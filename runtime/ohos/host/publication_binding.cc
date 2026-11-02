@@ -21,6 +21,17 @@
 
 namespace {
 
+// POSIX syscalls report positive errno values; libuv's Unix enum is negative.
+// Use the pinned header's complete map without importing bundled uv_* symbols.
+const char* ErrorName(int error_number) {
+  switch (-error_number) {
+#define DSH_ERRNO_CASE(code, message) case UV_##code: return #code;
+    UV_ERRNO_MAP(DSH_ERRNO_CASE)
+#undef DSH_ERRNO_CASE
+    default: return "UNKNOWN";
+  }
+}
+
 napi_value GetSystemBuildIdentity(napi_env env, napi_callback_info) {
   // These are public OS build properties, never a device serial or user ID.
   // Product builds resolve these four APIs from libdeviceinfo_ndk.z.so.
@@ -84,10 +95,9 @@ napi_value RenameNoReplace(napi_env env, napi_callback_info info) {
   const int error_number = ENOSYS;
 #endif
   if (error_number != 0) {
-    const int uv_error = uv_translate_sys_error(error_number);
     napi_value message, code, error, number, operation;
     if (napi_create_string_utf8(env, "renameat2(RENAME_NOREPLACE) failed", NAPI_AUTO_LENGTH, &message) != napi_ok ||
-        napi_create_string_utf8(env, uv_err_name(uv_error), NAPI_AUTO_LENGTH, &code) != napi_ok ||
+        napi_create_string_utf8(env, ErrorName(error_number), NAPI_AUTO_LENGTH, &code) != napi_ok ||
         napi_create_error(env, code, message, &error) != napi_ok ||
         napi_create_int32(env, -error_number, &number) != napi_ok ||
         napi_set_named_property(env, error, "errno", number) != napi_ok ||
@@ -125,10 +135,9 @@ napi_value LockExclusive(napi_env env, napi_callback_info info) {
   const int lock_result = flock(static_cast<int>(value), LOCK_EX | LOCK_NB);
   const int error_number = lock_result == 0 ? 0 : errno;
   if (error_number != 0) {
-    const int uv_error = uv_translate_sys_error(error_number);
     napi_value message, code, error, number, operation;
     if (napi_create_string_utf8(env, "flock(LOCK_EX | LOCK_NB) failed", NAPI_AUTO_LENGTH, &message) != napi_ok ||
-        napi_create_string_utf8(env, uv_err_name(uv_error), NAPI_AUTO_LENGTH, &code) != napi_ok ||
+        napi_create_string_utf8(env, ErrorName(error_number), NAPI_AUTO_LENGTH, &code) != napi_ok ||
         napi_create_error(env, code, message, &error) != napi_ok ||
         napi_create_int32(env, -error_number, &number) != napi_ok ||
         napi_set_named_property(env, error, "errno", number) != napi_ok ||
@@ -164,11 +173,10 @@ bool ReadDescriptor(napi_env env, napi_value value, int* descriptor) {
 }
 
 napi_value ThrowAttributeError(napi_env env, int error_number, const char* operation) {
-  const int uv_error = uv_translate_sys_error(error_number);
   napi_value message, code, error, number, syscall_name;
   // Neither the path, the attribute value nor file content enters diagnostics.
   if (napi_create_string_utf8(env, "Ownership marker operation failed", NAPI_AUTO_LENGTH, &message) != napi_ok ||
-      napi_create_string_utf8(env, uv_err_name(uv_error), NAPI_AUTO_LENGTH, &code) != napi_ok ||
+      napi_create_string_utf8(env, ErrorName(error_number), NAPI_AUTO_LENGTH, &code) != napi_ok ||
       napi_create_error(env, code, message, &error) != napi_ok ||
       napi_create_int32(env, -error_number, &number) != napi_ok ||
       napi_set_named_property(env, error, "errno", number) != napi_ok ||
