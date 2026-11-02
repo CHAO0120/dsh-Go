@@ -12,6 +12,17 @@
 #   --werror      warnings in the project's own files also fail the check
 #   --clean       delete --work first, downloads included
 #
+# Packaging everything but the signature, with the forks and in release mode:
+#
+#   --full            keep externalNativeOptions and build the whole unsigned HAP
+#   --aot DIR         app.so and flutter_assets: the ohos-aot-<sha> Actions artifact
+#   --native DIR      libnode.so, libdsh_flock.so, libdsh_require_builtin.so
+#                     (runtime/ohos/native/build-hap-libs.py)
+#   --runtime ZIP     dsh-runtime-rawfile.zip (runtime/ohos/package/compose-runtime.py)
+#   --node-headers D  Node 24.22.1 src/ or include/node, for CMakeLists.txt's N-API gate
+#
+# Then tooling/ohos/audit-hap.py lists the HAP against those inputs.
+#
 # Needs curl, python3, tar, node and java (JAVA_HOME or PATH; $NODE overrides node).
 # Exit: 0 clean, 1 diagnostics or a failed build, 2 bad input or environment.
 # Writes <work>/diagnostics.txt, <work>/hvigor.log and the unsigned HAP.
@@ -20,8 +31,8 @@
 # - runtimeOS OpenHarmony: the HarmonyOS SDK is behind a login (app/ohos/README.md says
 #   what that costs); this needs compileSdkVersion, modelVersion 6.0.0 and deviceTypes
 #   "default" too
-# - no externalNativeOptions: the native libs have their own build, so `libdsh_host.so`
-#   is checked against its .d.ts and the HAP doesn't run
+# - no externalNativeOptions unless --full: the native libs have their own build, so
+#   `libdsh_host.so` is checked against its .d.ts and the HAP doesn't run
 # - no flutter-hvigor-plugin and no Dart: oh_modules is laid out by hand (ohpm isn't
 #   public) and GeneratedPluginRegistrant.ets is written here
 set -euo pipefail
@@ -46,6 +57,11 @@ MODE=release
 FORKS=0
 WERROR=0
 CLEAN=0
+FULL=0
+AOT=""
+NATIVE=""
+RUNTIME=""
+NODE_HEADERS=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --sdk) SDK="${2:?--sdk needs a directory}"; shift 2 ;;
@@ -55,6 +71,11 @@ while [ $# -gt 0 ]; do
     --with-forks) FORKS=1; shift ;;
     --werror) WERROR=1; shift ;;
     --clean) CLEAN=1; shift ;;
+    --full) FULL=1; shift ;;
+    --aot) AOT="${2:?--aot needs a directory}"; shift 2 ;;
+    --native) NATIVE="${2:?--native needs a directory}"; shift 2 ;;
+    --runtime) RUNTIME="${2:?--runtime needs a zip}"; shift 2 ;;
+    --node-headers) NODE_HEADERS="${2:?--node-headers needs a directory}"; shift 2 ;;
     *) die "unknown option: $1" ;;
   esac
 done
@@ -76,6 +97,20 @@ d = json.load(open(sys.argv[1]))
 print(d["apiVersion"], d["version"])' "$SDK/ets/oh-uni-package.json")
 [ "$api" = "$SDK_API" ] || die "SDK API is $api, this check is pinned to API $SDK_API"
 [ "$version" = "$SDK_TESTED" ] || echo "check-arkts: SDK $version, tested with $SDK_TESTED" >&2
+
+if [ "$FULL" = 1 ]; then
+  [ "$MODE" = release ] || die "--full packages the release app.so, it can't be --debug"
+  FORKS=1
+  AOT="$(cd "${AOT:?--full needs --aot}" && pwd)" || die "no such --aot dir"
+  NATIVE="$(cd "${NATIVE:?--full needs --native}" && pwd)" || die "no such --native dir"
+  NODE_HEADERS="$(cd "${NODE_HEADERS:?--full needs --node-headers}" && pwd)" || die "no such --node-headers dir"
+  [ -f "${RUNTIME:?--full needs --runtime}" ] || die "no such --runtime zip"
+  RUNTIME="$(cd "$(dirname "$RUNTIME")" && pwd)/$(basename "$RUNTIME")"
+  for file in "$AOT/arm64-v8a/app.so" "$AOT/flutter_assets/AssetManifest.bin" "$NATIVE/libnode.so" \
+      "$NATIVE/libdsh_flock.so" "$NATIVE/libdsh_require_builtin.so" "$NODE_HEADERS/node_api.h"; do
+    [ -f "$file" ] || die "$file is missing"
+  done
+fi
 
 [ "$CLEAN" = 0 ] || rm -rf "$WORK"
 mkdir -p "$WORK/dl"
@@ -119,15 +154,17 @@ for part in ets js native toolchains; do ln -s "$SDK/$part" "$SDK_ROOT/26.0.0/$p
 sed 's/"Ets"/"Previewer"/; s/"path": "ets"/"path": "previewer"/' "$SDK/ets/oh-uni-package.json" \
   > "$SDK_ROOT/26.0.0/previewer/oh-uni-package.json"
 
-# --- the copy
-PROJECT="$WORK/project"
-rm -rf "$PROJECT" "$WORK/forks" "$WORK/home"; mkdir -p "$PROJECT" "$WORK/forks" "$WORK/home"
+# --- the copy. CMakeLists.txt finds the N-API gate from its own place in the repository.
+if [ "$FULL" = 1 ]; then PROJECT="$WORK/repo/app/ohos"; else PROJECT="$WORK/project"; fi
+FORK_ROOT="$(dirname "$PROJECT")/forks"
+rm -rf "$WORK/project" "$WORK/repo" "$WORK/forks" "$WORK/home"; mkdir -p "$PROJECT" "$FORK_ROOT" "$WORK/home"
+[ "$FULL" = 0 ] || ln -s "$REPO/runtime" "$WORK/repo/runtime"
 tar -C "$SOURCE" --exclude=./node_modules --exclude=./oh_modules --exclude=./entry/oh_modules \
   --exclude=./build --exclude=./entry/build --exclude=./.hvigor --exclude=./entry/.cxx --exclude=./.vendor \
   --exclude=./entry/libs --exclude=./local.properties --exclude=./entry/src/main/resources/rawfile/flutter_assets \
   -cf - . | tar -xf - -C "$PROJECT"
 ln -s "$TOOLS/node_modules" "$PROJECT/node_modules"
-ln -s "$TOOLS/node_modules" "$WORK/forks/node_modules"
+ln -s "$TOOLS/node_modules" "$FORK_ROOT/node_modules"
 echo "sdk.dir=$SDK_ROOT" > "$PROJECT/local.properties"
 
 # <override key> <module name> <ohos dir in the repo> <plugin class>. URL and tag come
@@ -157,16 +194,16 @@ print(re.search(r"url: (\S+)", block).group(1), re.search(r"ref: (\S+)", block).
     fi
     git -C "$clone" sparse-checkout add "$dir"
     [ -f "$clone/$dir/oh-package.json5" ] || die "$url $ref has no $dir"
-    mkdir -p "$WORK/forks/$name"
-    (cd "$clone/$dir" && tar --exclude=./build --exclude=./oh_modules -cf - .) | tar -xf - -C "$WORK/forks/$name"
+    mkdir -p "$FORK_ROOT/$name"
+    (cd "$clone/$dir" && tar --exclude=./build --exclude=./oh_modules -cf - .) | tar -xf - -C "$FORK_ROOT/$name"
     FORK_MODULES+="$name $class"$'\n'
   done <<< "$FORK_TABLE"
 fi
 
-EMBEDDING_VERSION="$(python3 -I - "$PROJECT" "$HAR" "$MODE" "$FORK_MODULES" <<'PY'
+EMBEDDING_VERSION="$(python3 -I - "$PROJECT" "$HAR" "$MODE" "$FORK_MODULES" "$FULL" <<'PY'
 import json, os, re, shutil, sys
 
-project, har, mode, fork_lines = sys.argv[1:5]
+project, har, mode, fork_lines, full = sys.argv[1:6]
 forks = [line.split() for line in fork_lines.splitlines() if line.strip()]
 work = os.path.dirname(project)
 
@@ -188,9 +225,9 @@ def write(rel, text):
 edit("build-profile.json5",
      (r'"runtimeOS": "HarmonyOS"', '"runtimeOS": "OpenHarmony"'),
      (r'"compatibleSdkVersion": ("[^"]+")', r'"compileSdkVersion": \1,\n        "compatibleSdkVersion": \1'))
-edit("entry/build-profile.json5",
-     (r'"runtimeOS": "HarmonyOS"', '"runtimeOS": "OpenHarmony"'),
-     (r'"externalNativeOptions": \{.*?\},\s*', ''))
+edit("entry/build-profile.json5", (r'"runtimeOS": "HarmonyOS"', '"runtimeOS": "OpenHarmony"'))
+if full == "0":
+    edit("entry/build-profile.json5", (r'"externalNativeOptions": \{.*?\},\s*', ''))
 edit("hvigor/hvigor-config.json5", (r'"modelVersion": "[^"]+"', '"modelVersion": "6.0.0"'))
 edit("oh-package.json5",
      (r'"modelVersion": "[^"]+"', '"modelVersion": "6.0.0"'),
@@ -256,11 +293,44 @@ print(version)
 PY
 )"
 
+# --- the rest of the HAP, where flutter-hvigor-plugin's FlutterTask and flutter_tools put it.
+if [ "$FULL" = 1 ]; then
+  ENTRY="$PROJECT/entry"
+  RAWFILE="$ENTRY/src/main/resources/rawfile"
+  LIBS="$ENTRY/libs/arm64-v8a"
+  mkdir -p "$RAWFILE" "$LIBS"
+  cp -a "$AOT/flutter_assets" "$RAWFILE/flutter_assets"
+  cp "$AOT/arm64-v8a/app.so" "$LIBS/libapp.so"
+  if [ -d "$AOT/native_assets/libs/arm64-v8a" ]; then cp "$AOT/native_assets/libs/arm64-v8a/"*.so "$LIBS/"; fi
+  # FlutterLoader reads these from rawfile; copyConfigsFile moves them there.
+  for config in buildinfo.json5 framesconfig.json; do
+    if [ -f "$ENTRY/src/main/resources/base/profile/$config" ]; then
+      mv "$ENTRY/src/main/resources/base/profile/$config" "$RAWFILE/$config"
+    fi
+  done
+  # libdsh_host.so is hvigor's to build; libc++_shared.so is its to add.
+  cp "$NATIVE/libnode.so" "$NATIVE/libdsh_flock.so" "$NATIVE/libdsh_require_builtin.so" "$LIBS/"
+  python3 -I -m zipfile -e "$RUNTIME" "$RAWFILE"
+  [ -f "$RAWFILE/dsh-runtime/manifest.json" ] || die "$RUNTIME has no dsh-runtime/manifest.json"
+  # The plugin takes the version from pubspec.yaml through local.properties.
+  python3 -I - "$REPO/app/pubspec.yaml" "$PROJECT/AppScope/app.json5" <<'PY'
+import re, sys
+name, code = re.search(r"^version: *([^+\s]+)\+(\d+)", open(sys.argv[1]).read(), re.M).groups()
+text = open(sys.argv[2]).read()
+text, a = re.subn(r'"versionCode": *\d+', f'"versionCode": {code}', text)
+text, b = re.subn(r'"versionName": *"[^"]*"', f'"versionName": "{name}"', text)
+if a != 1 or b != 1:
+    sys.exit("check-arkts: app.json5 no longer has one versionCode and one versionName")
+open(sys.argv[2], "w").write(text)
+PY
+fi
+
 # --- the build
 LOG="$WORK/hvigor.log"
 echo "check-arkts: hvigor $HVIGOR_VERSION, SDK $version, embedding $EMBEDDING_VERSION ($MODE), forks: $FORKS"
 rc=0
 (cd "$PROJECT" && env -u DEVECO_SDK_HOME HVIGOR_USER_HOME="$WORK/home" OHOS_BASE_SDK_HOME="$SDK_ROOT" \
+  DSH_NODE_HEADERS="$NODE_HEADERS" \
   PATH="$(dirname "$(command -v "$JAVA")"):$PATH" \
   "$NODE" --max-old-space-size=2048 node_modules/@ohos/hvigor/bin/hvigor.js \
   --mode module -p product=default -p module=entry@default -p buildMode="$MODE" assembleHap \
@@ -277,7 +347,8 @@ zipfile.ZipFile(sys.argv[1]).extract("ets/modules.abc", sys.argv[2])' "$HAP" "$W
 fi
 
 # --- diagnostics: every one, grouped by file; a file that never reached the bytecode counts.
-python3 -I - "$LOG" "$PROJECT" "$WORK" "$rc" "$HAP" "$ABC_TEXT" "$WERROR" "hvigor $HVIGOR_VERSION; SDK $version; embedding $EMBEDDING_VERSION ($MODE); forks $FORKS" <<'PY'
+status=0
+python3 -I - "$LOG" "$PROJECT" "$WORK" "$rc" "$HAP" "$ABC_TEXT" "$WERROR" "hvigor $HVIGOR_VERSION; SDK $version; embedding $EMBEDDING_VERSION ($MODE); forks $FORKS; full $FULL" <<'PY' || status=$?
 import collections, json, os, re, sys, zipfile
 
 log, project, work, rc, hap, abc_text, werror, tools = sys.argv[1:9]
@@ -286,7 +357,7 @@ with open(log, errors="replace") as f:
     text = re.sub(r"\x1b\[[0-9;]*m", "", f.read())
 
 def short(path):
-    for old, new in ((project + "/", ""), (work + "/forks/", "forks/")):
+    for old, new in ((project + "/", ""), (os.path.dirname(project) + "/forks/", "forks/")):
         path = path.replace(old, new)
     return re.sub(r"oh_modules/\.ohpm/[^/]+/oh_modules/@ohos/", "", path)
 
@@ -362,3 +433,9 @@ if rc != 0 and not errors and not tool_errors:
 print(f"check-arkts: {'OK' if ok else 'FAILED'}; all diagnostics in {work}/diagnostics.txt")
 sys.exit(0 if ok else 1)
 PY
+
+if [ "$FULL" = 1 ] && [ -f "$HAP" ]; then
+  python3 -I -B "$REPO/tooling/ohos/audit-hap.py" --hap "$HAP" --sdk "$SDK" --aot "$AOT" --native "$NATIVE" \
+    --runtime "$RUNTIME" --node-headers "$NODE_HEADERS" --report "$WORK/hap-audit.json" || status=1
+fi
+exit "$status"

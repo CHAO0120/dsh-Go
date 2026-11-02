@@ -40,6 +40,16 @@ JAVA_HOME=/path/to/jdk tooling/ohos/check-arkts.sh --sdk /path/to/ohos-sdk/linux
 
 真编译，不是类型擦除：公开源的 hvigor 6.26.9 → restool → ets-loader 严格 ArkTS → es2abc → 未签名 HAP，不用登录，下载一次后可以断网跑。它在临时副本上工作，诊断按文件写进 `<work>/diagnostics.txt`，有错误或有文件没进字节码就退出 1；警告默认不算失败，`--werror` 才算。`--with-forks` 把 `pubspec_overrides.ohos.yaml` 的七个 fork 一起编。
 
+`--full` 再往前一步，打出除签名外完整的 HAP：Dart 产物来自 Actions 的 `ohos-aot-<sha>`，原生库来自 `build-hap-libs.py`，运行时来自 `compose-runtime.py`，`libdsh_host.so` 由 hvigor 走 `entry/src/main/cpp/CMakeLists.txt` 现编。之后 `tooling/ohos/audit-hap.py` 把 HAP 里的每个库、每个运行时文件和输入逐一核对。
+
+```sh
+JAVA_HOME=/path/to/jdk tooling/ohos/check-arkts.sh --sdk /path/to/ohos-sdk/linux --full \
+  --aot /path/to/ohos-aot-sha --native /path/to/hap-libs/arm64-v8a \
+  --runtime /path/to/dsh-runtime-rawfile.zip --node-headers /path/to/node-v24.22.1/src
+```
+
+- 这个 HAP 的 `compileSdkType` 是 OpenHarmony，真要上华为手机还得用 Command Line Tools 走 HarmonyOS 分支重打一次。
+- `entry/build-profile.json5` 的 `ignoreResourcePattern` 不能删：restool 默认丢掉所有以点开头的文件，运行时清单里有 180 个，缺一个安装就失败。
 - 用的是 OpenHarmony 分支，公开 SDK 只有这个。另用空 HMS 层跑过 HarmonyOS 分支（除 `externalNativeOptions` 外配置不改，用真的 `flutter-hvigor-plugin`），ArkTS 诊断逐条相同；但只有 HMS 才有的 API 这里编不过，真 HMS SDK 没跑过。
-- HAP 不能运行：没有原生库，没有 Dart 产物。
+- 不带 `--full` 的 HAP 不能运行：没有原生库，没有 Dart 产物。
 - 工具不查的东西：权限名、分层图标的键名和图片内容；`entry` 下与 `AppScope` 同名的资源会被遮蔽，改坏了也不报。依赖里的部分类型错误会被降成警告。
