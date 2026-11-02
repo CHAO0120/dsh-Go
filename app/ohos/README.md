@@ -14,7 +14,7 @@ FLUTTER_OHOS=/path/to/flutter-ohos/bin/flutter tooling/ohos/build-hap.sh
 
 ## 依赖
 
-插件的鸿蒙实现在 `pubspec_overrides.ohos.yaml`，按 tag 锁定，只在构建 HAP 时生效。`flutter_webrtc` 没有鸿蒙实现，远程连接会自动退回中继。`share_plus`、`connectivity_plus` 没有可用的公开 fork，由 ArkTS 侧实现它们的通道（待做）。
+插件的鸿蒙实现在 `pubspec_overrides.ohos.yaml`，按 tag 锁定，只在构建 HAP 时生效。`material_ui`、`cupertino_ui`、`xterm`、`gpt_markdown` 没有鸿蒙 fork，它们的 `switch (defaultTargetPlatform)` 因为多出 `TargetPlatform.ohos` 而编不过，构建时由 `tooling/ohos/vendor_platform_switches.py` 复制到 `.vendor` 并让 `ohos` 走 android 分支。`flutter_webrtc` 没有鸿蒙实现，远程连接会自动退回中继。`share_plus`、`connectivity_plus` 没有可用的公开 fork，由 ArkTS 侧实现它们的通道（待做）。
 
 ## 宿主
 

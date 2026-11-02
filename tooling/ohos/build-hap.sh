@@ -17,12 +17,14 @@ cd "$APP"
 LOCK="$(mktemp)"
 cp pubspec.lock "$LOCK"
 restore() {
-  rm -f pubspec_overrides.yaml
+  rm -rf pubspec_overrides.yaml ohos/.vendor
   cp "$LOCK" pubspec.lock
   rm -f "$LOCK"
 }
 trap restore EXIT
 
 cp ohos/pubspec_overrides.ohos.yaml pubspec_overrides.yaml
+"$FLUTTER" pub get
+python3 "$APP/../tooling/ohos/vendor_platform_switches.py"
 "$FLUTTER" pub get
 "$FLUTTER" build hap "$MODE" --target-platform ohos-arm64

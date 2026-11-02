@@ -52,6 +52,8 @@ jobs:
         run: |
           cp ohos/pubspec_overrides.ohos.yaml pubspec_overrides.yaml
           dart pub get
+          python3 ../tooling/ohos/vendor_platform_switches.py
+          dart pub get
 
       - name: Compile to libapp.so
         working-directory: app
