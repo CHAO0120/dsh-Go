@@ -112,6 +112,7 @@ class SettingsPageMeta {
     this.links = const [],
     this.condition,
     this.row = true,
+    this.androidOnly = false,
   });
 
   final SettingsPageId id;
@@ -135,6 +136,10 @@ class SettingsPageMeta {
   /// it, and search still finds it.
   final bool row;
 
+  /// Android's own (androidSystemFeaturesProvider), and so is all that is on
+  /// or under it ([SettingsIndex.androidOnly]).
+  final bool androidOnly;
+
   /// The row on [parent] that opens this page.
   late final SettingSpot entry = SettingSpot(
     'page:${id.name}',
@@ -145,6 +150,7 @@ class SettingsPageMeta {
     freq: freq,
     opens: id,
     condition: condition,
+    androidOnly: androidOnly,
   );
 }
 
@@ -162,6 +168,7 @@ class SettingSpot {
     this.opens,
     this.field,
     this.altTitle,
+    this.androidOnly = false,
   });
 
   /// Stable, unique: `phone-confirm`, `page:phone`.
@@ -191,6 +198,9 @@ class SettingSpot {
   /// The title the row shows in its other state (安全模式: 以安全模式启动 /
   /// 恢复正常模式).
   final Label? altTitle;
+
+  /// Android's own, on a page that isn't ([SettingsIndex.androidOnly]).
+  final bool androidOnly;
 
   bool get isEntry => opens != null;
 }
@@ -232,6 +242,16 @@ abstract final class SettingsIndex {
 
   /// Every link id the index answers.
   static Set<String> get linkIds => {for (final p in _pages) ...p.links, for (final s in _rows) ?s.link};
+
+  /// Whether [spot] is Android's own: it says so, or a page on its way does.
+  /// Search leaves these out on HarmonyOS (androidSystemFeaturesProvider).
+  static bool androidOnly(SettingSpot spot) => spot.androidOnly || chain(spot.page).any((p) => page(p).androidOnly);
+
+  /// Whether the `dshgo://open/<id>` link [id] leads to something [androidOnly].
+  static bool androidOnlyLink(String id) {
+    final spot = pageForLink(id)?.entry ?? spotForLink(id);
+    return spot != null && androidOnly(spot);
+  }
 
   /// Pages from the hub down to [id], both included.
   static List<SettingsPageId> chain(SettingsPageId id) {
@@ -340,6 +360,7 @@ final _pages = <SettingsPageMeta>[
     keywords: (l) => l.searchKwPhone,
     freq: Freq.medium,
     links: const ['phone'],
+    androidOnly: true,
   ),
   SettingsPageMeta(
     SettingsPageId.phoneAppRules,
@@ -440,6 +461,7 @@ final _pages = <SettingsPageMeta>[
     keywords: (l) => l.searchKwBackground,
     freq: Freq.medium,
     links: const ['background'],
+    androidOnly: true,
   ),
   SettingsPageMeta(
     SettingsPageId.systemAccess,
@@ -448,6 +470,7 @@ final _pages = <SettingsPageMeta>[
     keywords: (l) => l.searchKwSystemAccess,
     freq: Freq.medium,
     links: const ['system-permissions'],
+    androidOnly: true,
   ),
   SettingsPageMeta(
     SettingsPageId.privacy,
@@ -622,12 +645,14 @@ abstract final class Spots {
     keywords: (l) => l.searchKwPhoneFiles,
     link: 'phone-files',
     condition: SpotCondition.localHost,
+    androidOnly: true,
   );
   static final permissionPhoneConfirm = SettingSpot(
     'permission-phone-confirm',
     page: SettingsPageId.permission,
     title: (l) => l.hubPermissionPhoneConfirm,
     keywords: (l) => l.searchKwPhoneConfirmEntry,
+    androidOnly: true,
   );
 
   // 个性化.
@@ -721,18 +746,21 @@ abstract final class Spots {
     page: SettingsPageId.appearance,
     title: (l) => l.pluginsAppIcon,
     keywords: (l) => l.searchKwAppIcon,
+    androidOnly: true,
   );
   static final iconShortcut = SettingSpot(
     'icon-shortcut',
     page: SettingsPageId.appearance,
     title: (l) => l.iconShortcutRow,
     keywords: (l) => l.searchKwIconShortcut,
+    androidOnly: true,
   );
   static final launchScreen = SettingSpot(
     'launch-screen',
     page: SettingsPageId.appearance,
     title: (l) => l.launchScreenTitle,
     keywords: (l) => l.searchKwLaunchScreen,
+    androidOnly: true,
   );
   static final wallpaper = SettingSpot(
     'wallpaper',
@@ -759,12 +787,14 @@ abstract final class Spots {
     page: SettingsPageId.pets,
     title: (l) => l.botsPetOutsideApp,
     keywords: (l) => l.searchKwPetOutside,
+    androidOnly: true,
   );
   static final petDisplayWhen = SettingSpot(
     'pet-display-when',
     page: SettingsPageId.pets,
     title: (l) => l.botsPetDisplayWhen,
     keywords: (l) => l.searchKwPetDisplayWhen,
+    androidOnly: true,
   );
 
   // 界面.
