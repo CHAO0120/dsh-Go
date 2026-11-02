@@ -19,4 +19,9 @@
 **/libs/**/libapp.so
 **/libs/**/libflutter.so
 **/libs/**/libvmservice_snapshot.so
+**/libs/**/libnode.so
+**/libs/**/libdsh_host.so
+**/libs/**/libdsh_flock.so
+**/libs/**/libdsh_require_builtin.so
+**/libs/**/libc++_shared.so
 /.vendor
