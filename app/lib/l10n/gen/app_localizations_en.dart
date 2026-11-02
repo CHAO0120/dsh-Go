@@ -8084,6 +8084,41 @@ class L10nEn extends L10n {
   String get engineReopenFailed => 'The engine needs the app reopened before it can start again. Please reopen it.';
 
   @override
+  String get engineCapShell => 'Command line';
+
+  @override
+  String engineCapShellBuiltin(int count) {
+    return '$count built-in commands';
+  }
+
+  @override
+  String get engineCapShellSystem => 'System';
+
+  @override
+  String get engineCapNodeScripts => 'Node scripts';
+
+  @override
+  String get engineCapMarket => 'Market plugins';
+
+  @override
+  String get engineCapBackground => 'In the background';
+
+  @override
+  String get engineCapMayFreeze => 'May be paused by the system';
+
+  @override
+  String get engineCapKeepsRunning => 'Keeps running';
+
+  @override
+  String get engineCapYes => 'Available';
+
+  @override
+  String get engineCapNone => 'Unavailable';
+
+  @override
+  String get marketInstallRefused => 'This engine can\'t install market plugins';
+
+  @override
   String get marketSectionOfficial => 'Official';
 
   @override

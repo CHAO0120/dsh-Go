@@ -24,6 +24,7 @@ import '../theme/app_icons.dart';
 import '../theme/theme.dart';
 import '../web/local_web_screen.dart';
 import 'engine_status.dart';
+import 'engine_capabilities.dart';
 import 'local_uninstall.dart';
 import 'log_view.dart';
 
@@ -175,6 +176,7 @@ class EngineScreen extends ConsumerWidget {
                   mono: true,
                 ),
                 InfoRow(label: l10n.phoneEngineArchitecture, value: status.abi ?? '—', mono: true),
+                const EngineCapabilityRows(),
               ],
             ),
             if (!missing && guest)

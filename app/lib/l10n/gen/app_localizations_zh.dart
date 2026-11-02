@@ -7651,6 +7651,41 @@ class L10nZh extends L10n {
   String get engineReopenFailed => '引擎要重新打开 App 才能再启动，请手动重开一次。';
 
   @override
+  String get engineCapShell => '命令行';
+
+  @override
+  String engineCapShellBuiltin(int count) {
+    return '内置 $count 个命令';
+  }
+
+  @override
+  String get engineCapShellSystem => '系统';
+
+  @override
+  String get engineCapNodeScripts => 'Node 脚本';
+
+  @override
+  String get engineCapMarket => '安装市场插件';
+
+  @override
+  String get engineCapBackground => '切到后台时';
+
+  @override
+  String get engineCapMayFreeze => '可能被系统暂停';
+
+  @override
+  String get engineCapKeepsRunning => '继续运行';
+
+  @override
+  String get engineCapYes => '可以';
+
+  @override
+  String get engineCapNone => '不可用';
+
+  @override
+  String get marketInstallRefused => '这个引擎不能安装市场插件';
+
+  @override
   String get marketSectionOfficial => '官方';
 
   @override

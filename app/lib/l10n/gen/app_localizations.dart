@@ -14024,6 +14024,72 @@ abstract class L10n {
   /// **'引擎要重新打开 App 才能再启动，请手动重开一次。'**
   String get engineReopenFailed;
 
+  /// No description provided for @engineCapShell.
+  ///
+  /// In zh, this message translates to:
+  /// **'命令行'**
+  String get engineCapShell;
+
+  /// No description provided for @engineCapShellBuiltin.
+  ///
+  /// In zh, this message translates to:
+  /// **'内置 {count} 个命令'**
+  String engineCapShellBuiltin(int count);
+
+  /// No description provided for @engineCapShellSystem.
+  ///
+  /// In zh, this message translates to:
+  /// **'系统'**
+  String get engineCapShellSystem;
+
+  /// No description provided for @engineCapNodeScripts.
+  ///
+  /// In zh, this message translates to:
+  /// **'Node 脚本'**
+  String get engineCapNodeScripts;
+
+  /// No description provided for @engineCapMarket.
+  ///
+  /// In zh, this message translates to:
+  /// **'安装市场插件'**
+  String get engineCapMarket;
+
+  /// No description provided for @engineCapBackground.
+  ///
+  /// In zh, this message translates to:
+  /// **'切到后台时'**
+  String get engineCapBackground;
+
+  /// No description provided for @engineCapMayFreeze.
+  ///
+  /// In zh, this message translates to:
+  /// **'可能被系统暂停'**
+  String get engineCapMayFreeze;
+
+  /// No description provided for @engineCapKeepsRunning.
+  ///
+  /// In zh, this message translates to:
+  /// **'继续运行'**
+  String get engineCapKeepsRunning;
+
+  /// No description provided for @engineCapYes.
+  ///
+  /// In zh, this message translates to:
+  /// **'可以'**
+  String get engineCapYes;
+
+  /// No description provided for @engineCapNone.
+  ///
+  /// In zh, this message translates to:
+  /// **'不可用'**
+  String get engineCapNone;
+
+  /// No description provided for @marketInstallRefused.
+  ///
+  /// In zh, this message translates to:
+  /// **'这个引擎不能安装市场插件'**
+  String get marketInstallRefused;
+
   /// No description provided for @marketSectionOfficial.
   ///
   /// In zh, this message translates to:
