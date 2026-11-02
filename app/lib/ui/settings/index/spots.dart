@@ -867,6 +867,7 @@ abstract final class Spots {
     page: SettingsPageId.performance,
     title: (l) => l.performanceRefresh,
     keywords: (l) => l.searchKwRefreshRate,
+    androidOnly: true,
   );
   static final blur = SettingSpot(
     'blur',

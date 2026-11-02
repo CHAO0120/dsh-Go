@@ -37,6 +37,7 @@ import 'package:dsh_app/ui/settings/appearance/launch_screen_section.dart';
 import 'package:dsh_app/ui/settings/appearance/wallpaper_section.dart';
 import 'package:dsh_app/ui/settings/index/spot_anchor.dart';
 import 'package:dsh_app/ui/settings/index/spots.dart';
+import 'package:dsh_app/ui/settings/performance_page.dart';
 import 'package:dsh_app/ui/settings/search/settings_search.dart';
 import 'package:dsh_app/ui/settings/search/settings_search_page.dart';
 import 'package:dsh_app/ui/settings/settings_screen.dart';
@@ -73,6 +74,7 @@ const _rows = {
   'launch-screen',
   'pet-outside-app',
   'pet-display-when',
+  'refresh-rate',
 };
 
 final _zh = lookupL10n(AppLocale.zhCN);
@@ -303,6 +305,21 @@ void main() {
       expect(find.text(_zh.launchScreenTitle), findsNothing);
       expect(find.byType(ThemeModePicker), findsOneWidget);
       expect(find.byType(WallpaperSection), findsOneWidget);
+    });
+  });
+
+  group('性能', () {
+    Finder refreshRate() => find.byKey(const ValueKey('performance-refresh-rate'));
+
+    testWidgets('on Android: the refresh rate choice', (tester) async {
+      await _pump(tester, const PerformancePage(), android: true);
+      expect(refreshRate(), findsOneWidget);
+    });
+
+    testWidgets('on HarmonyOS: no refresh rate, the effects stay', (tester) async {
+      await _pump(tester, const PerformancePage(), android: false);
+      expect(refreshRate(), findsNothing);
+      expect(find.byKey(const ValueKey('performance-blur')), findsOneWidget);
     });
   });
 
