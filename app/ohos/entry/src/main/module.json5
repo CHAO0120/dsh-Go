@@ -37,6 +37,16 @@
             "entities": ["entity.system.browsable"],
             "actions": ["ohos.want.action.viewData"],
             "uris": [{"scheme": "dshgo"}]
+          },
+          {
+            "actions": ["ohos.want.action.viewData"],
+            "uris": [
+              {"scheme": "file", "type": "general.file", "linkFeature": "FileOpen"},
+              {"scheme": "file", "type": "general.plain-text", "linkFeature": "FileOpen"},
+              {"scheme": "file", "type": "application/octet-stream", "linkFeature": "FileOpen"},
+              {"scheme": "file", "type": "application/pdf", "linkFeature": "FileOpen"},
+              {"scheme": "file", "type": "image/*", "linkFeature": "FileOpen"}
+            ]
           }
         ]
       }
