@@ -45,14 +45,23 @@ Node24.22.1 的 `node.gyp` 中，隐藏 Node 源符号的选项仍处于注释�
 
 ## 构建输入与输出
 
-`build-loader.py` 不联网，不安装依赖，输入路径必须由调用方提供：
+`build-loader.py` 不联网，不安装依赖，输入路径必须由调用方提供。构建所需的 `node-addon-api 8.9.2` 在 O4 锁中是可选传递依赖；仅按虚拟进程运行说明执行 `--omit=optional` 不会安装这些头文件。原生加载器的构建准备应使用固定 Node 24.22.1 工具链，在独立的构建依赖目录包含可选项：
+
+```sh
+# 从仓库根目录执行；使用一个新建的构建依赖目录。
+mkdir /absolute/loader-build-deps
+cp runtime/ohos/process/package.json runtime/ohos/process/package-lock.json /absolute/loader-build-deps/
+npm ci --prefix /absolute/loader-build-deps --include=optional --ignore-scripts
+```
+
+该命令沿用仓库的精确 lock，不改变依赖版本；`--ignore-scripts` 不执行依赖安装脚本。`--include=optional` 的选择规则见 [npm ci 官方说明](https://docs.npmjs.com/cli/v11/commands/npm-ci/#include)。这只是加载器构建头文件的准备步骤，O4 运行依赖的安装策略仍由其运行说明定义。随后把本次目录传入构建器：
 
 ```sh
 python3 runtime/ohos/native/loader/build-loader.py \
   --sdk-native /absolute/open-harmony-sdk/native \
   --source /absolute/dsh-node-addon-require-builtin-a58d3599 \
   --node-headers /absolute/node-v24.22.1/include/node \
-  --node-addon-api /absolute/locked-o4/node_modules/node-addon-api \
+  --node-addon-api /absolute/loader-build-deps/node_modules/node-addon-api \
   --libnode /absolute/o7b-output/libnode.so \
   --libnode-build-json /absolute/o7b-output/build.json \
   --output /absolute/fresh-loader-output
@@ -60,7 +69,7 @@ python3 runtime/ohos/native/loader/build-loader.py \
 
 libnode 的 build.json 必须绑定官方 Node24.22.1 源归档 SHA256 与输入 `.so` 的实际字节，并声明 OHOS arm64 shared 配置。SDK 的真实 manifest、编译器版本/哈希、编译命令和 ELF 结果写入输出 build.json；缺 SDK 在创建输出目录之前明确退出，目标构建记为 NOT_RUN。
 
-上游自己的锁文件使用 `node-addon-api 8.9.0`。这里复用已批准 O4 锁中实际已有的 **8.9.2**（MIT）作为构建头文件，`source-pins.json` 固定 `napi.h`、两个内联头、package.json 与许可证。这一处与上游构建锁不同，已明确记录；原 `.cc/.h` 实现不变。未新增 npm 依赖或安装步骤，不静默采用现有 DSH 树中较旧的 7.1.1。
+上游自己的锁文件使用 `node-addon-api 8.9.0`。这里复用已批准 O4 锁中实际已有的 **8.9.2**（MIT）作为构建头文件，`source-pins.json` 固定 `napi.h`、两个内联头、package.json 与许可证。这一处与上游构建锁不同，已明确记录；原 `.cc/.h` 实现不变。未新增运行时 npm 依赖；上述准备只安装锁中已有的可选构建头文件，不静默采用现有 DSH 树中较旧的 7.1.1。
 
 输出为私有平台包：
 
