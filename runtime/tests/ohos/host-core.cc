@@ -75,7 +75,8 @@ int main(int argc, char** argv) {
   for (const char* name : {"libdsh_flock.so", "libdsh_require_builtin.so"})
     std::ofstream(std::filesystem::path(options.native_library_dir) / name) << "path fixture, not an ELF library\n";
   for (const char* name : {"runtime/ohos/preload.mjs", "node_modules/@deepseek-ai/dsh/lib/bin.js",
-                         "runtime/ohos/process/index.mjs", "runtime/ohos/process/sandbox.mjs"}) {
+                         "runtime/ohos/process/index.mjs", "runtime/ohos/process/sandbox.mjs",
+                         "runtime/ohos/lifecycle/index.mjs", "runtime/ohos/capabilities/index.mjs"}) {
     auto path = std::filesystem::path(options.runtime_root) / name;
     std::filesystem::create_directories(path.parent_path()); std::ofstream(path) << "// fixture only\n";
   }
