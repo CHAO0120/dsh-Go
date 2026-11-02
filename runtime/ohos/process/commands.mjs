@@ -17,7 +17,8 @@ export const unavailableMessage = '这个命令在鸿蒙本机不可用，可以
 export const capabilities = Object.freeze({
   kind: 'virtual',
   commands: shellCommands,
-  streamingOutput: false,
+  // 已完成的外层 shell 语句逐段交付；单个命令和复合语句内部仍缓冲。
+  streamingOutput: true,
   stdin: 'batch',
   pty: false,
   processSpawn: false,

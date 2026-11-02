@@ -30,6 +30,19 @@ def rewrite(inputs):
     change(index, 'r.appendResult(i,ii(i))', 'r.appendResult(i)')
     change(index, 'n.appendResult(f,ii(f))', 'n.appendResult(f)')
     change(index, 't.stdout=jf(t.stdout),t.stderr=jf(t.stderr),t', 'Kf(t)!=="bytes"&&(t.stdout=jf(t.stdout)),t.stderr=jf(t.stderr),t')
+    # The host enters through the single, literal bash/sh command. Its first
+    # nested exec is the requested shell program; only that executeScript call
+    # receives the sink. Captures, pipelines, functions, eval/source and nested
+    # shells retain their normal result-routing semantics. A completed outer
+    # statement is delivered after accounting and redirection, then forgotten
+    # by this accumulator; the shared ExecutionScope budget is never reset.
+    change(index, 'async exec(t,n){let r=new jr(this.limits,n?.signal),s;', 'async exec(t,n){if(n?.ohosStatementOutput!==void 0&&(typeof n.ohosStatementOutput!=="function"||(t!=="bash"&&t!=="sh")))throw new TypeError("OHOS statement sink requires a literal bash/sh entry");let r=new jr(this.limits,n?.signal),s;')
+    change(index, 'this.execInScope(t,n,r,0,n?.signal,!1,!1)', 'this.execInScope(t,n,r,0,n?.signal,!1,!1,n?.ohosStatementOutput)')
+    change(index, 'async execInScope(t,n,r,s,i,o=!1,a=!0){', 'async execInScope(t,n,r,s,i,o=!1,a=!0,ohosStatementOutput){')
+    change(index, 'exec:(x,C,D=!1)=>this.execInScope(x,C,r,s+1,u.signal,D)', 'exec:(x,C,D=!1)=>this.execInScope(x,C,r,s+1,u.signal,D,!0,ohosStatementOutput)')
+    change(index, 'N=await new Nr(k,m).executeScript(b)', 'N=await new Nr(k,m).executeScript(b,s===1?ohosStatementOutput:void 0)')
+    change(index, 'async executeScript(t){this.assertDefenseContext("execution");', 'async executeScript(t,ohosStatementOutput){this.assertDefenseContext("execution");')
+    change(index, 'r.appendResult(i),n=i.exitCode,this.ctx.state.lastExitCode=n', 'r.appendResult(i),ohosStatementOutput&&(await ohosStatementOutput(r.build(i.exitCode)),r.ohosResetAfterDelivery()),n=i.exitCode,this.ctx.state.lastExitCode=n')
     # Keep arbitrary bytes through aggregation; return text only for an exact
     # UTF-8 round trip so existing Unicode compound-command paths retain shape.
     accumulator = 'chunks/chunk-J2OBOJ64.js'
@@ -38,6 +51,7 @@ def rewrite(inputs):
     change(accumulator, 'build(t,s){return{stdout:this.stdoutChunks.join(""),', 'build(t,s){let ohosRaw=this.stdoutChunks.join(""),ohosText=ohosDecode(ohosRaw),ohosValid=ohosEncode(ohosText)===ohosRaw;return{stdout:ohosValid?ohosText:ohosRaw,')
     change(accumulator, 'exitCode:t,...s,internalOutputAccounting:', 'exitCode:t,...s,stdoutKind:ohosValid?"text":"bytes",stdoutEncoding:ohosValid?void 0:"binary",internalOutputAccounting:')
     change(accumulator, 'get stdout(){return this.stdoutChunks.join("")}', 'get stdout(){return ohosDecode(this.stdoutChunks.join(""))}')
-    notice = ('/* Modified for dsh-go OHOS: permission diagnostics and typed output fixes.\n'
+    change(accumulator, 'get stderr(){return this.stderrChunks.join("")}', 'ohosResetAfterDelivery(){this.stdoutChunks.length=0,this.stderrChunks.length=0,this.stdoutBytes=0,this.stderrBytes=0}get stderr(){return this.stderrChunks.join("")}')
+    notice = ('/* Modified for dsh-go OHOS: permission diagnostics, typed output and statement delivery.\n'
               ' * Derived from just-bash 3.6.0; Apache-2.0. See LICENSE and PROVENANCE.json. */\n')
     return {name: (notice + text).encode('utf-8') for name, text in texts.items()}

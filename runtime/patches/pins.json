@@ -314,7 +314,7 @@
       "0.2.1-rc.4": {
         "node_modules/@deepseek-ai/dsh-tool-bash/lib/index.js": {
           "before": "a9da6334ca5dedf89eb8add510167318d64addae3a986445bdfb75dba3d9e295",
-          "after": "e1526706c2ac3261e6fea1f6508337b02fc5c26b754e454acf374277eee42f7a"
+          "after": "d95f8c9857f61b5eb1a18b88921cf145ad5dba58205f6810925b595ef4d9e0b6"
         }
       }
     },

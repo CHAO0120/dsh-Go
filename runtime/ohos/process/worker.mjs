@@ -19,15 +19,25 @@ const bash = new Bash({
 });
 filesystem.seal();
 
+const write = (stream, content, encoding) => content.length === 0 ? Promise.resolve() : new Promise((resolve, reject) => {
+  stream.write(content, encoding, error => error ? reject(error) : resolve());
+});
+const deliver = result => {
+  const encoding = result.stdoutKind === 'bytes' || result.stdoutEncoding === 'binary' ? 'latin1' : 'utf8';
+  return Promise.all([write(process.stdout, result.stdout, encoding), write(process.stderr, result.stderr, 'utf8')]);
+};
+
 try {
   // argv 通过 args 原样传递；脚本仅在 bash/sh -c 的语法位置由解释器解析。
-  const result = await bash.exec(argv[0], { args: argv.slice(1), cwd, env, replaceEnv: true, stdin, rawScript: true });
-  if (result.exitCode === 127) result.stderr += unavailableMessage + '\n';
-  const write = (stream, content, encoding) => new Promise((resolve, reject) => {
-    stream.write(content, encoding, error => error ? reject(error) : resolve());
+  // 私有构建只在该外层 shell 的语句完成后调用 deliver；内部管道、替换、
+  // 重定向及复合语句仍先完成路由。await write 回调保留真实管道背压。
+  const result = await bash.exec(argv[0], {
+    args: argv.slice(1), cwd, env, replaceEnv: true, stdin, rawScript: true,
+    ohosStatementOutput: argv[0] === 'bash' || argv[0] === 'sh' ? deliver : undefined,
   });
-  const encoding = result.stdoutKind === 'bytes' || result.stdoutEncoding === 'binary' ? 'latin1' : 'utf8';
-  await Promise.all([write(process.stdout, result.stdout, encoding), write(process.stderr, result.stderr, 'utf8')]);
+  if (result.exitCode === 127) result.stderr += unavailableMessage + '\n';
+  // 已交付语句已从私有累积器移除；此处只剩退出/错误等尚未交付的尾部。
+  await deliver(result);
   parentPort.postMessage({ exitCode: result.exitCode });
 } catch (error) {
   parentPort.postMessage({ failure: { name: error.name, message: error.message, code: error.code, stack: error.stack } });

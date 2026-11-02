@@ -60,6 +60,9 @@ test('真实tool-bash展示同源命令清单及现有sandbox审批参数', asyn
   assert.match(tool.description, /鸿蒙本机使用虚拟 shell/);
   assert.match(tool.description, /rg/);
   assert.match(tool.description, /只支持批量 stdin/);
+  assert.equal(ctx.subprocess.capabilities.streamingOutput, true);
+  assert.match(tool.description, /外层语句完成后交付输出/);
+  assert.match(tool.description, /单个命令、管道和复合语句内部仍有缓冲/);
   assert.match(tool.description, /命令执行计数上限为 100000/);
   assert.match(tool.description, /退出码 126/);
   assert.match(tool.description, /已经完成的写入不会回滚/);

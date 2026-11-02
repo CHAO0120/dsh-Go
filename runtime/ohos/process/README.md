@@ -1,6 +1,6 @@
 # O4a：鸿蒙批量虚拟进程后端
 
-**本项是 O4 的可复核子集，不代表 O4 全部完成。未在真机核实。** 固定基底 `afb5cdd`、DSH `0.2.1-rc.4`、Node `24.22.1`。**v3 完整替代 v1/v2，不叠加应用。** 当前支持批量 `bash` / `sh -c` 和部分 `rg` 模板；`node` 脚本、`git` 子命令、交互字节通道、实时 shell 输出尚未启用。它们必须保持不可用，不能在 O6 中报为可用。
+**本项是 O4 的可复核子集，不代表 O4 全部完成。未在真机核实。** 历史 O4a 固定基底 `afb5cdd`、DSH `0.2.1-rc.4`、Node `24.22.1`。**历史 v3 完整替代 v1/v2，不叠加应用。** 第二波 `c818155` 后续增加了 [外层语句分段输出](O4-statement-output.md)：`bash` / `sh` 完成一个外层语句即交付该语句的输出，单个命令、管道和复合语句内部仍有缓冲。stdin 仍为批量；`node` 脚本、`git` 子命令和交互字节通道尚未启用，不能在 O6 中报为可用。
 
 M4-1 v2 在此基线上恢复 DSH JSON grep 的正向 `include` 和 Unicode 常用字符类/词边界，具体构建链、差分与边界见 [M4-1.md](M4-1.md)。本组合版本已包含 [M4-2](M4-2.md) 的搜索与执行双队列，以及后继 [M4-3](M4-3.md)、[M4-4a](M4-4a.md)、[M4-4b](M4-4b.md)、[M6-1](M6-1.md)、[M6-2](M6-2.md)，各自范围与仍存在的差异见对应说明。
 
@@ -34,7 +34,7 @@ Cordis 的 `subprocess` 提供者改为本目录的 `index.mjs`，`sandbox` 提�
 | 参数 | argv 原样传给解释器；`bash/sh -c` 的脚本只在该语法位置解析，普通位置参数不做第二次插值。仅接受固定虚拟别名，任意 `/另一个目录/bash` 不会按 basename 偷换成 bash。 |
 | 取消 / 超时 | 原 bash 执行器决定 timeout / aborted 分类，后端终止 worker 并等待其实际退出；排队任务也可取消。已发生的文件写入不会回滚。 |
 | 尾部 / spill | 直接复用纯 JS 的 `dsh-subprocess-local/output` 导出；独立偏移读取、尾部截断、spill 上限及超限后不提供不完整 spill 文件沿用原行为。 |
-| 输出时机 | just-bash 公开 exec API 完成后才交付输出；因此运行中和取消前的逐步输出不等价。stdout/stderr 的 raw pipe 可在完成后读取，并实测延迟消费 600,000 字节中文 stdout 与 200,000 字节 stderr 完整。**不宣称实时输出。** |
+| 输出时机 | OHOS 私有构建在外层 shell 语句完成后交付 stdout/stderr；取消保留已经交付的前缀。单个命令、管道、循环、函数、嵌套 shell 等复合语句内部继续缓冲，取消时其中尚未交付的输出可能丢失。raw pipe 及原 OutputCollector 的字节、尾部与 spill 语义保留，具体测试见 [外层语句分段输出](O4-statement-output.md)。 |
 | stdin / control | 仅 ignore 和一次性 `{data}` 输入；交互 pipe / control 明确抛 `ERR_OHOS_STREAM_UNAVAILABLE`。没有 PTY。 |
 | 内存和文件规模 | 受限 FS 单文件读取及复制上限 64 MiB，解释器输出上限 64 MiB，worker JS old-generation 上限 256 MiB；这些不是总 RSS 上限，也不意味着同时读写多个大文件都在上述内存内。 |
 
