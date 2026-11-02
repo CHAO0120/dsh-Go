@@ -35,13 +35,13 @@ export class OhosManagedSkillStorage implements ManagedSkillStorage {
       } finally { await fs.close(file); }
     } catch (error) {
       if (this.missing(error as BusinessError)) return '';
-      throw error;
+      throw error as Error;
     }
   }
 
   private async stat(path: string): Promise<fs.Stat | null> {
     try { return await fs.lstat(path); }
-    catch (error) { if (this.missing(error as BusinessError)) return null; throw error; }
+    catch (error) { if (this.missing(error as BusinessError)) return null; throw error as Error; }
   }
 
   private async permitsPath(path: string): Promise<boolean> {
@@ -122,7 +122,7 @@ export class OhosManagedSkillStorage implements ManagedSkillStorage {
       let stat = await this.stat(current);
       if (stat === null) {
         try { await fs.mkdir(current); }
-        catch (error) { if ((error as BusinessError).code !== 13900015) throw error; }
+        catch (error) { if ((error as BusinessError).code !== 13900015) throw error as Error; }
         stat = await this.stat(current);
       }
       if (stat === null || !stat.isDirectory() || stat.isSymbolicLink()) throw new Error('Managed skill parent is redirected');

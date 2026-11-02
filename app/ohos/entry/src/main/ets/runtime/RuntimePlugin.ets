@@ -90,7 +90,7 @@ export class RuntimePlugin implements FlutterPlugin, MethodCallHandler, StreamHa
       return;
     }
     if (call.method === 'cancelManagedSkill') {
-      const id = call.argument('requestId');
+      const id: Any = call.argument('requestId');
       if (this.owner !== null && typeof id === 'string' && id.length > 0 && id.length <= 200) {
         controller.managedSkills.cancel(this.owner, id);
       }
