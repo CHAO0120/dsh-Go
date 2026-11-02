@@ -119,7 +119,7 @@ export default class AppLinksPlugin implements FlutterPlugin, AbilityAware, Meth
     const receiver = AppLinksPlugin.receiver;
     if (!receiver?.ready || !receiver.links) return;
     while (AppLinksPlugin.pending.length > 0 && AppLinksPlugin.pending[0].event) {
-      const event = AppLinksPlugin.pending.shift()!.event!;
+      const event: Map<string, Any> = AppLinksPlugin.pending.shift()!.event!;
       receiver.links.invokeMethod('link', event);
     }
   }
