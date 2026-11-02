@@ -16,7 +16,7 @@
 
 ## 使用与验证
 
-DSH 鸿蒙宿主必须在应用、插件及其它 dispatcher 配置之前，以真正的锁定 DSH bin 为主入口，加载专用 `runtime/ohos/net/dsh-preload.mjs`。它从该入口解析已锁定的 Undici 8.11.2，用公共 API 建立明确的安全基底。全局代理策略卸载时恢复其捕获的实际 prior；安全基底建立后由调用方设置的 custom dispatcher 也原样恢复。若外部 Undici 已载入但尚无本层的启动记录，则明确报 `ERR_OHOS_NET_BOOTSTRAP_ORDER`，不覆盖已有对象。详见 `M3-5.md`。模拟时：
+DSH 鸿蒙产品宿主通过 `dsh_node_start`，以真正的锁定 DSH bin 为主入口，仅加载 `runtime/ohos/preload.mjs`。统一入口在应用、插件及其它 dispatcher 配置之前，首先等待内部 `net/dsh-preload.mjs`，随后加载 publication；完整参数及环境约束见 [统一启动契约](../../../docs/design/harmonyos/startup.md)。它从该入口解析已锁定的 Undici 8.11.2，用公共 API 建立明确的安全基底。全局代理策略卸载时恢复其捕获的实际 prior；安全基底建立后由调用方设置的 custom dispatcher 也原样恢复。若外部 Undici 已载入但尚无本层的启动记录，则明确报 `ERR_OHOS_NET_BOOTSTRAP_ORDER`，不覆盖已有对象。详见 `M3-5.md`。以下只用于网络专项仿真，不是产品宿主启动：
 
 ```bash
 node --jitless --import ./runtime/ohos/sim/preload.mjs \

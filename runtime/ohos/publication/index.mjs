@@ -1,3 +1,4 @@
+import nodeVersion from '../node-version.json' with { type: 'json' };
 import { isMainThread } from 'node:worker_threads';
 import { realpath, stat } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
@@ -16,8 +17,8 @@ export async function installPublication() {
   // Worker startup inherits --import arguments. This service belongs to the
   // single main engine; unrelated virtual shell workers must remain startable.
   if (!isMainThread) return { installed: false, reason: 'not-main-thread' };
-  if (process.versions.node !== '24.22.1') {
-    throw Object.assign(new Error('OpenHarmony publication requires Node 24.22.1'),
+  if (process.versions.node !== nodeVersion) {
+    throw Object.assign(new Error(`OpenHarmony publication requires Node ${nodeVersion}`),
       { code: 'ERR_OHOS_PUBLICATION_NODE_VERSION' });
   }
   if (installing || Object.hasOwn(globalThis, publicationSymbol)) {

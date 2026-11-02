@@ -2,6 +2,8 @@
 
 **未在真机核实。** 这一目录的 Node runner 是 M3-1 的新原生组成部分，不代表旧 O7c 的 Ark 宿主候选已经通过，也不包含 ArkTS 接口、应用单次启动保护和 ready 通道。`c0949d6` 尚无这些文件，因此本补丁添加最小 Node runner；后续 O7c 应在这个 CMake target 上添加 Ark shim，不能再用旧候选覆盖它。
 
+M6-4 后继的当前产品入口是 `runtime/ohos/preload.mjs`，通过 `dsh_node_start` 以固定单一 `--import` 布局启动；非空 `NODE_OPTIONS` 在 Node 初始化前明确拒绝。详见 [统一启动契约](../../../docs/design/harmonyos/startup.md)。本文后面的独立 publication/linked 命令仍是专项测试，不是产品组合命令。版本校验已统一从 `runtime/ohos/node-version.json` 读取/构建；原生登记方式仍保持本节的固定版本接缝，M6-5 另行评估。
+
 ## 选择与接口
 
 本次选择自己的 `libdsh_node_runner.so`，不修改上游 `node-addon-system`。`dsh_node_start` 由 Ark 侧单次启动保护通过后调用，在 `node::Start` 前注册 `dsh_ohos_publication`；库驻留到应用退出。JS 使用固定 Node 24.22.1 的 `process._linkedBinding('dsh_ohos_publication')`。这是 Node 的 linked 模块查找入口，不要求 `--expose-internals`，但它不是跨 Node 版本不变的公共 JavaScript API；版本锁与启动检查仍必要。

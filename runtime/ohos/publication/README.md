@@ -15,7 +15,7 @@ M3-1b 增加了生产持久账本。临时路径在 `open('wx')` **之前**持�
 
 ## 宿主配置与启动
 
-Node 固定为 **24.22.1**。自有宿主在 Node 启动前注册 `dsh_ohos_publication` linked NAPI 模块，必须提供以下同步函数：
+Node 的唯一可执行版本声明是 `runtime/ohos/node-version.json`（当前 **24.22.1**）；JS 直接导入，原生构建从它生成临时头文件。自有宿主在 Node 启动前注册 `dsh_ohos_publication` linked NAPI 模块，必须提供以下同步函数：
 
 | 成员 | 合同 |
 |---|---|
@@ -28,7 +28,7 @@ Node 固定为 **24.22.1**。自有宿主在 Node 启动前注册 `dsh_ohos_publ
 
 宿主必须先创建它授权的应用数据目录，并将 **`DSH_HOME` 显式设为既有的绝对目录路径**。预加载会用 `realpath` 得到实际目录；不存在、相对路径、普通文件及文件系统根目录均拒绝。不从 `cwd` 或系统临时目录推导应用数据权限。账本放在该目录下的 `ohos-ownership/`；账本 factory 创建或核查这个 `0700` 私有目录，拒绝符号链接和非私有权限。
 
-显式增加 `--import /绝对路径/runtime/ohos/publication/preload.mjs`。预加载独立于网络和仿真模块，顶层等待 `installPublication()` 完成。安装仅在真实 `process.platform === 'openharmony'` 或明确的进程内 `Symbol.for('dsh.go.ohos.sim') === true` 下执行；旧环境变量本身不会开启分支。Worker 继承 `--import` 时跳过主引擎服务，不竞争主引擎账本锁。
+产品宿主必须通过 `dsh_node_start`，只传一个 `--import /绝对路径/runtime/ohos/preload.mjs`；该统一入口先等待网络启动，再等待本服务的 `installPublication()` 完成。启动布局、`NODE_OPTIONS` 拒绝与 Linux 合同测试见 [统一启动契约](../../../docs/design/harmonyos/startup.md)。直接导入 `publication/preload.mjs` 仅保留给本文件的 publication 专项测试，不再作为产品宿主命令。安装仅在真实 `process.platform === 'openharmony'` 或明确的进程内 `Symbol.for('dsh.go.ohos.sim') === true` 下执行；旧环境变量本身不会开启分支。Worker 继承 `--import` 时跳过主引擎服务，不竞争主引擎账本锁。
 
 安装过程先核版本、重复安装和四个原生成员，再取得账本排他锁，执行恢复，最后定义 `Symbol.for('dsh.go.ohos.publication')`。初始化失败时关闭已取得的 ledger。重复及并发安装都明确失败；缺少原生能力不静默降级。服务仍为 `protocolVersion: 1`，保留 `publish` 和只读 `pendingCount`，新增只读 `ownerId` 与深冻结的 `recoverySummary`。未解决记录只输出数量告警，保留详细结果供宿主检查。
 

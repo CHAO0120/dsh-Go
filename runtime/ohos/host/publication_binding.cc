@@ -1,4 +1,5 @@
 #include "publication_binding.h"
+#include "dsh_node_version.h"
 
 #include <node.h>
 #include <node_api.h>
@@ -226,8 +227,9 @@ napi_value GetOwnershipMarker(napi_env env, napi_callback_info info) {
 napi_value Initialize(napi_env env, napi_value exports) {
   const napi_node_version* version;
   if (napi_get_node_version(env, &version) != napi_ok) return nullptr;
-  if (version->major != 24 || version->minor != 22 || version->patch != 1) {
-    napi_throw_error(env, "ERR_OHOS_NATIVE_NODE_VERSION", "Publication binding requires Node 24.22.1");
+  if (version->major != DSH_NODE_VERSION_MAJOR || version->minor != DSH_NODE_VERSION_MINOR ||
+      version->patch != DSH_NODE_VERSION_PATCH) {
+    napi_throw_error(env, "ERR_OHOS_NATIVE_NODE_VERSION", "Publication binding requires Node " DSH_NODE_VERSION_STRING);
     return nullptr;
   }
   napi_value function;
