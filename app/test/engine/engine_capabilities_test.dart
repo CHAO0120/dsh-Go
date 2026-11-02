@@ -1,4 +1,5 @@
 import 'package:dsh_app/l10n/gen/app_localizations_zh.dart';
+import 'package:dsh_app/l10n/l10n.dart';
 import 'package:dsh_app/state/runtime_capabilities_state.dart';
 import 'package:dsh_app/ui/engine/engine_capabilities.dart';
 import 'package:dsh_client/dsh_client.dart';
@@ -13,9 +14,10 @@ final _zh = L10nZh();
 Future<void> _pump(WidgetTester tester, RuntimeCapabilities? caps) async {
   await tester.pumpWidget(
     goldenApp(
-      home: const Scaffold(body: EngineCapabilityRows()),
+      home: Scaffold(
+        body: Builder(builder: (context) => Column(children: engineCapabilityRows(context.l10n, caps))),
+      ),
       brightness: Brightness.light,
-      overrides: [runtimeCapabilitiesProvider.overrideWith((ref) async => caps)],
     ),
   );
   await tester.pump();

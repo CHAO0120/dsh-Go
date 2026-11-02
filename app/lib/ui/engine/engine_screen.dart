@@ -9,6 +9,7 @@ import '../../runtime/runtime_state.dart';
 import '../../runtime/local_footprint.dart';
 import '../../state/android_features.dart';
 import '../../state/engine_control.dart';
+import '../../state/runtime_capabilities_state.dart';
 import '../../state/safe_mode_state.dart';
 import '../../state/settings_state.dart';
 import '../common/page_hero.dart';
@@ -176,7 +177,7 @@ class EngineScreen extends ConsumerWidget {
                   mono: true,
                 ),
                 InfoRow(label: l10n.phoneEngineArchitecture, value: status.abi ?? '—', mono: true),
-                const EngineCapabilityRows(),
+                ...engineCapabilityRows(l10n, ref.watch(runtimeCapabilitiesProvider).value),
               ],
             ),
             if (!missing && guest)
