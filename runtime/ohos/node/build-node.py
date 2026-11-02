@@ -12,10 +12,13 @@ import shutil
 import subprocess
 import sys
 import tarfile
+import time
 
 
 HERE = Path(__file__).resolve().parent
 SOURCE_SHA256 = '4f5379796280cdaeb0c2f358fd04b6a16cc4fb7dfa83b5a8c91a9d963b435231'
+CXX_RUNTIME_EXPORT = re.compile(r'_Z(N|NK|TI|TS|TV|TT|GV|TH|TW)?N?St|_Z[nd][wal]|__cxa_|__cxxabi|__gxx_|__dynamic_cast'
+                                r'|_Unwind_|__emutls_get|__aarch64_|__clang_')
 
 
 def digest(path):
@@ -36,9 +39,42 @@ def apply_patches(source):
     return pins
 
 
+def audit_library(library, sdk):
+    tools, libs = sdk / 'llvm/bin', sdk / 'sysroot/usr/lib/aarch64-linux-ohos'
+    elf = subprocess.check_output([str(tools / 'llvm-readelf'), '-h', '-l', '-d', str(library)], text=True)
+    if ('AArch64' not in elf or 'DYN (Shared object file)' not in elf or 'INTERP' in elf
+            or re.search(r'SONAME.*\[libnode\.so\]', elf) is None):
+        raise RuntimeError('libnode must be AArch64 ET_DYN, no PT_INTERP, SONAME libnode.so')
+
+    def symbols(path, *options):
+        output = subprocess.check_output([str(tools / 'llvm-nm'), '-D', *options, str(path)], text=True)
+        return [line.split()[-2:] for line in output.splitlines()]
+
+    needed = re.findall(r'\(NEEDED\).*\[(.+)\]', elf)
+    missing = [name for name in needed if not (libs / name).is_file()]
+    if missing:
+        raise RuntimeError(f'libnode needs libraries absent from the SDK sysroot: {missing}')
+    exports = [name for _, name in symbols(library, '--defined-only')]
+    private = [name for name in exports if CXX_RUNTIME_EXPORT.match(name)]
+    if private:
+        raise RuntimeError(f'libnode exports {len(private)} C++ runtime symbols, e.g. {private[:5]}')
+    provided = {name for dependency in needed for _, name in symbols(libs / dependency, '--defined-only')}
+    undefined = symbols(library, '--undefined-only')
+    unresolved = [name for kind, name in undefined if kind == 'U' and name.split('@')[0] not in provided]
+    if unresolved:
+        raise RuntimeError(f'libnode imports symbols the SDK sysroot does not provide: {unresolved}')
+    return elf, {'needed': needed, 'exports': len(exports), 'imports': len(undefined),
+                 'weakImportsOutsideSysroot': sorted(name for kind, name in undefined if kind != 'U'
+                                                     and name.split('@')[0] not in provided),
+                 'tlsSegment': 'TLS ' in elf, 'textrel': 'TEXTREL' in elf}
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--sdk-native', required=True, type=Path)
+    parser.add_argument('--clang', required=True, type=Path,
+                        help='The clang --cxx-runtime was built with; clang++ must sit beside it')
+    parser.add_argument('--cxx-runtime', required=True, type=Path, help='Output of build-runtimes.py')
     parser.add_argument('--source-archive', required=True, type=Path)
     parser.add_argument('--host-node', required=True, type=Path,
                         help='Official Node 24.22.1 binary executable on the Linux build host')
@@ -48,18 +84,23 @@ def main():
     parser.add_argument('--host-cxx', default='g++')
     parser.add_argument('--jobs', default=4, type=int)
     args = parser.parse_args()
-    sdk, archive, node, work, output = (p.resolve() for p in
-        (args.sdk_native, args.source_archive, args.host_node, args.work, args.output))
+    clang = args.clang.absolute()
+    sdk, runtimes, archive, node, work, output = (p.resolve() for p in
+        (args.sdk_native, args.cxx_runtime, args.source_archive, args.host_node, args.work, args.output))
     if sys.platform != 'linux':
         parser.error('This reproducible recipe currently supports a Linux build host')
     if args.jobs < 1:
         parser.error('--jobs must be positive')
     required = [sdk / 'llvm/bin' / name for name in
-                ['clang', 'clang++', 'llvm-ar', 'llvm-readelf', 'llvm-strip']]
-    required += [sdk / 'oh-uni-package.json', sdk / 'sysroot/usr/include/stdio.h']
+                ['ld.lld', 'llvm-ar', 'llvm-nm', 'llvm-readelf', 'llvm-strip']]
+    required += [sdk / 'oh-uni-package.json', sdk / 'sysroot/usr/include/stdio.h', HERE / 'libnode-exports.map',
+                 clang, clang.with_name('clang++'), runtimes / 'runtimes.json']
     for file in required:
         if not file.is_file():
-            parser.error(f'Missing SDK input: {file}')
+            parser.error(f'Missing toolchain input: {file}')
+    runtime_plan = json.loads((runtimes / 'runtimes.json').read_text())
+    if digest(clang) != runtime_plan['compilerSha256']:
+        parser.error('--clang is not the compiler --cxx-runtime was built with')
     for file in [HERE / 'patch-undici.mjs', HERE / 'build-tools/node_modules/esbuild/package.json']:
         if not file.is_file():
             parser.error(f'Missing O7a input: {file}; apply O7a and install its locked build tools first')
@@ -78,6 +119,7 @@ def main():
         unpacked_bytes = sum(member.size for member in source_tar.getmembers() if member.isfile())
     if free_bytes < unpacked_bytes:
         parser.error(f'Source alone requires {unpacked_bytes} bytes; only {free_bytes} are free. Build objects need additional space.')
+    started = time.monotonic()
     work.mkdir(parents=True)
     output.mkdir(parents=True)
     with tarfile.open(archive, 'r:xz') as source_tar:
@@ -91,12 +133,14 @@ def main():
     wrappers = work / 'toolchain'
     wrappers.mkdir()
     for name in ['clang', 'clang++']:
-        command = [str(sdk / 'llvm/bin' / name), '--target=aarch64-linux-ohos',
-                   f'--sysroot={sdk / "sysroot"}', '-fPIC',
+        command = [str(clang.with_name(name)), '--target=aarch64-linux-ohos',
+                   f'--sysroot={sdk / "sysroot"}', f'-resource-dir={runtimes / "clang-resource"}',
+                   f'--ld-path={sdk / "llvm/bin/ld.lld"}', '-Qunused-arguments', '-fPIC',
                    '-D__OHOS__=1', '-D__MUSL__=1', '-DDSH_GO_EMBEDDED_RUNTIME=1',
                    f'-ffile-prefix-map={source}=/node-v24.22.1']
         if name == 'clang++':
-            command.append('-stdlib=libc++')
+            command += ['-stdlib=libc++', f'-stdlib++-isystem{runtimes / "include/c++/v1"}',
+                        f'-L{runtimes / "lib"}', '-static-libstdc++']
         wrapper = wrappers / name
         wrapper.write_text('#!/bin/sh\nexec ' + shlex.join(command) + ' "$@"\n')
         wrapper.chmod(0o755)
@@ -106,7 +150,11 @@ def main():
         'LINK_target': str(wrappers / 'clang++'), 'AR': str(sdk / 'llvm/bin/llvm-ar'),
         'AR_target': str(sdk / 'llvm/bin/llvm-ar'), 'CC_host': args.host_cc,
         'CXX_host': args.host_cxx, 'LINK_host': args.host_cxx, 'AR_host': 'ar',
-        'LDFLAGS': '-Wl,-Bsymbolic-functions', 'LDFLAGS_host': '',
+        # libc++ stays private to libnode: the HAP also ships the SDK's libc++_shared.so for libflutter.so.
+        'LDFLAGS': ' '.join(['-Wl,-Bsymbolic-functions', '-Wl,--no-undefined',
+                             '-Wl,--exclude-libs,libc++.a:libc++abi.a:libunwind.a:libclang_rt.builtins.a',
+                             f'-Wl,--version-script={HERE / "libnode-exports.map"}']),
+        'LDFLAGS_host': '',
         'CFLAGS': '', 'CXXFLAGS': '', 'CPPFLAGS': '',
         'CFLAGS_host': '', 'CXXFLAGS_host': '', 'CPPFLAGS_host': '',
         'SOURCE_DATE_EPOCH': '0', 'LC_ALL': 'C', 'TZ': 'UTC',
@@ -117,13 +165,17 @@ def main():
                  '--with-icu-locales=root,en', '--v8-options=--jitless',
                  '--without-node-snapshot', '--without-node-code-cache',
                  '--without-node-options', '--without-inspector']
-    plan ={'configure': configure, 'make': ['make', f'-j{args.jobs}'], 'environment': recipe,
+    # Only the library: the default target also links cctest, embedtest and other unshipped executables.
+    plan ={'configure': configure,
+            'make': ['make', '-C', 'out', f'-j{args.jobs}', 'BUILDTYPE=Release', 'libnode'], 'environment': recipe,
             'nodeSourceSha256': SOURCE_SHA256, 'patches': pins,
             'diskFreeBefore': free_bytes, 'sourceUncompressedBytes': unpacked_bytes,
             'sdkManifest': json.loads((sdk / 'oh-uni-package.json').read_text()),
             'sdkManifestSha256': digest(sdk / 'oh-uni-package.json'),
-            'compilerSha256': digest(sdk / 'llvm/bin/clang'),
-            'compilerVersion': subprocess.check_output([str(sdk / 'llvm/bin/clang'), '--version'], text=True),
+            'compilerSha256': digest(clang),
+            'compilerVersion': subprocess.check_output([str(clang), '--version'], text=True),
+            'linkerVersion': subprocess.check_output([str(sdk / 'llvm/bin/ld.lld'), '--version'], text=True),
+            'cxxRuntime': {key: runtime_plan[key] for key in ['llvmVersion', 'llvmSourceSha256', 'artifacts']},
             'hostCompilerVersion': subprocess.check_output([args.host_cxx, '--version'], text=True)}
     (work / 'build-plan.json').write_text(json.dumps(plan, indent=2) + '\n')
     with (work / 'configure.log').open('w') as log:
@@ -144,22 +196,15 @@ def main():
     library = source / 'out/Release/libnode.so'
     if not library.is_file():
         library = source / 'out/Release/lib.target/libnode.so'
-    readelf = sdk / 'llvm/bin/llvm-readelf'
-    elf = subprocess.check_output([str(readelf), '-h', '-l', '-d', str(library)], text=True)
-    if ('AArch64' not in elf or 'DYN (Shared object file)' not in elf or 'INTERP' in elf
-            or re.search(r'SONAME.*\[libnode\.so\]', elf) is None):
-        raise RuntimeError('libnode must be AArch64 ET_DYN, no PT_INTERP, SONAME libnode.so')
+    elf, audit = audit_library(library, sdk)
     unstripped = {'bytes': library.stat().st_size, 'sha256': digest(library)}
     shutil.copyfile(library, output / 'libnode.so')
     subprocess.run([str(sdk / 'llvm/bin/llvm-strip'), '--strip-unneeded', str(output / 'libnode.so')], check=True)
-    cxx_runtime = Path(subprocess.check_output([str(wrappers / 'clang++'),
-                       '-print-file-name=libc++_shared.so'], text=True).strip())
-    if not cxx_runtime.is_absolute() or not cxx_runtime.is_file():
-        raise RuntimeError('SDK compiler could not resolve libc++_shared.so; do not package an incomplete runtime')
-    shutil.copyfile(cxx_runtime, output / 'libc++_shared.so')
     shutil.copyfile(source / 'LICENSE', output / 'NODE-LICENSE.txt')
     plan.update({'scope': 'OHOS cross-build; HAP load and device behavior NOT_RUN',
-                 'unstripped': unstripped, 'elf': elf,
+                 'unstripped': unstripped, 'elf': elf, 'audit': audit,
+                 'buildSeconds': round(time.monotonic() - started),
+                 'workBytes': sum(p.stat().st_size for p in work.rglob('*') if p.is_file() and not p.is_symlink()),
                  'artifacts': {p.name: {'bytes': p.stat().st_size, 'sha256': digest(p)}
                                for p in output.iterdir() if p.is_file()}})
     (output / 'build.json').write_text(json.dumps(plan, indent=2) + '\n')

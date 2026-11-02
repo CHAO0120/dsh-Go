@@ -1,0 +1,9 @@
+/* libc++ stays private to libnode. --exclude-libs hides what the archives define; this hides the
+   template instantiations and inline variables Node's own objects emit with default visibility. */
+{
+  global: *;
+  local:
+    _ZNSt3__1*; _ZNKSt3__1*; _ZSt*;
+    _ZTINSt3__1*; _ZTSNSt3__1*; _ZTVNSt3__1*; _ZTTNSt3__1*;
+    _ZGVNSt3__1*; _ZTHNSt3__1*; _ZTWNSt3__1*;
+};
