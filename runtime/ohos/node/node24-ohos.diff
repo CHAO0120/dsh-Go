@@ -22,6 +22,19 @@ diff --git a/deps/uv/src/unix/linux.c b/deps/uv/src/unix/linux.c
    return 0;  /* Possibly available but blocked by seccomp. */
  #elif defined(__arm__) && __SIZEOF_POINTER__ == 4
    /* See https://github.com/libuv/libuv/issues/4158. */
+diff --git a/deps/v8/src/wasm/pgo.h b/deps/v8/src/wasm/pgo.h
+--- a/deps/v8/src/wasm/pgo.h
++++ b/deps/v8/src/wasm/pgo.h
+@@ -9,6 +9,9 @@
+ #error This header should only be included if WebAssembly is enabled.
+ #endif  // !V8_ENABLE_WEBASSEMBLY
+ 
++#if defined(__OHOS__) && defined(DSH_GO_EMBEDDED_RUNTIME)
++#include <atomic>  // libc++ 23 no longer provides it transitively.
++#endif
+ #include <vector>
+ 
+ #include "src/base/vector.h"
 diff --git a/src/node.cc b/src/node.cc
 --- a/src/node.cc
 +++ b/src/node.cc

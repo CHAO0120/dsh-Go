@@ -41,9 +41,10 @@ def suffix(filename, target, host):
 
 
 def preprocess(text, flags):
-    # Headers are removed for this branch comparison, not replaced with fake SDK declarations.
-    text = '\n'.join(line for line in text.splitlines() if not line.lstrip().startswith('#include'))
-    result = subprocess.run([args.cxx, '-E', '-P', '-x', 'c++', *flags, '-'], input=text,
+    # Headers stay inert text for this branch comparison, not replaced with fake SDK declarations.
+    text = '\n'.join('dsh_include ' + line if line.lstrip().startswith('#include') else line
+                      for line in text.splitlines())
+    result = subprocess.run([args.cxx, '-E', '-P', '-x', 'c++', '-DV8_ENABLE_WEBASSEMBLY=1', *flags, '-'], input=text,
                             capture_output=True, text=True, check=True)
     return '\n'.join(line.strip() for line in result.stdout.splitlines() if line.strip())
 
@@ -64,7 +65,7 @@ with tempfile.TemporaryDirectory(prefix='ohos-node-source-') as temporary:
         else:
             assert before == 'so.%s' and after == 'so'
         results['suffix'].append({'target': target, 'host': host, 'before': before, 'after': after})
-    for name in ['deps/uv/src/unix/linux.c', 'src/node.cc', 'src/node_main_instance.cc']:
+    for name in ['deps/uv/src/unix/linux.c', 'deps/v8/src/wasm/pgo.h', 'src/node.cc', 'src/node_main_instance.cc']:
         before, after = (args.source / name).read_text(), (fixture / name).read_text()
         for label, flags in [('linux', []), ('android', ['-D__ANDROID_API__=35']),
                              ('ohos-without-embedded-build', ['-D__OHOS__=1'])]:
