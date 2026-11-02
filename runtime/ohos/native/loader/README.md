@@ -41,7 +41,7 @@ Node24.22.1 的 `node.gyp` 中，隐藏 Node 源符号的选项仍处于注释�
 
 这里的 `node_api.h` 来自官方 Node24.22.1，C++ 的 `node-addon-api` 包装的是 Node-API。ArkTS 宿主的 `napi/native_api.h` 是另一套运行时接口，不能混用头文件、环境对象或句柄。
 
-Ark 和 Node 不再共用符号名：本脚本 force-include `runtime/ohos/node/napi-rename.h`，生成的 addon 导入 `dsh_napi_*`，显式依赖 `libnode.so`，并静态检查这些导入都在输入 libnode 的导出表中，任何残留的 `napi_*`、`node_api_*` 导入都拒绝构建。详见 `runtime/ohos/node/BUILD.md`。**这只是必要条件，不证明运行时绑定。** HAP 中 Ark NAPI、Node 与 addon 同时加载时，仍须记录：libnode 的真实加载方式与作用域、六个 `RTLD_DEFAULT` 查找地址所归属的映像、原生 probe 完整返回结果。
+Ark 和 Node 不再共用符号名：本脚本 force-include `--napi-rename-header` 给定的 `runtime/ohos/node/napi-rename.h`，经 `napi_isolation.py` 核对，要求 Clang 23 或更新版本，生成的 addon 导入 `dsh_napi_*`，显式依赖 `libnode.so`，并静态检查这些导入都在输入 libnode 的导出表中，任何残留的 `napi_*`、`node_api_*` 导入都拒绝构建。详见 `runtime/ohos/node/BUILD.md`。**这只是必要条件，不证明运行时绑定。** HAP 中 Ark NAPI、Node 与 addon 同时加载时，仍须记录：libnode 的真实加载方式与作用域、六个 `RTLD_DEFAULT` 查找地址所归属的映像、原生 probe 完整返回结果。
 
 ## 构建输入与输出
 
@@ -62,6 +62,10 @@ python3 runtime/ohos/native/loader/build-loader.py \
   --source /absolute/dsh-node-addon-require-builtin-a58d3599 \
   --node-headers /absolute/node-v24.22.1/include/node \
   --node-addon-api /absolute/loader-build-deps/node_modules/node-addon-api \
+  --compiler /absolute/clang-23/bin/clang++ \
+  --cxx-flag=-nostdinc++ --cxx-flag=-isystem/absolute/cxx-runtime/include/c++/v1 \
+  --ld-flag=-L/absolute/cxx-runtime/lib \
+  --napi-rename-header runtime/ohos/node/napi-rename.h \
   --libnode /absolute/o7b-output/libnode.so \
   --libnode-build-json /absolute/o7b-output/build.json \
   --output /absolute/fresh-loader-output

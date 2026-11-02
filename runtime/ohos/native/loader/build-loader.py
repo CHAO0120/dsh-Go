@@ -9,10 +9,13 @@ from pathlib import Path
 import re
 import shutil
 import subprocess
+import sys
 import tempfile
 
 
 HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE.parents[1] / 'host'))
+import napi_isolation
 
 
 def digest(path):
@@ -70,6 +73,13 @@ def main():
                         help='Official Node 24.22.1 include/node; never Ark NAPI headers')
     parser.add_argument('--node-addon-api', required=True, type=Path,
                         help='Pinned existing O4 dependency node-addon-api 8.9.2')
+    parser.add_argument('--compiler', required=True, type=Path,
+                        help='Same Clang 23+ compiler/wrapper as target libnode')
+    parser.add_argument('--cxx-flag', action='append', default=[],
+                        help='Repeat matching custom libc++ include flags, using --cxx-flag=VALUE')
+    parser.add_argument('--ld-flag', action='append', default=[],
+                        help='Repeat matching custom static libc++ library flags, using --ld-flag=VALUE')
+    parser.add_argument('--napi-rename-header', required=True, type=Path)
     parser.add_argument('--libnode', required=True, type=Path,
                         help='O7b arm64 OHOS libnode.so; its exports are checked before compiling')
     parser.add_argument('--libnode-build-json', required=True, type=Path,
@@ -80,10 +90,11 @@ def main():
         (args.sdk_native, args.source, args.node_headers, args.node_addon_api, args.libnode,
          args.libnode_build_json, args.output))
     pins = json.loads((HERE / 'source-pins.json').read_text())
-    compiler, readelf = sdk / 'llvm/bin/clang++', sdk / 'llvm/bin/llvm-readelf'
+    compiler, rename = args.compiler.resolve(), args.napi_rename_header.resolve()
+    readelf = sdk / 'llvm/bin/llvm-readelf'
     required = [compiler, readelf, sdk / 'sysroot/usr/include/dlfcn.h',
                 sdk / 'sysroot/usr/include/sys/mman.h', sdk / 'oh-uni-package.json',
-                headers / 'node_api.h', headers / 'node_version.h', libnode, node_report_path]
+                headers / 'node_api.h', headers / 'node_version.h', libnode, node_report_path, rename]
     for path in required:
         if not path.is_file():
             parser.error(f'Missing input: {path}; no target build was performed')
@@ -109,18 +120,22 @@ def main():
         if option not in node_report.get('configure', []):
             parser.error(f'libnode build report lacks {option}')
 
-    target = [str(compiler), '--target=aarch64-linux-ohos', f'--sysroot={sdk / "sysroot"}']
+    target = [str(compiler), '--target=aarch64-linux-ohos', f'--sysroot={sdk / "sysroot"}', *args.cxx_flag]
     macros = subprocess.check_output(target + ['-dM', '-E', '-x', 'c++', '-'], input='', text=True)
     for macro in ['__aarch64__', '__linux__']:
         if not re.search(r'^#define ' + re.escape(macro) + r'\b', macros, re.M):
             parser.error(f'SDK does not select upstream arm64 POSIX branch: {macro} missing')
+    clang = re.search(r'^#define __clang_major__ (\d+)$', macros, re.M)
+    if not clang or int(clang.group(1)) < 23:
+        parser.error('Use the same Clang 23+ and custom static libc++ toolchain as libnode')
     try:
         node_elf, node_symbols = inspect_elf(readelf, libnode)
         if re.search(r'SONAME.*\[libnode\.so\]', node_elf) is None:
             raise ValueError('Requires O7b SONAME libnode.so')
         node_exports = exported_symbols(node_symbols)
+        isolation = napi_isolation.verify(headers, rename, libnode, readelf)
         require_symbols(node_exports, pins['requiredNode24Symbols'] + ['dsh_napi_get_node_version', 'dsh_napi_typeof'])
-    except ValueError as error:
+    except (OSError, ValueError, subprocess.CalledProcessError) as error:
         parser.error(str(error))
 
     native = source / 'packages/native'
@@ -140,6 +155,7 @@ def main():
         'nodeVersion': '24.22.1', 'nodeApiVersion': 9, 'nodeAddonApi': pins['nodeAddonApi'],
         'nodeLibrarySHA256': digest(libnode), 'nodeLibraryELF': node_elf,
         'nodeBuildReportSHA256': digest(node_report_path),
+        'napiIsolation': isolation,
         'requiredDynamicSymbols': pins['requiredNode24Symbols'],
         'nativeSourceSHA256': {name: digest(source / name) for name in pins['upstream']['files']},
         'nodeHeaderSHA256': {name: digest(headers / name) for name in
@@ -154,13 +170,14 @@ def main():
     with tempfile.TemporaryDirectory(prefix='.loader-build-', dir=output) as temporary:
         binary = Path(temporary) / 'require_builtin.node'
         command = target + ['-std=c++17', '-O2', '-g0', '-fPIC', '-shared', '-pthread',
-            '-include', str(HERE.parents[1] / 'node/napi-rename.h'),
             '-stdlib=libc++', '-fvisibility=hidden', '-fno-exceptions',
+            '-include', str(rename),
             '-DNAPI_VERSION=9', '-DNARB_BACKEND=1', '-DNARB_PRODUCT=1',
             '-DNODE_ADDON_API_DISABLE_CPP_EXCEPTIONS', '-DNODE_GYP_MODULE_NAME=require_builtin',
             f'-ffile-prefix-map={source}=node-addon-require-builtin-0.1.9',
             '-I', str(headers), '-I', str(api), *map(str, sources),
             '-L', str(libnode.parent), '-Wl,-rpath-link,' + str(libnode.parent), '-lnode', '-ldl',
+            *args.ld_flag, '-static-libstdc++', '-Wl,--exclude-libs,ALL',
             '-Wl,-z,defs', '-Wl,-soname,require_builtin.node', '-o', str(binary)]
         report['command'] = command
         (output / 'build.json').write_text(json.dumps(report, ensure_ascii=False, indent=2) + '\n')
@@ -171,11 +188,9 @@ def main():
         if re.search(r'NEEDED.*\[libnode\.so\]', addon_elf) is None:
             raise RuntimeError('Addon must explicitly depend on libnode.so')
         require_symbols(exported_symbols(addon_symbols), ['napi_register_module_v1'])
-        addon_imports = imported_symbols(addon_symbols)
-        plain = sorted(name for name in addon_imports if name.startswith(('napi_', 'node_api_')))
-        if plain:
-            raise RuntimeError(f'Addon imports plain N-API names, which would bind to Ark: {plain}')
-        require_symbols(node_exports, sorted(name for name in addon_imports if name.startswith('dsh_')))
+        isolation = napi_isolation.verify(headers, rename, libnode, readelf, binary, 'addon')
+        napi_imports = sorted(name for name in imported_symbols(addon_symbols) if napi_isolation.renamed(name))
+        require_symbols(node_exports, napi_imports)
         (output / 'addon-dynamic-symbols.txt').write_text(addon_symbols)
         package = output / 'node_modules/node-addon-require-builtin-openharmony-arm64'
         (package / 'prebuilt').mkdir(parents=True)
@@ -194,6 +209,7 @@ def main():
         shutil.copyfile(source / 'LICENSE', package / 'LICENSE')
         shutil.copyfile(api / 'LICENSE.md', package / 'NODE-ADDON-API-LICENSE.md')
         report.update({'status': 'BUILT_DEVICE_NOT_RUN', 'addonELF': addon_elf,
+            'napiIsolation': isolation,
             'nodeApiImports': napi_imports,
             'artifacts': {str(path.relative_to(output)): {'bytes': path.stat().st_size, 'sha256': digest(path)}
                           for path in sorted(package.rglob('*')) if path.is_file()}})

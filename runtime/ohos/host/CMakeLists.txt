@@ -31,12 +31,11 @@ endif()
 add_library(dsh_node_runner SHARED node_runner.cpp publication_binding.cc)
 target_compile_features(dsh_node_runner PRIVATE cxx_std_20)
 target_compile_definitions(dsh_node_runner PRIVATE NAPI_VERSION=8)
-# libnode's N-API exists only under the dsh_ names; plain napi_* would bind to Ark's libace_napi.
-target_compile_options(dsh_node_runner PRIVATE -fvisibility=hidden
-  -include "${CMAKE_CURRENT_SOURCE_DIR}/../node/napi-rename.h")
+target_compile_options(dsh_node_runner PRIVATE -fvisibility=hidden)
 target_include_directories(dsh_node_runner PRIVATE
   "${CMAKE_CURRENT_BINARY_DIR}"
   "${DSH_DEVICEINFO_INCLUDE_DIR}"
   "${NODE_SOURCE_DIR}/src" "${NODE_SOURCE_DIR}/deps/v8/include" "${NODE_SOURCE_DIR}/deps/uv/include")
 target_link_libraries(dsh_node_runner PRIVATE "${NODE_LIBRARY_DIR}/libnode.so" "${DSH_DEVICEINFO_LIBRARY}" Threads::Threads)
 target_link_options(dsh_node_runner PRIVATE -Wl,-z,defs)
+include("${CMAKE_CURRENT_SOURCE_DIR}/napi-isolation.cmake")
