@@ -1,4 +1,5 @@
 import AppLinksPlugin from '../plugins/AppLinksPlugin';
+import NotifyPlugin from '../plugins/NotifyPlugin';
 import { FlutterAbility, FlutterEngine } from '@ohos/flutter_ohos';
 import ConnectivityPlugin from '../plugins/ConnectivityPlugin';
 import { GeneratedPluginRegistrant } from '../plugins/GeneratedPluginRegistrant';
@@ -13,5 +14,6 @@ export default class EntryAbility extends FlutterAbility {
     GeneratedPluginRegistrant.registerWith(flutterEngine)
     flutterEngine.getPlugins()?.add(new RuntimePlugin())
     flutterEngine.getPlugins()?.add(new FilesMediaPlugin())
+    flutterEngine.getPlugins()?.add(new NotifyPlugin())
   }
 }
