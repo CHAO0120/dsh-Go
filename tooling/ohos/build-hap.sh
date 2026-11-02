@@ -27,4 +27,5 @@ cp ohos/pubspec_overrides.ohos.yaml pubspec_overrides.yaml
 "$FLUTTER" pub get
 python3 "$APP/../tooling/ohos/vendor_platform_switches.py"
 "$FLUTTER" pub get
-"$FLUTTER" build hap "$MODE" --target-platform ohos-arm64
+# No icon tree shaking: oh-flutter's const_finder fails on its own Dart ("Invalid SDK hash").
+"$FLUTTER" build hap "$MODE" --target-platform ohos-arm64 --no-tree-shake-icons

@@ -55,6 +55,8 @@ jobs:
           python3 ../tooling/ohos/vendor_platform_switches.py
           dart pub get
 
+      # No icon tree shaking: oh-flutter's const_finder snapshot fails on its own Dart
+      # with "Invalid SDK hash".
       - name: Compile to libapp.so
         working-directory: app
         run: |
@@ -62,7 +64,7 @@ jobs:
             -dTargetPlatform=ohos-arm64 \
             -dBuildMode=release \
             -dTargetFile=lib/main.dart \
-            -dTreeShakeIcons=true \
+            -dTreeShakeIcons=false \
             --output=build/ohos-aot \
             ohos_aot_bundle_release_ohos-arm64
 
