@@ -71,7 +71,9 @@ jobs:
       - name: Report the result
         working-directory: app
         run: |
-          lib="$(find build/ohos-aot .dart_tool/flutter_build -name libapp.so | head -1)"
+          find build/ohos-aot -maxdepth 2 | head -20
+          lib="$(find build/ohos-aot .dart_tool/flutter_build \( -name app.so -o -name libapp.so \) | head -1)"
           test -n "$lib"
           file "$lib"
-          echo "libapp.so: $(wc -c < "$lib") bytes" >> "$GITHUB_STEP_SUMMARY"
+          echo "$(basename "$lib"): $(wc -c < "$lib") bytes" >> "$GITHUB_STEP_SUMMARY"
+          wc -c "$lib"
