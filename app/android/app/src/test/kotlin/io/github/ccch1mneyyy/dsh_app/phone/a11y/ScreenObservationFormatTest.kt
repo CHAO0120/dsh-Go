@@ -82,6 +82,32 @@ class ScreenObservationFormatTest {
         assertFalse(text, text.contains("Item 1"))
     }
 
+    @Test fun budgetHiddenObservationChangeCannotClaimTheScreenIsIdentical() {
+        fun capture(lastLabel: String): List<UiWindow> {
+            val nodes = (1..12).map { i -> UiNode(text = if (i == 12) lastLabel else "Stable row $i with visible content",
+                bounds = Box(0, 100 + i * 40, 400, 130 + i * 40)) }
+            return listOf(UiWindow(1, WindowKind.APP, "example.app", null, frame, UiNode(bounds = frame, children = nodes)))
+        }
+        fun budgeted(windows: List<UiWindow>, id: String) =
+            ScreenFormat.format(ScreenInput(id, "Example", "example.app", 400, 800, false, windows, charBudget = 250))
+        val beforeWindows = capture("Hidden row before")
+        val afterWindows = capture("Hidden row after")
+        val before = budgeted(beforeWindows, "s1")
+        val after = budgeted(afterWindows, "s2")
+        assertTrue(before.hidden > 0)
+        assertTrue(after.hidden > 0)
+        assertTrue(before.elements.isNotEmpty())
+        assertEquals(before.elements.map { it.observationKey }, after.elements.map { it.observationKey })
+        assertFalse(after.text.contains("Hidden row after"))
+        val beforeObservation = ScreenObservation("example.app", beforeWindows, frame, false, false, false, ScreenFormat.observationKeys(beforeWindows))
+        val afterObservation = ScreenObservation("example.app", afterWindows, frame, false, false, false, ScreenFormat.observationKeys(afterWindows))
+        assertTrue(afterObservation.changedFrom(beforeObservation))
+        val text = ScreenDigest.text("s1", before, "s2", after, observationChanged = afterObservation.changedFrom(beforeObservation))
+        assertEquals(after.text, text)
+        assertTrue(text, text.contains("另有"))
+        assertFalse(text, text.contains("（与 s1 相同，编号不变）"))
+    }
+
     @Test fun mergedRowsKeepTheChangedSecondElement() {
         fun screen(changed: String, id: String): FormattedScreen {
             val nodes = listOf(
