@@ -19,6 +19,8 @@ const { values } = parseArgs({ options: {
   'allow-addon': { type: 'string', multiple: true, default: [] },
   'linked-publication-fixture': { type: 'string' },
   'expose-internals': { type: 'boolean', default: false },
+  'native-library-dir': { type: 'string' },
+  'compile-cache-dir': { type: 'string' },
 } });
 if (!values.prefix || !values.out || !['jit', 'jitless', 'sim'].includes(values.mode)) {
   throw new Error('usage: node round.mjs --prefix <locked patched DSH prefix> --out <new case directory> --mode jit|jitless|sim');
@@ -27,14 +29,28 @@ const prefix = resolve(values.prefix);
 const out = resolve(values.out);
 const allowedAddons = [];
 for (const input of values['allow-addon']) {
-  if (!isAbsolute(input)) throw new TypeError('--allow-addon requires an absolute .node file path');
+  if (!isAbsolute(input)) throw new TypeError('--allow-addon requires an absolute native addon path');
   const path = await realpath(input);
-  if (!path.endsWith('.node') || !(await stat(path)).isFile()) {
-    throw new TypeError('--allow-addon requires an existing regular .node file');
+  if (!/(?:\.node|\/libdsh_(?:flock|require_builtin)\.so)$/u.test(path) || !(await stat(path)).isFile()) {
+    throw new TypeError('--allow-addon requires a regular .node or fixed DSH HAP addon .so file');
   }
   if (!allowedAddons.some((entry) => entry.path === path)) {
     allowedAddons.push({ path, sha256: createHash('sha256').update(await readFile(path)).digest('hex') });
   }
+}
+let nativeLibraryDirectory;
+if (values['native-library-dir'] !== undefined) {
+  if (values.mode !== 'sim' || !values.platform || !isAbsolute(values['native-library-dir'])) {
+    throw new TypeError('--native-library-dir requires strict platform simulation and an absolute directory');
+  }
+  nativeLibraryDirectory = await realpath(values['native-library-dir']);
+  if (!(await stat(nativeLibraryDirectory)).isDirectory()) throw new TypeError('native library directory is not a directory');
+}
+let compileCacheDirectory;
+if (values['compile-cache-dir'] !== undefined) {
+  if (!isAbsolute(values['compile-cache-dir'])) throw new TypeError('--compile-cache-dir requires an absolute directory');
+  await mkdir(values['compile-cache-dir'], { recursive: true });
+  compileCacheDirectory = await realpath(values['compile-cache-dir']);
 }
 let linkedPublicationFixture;
 if (values['linked-publication-fixture'] !== undefined) {
@@ -107,6 +123,8 @@ const env = {
   DSH_OHOS_MEASURE_LOADER: '1',
 };
 if (linkedPublicationFixture) env.LD_PRELOAD = linkedPublicationFixture.path;
+if (nativeLibraryDirectory) env.DSH_GO_OHOS_NATIVE_LIBRARY_DIR = nativeLibraryDirectory;
+if (compileCacheDirectory) env.NODE_COMPILE_CACHE = compileCacheDirectory;
 if (values.mode === 'sim') {
   env.DSH_GO_OHOS_SIM_ADDONS = JSON.stringify(allowedAddons.map((entry) => entry.path));
   // The exact allowlist must not become a copied native binary in a tmp cache.
@@ -123,6 +141,8 @@ report.loader = {
     strictAddonAllowlistApplied: values.mode === 'sim', allowedAddons,
     linkedPublicationFixture: linkedPublicationFixture || null,
     nativeCacheDisabled: env.NARB_DISABLE_NATIVE_CACHE === '1',
+    nativeLibraryDirectory: nativeLibraryDirectory || null,
+    compileCacheDirectory: compileCacheDirectory || null,
     imports: values.import.map((name) => resolve(name)) },
   observedRoute: 'not-observed', observations: [],
   host: { platform: process.platform, arch: process.arch },

@@ -333,6 +333,18 @@
           "after": "29fdb6af06b4ff1af651d658ceabc1c306fdab4283cb3720be4a2a84a3333ce1"
         }
       }
+    },
+    "ohos-hap-native-libraries.diff": {
+      "0.2.1-rc.4": {
+        "node_modules/@deepseek-ai/node-addon-system/lib/flock.js": {
+          "before": "e42af00c298d56322c073bf7cc66485096028318ab645a2e69dc2aa7481ba646",
+          "after": "44f6c73890025ef7fe2e450da636f4ee257b32ec5d595ac7707d7cfeb266f516"
+        },
+        "node_modules/node-addon-native-custom-loader/lib/index.js": {
+          "before": "6d83f4e5426895d40820acf507146226a893c5aefba00a08bf0884446160049e",
+          "after": "00bfe83989700049796ea03dc1cd9ab6e2789167bc038deed2f9d698eec9a55b"
+        }
+      }
     }
   },
   "schema": 2,
@@ -354,6 +366,7 @@
       "fs-create-exclusive.diff",
       "install-log-redaction.diff",
       "ohos-attachment-publication.diff",
+      "ohos-hap-native-libraries.diff",
       "ohos-network-transport.diff",
       "ohos-virtual-process.diff",
       "plugin-manager-active-run-guard.diff",
