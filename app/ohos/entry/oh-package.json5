@@ -6,6 +6,8 @@
   "main": "",
   "author": "",
   "license": "",
-  "dependencies": {},
+  "dependencies": {
+    "libdsh_host.so": "file:./src/main/cpp/types/libdsh_host",
+  },
 }
 

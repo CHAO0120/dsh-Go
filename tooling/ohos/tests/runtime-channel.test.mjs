@@ -1,0 +1,473 @@
+import test, { after, afterEach } from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import { spawn } from 'node:child_process';
+import { once } from 'node:events';
+import { makePack, fileIo } from './runtime-storage-fixture.mjs';
+import { native, MethodCall } from './runtime-host-fixture.mjs';
+
+// Node executes these exact ETS logic bodies after extension/import adaptation.
+// This is not an ArkTS compile or an OH filesystem/ResourceManager test.
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
+const source = path.join(root, 'app/ohos/entry/src/main/ets/runtime');
+const temp = await fs.mkdtemp(path.join(os.tmpdir(), 'dsh-ohos-channel-'));
+after(async () => { await fs.rm(temp, { recursive: true, force: true }); });
+const corePath = path.join(temp, 'RuntimeCore.mts');
+await fs.copyFile(path.join(source, 'RuntimeCore.ets'), corePath);
+const fixtureUrl = new URL('./runtime-storage-fixture.mjs', import.meta.url).href;
+let adapterText = await fs.readFile(path.join(source, 'OhosRuntimeStorage.ets'), 'utf8');
+adapterText = adapterText.replace("import fs from '@ohos.file.fs';", `import { fileIo as fs } from '${fixtureUrl}';`)
+  .replace("import fileHash from '@ohos.file.hash';", `import { fileHash } from '${fixtureUrl}';`)
+  .replace("import resourceManager from '@ohos.resourceManager';", '')
+  .replace("import { BusinessError } from '@ohos.base';", '')
+  .replace("import util from '@ohos.util';", `import { util } from '${fixtureUrl}';`)
+  .replace("from './RuntimeCore'", "from './RuntimeCore.mts'")
+  .replace('RuntimeChannelError, RuntimeFile, RuntimeStorage', 'RuntimeChannelError, type RuntimeFile, type RuntimeStorage');
+const adapterPath = path.join(temp, 'OhosRuntimeStorage.mts');
+await fs.writeFile(adapterPath, adapterText);
+const core = await import(pathToFileURL(corePath));
+const { OhosRuntimeStorage } = await import(pathToFileURL(adapterPath));
+const hostFixtureUrl = new URL('./runtime-host-fixture.mjs', import.meta.url).href;
+let controllerText = await fs.readFile(path.join(source, 'RuntimeController.ets'), 'utf8');
+controllerText = controllerText.replace("import common from '@ohos.app.ability.common';", '')
+  .replace("import util from '@ohos.util';", `import { util } from '${fixtureUrl}';`)
+  .replace("import connection from '@ohos.net.connection';", `import { connection } from '${hostFixtureUrl}';`)
+  .replace("from 'libdsh_host.so'", `from '${hostFixtureUrl}'`)
+  .replace('HostState, HostEvent, HostOptions', 'type HostState, type HostEvent, type HostOptions')
+  .replace('RuntimeChannelError, RuntimeManifest, RuntimeFile, RuntimeInstaller', 'RuntimeChannelError, type RuntimeManifest, type RuntimeFile, RuntimeInstaller')
+  .replace('  InstallProgress,', '  type InstallProgress,')
+  .replace("from './RuntimeCore'", "from './RuntimeCore.mts'")
+  .replace("from './OhosRuntimeStorage'", "from './OhosRuntimeStorage.mts'");
+const controllerPath = path.join(temp, 'RuntimeController.mts');
+await fs.writeFile(controllerPath, controllerText);
+const { RuntimeController } = await import(pathToFileURL(controllerPath));
+let pluginText = await fs.readFile(path.join(source, 'RuntimePlugin.ets'), 'utf8');
+pluginText = pluginText.replace(/^import .* from '@ohos\/flutter_ohos[^\n]+\n/gm, '')
+  .replace("from './RuntimeCore'", "from './RuntimeCore.mts'")
+  .replace("from './RuntimeController'", "from './RuntimeController.mts'");
+pluginText = `import { MethodCall, MethodChannel, EventChannel } from '${hostFixtureUrl}';\n` + pluginText;
+const pluginPath = path.join(temp, 'RuntimePlugin.mts');
+await fs.writeFile(pluginPath, pluginText);
+const { RuntimePlugin } = await import(pathToFileURL(pluginPath));
+const controllers = [];
+afterEach(() => { native.state.phase = 'idle'; for (const controller of controllers) controller.collect(); });
+const files = {
+  'node_modules/@deepseek-ai/dsh/lib/bin.js': 'console.log("fixture entry");',
+  'runtime/ohos/preload.mjs': 'export const fixture = true;',
+  'runtime/ohos/中文 空格.txt': '中文与 emoji 🐳\n',
+};
+
+async function makeCase(name, payload = files, version = 'v1') {
+  const dir = path.join(temp, name);
+  await fs.mkdir(dir);
+  const pack = await makePack(path.join(dir, 'payload.hap'), payload, version);
+  const storage = new OhosRuntimeStorage(pack.resources, dir);
+  const installer = new core.RuntimeInstaller(storage, dir + '/runtime');
+  return { dir, ...pack, storage, installer };
+}
+
+test('首次落地严格使用rawfile offset/length，中文字节、摘要及完成标记一致', async () => {
+  const c = await makeCase('first');
+  assert.equal(await c.installer.installed(), null);
+  const progress = [];
+  await c.installer.install(c.manifest, e => progress.push(e));
+  assert.equal((await c.installer.installed()).runtimeVersion, 'v1');
+  for (const [name, text] of Object.entries(files)) assert.equal(await fs.readFile(c.installer.root + '/' + name, 'utf8'), text);
+  assert.equal(c.resources.opened.size, 0);
+  assert.equal(c.resources.reads.length, 3);
+  assert.deepEqual(progress.at(-1), { step: 'configure', done: 1, total: 1 });
+});
+
+test('重复安装不读HAP文件；升级只复制实际变更文件并删除旧清单项', async () => {
+  const c = await makeCase('upgrade');
+  await c.installer.install(c.manifest, () => {});
+  const before = await fs.stat(c.installer.root + '/runtime/ohos/preload.mjs');
+  c.resources.reads.length = 0;
+  await c.installer.install(c.manifest, () => {});
+  assert.deepEqual(c.resources.reads, []);
+  const nextFiles = { ...files, 'runtime/ohos/new.txt': '新增' };
+  delete nextFiles['runtime/ohos/中文 空格.txt'];
+  const next = await makePack(path.join(c.dir, 'payload2.hap'), nextFiles, 'v2');
+  const nextInstaller = new core.RuntimeInstaller(new OhosRuntimeStorage(next.resources, c.dir), c.dir + '/runtime');
+  await nextInstaller.install(next.manifest, () => {});
+  assert.deepEqual(next.resources.reads, ['dsh-runtime/files/runtime/ohos/new.txt']);
+  assert.equal((await fs.stat(c.installer.root + '/runtime/ohos/preload.mjs')).ino, before.ino);
+  await assert.rejects(fs.access(c.installer.root + '/runtime/ohos/中文 空格.txt'));
+  assert.equal((await nextInstaller.installed()).runtimeVersion, 'v2');
+});
+
+test('复制校验失败保留安装中断标记，不能把半树报告成已安装', async () => {
+  const c = await makeCase('corrupt');
+  c.manifest.files[0].sha256 = '0'.repeat(64);
+  await assert.rejects(c.installer.install(c.manifest, () => {}), { code: 'ohos_checksum_failed' });
+  assert.equal(await c.installer.installed(), null);
+  assert.equal(c.resources.opened.size, 0);
+  await fs.access(c.dir + '/runtime/installing.json');
+});
+
+test('升级把旧多层目录换为文件时，只清理登记过的空祖先目录', async () => {
+  const c = await makeCase('directory-to-file', { ...files, 'nested/a/b/c.txt': 'old' });
+  await c.installer.install(c.manifest, () => {});
+  const next = await makePack(path.join(c.dir, 'next.hap'), { ...files, 'nested': 'new file' }, 'v2');
+  const installer = new core.RuntimeInstaller(new OhosRuntimeStorage(next.resources, c.dir), c.dir + '/runtime');
+  await installer.install(next.manifest, () => {});
+  assert.equal(await fs.readFile(installer.root + '/nested', 'utf8'), 'new file');
+});
+
+test('安装中断后换新HAP，不残留未提交版本已写的新文件或已登记临时文件', async () => {
+  const c = await makeCase('interrupted-upgrade', { 'uncommitted/new.txt': 'old', ...files }, 'failed-v1');
+  await assert.rejects(c.installer.install(c.manifest, e => {
+    if (e.step === 'extract' && e.done > 0) throw new Error('injected interruption after first commit');
+  }), /injected interruption/);
+  assert.equal(await c.installer.installed(), null);
+  await fs.access(c.installer.root + '/uncommitted/new.txt');
+  const next = await makePack(path.join(c.dir, 'next.hap'), files, 'v2');
+  const installer = new core.RuntimeInstaller(new OhosRuntimeStorage(next.resources, c.dir), c.dir + '/runtime');
+  await installer.install(next.manifest, () => {});
+  await assert.rejects(fs.access(installer.root + '/uncommitted/new.txt'));
+  assert.equal((await installer.installed()).runtimeVersion, 'v2');
+  assert.deepEqual(await fs.readdir(c.dir + '/runtime/staging'), []);
+});
+
+test('文件改目录的升级在新子文件提交后中断，续装不把当前祖先目录当旧文件删', async () => {
+  const c = await makeCase('file-to-directory-resume', { ...files, 'changing': 'v1 file' });
+  await c.installer.install(c.manifest, () => {});
+  const next = await makePack(path.join(c.dir, 'next.hap'), { ...files, 'changing/child.txt': 'v2 child' }, 'v2');
+  const installer = new core.RuntimeInstaller(new OhosRuntimeStorage(next.resources, c.dir), c.dir + '/runtime');
+  await assert.rejects(installer.install(next.manifest, e => {
+    if (e.step === 'extract' && e.done > 0) throw new Error('interrupted after path changed type');
+  }), /interrupted/);
+  await installer.install(next.manifest, () => {});
+  assert.equal(await fs.readFile(installer.root + '/changing/child.txt', 'utf8'), 'v2 child');
+  assert.equal((await installer.installed()).runtimeVersion, 'v2');
+});
+
+test('真实SIGKILL发生在首文件提交后：重开拒绝混合树，续装只补剩余文件', async () => {
+  const c = await makeCase('killed');
+  const childScript = path.join(temp, 'kill-install.mjs');
+  await fs.writeFile(childScript, `
+    import fs from 'node:fs';
+    import { RuntimeInstaller } from ${JSON.stringify(pathToFileURL(corePath).href)};
+    import { OhosRuntimeStorage } from ${JSON.stringify(pathToFileURL(adapterPath).href)};
+    import { PackedResources } from ${JSON.stringify(fixtureUrl)};
+    const data = JSON.parse(process.argv[2]);
+    const r = new PackedResources(data.pack, data.entries);
+    const i = new RuntimeInstaller(new OhosRuntimeStorage(r, data.dir), data.dir + '/runtime');
+    await i.install(data.manifest, e => { if (e.step === 'extract' && e.done > 0) { fs.writeSync(1, 'committed\\n'); process.kill(process.pid, 'SIGSTOP'); } });
+  `);
+  const child = spawn(process.execPath, [childScript, JSON.stringify({ pack: c.resources.path, entries: c.resources.entries, dir: c.dir, manifest: c.manifest })], { stdio: ['ignore', 'pipe', 'pipe'] });
+  let stderr = ''; child.stderr.on('data', b => { stderr += b; });
+  const exited = once(child, 'exit');
+  let timer;
+  const committed = await Promise.race([
+    once(child.stdout, 'data').then(([data]) => data.toString().includes('committed')),
+    exited.then(() => false),
+    new Promise(resolve => { timer = setTimeout(() => resolve(false), 5000); }),
+  ]);
+  clearTimeout(timer);
+  child.kill('SIGKILL');
+  const [, signal] = await exited;
+  assert.equal(committed, true, stderr);
+  assert.equal(signal, 'SIGKILL');
+  assert.equal(await c.installer.installed(), null);
+  assert.equal(await fs.readFile(c.installer.root + '/' + c.manifest.files[0].path, 'utf8'), files[c.manifest.files[0].path]);
+  await c.installer.install(c.manifest, () => {});
+  assert.equal(c.resources.reads.length, 2);
+  assert.equal((await c.installer.installed()).runtimeVersion, 'v1');
+});
+
+test('实际短读与短写仍准确落地，raw FD 在失败和成功时都关闭', async () => {
+  const c = await makeCase('short');
+  const read = fileIo.read, write = fileIo.write;
+  fileIo.read = (fd, buffer, opts) => read(fd, buffer, { ...opts, length: Math.min(3, opts.length) });
+  fileIo.write = (fd, buffer, opts) => write(fd, buffer.slice(0, Math.min(2, buffer.byteLength)), opts);
+  try {
+    await c.installer.install(c.manifest, () => {});
+    for (const [name, text] of Object.entries(files)) assert.equal(await fs.readFile(c.installer.root + '/' + name, 'utf8'), text);
+    assert.equal(c.resources.opened.size, 0);
+  } finally { fileIo.read = read; fileIo.write = write; }
+});
+
+test('ELF 即使伪装成JS且每次只读1字节，也不能提交到运行时目录', async () => {
+  const c = await makeCase('elf', { ...files, 'payload.js': Buffer.from([127, 69, 76, 70, 1, 2, 3]) });
+  const read = fileIo.read;
+  fileIo.read = (fd, buffer, opts) => read(fd, buffer, { ...opts, length: 1 });
+  try { await assert.rejects(c.installer.install(c.manifest, () => {}), { code: 'ohos_native_payload' }); }
+  finally { fileIo.read = read; }
+  assert.equal(c.resources.opened.size, 0);
+  await assert.rejects(fs.access(c.installer.root + '/payload.js'));
+});
+
+test('固定依赖中的client.node.js名称是普通JS，不能误判为原生扩展；版本化so仍拒绝', async () => {
+  const name = 'node_modules/@deepseek-ai/dsh-api-gateway/lib/client.node.js';
+  const body = 'export const fixture = "普通 Node 端 JS";';
+  const c = await makeCase('node-js-name', { ...files, [name]: body });
+  core.validateManifest(c.manifest);
+  await c.installer.install(c.manifest, () => {});
+  assert.equal(await fs.readFile(c.installer.root + '/' + name, 'utf8'), body);
+  for (const nativeName of ['addon.node', 'lib.so', 'lib.so.1', 'lib.so.1.2.3', 'LIB.SO.26']) {
+    const invalid = structuredClone(c.manifest);
+    invalid.files.push({ path: nativeName, size: 1, sha256: 'a'.repeat(64) });
+    assert.throws(() => core.validateManifest(invalid), { code: 'ohos_manifest_invalid' });
+  }
+  const elf = await makeCase('node-js-magic', { ...files, [name]: Buffer.from([127, 69, 76, 70, 1, 2, 3]) });
+  await assert.rejects(elf.installer.install(elf.manifest, () => {}), { code: 'ohos_native_payload' });
+  await assert.rejects(fs.access(elf.installer.root + '/' + name));
+});
+
+test('manifest拒绝越界、原生模块、重复及文件/目录冲突', () => {
+  const valid = { schema: 1, runtimeVersion: 'v1', dshVersion: 'x', nodeVersion: '24.22.1', files: Object.keys(files).map(name => ({ path: name, size: 1, sha256: 'a'.repeat(64) })) };
+  for (const name of ['../escape', '/absolute', 'a//b', 'a/./b', 'a/../b', 'a\\b', 'a\0b', 'libx.so', 'x.node', 'libx.so.1']) {
+    const manifest = structuredClone(valid); manifest.files.push({ path: name, size: 1, sha256: 'a'.repeat(64) });
+    assert.throws(() => core.validateManifest(manifest), { code: 'ohos_manifest_invalid' }, name);
+  }
+  for (const name of [valid.files[0].path, 'runtime']) {
+    const manifest = structuredClone(valid); manifest.files.push({ path: name, size: 1, sha256: 'a'.repeat(64) });
+    assert.throws(() => core.validateManifest(manifest), { code: 'ohos_manifest_invalid' });
+  }
+});
+
+test('实际符号链接父目录拒绝写入；未知目录内容不因OH递归rmdir被删', async () => {
+  const c = await makeCase('links');
+  await c.storage.ensureDirectory(c.installer.root);
+  const outside = path.join(c.dir, 'outside'); await fs.mkdir(outside);
+  await fs.symlink(outside, c.installer.root + '/node_modules');
+  await assert.rejects(c.installer.install(c.manifest, () => {}), { code: 'ohos_path_link' });
+  assert.deepEqual(await fs.readdir(outside), []);
+  await fs.unlink(c.installer.root + '/node_modules');
+  const d = c.installer.root + '/runtime/ohos/preload.mjs';
+  await fs.mkdir(d, { recursive: true }); await fs.writeFile(d + '/foreign.txt', 'user');
+  await assert.rejects(c.installer.install(c.manifest, () => {}), { code: 'ohos_install_path_conflict' });
+  assert.equal(await fs.readFile(d + '/foreign.txt', 'utf8'), 'user');
+});
+
+test('日志快照/live边界单调去重、2000行有界，敏感值不落日志', () => {
+  const logs = new core.RuntimeLogs();
+  logs.rememberSecret('fixture-secret-123');
+  const first = logs.append('url ?token=abc&x=1 fixture-secret-123 Authorization: Bearer XYZ', 'stdout');
+  assert.equal(first.seq, 1);
+  assert.doesNotMatch(first.line, /abc|fixture-secret-123|XYZ/);
+  const snapshot = logs.snapshot(300);
+  const next = logs.append('tail', 'stderr');
+  const combined = [...snapshot.entries, ...[first, next].filter(e => e.seq > snapshot.throughSeq)];
+  assert.deepEqual(combined.map(e => e.seq), [1, 2]);
+  for (let i = 0; i < 2500; i++) logs.append('line', 'stdout');
+  assert.equal(logs.snapshot(5000).entries.length, 2000);
+  assert.equal(logs.snapshot(0).throughSeq, 2502);
+  assert.equal(logs.snapshot(0).entries.length, 0);
+  assert.equal(logs.append('x'.repeat(10000), 'stdout').line.length < 8300, true);
+});
+
+test('start参数拒绝暗中改变宿主配置，明确拒绝sdcard和安全模式', () => {
+  for (const key of ['NODE_OPTIONS', 'DSH_HOME', 'LD_PRELOAD', 'DSH_GO_OHOS_SIM', 'DSH_GO_OHOS_NATIVE_LIBRARY_DIR', 'NODE_PATH', 'HOME']) {
+    assert.throws(() => core.validateEnvironment(new Map([[key, 'value']])), { code: 'ohos_invalid_env' });
+  }
+  assert.deepEqual(core.validateEnvironment(new Map([['DEEPSEEK_API_KEY', 'test-only']])), { DEEPSEEK_API_KEY: 'test-only' });
+  assert.throws(() => core.validateStartOptions(true, null), { code: 'ohos_unsupported' });
+  assert.throws(() => core.validateStartOptions(false, 'safe'), { code: 'ohos_unsupported' });
+  core.validateStartOptions(false, 'normal');
+});
+
+test('原生库目录从公开Context的根和相对分量拼接，不接受绝对、空、NUL或越界分量', () => {
+  assert.equal(core.resolveNativeLibraryDir('/private/安装包/', 'libs/arm64/'), '/private/安装包/libs/arm64');
+  assert.equal(core.resolveNativeLibraryDir('/app/code', 'libs/arm64'), '/app/code/libs/arm64');
+  for (const root of ['', '/', '//', 'relative', '/code\0bad']) {
+    assert.throws(() => core.resolveNativeLibraryDir(root, 'libs/arm64'), { code: 'ohos_native_library_path' });
+  }
+  for (const relative of ['', '/', '/absolute', 'a//b', 'a//', '.', '..', '../b', 'a/../b', 'a/./b', 'a\0b']) {
+    assert.throws(() => core.resolveNativeLibraryDir('/app/code', relative), { code: 'ohos_native_library_path' }, relative);
+  }
+});
+
+test('并发install拒绝第二次进入，第一轮完成后才可继续', async () => {
+  const c = await makeCase('busy');
+  const first = c.installer.install(c.manifest, () => {});
+  await assert.rejects(c.installer.install(c.manifest, () => {}), { code: 'install_busy' });
+  await first;
+  await c.installer.install(c.manifest, () => {});
+});
+
+test('并发发布完整文本不会混写同一临时文件，失败写入不会堵住后续发布', async () => {
+  const c = await makeCase('atomic-text');
+  const directory = c.dir + '/diagnostics';
+  await fs.mkdir(directory);
+  const target = directory + '/report.md';
+  const values = ['# 长报告\n' + '甲'.repeat(10000), '# 短报告\n乙', ''];
+  const other = new OhosRuntimeStorage(c.resources, c.dir);
+  for (let attempt = 0; attempt < 10; attempt++) {
+    const results = await Promise.allSettled(values.map((value, index) =>
+      (index % 2 === 0 ? c.storage : other).writeTextAtomic(target, value)));
+    assert.deepEqual(results.map(result => result.status), ['fulfilled', 'fulfilled', 'fulfilled']);
+    assert.equal(values.includes(await fs.readFile(target, 'utf8')), true);
+    await assert.rejects(fs.access(target + '.tmp'));
+  }
+  const blocked = directory + '/blocked.md';
+  await fs.symlink(target, blocked);
+  const results = await Promise.allSettled([
+    c.storage.writeTextAtomic(blocked, '不能替换链接'),
+    other.writeTextAtomic(target, '# 恢复正常\n'),
+  ]);
+  assert.equal(results[0].status, 'rejected');
+  assert.equal(results[0].reason.code, 'ohos_path_link');
+  assert.equal(results[1].status, 'fulfilled');
+  assert.equal(await fs.readFile(target, 'utf8'), '# 恢复正常\n');
+});
+
+async function controllerCase(name) {
+  native.reset();
+  const c = await makeCase(name);
+  const cacheDir = path.join(c.dir, 'cache'); await fs.mkdir(cacheDir);
+  c.resources.getRawFileContent = async asset => {
+    assert.equal(asset, 'dsh-runtime/manifest.json');
+    return new TextEncoder().encode(JSON.stringify(c.manifest));
+  };
+  const context = { filesDir: c.dir, cacheDir, resourceManager: c.resources,
+    bundleCodeDir: '/private/安装包', applicationInfo: { nativeLibraryPath: 'libs/arm64/' } };
+  const controller = new RuntimeController(context); controllers.push(controller);
+  await controller.initialize();
+  return { ...c, context, controller };
+}
+
+test('Context原生库路径无效时明确报错且不消耗本进程唯一Node启动机会', async () => {
+  const c = await controllerCase('native-path-reject');
+  await c.controller.install(false);
+  c.context.applicationInfo.nativeLibraryPath = '../outside';
+  await assert.rejects(c.controller.start(null, false, null, true), { code: 'ohos_native_library_path' });
+  assert.equal(native.starts.length, 0); assert.equal(native.state.consumed, false);
+  assert.match(c.controller.snapshot().get('error'), /原生库目录/);
+  c.context.applicationInfo.nativeLibraryPath = 'libs/arm64/';
+  await c.controller.start(null, false, null, true);
+  assert.equal(native.starts[0].nativeLibraryDir, '/private/安装包/libs/arm64');
+});
+
+test('并发publishDiagnostics在目录尚不存在时也返回完整可用报告', async () => {
+  const c = await controllerCase('diagnostics-concurrent');
+  await c.controller.install(false);
+  const values = ['# 长报告\n' + '甲'.repeat(10000), '# 短报告\n乙', ''];
+  const results = await Promise.all(values.map(value => c.controller.publishDiagnostics(value)));
+  for (let i = 0; i < results.length; i++) assert.equal(results[i].get('bytes'), Buffer.byteLength(values[i]));
+  assert.equal(values.includes(await fs.readFile(results[0].get('path'), 'utf8')), true);
+});
+
+test('status与事件沿用Dart字段，ready前不报告running，stop完成后不能再次启动Node', async () => {
+  const c = await controllerCase('state');
+  const received = [];
+  const sink = event => received.push(event);
+  c.controller.subscribe(sink);
+  await c.controller.install(false);
+  await c.controller.start(new Map([['DEEPSEEK_API_KEY', 'fixture-credential']]), false, null, true);
+  assert.equal(native.starts.length, 1);
+  assert.deepEqual(native.starts[0].workspaceRoots, [c.dir + '/workspace']);
+  assert.equal(native.starts[0].nativeLibraryDir, '/private/安装包/libs/arm64');
+  assert.equal(c.controller.snapshot().get('phase'), 'starting');
+  assert.equal(c.controller.snapshot().get('token'), null);
+  native.state.phase = 'running'; native.state.baseUrl = 'http://127.0.0.1:3080'; native.state.token = 'fixture-token';
+  native.events.push({kind: 'ready', baseUrl: native.state.baseUrl, token: native.state.token},
+    {kind: 'log', stream: 'stdout', line: 'fixture-credential fixture-token'});
+  c.controller.collect();
+  const status = c.controller.snapshot();
+  assert.equal(status.get('phase'), 'running'); assert.equal(status.get('token'), 'fixture-token');
+  assert.equal(status.get('currentExecutionMode'), 'ohos-embedded');
+  assert.equal(status.get('directEngineActive'), false);
+  assert.doesNotMatch(c.controller.recentLogs(1)[0], /fixture-/);
+  assert.equal(received.some(e => e.get('type') === 'logs'), true);
+  await c.controller.start(null, false, null, true); assert.equal(native.starts.length, 1);
+  c.controller.stop(); assert.equal(native.stops, 1); assert.equal(c.controller.snapshot().get('phase'), 'stopping');
+  native.state.phase = 'exited'; native.state.exitCode = 0; native.state.baseUrl = null; native.state.token = null;
+  native.events.push({kind: 'exit', exitCode: 0}); c.controller.collect();
+  assert.equal(c.controller.snapshot().get('phase'), 'installed');
+  assert.equal(c.controller.snapshot().get('token'), null);
+  await assert.rejects(c.controller.start(null, false, null, true), {code: 'ohos_restart_required'});
+  await assert.rejects(c.controller.install(false), {code: 'ohos_restart_required'});
+  c.controller.unsubscribe(sink);
+});
+
+test('stop发生在异步启动准备期间时不会随后偷偷启动；用户AGENTS与关闭可视化指令保留', async () => {
+  const c = await controllerCase('cancel-setup');
+  await c.controller.install(false);
+  const starting = c.controller.start(null, false, null, false);
+  c.controller.stop();
+  await assert.rejects(starting, {code: 'ohos_start_cancelled'});
+  assert.equal(native.starts.length, 0);
+  assert.doesNotMatch(await fs.readFile(c.dir + '/dsh-home/AGENTS.md', 'utf8'), /可视化回复/);
+  await fs.writeFile(c.dir + '/dsh-home/AGENTS.md', '# 用户自有规则\n');
+  await c.controller.start(null, false, null, true);
+  assert.equal(await fs.readFile(c.dir + '/dsh-home/AGENTS.md', 'utf8'), '# 用户自有规则\n');
+});
+
+test('原生在线程间于drain与state之间退出时保留下一次收尾轮询，失败快照含完整尾部', async () => {
+  const c = await controllerCase('terminal-read-order');
+  await c.controller.install(false);
+  await c.controller.start(null, false, null, true);
+  native.state.phase = 'running'; native.state.token = 'test-tail-secret';
+  native.afterDrain = () => {
+    native.afterDrain = null;
+    native.events.push({ kind: 'log', stream: 'stderr', line: '中文适配层尾部 test-tail-secret' });
+    native.events.push({ kind: 'exit', exitCode: 23 });
+    native.state.phase = 'exited'; native.state.exitCode = 23; native.state.token = null;
+  };
+  c.controller.collect();
+  assert.notEqual(c.controller.timer, null, '旧批次不允许因稍后终态停掉最后一次drain');
+  c.controller.collect();
+  assert.equal(c.controller.timer, null);
+  assert.match(c.controller.recentLogs(50).join('\n'), /中文适配层尾部/);
+  assert.match(c.controller.failureLog().join('\n'), /中文适配层尾部/);
+  assert.match(c.controller.failureLog().join('\n'), /code=23/);
+  assert(!c.controller.failureLog().join('\n').includes('test-tail-secret'));
+  const finished = c.controller.failureLog();
+  c.controller.collect();
+  assert.deepEqual(c.controller.failureLog(), finished);
+});
+
+test('实际RuntimePlugin逐个处理28个Android方法，unknown才notImplemented，日志快照形状兼容', async () => {
+  const c = await controllerCase('plugin');
+  const plugin = new RuntimePlugin();
+  const cleared = [];
+  const messenger = { setMessageHandler: (name, handler) => cleared.push([name, handler]) };
+  const binding = { getApplicationContext: () => c.context, getBinaryMessenger: () => messenger };
+  plugin.onAttachedToEngine(binding);
+  const invoke = (method, args = {}) => new Promise(resolve => plugin.onMethodCall(new MethodCall(method, new Map(Object.entries(args))), {
+    success: value => resolve({kind: 'success', value}),
+    error: (code, message) => resolve({kind: 'error', code, message}),
+    notImplemented: () => resolve({kind: 'unknown'}),
+  }));
+  assert.equal((await invoke('getStatus')).value.get('phase'), 'notInstalled');
+  assert.equal((await invoke('install')).kind, 'success');
+  const snapshot = (await invoke('getLogSnapshot')).value;
+  assert.deepEqual(snapshot.get('entries'), []); assert.equal(Number.isInteger(snapshot.get('throughSeq')), true);
+  assert.equal((await invoke('getLogs')).kind, 'success');
+  assert.equal((await invoke('clearFailure')).kind, 'success');
+  assert.equal((await invoke('failureLog')).kind, 'success');
+  assert.equal((await invoke('lastKnownGood')).value.get('available'), false);
+  assert.equal((await invoke('storageStatus')).value.get('granted'), false);
+  assert.equal((await invoke('networkMetered')).value, false);
+  const diagnostic = await invoke('publishDiagnostics', {markdown: '# 测试\n'});
+  assert.equal(diagnostic.kind, 'success'); assert.equal(diagnostic.value.get('bytes'), Buffer.byteLength('# 测试\n'));
+  assert.equal((await invoke('publishDiagnostics', {markdown: ''})).value.get('bytes'), 0);
+  for (const method of ['reset', 'restoreLastKnownGood', 'safePreflight', 'moveAside', 'setAutoSafe', 'setDirectEngine',
+    'installManagedSkill', 'cancelManagedSkill', 'requestStorage', 'openAllFilesAccess', 'batteryExempt',
+    'requestBatteryExempt', 'backgroundSettings', 'openBackgroundSettings', 'openVendorSettings', 'voiceModelLine']) {
+    assert.deepEqual((await invoke(method)).code, 'ohos_unsupported', method);
+  }
+  assert.equal((await invoke('start', {phoneStorage: true})).code, 'ohos_unsupported');
+  assert.equal((await invoke('start', {env: new Map()})).value, null);
+  assert.equal((await invoke('stop')).value, null);
+  native.state.phase = 'exited'; native.state.token = null;
+  await invoke('getStatus');
+  assert.equal((await invoke('unknownMethod')).kind, 'unknown');
+  const events = [];
+  const controller = plugin.controller;
+  const firstEvent = Promise.withResolvers();
+  plugin.onListen(null, { success: value => { events.push(value); firstEvent.resolve(); } });
+  await firstEvent.promise;
+  const count = events.length;
+  plugin.onDetachedFromEngine(binding);
+  assert.deepEqual(cleared, [['dsh/runtime/events', null]]);
+  native.events.push({ kind: 'log', stream: 'stdout', line: 'late event after detach' });
+  controller.collect();
+  assert.equal(events.length, count);
+  assert.equal((await invoke('getStatus')).code, 'ohos_detached');
+});
