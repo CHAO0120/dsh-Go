@@ -78,6 +78,8 @@ class RuntimeController private constructor(private val app: Context) : DshProce
     /** Mode of the current (or last) launched process. */
     @Volatile private var runSafe = false
     @Volatile private var runGen = 0
+    /** Installation commit captured by the process being launched, before its ready callback. */
+    @Volatile private var runCommit: String? = null
     @Volatile private var stopGen = -1
     @Volatile private var resetting = false
     // Retire skill writes at the stop request, before the Service receives ACTION_STOP.
@@ -177,11 +179,15 @@ class RuntimeController private constructor(private val app: Context) : DshProce
     }
 
     /** [dropKept]: give up what a reset kept but cannot be put back (see [KeepFailed]). */
-    fun install(dropKept: Boolean = false, onDone: (Throwable?) -> Unit) {
+    @Synchronized fun install(dropKept: Boolean = false, onDone: (Throwable?) -> Unit) {
         if (phase == Phase.INSTALLING) return onDone(null)
-        if (installer.isCurrent() && phase != Phase.ERROR) {
+        val current = try { installer.isCurrent() } catch (e: Exception) { return onDone(e) }
+        if (current && phase != Phase.ERROR) {
             if (phase == Phase.NOT_INSTALLED) setPhase(Phase.INSTALLED)
             return onDone(null)
+        }
+        if (process != null || phase in setOf(Phase.STARTING, Phase.RUNNING, Phase.STOPPING) || resetting) {
+            return onDone(IllegalStateException("stop the engine before installing its runtime"))
         }
         setPhase(Phase.INSTALLING)
         worker.execute {
@@ -285,9 +291,17 @@ class RuntimeController private constructor(private val app: Context) : DshProce
     }
 
     @Synchronized internal fun startProcess() {
-        if (process != null || phase == Phase.INSTALLING || phase == Phase.STOPPING) return
+        if (process != null || phase == Phase.INSTALLING || phase == Phase.STOPPING || resetting) return
         lastLaunch = null
-        if (!installer.isCurrent()) {
+        val current = try {
+            installer.isCurrent()
+        } catch (e: Exception) {
+            error = "runtime recovery required: ${e.message}"
+            setPhase(Phase.ERROR)
+            DshService.stopSelfIfRunning(app)
+            return
+        }
+        if (!current) {
             error = "runtime not installed"
             setPhase(Phase.ERROR)
             DshService.stopSelfIfRunning(app)
@@ -343,6 +357,7 @@ class RuntimeController private constructor(private val app: Context) : DshProce
                     PhoneControl.get(app).onEngineStopped()
                     return@execute
                 }
+                runCommit = installer.layers.installedCommit()
                 val p = DshProcess(app, manifest, installer.rootfs, this)
                 launched = p
                 lastLaunch = p.launchDiagnostics
@@ -423,7 +438,7 @@ class RuntimeController private constructor(private val app: Context) : DshProce
      * Stops DSH and waits for it to exit, then deletes the runtime with everything in /root except
      * [keep], which the next install puts back.
      */
-    fun reset(keep: Set<ResetKeep> = emptySet(), onDone: (Throwable?) -> Unit) {
+    @Synchronized fun reset(keep: Set<ResetKeep> = emptySet(), onDone: (Throwable?) -> Unit) {
         stopGen = runGen
         resetting = true
         setPhase(Phase.STOPPING)
@@ -739,6 +754,20 @@ class RuntimeController private constructor(private val app: Context) : DshProce
         setPhase(Phase.RUNNING)
         PhoneControl.get(app).onEngineReady()
         val gen = runGen
+        val commit = runCommit
+        if (!runSafe && commit != null) {
+            worker.execute {
+                try {
+                    val ready = synchronized(this) {
+                        source === process && gen == runGen && phase == Phase.RUNNING &&
+                            !runSafe && stopGen < gen && !resetting && installer.layers.markReady(commit)
+                    }
+                    if (ready) installer.layers.cleanup(commit)
+                } catch (e: Exception) {
+                    log("[dsh-app] runtime cleanup failed: ${e.message}", "system")
+                }
+            }
+        }
         main.postDelayed({ if (gen == runGen && phase == Phase.RUNNING && process != null) onHealthy() }, SafePolicy.HEALTHY_MS)
     }
 

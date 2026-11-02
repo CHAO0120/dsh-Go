@@ -15,7 +15,8 @@
 # runtime/.work/x86_64/dsh-prefix, or end to end with runtime/test-host.sh.
 #
 # Outputs (consumed by app/android/app/build.gradle.kts flavors):
-#   runtime/out/<abi>/assets/runtime/rootfs-<abi>.tar.xz
+#   runtime/out/<abi>/assets/runtime/{base,dsh,go}-<abi>.tar.xz
+#   runtime/out/<abi>/assets/runtime/runtime-info.json     (derived runtime identity)
 #   runtime/out/<abi>/assets/runtime/manifest.json      (versions, hashes, launch template)
 #   runtime/out/<abi>/assets/runtime/licenses/...
 #   runtime/out/<abi>/jniLibs/<abi>/lib{proot,proot-loader,talloc,android-shmem}.so
@@ -395,7 +396,7 @@ PYEOF
   local pnpm_prefix="$work/pnpm-prefix"
   install_pnpm "$npm_cpu" "$pnpm_prefix"
 
-  # -- runtimeVersion: hash of every input + the recipe itself --
+  # -- input provenance only; runtimeVersion is derived from the final outputs --
   local lockfile="$LOCKS/dsh-$DSH_VERSION/package-lock.json"
   local pnpm_lockfile="$LOCKS/pnpm-$PNPM_VERSION/package-lock.json"
   local inputs_sha
@@ -406,24 +407,22 @@ PYEOF
       sha256 "$lockfile"; sha256 "$pnpm_lockfile"; sha256 "$HERE/build-runtime.sh"; sha256 "$HERE/lib/rtbuild.py"
       (cd "$HERE" && find patches bridge boot direct -type f -print0 | LC_ALL=C sort -z | xargs -0 sha256sum)
     } | sha256sum | cut -c1-12 )"
-  local runtime_version="${RUNTIME_REVISION}-dsh${DSH_VERSION}-node${NODE_VERSION}-ubuntu${UBUNTU_VERSION}-${inputs_sha}"
   local runtime_info
-  runtime_info="$(printf '{"runtimeVersion":"%s","abi":"%s","dshVersion":"%s","nodeVersion":"%s","pnpmVersion":"%s","ubuntuVersion":"%s","prootVersion":"%s","dshPatches":%s,"dshGoBridge":"%s"}' \
-    "$runtime_version" "$abi" "$DSH_VERSION" "$NODE_VERSION" "$PNPM_VERSION" "$UBUNTU_VERSION" "$PROOT_VERSION" \
+  runtime_info="$(printf '{"abi":"%s","dshVersion":"%s","nodeVersion":"%s","pnpmVersion":"%s","ubuntuVersion":"%s","prootVersion":"%s","dshPatches":%s,"dshGoBridge":"%s"}' \
+    "$abi" "$DSH_VERSION" "$NODE_VERSION" "$PNPM_VERSION" "$UBUNTU_VERSION" "$PROOT_VERSION" \
     "$(cat "$work/dsh-patches.json")" "$bridge_version")"
 
-  # -- rootfs archive --
-  local archive="$assets/rootfs-$abi.tar.$COMPRESS"
+  # -- fixed content layers --
   local -a prune=(); [[ "$PRUNE_DEV_METADATA" == 1 ]] && prune=(--prune-dev-metadata)
-  log "assembling rootfs ($COMPRESS)"
+  log "assembling runtime layers ($COMPRESS)"
   "${PY[@]}" assemble --abi "$abi" --base "$base" --node "$node" --dsh-prefix "$prefix" --pnpm-prefix "$pnpm_prefix" \
-    --out "$archive" --report "$out/build-report.json" --runtime-info "$runtime_info" \
+    --out "$assets" --report "$out/build-report.json" --runtime-info "$runtime_info" \
     --compress "$COMPRESS" --xz-preset "$XZ_PRESET" --threads "$XZ_THREADS" --epoch "$SOURCE_DATE_EPOCH" "${prune[@]}" \
     "${extra_debs[@]/#/--deb=}" --python "$python" --bridge "$bridge"
 
   local versions
-  versions="$(printf '{"runtimeVersion":"%s","dshVersion":"%s","nodeVersion":"%s","pnpmVersion":"%s","ubuntuVersion":"%s","prootVersion":"%s","tallocVersion":"%s","androidShmemVersion":"%s","dshPatches":%s,"dshGoBridge":"%s","build":{"inputsSha256_12":"%s","ubuntuBaseSha256":"%s","nodeSha256":"%s","dshLockSha256":"%s","pnpmIntegrity":"%s","sourceDateEpoch":%s}}' \
-    "$runtime_version" "$DSH_VERSION" "$NODE_VERSION" "$PNPM_VERSION" "$UBUNTU_VERSION" "$PROOT_VERSION" "$TALLOC_VERSION" "$SHMEM_VERSION" \
+  versions="$(printf '{"dshVersion":"%s","nodeVersion":"%s","pnpmVersion":"%s","ubuntuVersion":"%s","prootVersion":"%s","tallocVersion":"%s","androidShmemVersion":"%s","dshPatches":%s,"dshGoBridge":"%s","build":{"inputsSha256_12":"%s","ubuntuBaseSha256":"%s","nodeSha256":"%s","dshLockSha256":"%s","pnpmIntegrity":"%s","sourceDateEpoch":%s}}' \
+    "$DSH_VERSION" "$NODE_VERSION" "$PNPM_VERSION" "$UBUNTU_VERSION" "$PROOT_VERSION" "$TALLOC_VERSION" "$SHMEM_VERSION" \
     "$(cat "$work/dsh-patches.json")" "$bridge_version" \
     "$inputs_sha" "$(sha256 "$base")" "$(sha256 "$node")" "$(sha256 "$lockfile")" "$PNPM_INTEGRITY" "$SOURCE_DATE_EPOCH")"
   "${PY[@]}" manifest --abi "$abi" --report "$out/build-report.json" --jnilibs "$work/jnilibs.json" \
@@ -442,21 +441,25 @@ print("rootfs ELF objects: %d, wrong-arch: %d, warnings: %d" % (len(r["elf"]), l
 sys.exit(1 if wrong else 0)
 PYEOF
   [[ "$bad" == 0 ]] || die "ABI verification failed for $abi"
-  log "$abi done: $(du -h "$archive" | cut -f1) archive, version $runtime_version"
+  local summary
+  summary="$(python3 -I -c 'import json,sys; m=json.load(open(sys.argv[1])); print(str(m["rootfsBytes"])+" bytes in layers + identity, version "+m["runtimeVersion"])' "$assets/manifest.json")"
+  log "$abi done: $summary"
 }
 
 write_index() {
   python3 -I - "$OUT" <<'PYEOF'
 import json, os, sys
 out = sys.argv[1]
-index = {"schema": 1, "abis": {}}
+index = {"schema": 2, "abis": {}}
 for abi in ("x86_64", "arm64-v8a"):
     p = os.path.join(out, abi, "assets", "runtime", "manifest.json")
     if not os.path.isfile(p):
         continue
     m = json.load(open(p))
-    index["abis"][abi] = {k: m.get(k) for k in (  # .get: another ABI may still hold an older build
-        "runtimeVersion", "rootfs", "rootfsSha256", "rootfsBytes", "uncompressedBytes", "entries",
+    if m["schema"] != 2:  # a single-ABI build may leave the other ABI in the old format
+        continue
+    index["abis"][abi] = {k: m[k] for k in (
+        "runtimeVersion", "layers", "runtimeIdentity", "rootfsBytes", "uncompressedBytes", "entries",
         "dshVersion", "nodeVersion", "pnpmVersion", "ubuntuVersion", "prootVersion")}
     index["abis"][abi]["jniLibs"] = {n: {"sha256": v["sha256"], "bytes": v["bytes"]} for n, v in m["jniLibs"].items()}
 json.dump(index, open(os.path.join(out, "manifest.json"), "w"), indent=2)

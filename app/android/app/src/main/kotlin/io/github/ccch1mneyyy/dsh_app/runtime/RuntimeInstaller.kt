@@ -12,13 +12,13 @@ import java.security.DigestInputStream
 import java.security.MessageDigest
 
 /**
- * Unpacks the bundled rootfs into app-private storage.
+ * Installs the changed bundled runtime layers into app-private storage.
  *
  * Layout under filesDir/runtime:
  *   rootfs/            the active Linux root (proot -r)
  *   rootfs.version     runtimeVersion of the active rootfs
- *   staging/           in-progress extraction, swapped in atomically when done
- *   home.carry/        the user's /root while an upgrade swaps rootfs (see [activateRootfs])
+ *   layer-staging/     verified new layer payloads, owned by [RuntimeLayers]
+ *   home.carry/        the user's /root while a base upgrade swaps rootfs
  *   keep.trash/        fresh copies a restore of kept files replaced (see [restoreKept])
  * and next to it, for a reset (see [retireRuntime]):
  *   runtime.reset/     the runtime being deleted
@@ -35,14 +35,14 @@ class RuntimeInstaller(
     val baseDir = File(context.filesDir, "runtime")
     val rootfs = File(baseDir, "rootfs")
     private val versionFile = File(baseDir, "rootfs.version")
-    private val staging = File(baseDir, "staging")
+    internal val layers = RuntimeLayers(baseDir)
     private val retiredDir = File(context.filesDir, "runtime.reset")
     private val keepDir = File(context.filesDir, "runtime-keep")
 
     fun installedVersion(): String? =
         if (rootfs.isDirectory && versionFile.isFile) versionFile.readText().trim().ifEmpty { null } else null
 
-    fun isCurrent(): Boolean = installedVersion() == manifest.runtimeVersion
+    fun isCurrent(): Boolean = layers.isCurrent(manifest.layerSet)
 
     /**
      * Extracts the bundled rootfs; [onProgress] gets (compressedBytesRead, totalCompressedBytes).
@@ -52,53 +52,79 @@ class RuntimeInstaller(
     fun install(dropKept: Boolean = false, onProgress: (Long, Long) -> Unit) {
         // A reset killed halfway finishes first, so what it keeps is in runtime-keep for the restore.
         settleReset(retiredDir, keepDir, dropKept)
-        baseDir.mkdirs()
-        staging.deleteRecursivelySafely()
-        checkFreeSpace()
-        staging.mkdirs()
-
-        val assetPath = "${RuntimeManifest.ASSET_DIR}/${manifest.rootfsAsset}"
-        val assetBytes = assetLength(assetPath)
-        val total = assetBytes.takeIf { it > 0 } ?: manifest.rootfsBytes
+        layers.pendingReset()?.let { reset(it) }
+        val next = manifest.layerSet
+        val preparation = layers.prepare(next, sync) ?: return
+        val changed = layers.changed(next)
+        checkFreeSpace(changed)
+        val total = changed.sumOf { manifest.layers.getValue(it).bytes } + manifest.runtimeIdentity.bytes
+        var completed = 0L
         var lastReported = 0L
         val progress: (Long) -> Unit = { read ->
-            if (read - lastReported >= 512 * 1024 || read == total) {
-                lastReported = read
-                onProgress(read, total)
+            val done = completed + read
+            if (done - lastReported >= 512 * 1024 || done == total) {
+                lastReported = done
+                onProgress(done, total)
             }
         }
-        timed("verify") {
-            // Parallel readers revisit compressed bytes; hash the asset once, in order.
-            val digest = MessageDigest.getInstance("SHA-256")
-            DigestInputStream(context.assets.open(assetPath, AssetManager.ACCESS_STREAMING), digest).use { input ->
-                val buffer = ByteArray(1 shl 16)
-                while (input.read(buffer) >= 0) {}
+        for (name in changed) {
+            val layer = manifest.layers.getValue(name)
+            val assetPath = "${RuntimeManifest.ASSET_DIR}/${layer.asset}"
+            timed("verify $name") {
+                verifyAsset(assetPath, layer.bytes, layer.archiveSha256)
             }
-            val actual = digest.digest().joinToString("") { "%02x".format(it) }
-            val expected = manifest.rootfsSha256
-            if (expected != null && !expected.equals(actual, ignoreCase = true)) {
-                staging.deleteRecursivelySafely()
-                throw IllegalStateException(AppStrings.get(context, R.string.service_package_checksum_failed))
-            }
-        }
-        timed("extract") {
-            val extractor = TarExtractor(staging, progress)
-            if (manifest.rootfsAsset.endsWith(".xz") && assetBytes > 0) {
-                val decoded = ParallelXZInputStream.open(
-                    { AssetSeekableInputStream(context.assets.openFd(assetPath)) }, progress,
-                )
-                extractor.extractDecoded(decoded)
-            } else {
-                context.assets.open(assetPath, AssetManager.ACCESS_STREAMING).use { raw ->
-                    extractor.extract(raw, manifest.rootfsAsset)
+            timed("extract $name") {
+                val extractor = TarExtractor(layers.staged(name), progress)
+                if (layer.asset.endsWith(".xz") && assetLength(assetPath) > 0) {
+                    val decoded = ParallelXZInputStream.open(
+                        { AssetSeekableInputStream(context.assets.openFd(assetPath)) }, progress,
+                    )
+                    extractor.extractDecoded(decoded)
+                } else {
+                    context.assets.open(assetPath, AssetManager.ACCESS_STREAMING).use { raw ->
+                        extractor.extract(raw, layer.asset)
+                    }
                 }
             }
+            completed += layer.bytes
         }
+        val identity = manifest.runtimeIdentity
+        val identityPath = "${RuntimeManifest.ASSET_DIR}/${identity.asset}"
+        timed("verify identity") { verifyAsset(identityPath, identity.bytes, identity.sha256) }
+        val stagedIdentity = layers.stagedIdentity()
+        context.assets.open(identityPath, AssetManager.ACCESS_STREAMING).use { input ->
+            stagedIdentity.outputStream().use { input.copyTo(it) }
+        }
+        android.system.Os.chmod(stagedIdentity.path, 0x1A4) // 0644, as in the assembled reference.
         onProgress(total, total)
 
         timed("activate") {
-            activateRootfs(baseDir, manifest.runtimeVersion, keepDir, dropKept,
-                sync = { timed("sync") { sync() } })
+            val carry = File(baseDir, "home.carry")
+            DirectLaunch.preservePhysicalAlias(rootfs,
+                if (carry.exists()) carry else File(rootfs, "root"), File(baseDir, "rootfs.old"))
+            layers.activate(next, preparation, sync = { timed("sync") { sync() } }, restoreKept = { root ->
+                listOf("root", "root/workspace", "tmp", "dev", "proc", "sys").forEach { File(root, it).mkdirs() }
+                File(root, "tmp").setWritable(true, false)
+                restoreKept(keepDir, root, dropKept)
+            })
+        }
+    }
+
+    private fun verifyAsset(path: String, bytes: Long, expected: String) {
+        // Parallel readers revisit compressed bytes; hash each changed asset once, in order.
+        val digest = MessageDigest.getInstance("SHA-256")
+        var read = 0L
+        DigestInputStream(context.assets.open(path, AssetManager.ACCESS_STREAMING), digest).use { input ->
+            val buffer = ByteArray(1 shl 16)
+            while (true) {
+                val count = input.read(buffer)
+                if (count < 0) break
+                read += count
+            }
+        }
+        val actual = digest.digest().joinToString("") { "%02x".format(it) }
+        if (read != bytes || !expected.equals(actual, ignoreCase = true)) {
+            throw IllegalStateException(AppStrings.get(context, R.string.service_package_checksum_failed))
         }
     }
 
@@ -111,8 +137,9 @@ class RuntimeInstaller(
         }
     }
 
-    private fun checkFreeSpace() {
-        val need = (manifest.uncompressedBytes.takeIf { it > 0 } ?: 600L * 1024 * 1024) * 115 / 100
+    private fun checkFreeSpace(changed: Set<String>) {
+        val payload = changed.sumOf { manifest.layers.getValue(it).uncompressedBytes } + manifest.runtimeIdentity.bytes
+        val need = payload * 115 / 100
         val free = context.filesDir.usableSpace
         if (free < need) {
             val mb = { b: Long -> b / (1024 * 1024) }
@@ -122,6 +149,7 @@ class RuntimeInstaller(
 
     /** Deletes the runtime; [keep] (paths under the rootfs) waits in runtime-keep for the next install. */
     fun reset(keep: List<String>) {
+        layers.prepareReset(keep, sync)
         retireRuntime(baseDir, retiredDir, keepDir, keep)
     }
 
@@ -155,51 +183,6 @@ private fun File.isSymlink(): Boolean = try {
 
 /** Exists, counting a symlink whose target is gone. */
 private fun File.present(): Boolean = exists() || isSymlink()
-
-/**
- * Swaps `staging` in as `rootfs` and moves the user's /root over. The home waits in `home.carry`,
- * never in `staging` (which every install wipes first), so an upgrade killed at any step loses
- * nothing: the next install picks up from what is on disk.
- */
-internal fun activateRootfs(
-    base: File,
-    version: String,
-    keep: File? = null,
-    dropKept: Boolean = false,
-    sync: () -> Unit,
-    syncDirectory: (File) -> Unit = ::syncDirectory,
-) {
-    val rootfs = File(base, "rootfs")
-    val staging = File(base, "staging")
-    val retired = File(base, "rootfs.old")
-    val carry = File(base, "home.carry")
-    val home = File(rootfs, "root")
-    val versionFile = File(base, "rootfs.version")
-    // A retry may install the same version. Retire its ready marker before replacing any tree.
-    if (Files.deleteIfExists(versionFile.toPath())) syncDirectory(base)
-    // /opt is replaced below. Remember old direct use with the carried home so
-    // saved physical cwd paths remain readable after upgrading in PRoot mode.
-    DirectLaunch.preservePhysicalAlias(rootfs, if (carry.exists()) carry else home, retired)
-    if (!carry.exists() && home.isDirectory && !home.renameTo(carry)) {
-        throw IllegalStateException("could not keep the user's home")
-    }
-    retired.deleteRecursivelySafely()
-    if (rootfs.exists() && !rootfs.renameTo(retired)) rootfs.deleteRecursivelySafely()
-    if (!staging.renameTo(rootfs)) throw IllegalStateException("could not activate rootfs")
-    if (carry.exists()) {
-        home.deleteRecursivelySafely()
-        if (!carry.renameTo(home)) throw IllegalStateException("could not restore the user's home")
-    }
-    listOf("root", "root/workspace", "tmp", "dev", "proc", "sys").forEach { File(rootfs, it).mkdirs() }
-    File(rootfs, "tmp").setWritable(true, false)
-    // Before the version: until everything kept is back, the runtime reads as not installed.
-    if (keep != null) restoreKept(keep, rootfs, dropKept)
-    // Everything the marker vouches for is on disk before it says ready. A marker torn by a
-    // power cut doesn't match the version, so the next start just installs again.
-    sync()
-    versionFile.writeText(version)
-    retired.deleteRecursivelySafely()
-}
 
 internal fun syncDirectory(directory: File) {
     FileChannel.open(directory.toPath(), StandardOpenOption.READ).use { it.force(true) }

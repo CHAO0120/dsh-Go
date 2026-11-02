@@ -6,14 +6,15 @@ import org.junit.After
 import org.junit.Assert.*
 import org.junit.Test
 
-/** Actual rootfs activation, including the retry states; no copied swap algorithm. */
+/** Actual layered activation; legacy alias evidence remains production DirectLaunch logic. */
 class DirectUpgradeAliasTest {
-    private val base = Files.createTempDirectory("direct-upgrade").toFile()
+    private val files = Files.createTempDirectory("direct-upgrade").toFile()
+    private val base = File(files, "runtime")
     private val root = File(base, "rootfs")
     private val args = listOf("proot", "/usr/bin/env", "-i", "/bin/sh", "-c", "exit 0")
     private val markerName = ".dsh-go-direct-path-alias"
 
-    @After fun cleanup() { base.deleteRecursively() }
+    @After fun cleanup() { files.deleteRecursively() }
 
     private fun installed(direct: Boolean = true) {
         File(root, "root/workspace").mkdirs()
@@ -25,10 +26,17 @@ class DirectUpgradeAliasTest {
     }
 
     private fun stageAndActivate(version: String = "r4") {
-        File(base, "staging/root").mkdirs()
-        File(base, "staging/etc").mkdirs()
-        File(base, "staging/etc/version").writeText(version)
-        activateRootfs(base, version, sync = {})
+        val layers = RuntimeLayers(base)
+        val next = RuntimeLayerSet(version, "arm64-v8a", "base-$version", "dsh-$version", "go-$version", "info-$version")
+        val preparation = requireNotNull(layers.prepare(next, sync = {}))
+        writeRuntimeLayerFixture(layers, next)
+        val carry = File(base, "home.carry")
+        DirectLaunch.preservePhysicalAlias(root,
+            if (carry.exists()) carry else File(root, "root"), File(base, "rootfs.old"))
+        val commit = layers.activate(next, preparation, sync = {})
+        assertFalse(layers.cleanup(commit))
+        assertTrue(layers.markReady(commit))
+        assertTrue(layers.cleanup(commit))
         assertEquals("user bytes\n", File(root, "root/workspace/keep.txt").readText())
         assertFalse(File(root, "opt/dsh-app/direct/config.json").exists())
     }
