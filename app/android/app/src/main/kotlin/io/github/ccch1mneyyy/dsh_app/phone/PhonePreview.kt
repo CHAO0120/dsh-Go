@@ -9,6 +9,8 @@ data class PhonePreviewSnapshot(
     val taskId: Long? = null,
     val capturedAt: Long? = null,
     val reason: String? = null,
+    /** The image came from the background screen, not the one the user is looking at. */
+    val background: Boolean = false,
 ) {
     fun toMap(): Map<String, Any?> = if (jpegBytes != null) mapOf(
         "revision" to revision, "available" to true,
@@ -24,6 +26,7 @@ internal class PhonePreview(private val tasks: PhoneTasks) {
     private var owner: PhoneTasks.Owner? = null
     private var jpeg: ByteArray? = null
     private var capturedAt: Long? = null
+    private var background = false
     private var reason = "inactive"
 
     /** Admission may name an old frame; begin replaces it with this worker's actual task owner. */
@@ -50,7 +53,7 @@ internal class PhonePreview(private val tasks: PhoneTasks) {
     }
 
     /** Only the caller returning its actual final ToolOutput invokes this, never the worker. */
-    fun complete(capture: Capture, bytes: ByteArray?, obtainedAt: Long?, blocked: String?) {
+    fun complete(capture: Capture, bytes: ByteArray?, obtainedAt: Long?, blocked: String?, onBackground: Boolean = false) {
         val changed = synchronized(lock) {
             capture.finished = true
             val expected = capture.owner ?: return
@@ -60,6 +63,7 @@ internal class PhonePreview(private val tasks: PhoneTasks) {
                 owner = expected
                 jpeg = bytes.copyOf()
                 capturedAt = obtainedAt
+                background = onBackground
             }
             revision
         }
@@ -115,7 +119,7 @@ internal class PhonePreview(private val tasks: PhoneTasks) {
                 changed = revision
             }
             PhonePreviewSnapshot(revision, jpeg?.copyOf(), owner?.taskId.takeIf { jpeg != null },
-                capturedAt, if (jpeg == null) reason else null)
+                capturedAt, if (jpeg == null) reason else null, background && jpeg != null)
         }
         changed?.let(::emit)
         return result
@@ -133,6 +137,7 @@ internal class PhonePreview(private val tasks: PhoneTasks) {
         owner = null
         jpeg = null
         capturedAt = null
+        background = false
         reason = unavailable
     }
 

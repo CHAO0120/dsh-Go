@@ -643,9 +643,12 @@ internal class ControlOverlay(private val service: AccessibilityService) : UserG
         val core = previewCore ?: return
         if (!previewTracker.event(revision)) return
         val snapshot = core.previewSnapshot()
-        previewTracker.snapshot(snapshot.revision, snapshot.jpegBytes, snapshot.capturedAt)
+        // A main-screen picture shows what the user can already see: this window is for the other screen.
+        previewTracker.snapshot(snapshot.revision, snapshot.jpegBytes?.takeIf { snapshot.background }, snapshot.capturedAt)
         // Between screens there is no picture yet; once the task or channel is gone, none will come.
         if (snapshot.jpegBytes == null && snapshot.reason != "noImage") dismissPreview() else renderPreview()
+        // A released background display takes the card's entry with it, and a handoff writes no new status.
+        renderPill()
     }
 
     private fun openPreview() {

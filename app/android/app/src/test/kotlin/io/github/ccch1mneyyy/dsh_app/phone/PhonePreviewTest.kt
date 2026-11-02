@@ -28,6 +28,13 @@ class PhonePreviewTest {
         assertArrayEquals(byteArrayOf(1, 2, 3), preview.snapshot(null).jpegBytes)
     }
 
+    @Test fun aSnapshotSaysWhichScreenItsImageCameFrom() {
+        preview.complete(begin(), bytes, 1L, null, onBackground = true)
+        assertTrue(preview.snapshot(null).background)
+        preview.complete(begin(), bytes, 2L, null, onBackground = false)
+        assertFalse(preview.snapshot(null).background)
+    }
+
     @Test fun newerBeginRejectsOldDoneWithoutInvalidatingItsOwnCapture() {
         val old = begin()
         val next = begin()

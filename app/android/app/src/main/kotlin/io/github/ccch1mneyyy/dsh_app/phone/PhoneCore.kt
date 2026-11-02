@@ -87,6 +87,7 @@ class PhoneCore(
         val summary: String? = null,
         val decision: String? = null,
         val capturedAt: Long? = null,
+        val capturedOnBackground: Boolean = false,
     )
 
     fun call(name: String, args: Map<String, Any?>): ToolOutput {
@@ -148,7 +149,7 @@ class PhoneCore(
         if (capture != null) {
             // A cancelled worker can still finish later. Only this returned outcome can publish.
             preview.complete(capture, if (outcome is SerialWorker.Outcome.Done) image else null,
-                out.capturedAt, previewBlockedReason())
+                out.capturedAt, previewBlockedReason(), out.capturedOnBackground)
         }
         return result
     }
@@ -419,6 +420,7 @@ class PhoneCore(
             summary = "$summary ${snap.id}",
             decision = if (refused) "refused:read" else "ok",
             capturedAt = capturedAt,
+            capturedOnBackground = which == PhoneScreen.BACKGROUND,
         )
     }
 
