@@ -8,6 +8,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../l10n/l10n.dart';
 import '../remote/link_status.dart';
 import '../remote/relay/dsh_remote_backend.dart';
+import 'android_features.dart';
 import 'app_info.dart';
 import '../remote/relay/relay_backend.dart';
 import '../remote/relay/webrtc_peer.dart';
@@ -380,7 +381,9 @@ final relayBackendProvider = Provider<RelayBackend>((ref) {
     secrets: ref.watch(secretStoreProvider),
     serverUrl: ref.watch(relayServerProvider),
     clientVersion: AppInfo.version.split('+').first,
-    peerConnector: flutterPeerConnector,
+    // flutter_webrtc has no HarmonyOS implementation: straight to the relay,
+    // not two handshakes that fail on the way there.
+    peerConnector: ref.watch(androidSystemFeaturesProvider) ? flutterPeerConnector : null,
   );
   // The old default-off preference no longer controls automatic transport selection.
   unawaited(
