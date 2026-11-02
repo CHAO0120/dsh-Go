@@ -99,7 +99,8 @@ def main():
     required = [sdk / 'llvm/bin' / name for name in
                 ['ld.lld', 'llvm-ar', 'llvm-nm', 'llvm-readelf', 'llvm-strip']]
     required += [sdk / 'oh-uni-package.json', sdk / 'sysroot/usr/include/stdio.h', HERE / 'libnode-exports.map',
-                 HERE / 'napi-rename.h', clang, clang.with_name('clang++'), runtimes / 'runtimes.json']
+                 HERE / 'napi-rename.h', clang, clang.with_name('clang++'), runtimes / 'runtimes.json',
+                 runtimes / 'LLVM-LICENSE.txt']
     for file in required:
         if not file.is_file():
             parser.error(f'Missing toolchain input: {file}')
@@ -210,6 +211,7 @@ def main():
     shutil.copyfile(library, output / 'libnode.so')
     subprocess.run([str(sdk / 'llvm/bin/llvm-strip'), '--strip-unneeded', str(output / 'libnode.so')], check=True)
     shutil.copyfile(source / 'LICENSE', output / 'NODE-LICENSE.txt')
+    shutil.copyfile(runtimes / 'LLVM-LICENSE.txt', output / 'LLVM-LICENSE.txt')
     plan.update({'scope': 'OHOS cross-build; HAP load and device behavior NOT_RUN',
                  'unstripped': unstripped, 'elf': elf, 'audit': audit,
                  'buildSeconds': round(time.monotonic() - started),
