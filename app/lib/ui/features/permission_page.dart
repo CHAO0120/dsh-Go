@@ -12,6 +12,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../l10n/l10n.dart';
 import '../../runtime/runtime_state.dart';
+import '../../state/android_features.dart';
 import '../../state/connection_state.dart';
 import '../../state/engine_settings_state.dart' show describeSettingsError;
 import '../../state/features_state.dart';
@@ -182,7 +183,8 @@ class _PermissionPageState extends ConsumerState<PermissionPage> {
     ];
 
     final phoneFiles = ref.watch(settingsProvider.select((s) => s.phoneStorage));
-    final confirm = ref.watch(phoneProvider.select((s) => s.policies?.confirmMode));
+    final android = ref.watch(androidSystemFeaturesProvider);
+    final confirm = android ? ref.watch(phoneProvider.select((s) => s.policies?.confirmMode)) : null;
     final phone = ListPageCard(
       title: l10n.hubPermissionPhone,
       children: [
@@ -250,8 +252,7 @@ class _PermissionPageState extends ConsumerState<PermissionPage> {
               ),
             ),
         ],
-        const SizedBox(height: 24),
-        phone,
+        if (android) ...[const SizedBox(height: 24), phone],
       ],
     );
   }

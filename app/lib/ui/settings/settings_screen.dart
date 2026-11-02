@@ -7,6 +7,7 @@ import '../../l10n/l10n.dart';
 import '../../runtime/local_footprint.dart';
 import '../../runtime/runtime_state.dart';
 import '../../state/account_state.dart';
+import '../../state/android_features.dart';
 import '../../state/ask_ai.dart' show askAiAvailableProvider;
 import '../../state/balance_state.dart';
 import '../../state/connection_state.dart';
@@ -92,6 +93,7 @@ class SettingsScreen extends ConsumerWidget {
     final engine = EngineStatusView.of(runtime);
     final colors = DshColors.of(context);
     final notifier = ref.read(settingsProvider.notifier);
+    final android = ref.watch(androidSystemFeaturesProvider);
     final uiMode = ref.watch(uiModeProvider.select((s) => s.mode));
     final host = ref.watch(activeHostProvider);
     Widget? text(String? value, {Color? color}) =>
@@ -103,8 +105,8 @@ class SettingsScreen extends ConsumerWidget {
         ? (replyPrefsSummary(ref) == null ? l10n.commonNotSet : l10n.hubValueSet)
         : null;
     // 能力.
-    final phone = ref.watch(phoneProvider);
-    final phoneValue = !phone.loaded || !phone.status.ready
+    final phone = android ? ref.watch(phoneProvider) : null;
+    final phoneValue = phone == null || !phone.loaded || !phone.status.ready
         ? null
         : !phone.status.enabled
         ? l10n.hubValueOff
@@ -118,7 +120,7 @@ class SettingsScreen extends ConsumerWidget {
         ? null
         : search.valueOf(const FieldRef(WebSearchSettingsPage.webNs, ['searchProvider'])) == 'deepseek-search-api';
     // 通用.
-    final exempt = ref.watch(batteryExemptProvider).value;
+    final exempt = android ? ref.watch(batteryExemptProvider).value : null;
     // 主机.
     final ssh = ref.watch(hostsProvider.select((s) => s.ssh.length));
     final hostName = host.isLocal ? l10n.commonThisPhone : ref.watch(hostNameProvider(host)) ?? l10n.commonRemoteHost;
@@ -166,13 +168,14 @@ class SettingsScreen extends ConsumerWidget {
         SettingsSection(
           title: l10n.hubGroupCapabilities,
           children: [
-            SettingsTile(
-              icon: AppIcons.phoneControl,
-              tint: SettingsHues.abilities,
-              spot: SettingsIndex.entry(SettingsPageId.phone),
-              value: text(phoneValue, color: phoneValue == l10n.hubValueOneStep ? colors.warning : null),
-              onTap: () => _push(context, const PhoneControlScreen()),
-            ),
+            if (android)
+              SettingsTile(
+                icon: AppIcons.phoneControl,
+                tint: SettingsHues.abilities,
+                spot: SettingsIndex.entry(SettingsPageId.phone),
+                value: text(phoneValue, color: phoneValue == l10n.hubValueOneStep ? colors.warning : null),
+                onTap: () => _push(context, const PhoneControlScreen()),
+              ),
             SettingsTile(
               icon: AppIcons.webSearch,
               tint: SettingsHues.abilities,
@@ -238,22 +241,24 @@ class SettingsScreen extends ConsumerWidget {
             const NotificationSettingsTile(tint: SettingsHues.general),
             const VoiceSettingsTile(tint: SettingsHues.general),
             const PerformanceSettingsTile(tint: SettingsHues.general),
-            SettingsTile(
-              icon: AppIcons.keepAlive,
-              tint: SettingsHues.general,
-              spot: SettingsIndex.entry(SettingsPageId.background),
-              value: text(
-                exempt == null ? null : (exempt ? l10n.hubValueAllowed : l10n.hubValueNeedsSetup),
-                color: exempt == false ? colors.warning : null,
+            if (android) ...[
+              SettingsTile(
+                icon: AppIcons.keepAlive,
+                tint: SettingsHues.general,
+                spot: SettingsIndex.entry(SettingsPageId.background),
+                value: text(
+                  exempt == null ? null : (exempt ? l10n.hubValueAllowed : l10n.hubValueNeedsSetup),
+                  color: exempt == false ? colors.warning : null,
+                ),
+                onTap: () => _push(context, const BackgroundGuidePage()),
               ),
-              onTap: () => _push(context, const BackgroundGuidePage()),
-            ),
-            SettingsTile(
-              icon: AppIcons.systemAccess,
-              tint: SettingsHues.general,
-              spot: SettingsIndex.entry(SettingsPageId.systemAccess),
-              onTap: () => _push(context, const SystemAccessPage()),
-            ),
+              SettingsTile(
+                icon: AppIcons.systemAccess,
+                tint: SettingsHues.general,
+                spot: SettingsIndex.entry(SettingsPageId.systemAccess),
+                onTap: () => _push(context, const SystemAccessPage()),
+              ),
+            ],
             SettingsTile(
               icon: AppIcons.privacy,
               tint: SettingsHues.general,
