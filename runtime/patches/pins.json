@@ -14,6 +14,18 @@
         }
       }
     },
+    "zzzzzzzzzzzzz-ohos-plugin-install-refusal.diff": {
+      "0.2.1-rc.4": {
+        "node_modules/@deepseek-ai/dsh-plugin-manager/lib/index.js": {
+          "before": "7978a5b16f406b3c223de5a83c93e86125677ece1265d39d79dcba19de13cd45",
+          "after": "be812f844e6da171a7e2a874fca716f05a157dcab96ded1c79a35f679285b6c7"
+        },
+        "node_modules/@deepseek-ai/dsh-plugin-manager/lib/types/operations.js": {
+          "before": "a9f2c4bbcfcad95eaac8878358e5aecb2532cfa4a7a9c6f981ff507fe3403f94",
+          "after": "baa52993c097351842b4446cdba0a4a63cb63c5db4d906ab94180216f951a32c"
+        }
+      }
+    },
     "plugin-manager-active-run-guard.diff": {
       "0.2.1-rc.4": {
         "node_modules/@deepseek-ai/dsh-plugin-manager/lib/index.js": {
@@ -404,6 +416,7 @@
       "zz-direct-runtime.diff",
       "zzz-config-editor-path.diff",
       "zzz-title-cache-refresh.diff",
+      "zzzzzzzzzzzzz-ohos-plugin-install-refusal.diff",
       "zzzz-plugin-config-readability.diff",
       "zzzzz-plugin-config-bundles.diff",
       "zzzzzz-session-deletion.diff",
