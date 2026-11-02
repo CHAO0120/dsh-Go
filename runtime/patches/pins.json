@@ -365,6 +365,14 @@
           "after": "00bfe83989700049796ea03dc1cd9ab6e2789167bc038deed2f9d698eec9a55b"
         }
       }
+    },
+    "ohos-workspace-changes.diff": {
+      "0.2.1-rc.4": {
+        "node_modules/@deepseek-ai/dsh-workspace-changes/lib/index.js": {
+          "before": "d623c9fa909dfa2e8a9a5797eebdc2041553bf38cc8788b773996e0e4617385f",
+          "after": "027c3246d8174ad2c519fd989e0ab157eedbe3535a5afa41121dc05e5e5615d3"
+        }
+      }
     }
   },
   "schema": 2,
@@ -389,6 +397,7 @@
       "ohos-hap-native-libraries.diff",
       "ohos-network-transport.diff",
       "ohos-virtual-process.diff",
+      "ohos-workspace-changes.diff",
       "plugin-manager-active-run-guard.diff",
       "plugin-manager-cancel-tree-confirmation.diff",
       "route-guard.diff",

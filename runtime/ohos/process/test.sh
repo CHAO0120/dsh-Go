@@ -9,6 +9,6 @@ node_bin=${NODE:-node}
 DSH_GO_OHOS_SIM=1 "$node_bin" --test --test-isolation=none "$repo/runtime/tests/ohos/process-android-path.test.mjs"
 "$node_bin" "$repo/runtime/ohos/process/build-rg-regex.mjs" "${OHOS_ESBUILD_PREFIX:-$repo/runtime/ohos/node/build-tools}"
 python3 "$repo/runtime/ohos/process/build-just-bash.py"
-tests=("$repo/runtime/tests/ohos/process.test.mjs" "$repo/runtime/tests/ohos/process-integration.test.mjs" "$repo/runtime/tests/ohos/process-policy.test.mjs" "$repo/runtime/tests/ohos/process-diagnostics.test.mjs" "$repo/runtime/tests/ohos/process-streaming.test.mjs")
+tests=("$repo/runtime/tests/ohos/process.test.mjs" "$repo/runtime/tests/ohos/process-integration.test.mjs" "$repo/runtime/tests/ohos/process-policy.test.mjs" "$repo/runtime/tests/ohos/process-diagnostics.test.mjs" "$repo/runtime/tests/ohos/process-streaming.test.mjs" "$repo/runtime/tests/ohos/process-cancel-before-start.test.mjs")
 env -u DSH_GO_OHOS_SIM M4_DIAGNOSTICS_MODE=jit "$node_bin" --import "$repo/runtime/ohos/sim/marker.mjs" --test --test-isolation=none "${tests[@]}"
 env -u DSH_GO_OHOS_SIM M4_DIAGNOSTICS_MODE=strict DSH_GO_OHOS_SIM_PLATFORM=openharmony DSH_GO_OHOS_SIM_ADDONS='[]' "$node_bin" --jitless --import "$OHOS_SIM_PRELOAD" --test --test-isolation=none "${tests[@]}"

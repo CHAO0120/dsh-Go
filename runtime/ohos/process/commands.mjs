@@ -2,7 +2,7 @@
 export const shellCommands = Object.freeze([
   'echo', 'cat', 'printf', 'ls', 'mkdir', 'mktemp', 'rmdir', 'touch', 'rm',
   'cp', 'mv', 'ln', 'chmod', 'pwd', 'readlink', 'head', 'tail', 'wc', 'stat',
-  'grep', 'fgrep', 'egrep', 'rg', 'sed', 'awk', 'sort', 'uniq', 'comm', 'cut',
+  'grep', 'fgrep', 'egrep', 'rg', 'git', 'sed', 'awk', 'sort', 'uniq', 'comm', 'cut',
   'paste', 'tr', 'rev', 'nl', 'fold', 'expand', 'unexpand', 'strings', 'split',
   'column', 'join', 'tee', 'find', 'basename', 'dirname', 'tree', 'du', 'env',
   'printenv', 'alias', 'unalias', 'history', 'xargs', 'true', 'false', 'yes',
@@ -11,7 +11,7 @@ export const shellCommands = Object.freeze([
   'tac', 'hostname', 'od', 'gzip', 'gunzip', 'zcat', 'time', 'whoami',
 ]);
 
-export const subprocessCommands = Object.freeze(['bash', 'sh', 'rg']);
+export const subprocessCommands = Object.freeze(['bash', 'sh', 'rg', 'git']);
 export const unavailableMessage = '这个命令在鸿蒙本机不可用，可以连接电脑执行';
 
 export const capabilities = Object.freeze({

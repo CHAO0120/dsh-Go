@@ -1,6 +1,6 @@
 # O4a：鸿蒙批量虚拟进程后端
 
-**本项是 O4 的可复核子集，不代表 O4 全部完成。未在真机核实。** 历史 O4a 固定基底 `afb5cdd`、DSH `0.2.1-rc.4`、Node `24.22.1`。**历史 v3 完整替代 v1/v2，不叠加应用。** 第二波 `c818155` 后续增加了 [外层语句分段输出](O4-statement-output.md)：`bash` / `sh` 完成一个外层语句即交付该语句的输出，单个命令、管道和复合语句内部仍有缓冲。stdin 仍为批量；`node` 脚本、`git` 子命令和交互字节通道尚未启用，不能在 O6 中报为可用。
+**本项是 O4 的可复核子集，不代表 O4 全部完成。未在真机核实。** 历史 O4a 固定基底 `afb5cdd`、DSH `0.2.1-rc.4`、Node `24.22.1`。**历史 v3 完整替代 v1/v2，不叠加应用。** 第二波 `c818155` 后续增加了 [外层语句分段输出](O4-statement-output.md)：`bash` / `sh` 完成一个外层语句即交付该语句的输出，单个命令、管道和复合语句内部仍有缓冲。stdin 仍为批量；`node` 脚本和交互字节通道尚未启用，不能在 O6 中报为可用。后续 O4b 增加受限 Git Worker、父线程临时文件归属和真实工作区快照，具体子命令、停止语义与证据见 [GIT.md](GIT.md)。
 
 M4-1 v2 在此基线上恢复 DSH JSON grep 的正向 `include` 和 Unicode 常用字符类/词边界，具体构建链、差分与边界见 [M4-1.md](M4-1.md)。本组合版本已包含 [M4-2](M4-2.md) 的搜索与执行双队列，以及后继 [M4-3](M4-3.md)、[M4-4a](M4-4a.md)、[M4-4b](M4-4b.md)、[M6-1](M6-1.md)、[M6-2](M6-2.md)，各自范围与仍存在的差异见对应说明。
 
@@ -58,6 +58,8 @@ M4-4b 后继使用固定 just-bash 3.6.0 的 OHOS 私有 ESM 构建，以恢复�
 
 manifest 中直接声明的运行时依赖保持题面已批准的 `just-bash 3.6.0`（Apache-2.0）与 `isomorphic-git 1.44.9`（MIT）。本项还直接依赖原锁闭包中的 `re2js 1.3.3`（MIT）来生成仅供 rg 使用的私有构建，修改其非生成源码；不改原 npm 包、原 Unicode 表或其他消费者，也没有安装新的 ignore/glob 依赖。它不再只是调用未修改 re2js 的公开 matcher：构建耦合包括固定 sourcemap 与其中 24 个源码的身份。追加6已要求把 re2js 记录为 manifest 直接依赖，由主线 M4-6 独立落实；本包不抢改该锁文件。生成脚本复用已批准的 esbuild 0.27.3；`build/` 产物不提交，完整 MIT 归属保留在产物头部。
 
+O4b 的 `git-diff.mjs` 直接导入同一原锁闭包中的 `diff 8.0.4`（BSD-3-Clause），该包原由 just-bash 传递引入。这里没有增加、升级或重新声明依赖，`package.json` 和 `package-lock.json` 保持基底字节；O2 的最终组成必须保留 `node_modules/diff` 的 ESM API、包声明和 LICENSE。依赖闭包、实际入口及许可仍须按最终分发文件复核。
+
 从 `afb5cdd` 根目录应用独立补丁后，使用官方 Node 24.22.1：
 
 ```bash
@@ -91,7 +93,7 @@ v1 的独立审查 `cb25400e…` 为 BLOCKED：缺失路径和合法零宽正则
 
 主代理另外实际复现：直接 spawn 拒绝 NUL 命令，prepare 后却可执行。v2 已增加真实 tool-bash / sandbox.confine / 直接 spawn 三路径回归，非法命令在分配 worker 和票据前被拒绝。v2 独立复核还发现一个既有缺陷：显式给出 `.gitignore` 忽略的文件时，借用 just-bash `--files` 会过滤该文件，真实 DSH 相对与绝对路径均误报零结果。v3 只把显式文件从目录遍历中分开：已指定文件按受限 FS 读取，目录仍沿原规则；没有全局关闭 ignore。新增真实 DSH 的 ignored/hidden/负向 glob 回归，审查方默认遍历的负对照也必须保留。
 
-冻结前并行负载曾令一个普通 shell 成功测试超过夹具原 2 秒预算。仅将普通成功用例共用的 fixture 默认预算改为 15 秒，显式 timeout 回归仍是 120 毫秒，生产代码的预算与分类未变；旧失败日志保留。正式结论以绑定本补丁 SHA256 的独立复核报告为准；该 v3 历史结果不覆盖当时未实现的 include；M4-1 的 include 结果单列。node、git 与实时输出仍不在本包范围。
+冻结前并行负载曾令一个普通 shell 成功测试超过夹具原 2 秒预算。仅将普通成功用例共用的 fixture 默认预算改为 15 秒，显式 timeout 回归仍是 120 毫秒，生产代码的预算与分类未变；旧失败日志保留。正式结论以绑定补丁 SHA256 的独立复核报告为准；该 v3 历史结果不覆盖当时未实现的 include；M4-1 的 include 结果单列。当时未实现的 Git 由本次 O4b 单列验证；历史通过不能作为新功能的证据。
 
 ## 可核对的源材料
 
@@ -100,7 +102,7 @@ v1 的独立审查 `cb25400e…` 为 BLOCKED：缺失路径和合法零宽正则
 - 同版本 `dsh-tool-bash`、`dsh-bash-sandbox`、`dsh-user-approval`：工具审批先于执行，策略来自会话，批准只对单次调用有效。
 - [just-bash 官方项目](https://github.com/vercel-labs/just-bash) 与锁定 npm 包的 ReadWriteFs/MountableFs/CommandContext 声明及 rg bundle。
 - [Node 24.22.1 worker_threads 文档](https://nodejs.org/download/release/v24.22.1/docs/api/worker_threads.html)。
-- [isomorphic-git 官方文档](https://isomorphic-git.org/docs/en/quickstart)：后续 git 适配还需处理 DSH 工作区快照的独立 index/object 环境，不能把常用八个子命令当作完整 DSH 覆盖。
+- [isomorphic-git 官方文档](https://isomorphic-git.org/docs/en/quickstart)：本次 Git 子集使用固定 1.44.9 包；独立 index/object 环境及真实 DSH 工作区快照的验证见 GIT.md，不能把支持的子命令理解为完整原生 Git 兼容。
 
 - [RE2JS 官方项目](https://github.com/le0pard/re2js) 及锁定包 1.3.3 的 matcher(number[]) / find / start / end 公开 API；字节坐标以原生差分为证据；M4-1 的私有源码改动与生成流程另见该文。
 - [ripgrep 官方指南](https://github.com/BurntSushi/ripgrep/blob/master/GUIDE.md)；本文具体行为数据由随 DSH 分发的 15.0.0 实测，而非以最新版文档代替已锁版本。

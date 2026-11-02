@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { createHash } from 'node:crypto';
 import { createRequire } from 'node:module';
-import { join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 
 const git = createRequire(new URL('../../ohos/process/package.json', import.meta.url))('isomorphic-git');
 export const inject = ['workspaceChanges', 'connection', 'webServer'];
@@ -34,12 +34,21 @@ export async function apply(ctx, config) {
   const externalFile = '仅快照可见.txt';
   fs.writeFileSync(join(directory, externalFile), 'before\n', { flag: 'wx' });
   fs.writeFileSync(join(directory, '未改动.txt'), 'unchanged\n', { flag: 'wx' });
-  fs.writeFileSync(join(directory, '.gitignore'), 'ignored.txt\n', { flag: 'wx' });
+  fs.writeFileSync(join(directory, '.gitignore'), 'ignored.txt\nignored-nested/\n', { flag: 'wx' });
   fs.writeFileSync(join(directory, 'ignored.txt'), 'ignored-before\n', { flag: 'wx' });
   await git.init({ fs, dir: directory, defaultBranch: 'main' });
   for (const filepath of [externalFile, '未改动.txt', '.gitignore']) await git.add({ fs, dir: directory, filepath });
   await git.commit({ fs, dir: directory, message: 'O0 workspace snapshot fixture', author: { name: 'OHOS fixture', email: 'fixture@example.invalid', timestamp: 1, timezoneOffset: 0 } });
   const metadataBefore = gitState(join(directory, '.git'));
+  // Prepare outside the worktree, then move in synchronously after baseline.
+  // A broken ignored-gitlink branch now changes the snapshot and is observable
+  // through the production summary, rather than existing unchanged in both trees.
+  const stagedNested = fs.mkdtempSync(join(dirname(directory), 'fixture-nested-'));
+  await git.init({ fs, dir: stagedNested, defaultBranch: 'main' });
+  fs.writeFileSync(join(stagedNested, 'nested.txt'), 'nested repository content\n', { flag: 'wx' });
+  await git.add({ fs, dir: stagedNested, filepath: 'nested.txt' });
+  await git.commit({ fs, dir: stagedNested, message: 'ignored nested fixture', author: { name: 'OHOS fixture', email: 'fixture@example.invalid', timestamp: 2, timezoneOffset: 0 } });
+  const nestedMetadataBefore = gitState(join(stagedNested, '.git'));
   let changed = false;
   const announced = new Map();
   ctx.on('session/event', (session, event) => {
@@ -49,6 +58,7 @@ export async function apply(ctx, config) {
       // repository snapshot can report this change; file-tool fallback cannot.
       fs.writeFileSync(join(directory, externalFile), 'after\n');
       fs.writeFileSync(join(directory, 'ignored.txt'), 'ignored-after\n');
+      fs.renameSync(stagedNested, join(directory, 'ignored-nested'));
       changed = true;
     }
   });
@@ -69,6 +79,9 @@ export async function apply(ctx, config) {
       assert(index >= 0, 'snapshot must include a mutation outside DSH file tools');
       assert(summary.files.some(file => file.path === '中文 测试.txt'));
       assert(!summary.files.some(file => file.path === 'ignored.txt' || file.path === '未改动.txt'));
+      assert(!summary.files.some(file => file.path === 'ignored-nested' || file.path.startsWith('ignored-nested/')),
+        'an ignored nested repository arriving after baseline must not enter the snapshot');
+      record.ignoredNestedArrivedAfterBaseline = changed;
       const comparison = await ctx.workspaceChanges.diff(agent.session.id, seq, index, signal);
       assert.equal(comparison.kind, 'text');
       assert.equal(comparison.before, true); assert.equal(comparison.after, true);
@@ -76,6 +89,7 @@ export async function apply(ctx, config) {
       assert(lines.includes('-before')); assert(lines.includes('+after'));
       record.comparison = comparison;
       assert.deepEqual(gitState(join(directory, '.git')), metadataBefore, 'snapshot must not change user index, objects or refs');
+      assert.deepEqual(gitState(join(directory, 'ignored-nested/.git')), nestedMetadataBefore, 'snapshot must not change nested repository metadata');
       record.repositoryMetadataUnchanged = true;
 
       // Read the same authenticated HTTP endpoints as the existing client.

@@ -10,6 +10,7 @@ import { scrubbedParentEnv, SubprocessExecutableNotFoundError } from '@deepseek-
 import { MAX_TIMER_DELAY_MS } from '@deepseek-ai/dsh-timeout';
 import { capabilities, subprocessCommands, unavailableMessage } from './commands.mjs';
 import { distinctRoots, isInside } from './filesystem.mjs';
+import { createOwnedGitServer } from './owned-server.mjs';
 
 const confinedProgram = '/dsh-go/ohos/confined';
 const validateArgv = argv => {
@@ -29,8 +30,13 @@ export class VirtualSubprocessRuntime {
   prepared = new Map();
   #temporaryOwner;
   #disposePromise;
+  #resourceFailures = new Set();
+  #createOwnedGitServer;
 
-  constructor({ workspaceRoots, temporaryRoot, onSpillFailure = () => {} } = {}) {
+  constructor({ workspaceRoots, temporaryRoot, onSpillFailure = () => {} } = {}, internals = {}) {
+    // Explicit trusted test seam; never read from Worker messages or DSH config.
+    this.#createOwnedGitServer = internals.createOwnedGitServer ?? createOwnedGitServer;
+    if (typeof this.#createOwnedGitServer !== 'function') throw new TypeError('Invalid owned-resource server factory');
     if (!Array.isArray(workspaceRoots) || workspaceRoots.length === 0) {
       throw new TypeError('workspaceRoots 必须由宿主显式配置为非空的绝对工作区目录数组');
     }
@@ -109,9 +115,14 @@ export class VirtualSubprocessRuntime {
       validateArgv(argv);
     }
     const lane = this.lanes[commandName(argv[0]) === 'rg' ? 'search' : 'execution'];
-    const state = { worker: undefined, stopped: false, settled: false, outcome: undefined, failure: undefined };
+    const state = { worker: undefined, resources: undefined, stopped: false, finishing: false,
+      settled: false, outcome: undefined, failure: undefined, providerFailure: undefined, rangeFailure: undefined };
     const completion = Promise.withResolvers();
     const gone = Promise.withResolvers();
+    // The original promises still reject to callers; attach internal observers
+    // so a cleanup failure before a caller begins awaiting is never unhandled.
+    completion.promise.catch(() => {});
+    gone.promise.catch(() => {});
     const collected = {};
     const output = {};
     for (const label of ['stdout', 'stderr']) {
@@ -127,18 +138,42 @@ export class VirtualSubprocessRuntime {
       else return process[label].write(bytes);
       return true;
     };
-    const finish = () => {
-      if (state.settled) return;
-      state.settled = true;
+    const settle = cleanupFailure => {
+      const providerErrors = new Set([cleanupFailure, state.providerFailure].filter(Boolean));
       spec.signal?.removeEventListener('abort', handle.terminate);
-      for (const collector of Object.values(collected)) collector.seal();
-      for (const stream of Object.values(output)) stream.end();
+      for (const collector of Object.values(collected)) {
+        try { collector.seal(); } catch (error) { providerErrors.add(error); }
+      }
+      for (const stream of Object.values(output)) {
+        try { stream.end(); } catch (error) { providerErrors.add(error); }
+      }
+      state.settled = true;
+      if (providerErrors.size) {
+        state.rangeFailure = providerErrors.size === 1 ? [...providerErrors][0]
+          : new AggregateError([...providerErrors], 'Virtual process resource cleanup failed');
+        this.#resourceFailures.add(state.rangeFailure);
+      }
       this.live.delete(handle);
       if (lane.active === handle) lane.active = undefined;
-      gone.resolve(true);
-      if (state.failure && !state.stopped) completion.reject(state.failure);
+      if (state.rangeFailure) gone.reject(state.rangeFailure);
+      else gone.resolve(true);
+      if (state.rangeFailure) {
+        const failures = [state.rangeFailure];
+        if (state.failure && !state.stopped && state.failure !== state.rangeFailure) failures.push(state.failure);
+        completion.reject(failures.length === 1 ? failures[0]
+          : new AggregateError(failures, 'Virtual process and resource cleanup failed', { cause: failures[0] }));
+      } else if (state.failure && !state.stopped) completion.reject(state.failure);
       else completion.resolve(state.stopped ? { exitCode: null, signal: 'SIGTERM' } : state.outcome);
       queueMicrotask(() => this.startNext(lane));
+    };
+    const finish = () => {
+      if (state.settled || state.finishing) return;
+      state.finishing = true;
+      state.resources?.stop();
+      // Worker exit is only the first barrier. Drain accepted parent I/O and
+      // replies, then exact cleanup/FD close/ledger release, before any lifetime
+      // promise settles or this lane can start its following job.
+      Promise.resolve().then(() => state.resources?.finish({ cancelled: state.stopped })).then(() => settle(), settle);
     };
     const handle = {
       stdin: undefined, stdout: output.stdout, stderr: output.stderr, control: undefined, collected,
@@ -146,11 +181,15 @@ export class VirtualSubprocessRuntime {
       terminate: () => {
         if (state.settled || state.stopped) return;
         state.stopped = true;
-        if (state.worker) void state.worker.terminate();
+        state.resources?.stop();
+        if (state.worker) void state.worker.terminate().catch(error => { state.providerFailure ??= error; });
         else finish();
       },
       waitForExit: async signal => {
-        if (state.settled) return true;
+        if (state.settled) {
+          if (state.rangeFailure) throw state.rangeFailure;
+          return true;
+        }
         if (signal?.aborted) return false;
         const interrupted = Promise.withResolvers();
         const abort = () => interrupted.resolve(false);
@@ -159,7 +198,9 @@ export class VirtualSubprocessRuntime {
         finally { signal?.removeEventListener('abort', abort); }
       },
       start: () => {
-        if (state.settled) return;
+        // finish drains asynchronously. A queued start must not create a new
+        // Worker after a same-stack cancel already began that finish barrier.
+        if (state.stopped || state.finishing || state.settled || state.worker) return;
         lane.active = handle;
         try {
           if (spec.stdio.stdin === 'pipe' || spec.stdio.control === 'pipe') {
@@ -188,6 +229,11 @@ export class VirtualSubprocessRuntime {
           if (globalThis[Symbol.for('dsh.go.ohos.sim')] === true && process.env.DSH_GO_OHOS_SIM_PLATFORM) {
             workerEnv.DSH_GO_OHOS_SIM_PLATFORM = process.env.DSH_GO_OHOS_SIM_PLATFORM;
           }
+          state.resources = this.#createOwnedGitServer({
+            roots, policy,
+            send: message => state.worker.postMessage(message),
+            onFailure: error => { state.providerFailure ??= error; handle.terminate(); },
+          });
           const worker = state.worker = new Worker(new URL('./worker.mjs', import.meta.url), {
             workerData: {
               argv: [name, ...argv.slice(1)], cwd, policy,
@@ -206,6 +252,7 @@ export class VirtualSubprocessRuntime {
             });
           }
           worker.on('message', message => {
+            if (state.resources.handle(message)) return;
             if (message.failure) state.failure = Object.assign(new Error(message.failure.message), message.failure);
             else state.outcome = { exitCode: message.exitCode, signal: null };
           });
@@ -246,7 +293,13 @@ export class VirtualSubprocessRuntime {
     for (const handle of handles) handle.terminate();
     for (const lane of Object.values(this.lanes)) lane.queue.length = 0;
     this.#disposePromise = (async () => {
-      await Promise.all(handles.map(handle => handle.waitForExit()));
+      const observations = await Promise.allSettled(handles.map(handle => handle.waitForExit()));
+      const failures = new Set(this.#resourceFailures);
+      for (const result of observations) if (result.status === 'rejected') failures.add(result.reason);
+      // Preserve unresolved ownership evidence, including a caller-independent
+      // temporary root. Never recursively remove it after a resource failure.
+      if (failures.size === 1) throw [...failures][0];
+      if (failures.size) throw new AggregateError([...failures], 'Virtual process resources did not dispose cleanly');
       const owner = this.#temporaryOwner;
       if (!owner) return;
       const current = await lstat(owner.path, { bigint: true }).catch(error => {

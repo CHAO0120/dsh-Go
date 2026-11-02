@@ -10,6 +10,22 @@ import { openAtomicFuse, readSystemBuildIdentity } from './atomic-fuse.mjs';
 export const publicationSymbol = Symbol.for('dsh.go.ohos.publication');
 const simulationSymbol = Symbol.for('dsh.go.ohos.sim');
 let installing = false;
+let installedOwnership;
+
+// Borrow the one already-open main-engine ledger. A subprocess job must not
+// acquire a second flock, close this process-wide owner, or use the publication
+// state slot for unrelated Git data. Workers receive only a job-bound RPC.
+export function borrowInstalledOwnership() {
+  if (!isMainThread) {
+    throw Object.assign(new Error('Ownership resources belong to the main engine'),
+      { code: 'ERR_OHOS_OWNERSHIP_MAIN_THREAD' });
+  }
+  if (!installedOwnership) {
+    throw Object.assign(new Error('The main-engine ownership service is unavailable'),
+      { code: 'ERR_OHOS_OWNERSHIP_UNAVAILABLE' });
+  }
+  return installedOwnership;
+}
 
 export async function installPublication() {
   if (process.platform !== 'openharmony' && globalThis[simulationSymbol] !== true) {
@@ -100,6 +116,12 @@ export async function installPublication() {
       publish,
     });
     Object.defineProperty(globalThis, publicationSymbol, { value: service });
+    installedOwnership = Object.freeze({
+      ownerId: ledger.ownerId,
+      reserve: ledger.reserve,
+      identify: ledger.identify,
+      release: ledger.release,
+    });
     return { installed: true, protocolVersion: service.protocolVersion };
   } catch (error) {
     if (ledger) {

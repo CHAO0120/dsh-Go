@@ -129,9 +129,9 @@ test('DSH原rawOutputMaxBytes上限不解析截断的半条JSON', async () => {
   await assert.rejects(search.runRipgrep(context, { agent: searchAgent(), signal: new AbortController().signal }, 'grep', search.buildGrepCommand({ pattern: 'abc' }), 32, 200, 1000), { code: 'SEARCH_RAW_OUTPUT_OVERFLOW' });
 });
 
-test('PTY明确不可用，未实现git不能被工作区快照当成可执行系统git', async () => {
+test('PTY明确不可用，git解析到受限Worker而非系统可执行文件', async () => {
   await assert.rejects(ctx.subprocess.spawnTerminal({}), { code: 'ERR_OHOS_PTY_UNAVAILABLE' });
-  await assert.rejects(ctx.subprocess.resolveExecutable('git'), { name: 'SubprocessExecutableNotFoundError' });
+  assert.equal(await ctx.subprocess.resolveExecutable('git'), '/dsh-go/ohos/bin/git');
   assert.equal(await ctx.subprocess.resolveExecutable('bash'), '/dsh-go/ohos/bin/bash');
   assert.equal(ctx.subprocess.temporaryRoot, temp);
   assert.throws(() => { ctx.subprocess.temporaryRoot = '/tmp'; }, TypeError);

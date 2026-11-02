@@ -3,8 +3,13 @@ import { Bash, defineCommand } from './build/just-bash/index.js';
 import { createFilesystem } from './filesystem.mjs';
 import { shellCommands, unavailableMessage } from './commands.mjs';
 import { executeRg } from './rg.mjs';
+import { createOwnedGitClient } from './owned-client.mjs';
+import { executeGit } from './git.mjs';
+import { createFetch } from '../net/fetch.mjs';
+import { createHttpDispatcher } from '../net/dispatcher.mjs';
 
 const { argv, cwd, roots, stdin, env, policy } = workerData;
+const ownedGitClient = createOwnedGitClient(parentPort);
 const filesystem = createFilesystem(roots, policy);
 const bash = new Bash({
   fs: filesystem.fs,
@@ -14,7 +19,14 @@ const bash = new Bash({
   python: false,
   javascript: false,
   defenseInDepth: false,
-  customCommands: [defineCommand('rg', executeRg)],
+  customCommands: [
+    defineCommand('rg', executeRg),
+    defineCommand('git', async (args, context) => {
+      const dispatcher = createHttpDispatcher({ proxyEnv: Object.fromEntries(context.env) });
+      try { return await executeGit(args, { ...context, ownedGit: ownedGitClient.api, fetch: createFetch(dispatcher) }); }
+      finally { await dispatcher.destroy(); }
+    }),
+  ],
   executionLimits: { maxExecutionTimeMs: Infinity, maxOutputSize: 64 * 1024 * 1024 },
 });
 filesystem.seal();
@@ -42,5 +54,6 @@ try {
 } catch (error) {
   parentPort.postMessage({ failure: { name: error.name, message: error.message, code: error.code, stack: error.stack } });
 } finally {
+  ownedGitClient.close();
   parentPort.close();
 }
