@@ -6,7 +6,7 @@ M6-4 后继的当前产品入口是 `runtime/ohos/preload.mjs`，通过 `dsh_nod
 
 ## 选择与接口
 
-本次选择自己的 `libdsh_node_runner.so`，不修改上游 `node-addon-system`。`dsh_node_start` 由 Ark 侧单次启动保护通过后调用，在 `node::Start` 前注册 `dsh_ohos_publication`；库驻留到应用退出。JS 使用固定 Node 24.22.1 的 `process._linkedBinding('dsh_ohos_publication')`。这是 Node 的 linked 模块查找入口，不要求 `--expose-internals`，但它不是跨 Node 版本不变的公共 JavaScript API；版本锁与启动检查仍必要。
+本次选择自己的 runner（现编入 `libnode.so`），不修改上游 `node-addon-system`。`dsh_node_start` 由 Ark 侧单次启动保护通过后调用，在初始化 Node 前注册 `dsh_ohos_publication`；库驻留到应用退出。JS 使用固定 Node 24.22.1 的 `process._linkedBinding('dsh_ohos_publication')`。这是 Node 的 linked 模块查找入口，不要求 `--expose-internals`，但它不是跨 Node 版本不变的公共 JavaScript API；版本锁与启动检查仍必要。
 
 30 号版本的函数 `renameNoReplace(temporaryPath, finalPath)` 同步调用 `renameat2(AT_FDCWD, ..., AT_FDCWD, ..., RENAME_NOREPLACE)`。成功返回 `undefined`。失败保留 `code`、负的原始 `errno` 与 `syscall: 'renameat2'`，不在错误消息中拼路径。原生层不复制、不 fsync、不清理文件，也不进行回退；JS 发布协议负责这些步骤。目标文件存在时必须保留两边原样，不能改用普通 `rename`。编译环境缺少 `SYS_renameat2` 时明确返回 `ENOSYS`，不能把它解释成允许回退。M3-1b 后继新增的锁和归属标记函数见文末；这里的改名函数体逐字节保持不变。
 
@@ -42,7 +42,7 @@ DSH_GO_OHOS_SIM_PLATFORM=openharmony DSH_GO_OHOS_SIM_ADDONS='[]' \
 
 原生 v1 候选 `c31270dd…` 的代码函数没有因此改变；独审指出该候选没有写出 M3-3 的测试前置，且探针只比较主/worker 标记是否相等，二者都 false 也能通过。v2 保留旧候选与反例，并添加上述强制断言；不能将旧候选在干净 c094 上的 jitless 结果误称严格通过。最终 C++ 源码和两种测试原生二进制哈希保持不变。
 
-产品构建只接受 OHOS CMake toolchain、O7b 固定源码与目标 `libnode.so`。用 API 26 SDK 的 CMake 配置和 `-z defs` 链接已离线通过；arm64 ABI、Ark/Node 符号隔离、HAP 签名与实机加载的实际运行全部 `NOT_RUN`。产品构建 force-include `runtime/ohos/node/napi-rename.h`，绑定的 N-API 调用和两个 libuv 错误辅助函数都走 libnode 的 `dsh_*` 名字，不与 Ark 的 `napi_*` 同名（见 `runtime/ohos/node/BUILD.md`）。
+产品构建由 `runtime/ohos/node/build-node.py` 完成：runner 和绑定用 libnode 目标自身的编译参数编译，链入 `libnode.so`。这一步已离线通过；arm64 ABI、Ark/Node 符号隔离、HAP 签名与实机加载的实际运行全部 `NOT_RUN`。产品构建 force-include `runtime/ohos/node/napi-rename.h`，绑定的 N-API 调用都走 libnode 的 `dsh_*` 名字，不与 Ark 的 `napi_*` 同名（见 `runtime/ohos/node/BUILD.md`）。
 
 ## 设备核验与结论边界
 

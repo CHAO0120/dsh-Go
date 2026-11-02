@@ -14,7 +14,7 @@ publication 步骤等待主引擎账本开锁与恢复后才发布服务。Worke
 
 ## 宿主必须提供的输入
 
-使用自有 `libdsh_node_runner.so` 的 **`dsh_node_start(argc, argv)`**；不能跳过它直接调 `node::Start`。Ark 侧仍负责应用生命周期内只启动一次，并保持宿主库驻留。C/C++ argv 数组必须像普通 main 参数一样有效、以空指针结束，在 Node 运行期间保持所需生命周期。
+使用编入 `libnode.so` 的自有 runner 的 **`dsh_node_start(argc, argv)`**；这是 libnode 唯一的启动入口，`node::Start` 不导出。Ark 侧仍负责应用生命周期内只启动一次，并保持宿主库驻留。C/C++ argv 数组必须像普通 main 参数一样有效、以空指针结束，在 Node 运行期间保持所需生命周期。
 
 在调用前，宿主创建其获准的私有应用数据目录，把 `DSH_HOME` 显式设成该既有绝对目录，保持34的 ledger / marker / flock 前提。现有 `workspaceRoots`、会话根和文件系统权限约束继续由原授权层提供；本项没有扩大或替代它们。
 

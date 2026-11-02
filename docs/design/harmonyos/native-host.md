@@ -55,7 +55,7 @@ stdout/stderr 使用管道读取。fd 1/2 属于整个进程，捕获期间其�
 
 P2 的 rawfile manifest 按文件哈希描述 JS/JSON 等普通资源，安装到固定 `filesDir/dsh-runtime/tree`；已有文件 hash 一致时保留，变动文件写私有临时文件再 rename。持久 installing 标记阻止中断后的半成品启动；重新执行安装续完后才清除。已经消耗 Node 实例的进程不更新活动树。home/workspace 不随运行时替换，缓存可重建。这一过程不是全量解压几百 MB 的归档。
 
-`libdsh_host.so` 由 App CMake 构建；主线提供的 `libdsh_node_runner.so`、`libnode.so` 在 `entry/libs/arm64-v8a/`。Ark target 不包含 Node 头、不强制改名；C ABI runner 由另一份与 libnode 匹配的工具链构建。详见 `napi-isolation.md`。
+`libdsh_host.so` 由 App CMake 构建；主线提供的 `libnode.so` 在 `entry/libs/arm64-v8a/`，runner 已编入其中。Ark target 不包含 Node 头、不强制改名，只经 C ABI 进入 libnode。详见 `napi-isolation.md`。
 
 P1B v2 要求 P2 v5 从自己的可信 Context 生成 `nativeLibraryDir`：普通自有 Context 的 `bundleCodeDir` 加上 `applicationInfo.nativeLibraryPath` 的相对路径组件。公开 6.1 源码中后者不是绝对路径。Ark 必须拒绝空值、绝对 nativeLibraryPath、NUL、空组件、`.` 和 `..`，不接受 Dart 或配置传入的覆盖，也不硬编码安装路径。entry 模块固定 `extractNativeLibs: true`、`libIsolation: false`；这些 Ark 和模块字段由 P2 v5 提供。
 

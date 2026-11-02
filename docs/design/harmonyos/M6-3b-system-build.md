@@ -29,9 +29,9 @@
 
 ## 3. 产品与 Linux 夹具的构建输入
 
-产品 `host/CMakeLists.txt` 要求 OHOS 工具链，找到 SDK 中的 `deviceinfo.h` 和 `libdeviceinfo_ndk.z.so` 后才继续构建，并把设备信息库链接到自有 runner。官方 C API 文档及固定 `BUILD.gn` 支持这个库名与 NDK 接口归属。[官方 API 文档](https://raw.githubusercontent.com/openharmony/docs/OpenHarmony-v6.1-Release/zh-cn/application-dev/reference/apis-basic-services-kit/capi-deviceinfo-h.md)；[固定库构建定义](https://raw.githubusercontent.com/openharmony/startup_init/08addb7868567eed729072efa93b59380366cf22/interfaces/kits/syscap/BUILD.gn)。
+产品 runner 编入 libnode，`runtime/ohos/node/build-node.py` 要求 SDK 中的 `deviceinfo.h`，并把 `libdeviceinfo_ndk.z.so` 链接到 libnode。官方 C API 文档及固定 `BUILD.gn` 支持这个库名与 NDK 接口归属。[官方 API 文档](https://raw.githubusercontent.com/openharmony/docs/OpenHarmony-v6.1-Release/zh-cn/application-dev/reference/apis-basic-services-kit/capi-deviceinfo-h.md)；[固定库构建定义](https://raw.githubusercontent.com/openharmony/startup_init/08addb7868567eed729072efa93b59380366cf22/interfaces/kits/syscap/BUILD.gn)。
 
-Linux 没有这个系统库。`build-publication-native.sh` 因此显式加入 `runtime/tests/ohos/publication-deviceinfo-fixture/` 的四函数测试实现；返回值带 `DSH-Linux-Test-` 前缀。这个目录不在产品 CMake 的 include 或 source 列表中。测试值没有环境变量覆盖；故障用编译宏生成独立测试产物。这里没有在产品源中增加“非 OHOS 时假装有系统版本”的分支。
+Linux 没有这个系统库。`build-publication-native.sh` 因此显式加入 `runtime/tests/ohos/publication-deviceinfo-fixture/` 的四函数测试实现；返回值带 `DSH-Linux-Test-` 前缀。这个目录不在产品构建的 include 或 source 列表中。测试值没有环境变量覆盖；故障用编译宏生成独立测试产物。这里没有在产品源中增加“非 OHOS 时假装有系统版本”的分支。
 
 真实崩溃测试中的系统 A/B 切换也是显式测试输入，用来覆盖持久状态跨版本行为。它不是在 Linux 上测到两个 HarmonyOS 系统版本。测试必须同时记录真实测试 binding getter 的返回值和 A/B 覆盖来源，以免把版本模拟混成设备证据。
 

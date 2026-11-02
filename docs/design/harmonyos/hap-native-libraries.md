@@ -1,13 +1,12 @@
 # HAP 原生库与 Node addon 的文件映射
 
-本项只闭合 JS 入口到两个固定库文件的映射。Linux 已用真实 addon 完成严格仿真；鸿蒙 SDK、改名后的 libnode、HAP 安装和设备加载均未验证。宿主目录接线另属 P1B/P2 后继版本，不能把本项单独视为可发行的 HAP。
+本项只闭合 JS 入口到两个固定库文件的映射。Linux 已用真实 addon 完成严格仿真；目标库的交叉编译和 ELF 审计已离线完成（`runtime/ohos/node/BUILD.md`），HAP 安装和设备加载均未验证。宿主目录接线另属 P1B/P2 后继版本，不能把本项单独视为可发行的 HAP。
 
 ## 两类文件
 
 | 生产者 | HAP `entry/libs/arm64-v8a/` 文件 | 消费方式 |
 |---|---|---|
-| libnode 主线构建 | `libnode.so` | runner 的 ELF 依赖；由主线核实实际输出及导出表 |
-| `runtime/ohos/host/` | `libdsh_node_runner.so` | Ark 宿主只调用 `dsh_node_start` / `dsh_node_stop` C 接口 |
+| libnode 主线构建，含 `runtime/ohos/host/` 的 runner | `libnode.so` | `libdsh_host.so` 的 ELF 依赖；Ark 宿主只调用 `dsh_node_start` / `dsh_node_stop` C 接口。由主线核实实际输出及导出表 |
 | `app/ohos/entry/src/main/cpp/` | `libdsh_host.so` | Ark 真正的 N-API 模块 |
 | `runtime/ohos/native/build-flock.py` 的 `system.node` | `libdsh_flock.so` | OH 专用 flock 入口，显式 `process.dlopen` |
 | `runtime/ohos/native/loader/build-loader.py` 的 `require_builtin.node` | `libdsh_require_builtin.so` | OH 专用 require-builtin 入口，显式 `process.dlopen` |

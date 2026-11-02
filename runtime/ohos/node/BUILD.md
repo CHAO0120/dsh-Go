@@ -71,11 +71,12 @@ python3 runtime/ohos/node/build-node.py \
 | 内置快照/代码缓存 | 交叉构建显式禁用；不禁止 O2 对用户模块启用 `module.enableCompileCache` |
 | ELF | AArch64、ET_DYN、无 PT_INTERP，SONAME 必须为 `libnode.so` |
 | C++ 运行库 | LLVM 23.1.1 的 libc++、libc++abi、libunwind、compiler-rt builtins 经 `-static-libstdc++` 静态链入，`libnode-exports.map` 不导出它们 |
-| N-API 与导出表 | 全程 `-include napi-rename.h`；`libnode-exports.map` 默认拒绝，只导出 `dsh_napi_*`、`dsh_node_api_*`、`dsh_uv_err_name`、`dsh_uv_translate_sys_error`、`node::Start` 和 require-builtin 的六个符号。V8、libuv、OpenSSL、zlib、ICU、SQLite 都不导出 |
+| 嵌入 runner | `runtime/ohos/host/node_runner.cpp`、`publication_binding.cc` 在 configure 后用 `out/libnode.target.mk` 里的 gyp 参数预先编译，再经 `toolchain/link` 链入 libnode。不改 Node 源码和 gyp。Node 关闭 RTTI，RTTI 开关会改变 `std::function` 的布局，所以参数必须一致。`make` 还会链接 openssl-cli，所以只属于 libnode 的链接项放在 `link` 包装脚本里，不放 `LDFLAGS` |
+| N-API 与导出表 | 全程 `-include napi-rename.h`；`libnode-exports.map` 默认拒绝，只导出 `dsh_napi_*`、`dsh_node_api_*`、`dsh_node_start`、`dsh_node_stop` 和 require-builtin 的六个符号。V8、libuv、OpenSSL、zlib、ICU、SQLite 都不导出 |
 
-输出包括精简后的 `libnode.so`、Node 合并许可证和 `build.json`。`libnode.so` 不再依赖 `libc++_shared.so`，不需要为它分发；HAP 仍要带 SDK 的那份给 `libflutter.so` 和用 SDK 工具链构建的其他库。报告记录源码/补丁摘要、实际 SDK manifest、编译器和链接器的摘要与版本、运行库摘要、精确环境与命令、原始和精简库大小及摘要、ELF 动态信息和符号审计。仅在构建真正完成后才产生这些大小。
+输出包括精简后的 `libnode.so`、Node 合并许可证和 `build.json`。`libnode.so` 不再依赖 `libc++_shared.so`，不需要为它分发；HAP 仍要带 SDK 的那份给 `libdsh_host.so`。报告记录源码/补丁摘要、实际 SDK manifest、编译器和链接器的摘要与版本、运行库摘要、精确环境与命令、原始和精简库大小及摘要、ELF 动态信息和符号审计。仅在构建真正完成后才产生这些大小。
 
-脚本在产出前审计：NEEDED 全部存在于 SDK sysroot；每个导出都匹配 `libnode-exports.map`，因此没有 `napi_*`、`node_api_*`、`uv_*` 和 C++ 运行库符号；`napi-rename.h` 的每个目标名和导出表的每个确切符号都确实导出；所有强导入都能由 NEEDED 库在 sysroot 中的版本提供。sysroot 的 `libc.so` 是接口存根，这证明的是 SDK 公开接口，不证明设备上的实现。
+脚本在产出前审计：NEEDED 全部存在于 SDK sysroot；每个导出都匹配 `libnode-exports.map`，因此没有 `napi_*`、`node_api_*`、`uv_*` 和 C++ 运行库符号；C++ 导出恰好是 `native/loader/source-pins.json` 的六个，反修饰后不含 `std::`；`napi-rename.h` 的每个目标名和导出表的每个确切符号都确实导出；带 `NODELETE`，无 RUNPATH；通过 `runtime/ohos/host/napi_isolation.py`；所有强导入都能由 NEEDED 库在 sysroot 中的版本提供。sysroot 的 `libc.so` 是接口存根，这证明的是 SDK 公开接口，不证明设备上的实现。
 
 Node 上游 [共享库说明](https://github.com/nodejs/node/blob/v24.22.1/doc/contributing/shared-library.md) 将共享库构建列为非正式支持方式，列出的已测试平台不包含 OpenHarmony。固定源码已包含 OpenHarmony 目标支持，也不等于本脚本的所有链接步骤已获设备验证。
 
@@ -100,24 +101,57 @@ Ark 的 `libace_napi` 在同一进程导出同名 `napi_*`，env 和 value 语�
 
 | 组件 | 编译方式 | 用到的符号 |
 | --- | --- | --- |
-| `libnode.so` | 目标编译全程 `-include napi-rename.h`（包装脚本注入，宿主工具不受影响） | 导出 `dsh_napi_*`、`dsh_node_api_*` |
-| `.node` addon、`dsh_ohos_publication`（`libdsh_node_runner.so`） | **必须同样** `-include runtime/ohos/node/napi-rename.h` | 导入 `dsh_napi_*`，`NEEDED libnode.so` |
-| `libdsh_host.so` | 不 force-include，用 Ark 的 `napi/native_api.h` | 用 Ark 的真 `napi_*`，只经 C 函数 `dsh_node_start` 进入 Node |
+| `libnode.so`，含 runner 和 `dsh_ohos_publication` | 目标编译全程 `-include napi-rename.h`（包装脚本注入，宿主工具不受影响） | 导出 `dsh_napi_*`、`dsh_node_api_*`、`dsh_node_start`、`dsh_node_stop` |
+| `.node` addon | **必须同样** `-include runtime/ohos/node/napi-rename.h` | 导入 `dsh_napi_*`，`NEEDED libnode.so` |
+| `libdsh_host.so` | 不 force-include，用 Ark 的 `napi/native_api.h` | 用 Ark 的真 `napi_*`，只经 C 函数 `dsh_node_start`、`dsh_node_stop` 进入 Node |
 
-`napi-rename.h` 由 `gen-napi-rename.py` 从固定的 `src/js_native_api.h`、`src/node_api.h` 生成，两个头文件的 SHA256 钉在脚本里；构建和 `runtime/tests/ohos/node-build.py` 都用 `--check` 确认它是最新的。列表与官方 Linux Node 24.22.1 动态导出的 161 个 `napi_*` / `node_api_*` 函数逐一相同。此外改名 libuv 的 `uv_err_name`、`uv_translate_sys_error`，因为发布绑定调用它们，而 libuv 不再导出。
+`napi-rename.h` 由 `gen-napi-rename.py` 从固定的 `src/js_native_api.h`、`src/node_api.h` 生成，两个头文件的 SHA256 钉在脚本里；构建和 `runtime/tests/ohos/node-build.py` 都用 `--check` 确认它是最新的。列表与官方 Linux Node 24.22.1 动态导出的 161 个 `napi_*` / `node_api_*` 函数逐一相同。
 
 addon 构建者要做的：
 
 1. 编译时加 `-include <repo>/runtime/ohos/node/napi-rename.h`，其余照常包含 Node 24.22.1 的 `node_api.h`，源码不用改。`napi_register_module_v1` 和 `node_api_module_get_api_version_v1` 是 addon 自己导出的入口，不在改名之列。
 2. 链接 `libnode.so`，加 `-Wl,-z,defs`。
 3. 产出后检查 `llvm-nm -D --undefined-only`：不得出现 `napi_*`、`node_api_*`（否则会绑定到 Ark），`dsh_*` 必须都在 libnode 的导出里。`build-flock.py`、`build-loader.py` 已包含这项拒绝。未经此法构建的现成预编译 addon 不能用。
-4. 只能用 N-API。libuv（除上面两个错误辅助函数）、`v8::`、`node::` C++ API 不导出，依赖它们的 addon 在 `-z defs` 下链接失败。
+4. 只能用 N-API。libuv、`v8::`、`node::` C++ API 不导出，依赖它们的 addon 在 `-z defs` 下链接失败。
+5. 不得依赖 `libc++_shared.so`，`napi_isolation.py` 会拒绝。C addon 用哪个编译器都可以（flock 用 SDK clang）；C++ addon 用 clang 23 和 `--cxx-runtime` 的静态 libc++（`build-loader.py`）。
 
-addon 不需要用 clang 23 或这份 libc++：N-API 是 C 接口，SDK clang 15 配 SDK libc++ 可以编译 Node 24.22.1 的 `node_api.h` 和 `node.h`。libnode 内部的 libc++ 是 `std::__1`，SDK 的是 `std::__n1`，两者都带 `__cxa_*` 和 `operator new`；libnode 的那份不导出，所以不会互相干扰。不要让 C++ 异常或 `std::` 对象跨过 addon 与 libnode 的边界。
+libnode 内部的 libc++ 是 `std::__1`，SDK 的是 `std::__n1`，两者都带 `__cxa_*` 和 `operator new`；libnode 的那份不导出，所以不会互相干扰。不要让 C++ 异常或 `std::` 对象跨过 addon 与 libnode 的边界。
 
-`dsh_node_start` 定义在 `libdsh_node_runner.so`（`runtime/ohos/host/node_runner.cpp`），不在 libnode：它要先注册发布绑定再调用 `node::Start(int, char**)`，后者是 libnode 为此导出的唯一 Node 启动入口，签名不含 `std::` 类型。`libnode-exports.map` 另导出 `native/loader/source-pins.json` 列出的六个符号，供 require-builtin addon 经 `dlsym(RTLD_DEFAULT, …)` 读取；这要求 libnode 处于全局查找范围，是否成立只能在设备上确认。
+`dsh_node_start`、`dsh_node_stop`（`runtime/ohos/host/node_runner.cpp`）编入 libnode，是 `libdsh_host.so` 进入 Node 的唯一入口。runner 用的 `node::`、`v8::` 嵌入 API 带 `std::` 类型，留在库内不导出，`node::Start` 也不再导出。`libnode-exports.map` 另导出 `native/loader/source-pins.json` 列出的六个符号，供 require-builtin addon 经 `dlsym(RTLD_DEFAULT, …)` 读取；这要求 libnode 处于全局查找范围，是否成立只能在设备上确认。
 
 `-Bsymbolic-functions` 只让 libnode 内部调用绑定自身，挡不住别的库绑定到它的导出，真正起隔离作用的是改名和默认拒绝的导出表。模拟 TLS 的键也归各库自己：`dlclose` libnode 不受支持，它的 pthread key 和析构函数不会卸载，库应驻留到进程退出。
+
+## HAP 原生库集合
+
+`runtime/ohos/native/build-hap-libs.py` 在 `build-node.py` 的输出旁构建其余的库，放进新目录，并把集合作为整体审计：
+
+```sh
+python3 runtime/ohos/native/build-hap-libs.py \
+  --sdk-native /absolute/sdk/native \
+  --clang /usr/bin/clang++ \
+  --cxx-runtime /absolute/ohos-llvm-runtimes \
+  --libnode-output /absolute/new-node-ohos-artifacts \
+  --node-source /absolute/pristine-node-v24.22.1 \
+  --flock-package /absolute/node-addon-system-0.1.2 \
+  --loader-source /absolute/dsh-node-addon-require-builtin-a58d3599 \
+  --node-addon-api /absolute/node-addon-api-8.9.2 \
+  --work /absolute/new-hap-libs-build \
+  --output /absolute/hap-libs/arm64-v8a
+```
+
+三个第三方输入都不进仓库，由 `build-flock.py`、`build-loader.py` 按各自的 SHA256 核对：`@deepseek-ai/node-addon-system` 0.1.2 和 `node-addon-api` 8.9.2 来自 npm，loader 源码来自 `native/loader/source-pins.json` 的 `archiveURL`。
+
+| 库 | 来源 |
+| --- | --- |
+| `libnode.so` | `build-node.py` |
+| `libdsh_host.so` | `app/ohos/entry/src/main/cpp/CMakeLists.txt`，SDK 工具链文件，`-z defs` |
+| `libdsh_flock.so` | `build-flock.py` 的 `system.node`，SDK clang |
+| `libdsh_require_builtin.so` | `build-loader.py` 的 `require_builtin.node`，clang 23 和静态 libc++ |
+| `libc++_shared.so` | SDK `llvm/lib/aarch64-linux-ohos`，只有 `libdsh_host.so` 依赖它 |
+
+审计（写入 `--output` 旁的 `audit.json`，有问题则失败）：每个库的 NEEDED 闭包都在集合或 SDK sysroot 内；每个强导入都能在自己的 NEEDED 闭包里解析；无 RUNPATH；原名 N-API 导入只出现在 `libdsh_host.so` 且由 `libace_napi.z.so` 提供；`dsh_napi_*` 导入只流向 libnode，只有 libnode 定义它们；除 addon 两个入口外，没有库定义原名 N-API。
+
+`tooling/ohos/build-hap.sh` 从 `DSH_OHOS_NATIVE_LIBS` 把 `libnode.so`、`libdsh_flock.so`、`libdsh_require_builtin.so` 放进 `app/ohos/entry/libs/arm64-v8a`，缺任何一个都直接失败，退出时清掉，`app/ohos/.gitignore` 挡住它们。`libdsh_host.so` 和 `libc++_shared.so` 不放：`entry/build-profile.json5` 的 `externalNativeOptions` 让 hvigor 按同一份 CMake 对放入的 libnode 重新构建宿主，放进预编译的一份会重名。因此 HAP 里的 `libdsh_host.so` 与这里审计的不是同一份字节，同一个 CMake 门会在 hvigor 构建时再跑一次。hvigor 是否打包 `libc++_shared.so` 本机没有验证过。
 
 ## 实测
 
@@ -125,20 +159,31 @@ addon 不需要用 clang 23 或这份 libc++：N-API 是 C 接口，SDK clang 15
 
 | 项目 | 结果 |
 | --- | --- |
-| 耗时 | 运行库 30 秒（`-j5`）；Node 4232 秒（`-j4`） |
-| 磁盘 | Node 工作目录 1695697781 字节；运行库构建目录 278 MB，安装目录 20 MB |
-| 可复现性 | 同一 `--work` 路径的两次独立构建，未精简库 SHA256 相同（`3769bedc…`）；换路径未测 |
+| 耗时 | 运行库 30 秒（`-j5`）；Node 4147 秒（`-j4`，内存上限 6 GB）；其余原生库 8 秒 |
+| 磁盘 | Node 工作目录 1696484303 字节；运行库构建目录 278 MB，安装目录 20 MB |
+| 可复现性 | 保留树增量重链和从空目录重建，未精简库 SHA256 相同（`7613329a…`），下表五个库逐字节相同。两次用同一 `--work` 路径；换路径未测 |
 | ELF | ELF64、AArch64、ET_DYN，无 PT_INTERP，SONAME `libnode.so`，无 RUNPATH，BIND_NOW |
-| NEEDED | 只有 `libc.so` |
-| 动态导出 | 170 个：161 个 `dsh_napi_*` / `dsh_node_api_*`、2 个 `dsh_uv_*`、`node::Start`、require-builtin 的 6 个；无 `napi_*`、`node_api_*`、`uv_*`、C++ 运行库符号 |
-| 动态导入 | 469 个，强导入全部由 SDK sysroot 的 `libc.so` 提供；sysroot 之外只有 8 个弱引用（`ZSTD_trace_*` 4 个、`__cxa_thread_atexit_impl`、`__register_frame_info`、`__deregister_frame_info`、V8 的 `_ZTH…g_thread_in_wasm_code`） |
+| NEEDED | `libdeviceinfo_ndk.z.so`、`libc.so` |
+| 动态导出 | 169 个：161 个 `dsh_napi_*` / `dsh_node_api_*`、`dsh_node_start`、`dsh_node_stop`、require-builtin 的 6 个；无 `napi_*`、`node_api_*`、`uv_*`、C++ 运行库符号，无带 `std::` 的导出 |
+| 动态导入 | 476 个，强导入全部由 SDK sysroot 的 `libc.so`、`libdeviceinfo_ndk.z.so` 提供；sysroot 之外只有 8 个弱引用（`ZSTD_trace_*` 4 个、`__cxa_thread_atexit_impl`、`__register_frame_info`、`__deregister_frame_info`、V8 的 `_ZTH…g_thread_in_wasm_code`） |
 | TLS | 无 PT_TLS，无 TLS 重定位 |
-| 大小 | 未精简 107831584 字节，`--strip-unneeded` 后 81662024 字节（SHA256 `5113418d…`） |
+| 大小 | 未精简 107838320 字节，`--strip-unneeded` 后 81662168 字节（SHA256 `6771313b…`） |
 
-离线集成检查：`runtime/ohos/host` 用 SDK CMake 工具链链接成功（`-z defs`，只导入 `dsh_*` 和 `node::Start`）；`build-flock.py` 和一个 node-addon-api 探针用 SDK clang 15 构建成功，导入全部解析到 libnode；不带 force-include 的 addon 在 `-z defs` 下报 `undefined symbol: napi_get_undefined`。
+`build-hap-libs.py` 产出的集合，审计无问题：
 
+| 库 | 精简后字节 | NEEDED | 导出 | 强导入 | 原名 N-API 导入 | `dsh_*` N-API 导入 |
+| --- | --- | --- | --- | --- | --- | --- |
+| `libnode.so` | 81662168 | `libdeviceinfo_ndk.z.so`、`libc.so` | 169 | 466 | 0 | 0 |
+| `libc++_shared.so` | 1262248 | `libc.so` | 2357 | 167 | 0 | 0 |
+| `libdsh_require_builtin.so` | 872840 | `libnode.so`、`libc.so` | 4 | 147 | 0 | 32 |
+| `libdsh_host.so` | 121888 | `libace_napi.z.so`、`libhilog_ndk.z.so`、`libnode.so`、`libc++_shared.so`、`libc.so` | 41 | 140 | 19 | 0 |
+| `libdsh_flock.so` | 9248 | `libnode.so`、`libc.so` | 4 | 27 | 0 | 23 |
+| 合计 | 83928392 | | | | | |
 
+合计不含 Flutter 自己的 `libflutter.so`、`libapp.so`，本机没有这两个库。`libdsh_flock.so`、`libdsh_require_builtin.so` 的 SONAME 仍是 `system.node`、`require_builtin.node`，只有文件名按 HAP 映射改过。
+
+离线负向检查：审计拒绝缺 `libc++_shared.so`、缺 `libnode.so`、未改名 addon、不依赖 libnode 的改名 addon、带 RUNPATH、第二个定义改名 N-API 的库、无处解析的强导入；门拒绝把 addon 当 Ark 模块、把 Ark 模块当 addon，以及已删除的 `runner` 角色。libnode 里 `builtin_module_require` 的实际机器码是 `bti c; ldr x0, [x0, #440]; ret`，loader 的解码器支持这个形状；这只是读了指令和解码器源码，没有在 ARM64 上跑过探针。
 
 ## 本机必须完成的验收
 
-下列项目仍为 **NOT_RUN**，没有 HarmonyOS 设备：HAP 签名分发、`libnode.so` 实际装载、Ark/Node 符号解析、首次/重复启动、内置 SQLite、zstd、TLS 证书校验、jitless 无 wasm、普通 `process.exit(7)` 返回退出码且应用存活、Node 退出后不能再次启动。最终内置 Fetch 的 multipart 测试必须去掉 O7a 的候选 bundle 替代加载，直接针对编入共享库的内置版本运行。
+下列项目仍为 **NOT_RUN**，没有 HarmonyOS 设备：HAP 构建与打包、签名分发、`libnode.so` 实际装载、Ark/Node 符号解析、require-builtin 的 `dlsym(RTLD_DEFAULT, …)` 能否看到 libnode、首次/重复启动、内置 SQLite、zstd、TLS 证书校验、jitless 无 wasm、普通 `process.exit(7)` 返回退出码且应用存活、Node 退出后不能再次启动。最终内置 Fetch 的 multipart 测试必须去掉 O7a 的候选 bundle 替代加载，直接针对编入共享库的内置版本运行。
