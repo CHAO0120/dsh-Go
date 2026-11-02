@@ -14012,6 +14012,18 @@ abstract class L10n {
   /// **'安装后即可登录'**
   String get localEnvSignInInstallFirst;
 
+  /// No description provided for @engineStartReopensApp.
+  ///
+  /// In zh, this message translates to:
+  /// **'引擎每次打开 App 只能启动一次，再启动会重新打开 App。'**
+  String get engineStartReopensApp;
+
+  /// No description provided for @engineReopenFailed.
+  ///
+  /// In zh, this message translates to:
+  /// **'引擎要重新打开 App 才能再启动，请手动重开一次。'**
+  String get engineReopenFailed;
+
   /// No description provided for @marketSectionOfficial.
   ///
   /// In zh, this message translates to:

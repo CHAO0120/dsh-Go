@@ -1,9 +1,10 @@
 import 'dart:async';
 import 'dart:collection';
 
-import 'package:flutter/services.dart' show MissingPluginException;
+import 'package:flutter/services.dart' show MissingPluginException, PlatformException;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../l10n/l10n.dart';
 import '../state/settings_state.dart';
 import '../state/read_list_epoch.dart';
 import 'runtime_bridge.dart';
@@ -116,13 +117,33 @@ class LocalRuntimeController extends Notifier<LocalRuntimeState> {
   /// Keeps the current mode: in safe mode this starts safe mode again.
   Future<void> start() {
     final settings = ref.read(settingsProvider);
-    return _bridge.start(phoneStorage: settings.phoneStorage, visualReplies: settings.visualReplies);
+    return _startOrReopen(
+      () => _bridge.start(phoneStorage: settings.phoneStorage, visualReplies: settings.visualReplies),
+    );
   }
 
   /// Starts in [mode]; [EngineMode.normal] from safe mode begins the two-minute trial.
   Future<void> startIn(EngineMode mode) {
     final settings = ref.read(settingsProvider);
-    return _bridge.start(phoneStorage: settings.phoneStorage, visualReplies: settings.visualReplies, mode: mode);
+    return _startOrReopen(
+      () => _bridge.start(phoneStorage: settings.phoneStorage, visualReplies: settings.visualReplies, mode: mode),
+    );
+  }
+
+  /// HarmonyOS's engine runs in the app's own process and only once, so a second
+  /// start takes a new process. Every stop-then-start in the app ends up here.
+  Future<void> _startOrReopen(Future<void> Function() start) async {
+    try {
+      await start();
+    } on PlatformException catch (e) {
+      if (e.code != 'ohos_restart_required') rethrow;
+      try {
+        await _bridge.reopenApp();
+      } on PlatformException {
+        // The system says no while the app isn't on top, or within 3 s of the last time.
+        state = state.copyWith(notice: RuntimeNotice((state.notice?.seq ?? 0) + 1, appL10n.engineReopenFailed));
+      }
+    }
   }
 
   Future<void> stop() => _bridge.stop();

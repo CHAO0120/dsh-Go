@@ -75,6 +75,10 @@ const _rows = {
   'pet-outside-app',
   'pet-display-when',
   'refresh-rate',
+  'auto-safe',
+  'safe-mode',
+  'engine-reset',
+  'engine-uninstall',
 };
 
 final _zh = lookupL10n(AppLocale.zhCN);
@@ -345,6 +349,20 @@ void main() {
 
   group('引擎', () {
     List<Override> bridge() => [runtimeBridgeProvider.overrideWithValue(FakeBridge())];
+
+    testWidgets('on Android: safe mode, reset and uninstall', (tester) async {
+      await _pump(tester, const EngineScreen(), android: true, overrides: bridge());
+      expect(find.text(_zh.phoneEngineReset), findsOneWidget);
+      expect(find.text(_zh.phoneSafeAutoSettingsHint), findsOneWidget);
+      expect(find.text(_zh.engineStartReopensApp), findsNothing);
+    });
+
+    testWidgets('on HarmonyOS: none of them, and it says what starting again does', (tester) async {
+      await _pump(tester, const EngineScreen(), android: false, overrides: bridge());
+      expect(find.text(_zh.phoneEngineReset), findsNothing);
+      expect(find.text(_zh.phoneSafeAutoSettingsHint), findsNothing);
+      expect(find.text(_zh.engineStartReopensApp), findsOneWidget);
+    });
 
     testWidgets('on Android: 后台保活 under 更多', (tester) async {
       await _pump(tester, const EngineScreen(), android: true, overrides: bridge());

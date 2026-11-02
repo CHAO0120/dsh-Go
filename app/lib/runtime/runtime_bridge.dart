@@ -689,6 +689,9 @@ class RuntimeBridge {
 
   Future<void> stop() => _methods.invokeMethod<void>('stop');
 
+  /// HarmonyOS: closes the app and opens it again, the only way to another engine start.
+  Future<void> reopenApp() => _methods.invokeMethod<void>('reopenApp');
+
   /// Deletes the runtime with everything in /root except [keep].
   Future<void> reset({ResetKeep keep = const ResetKeep()}) => _methods.invokeMethod<void>('reset', {'keep': keep.wire});
 

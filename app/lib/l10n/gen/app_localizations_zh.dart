@@ -7645,6 +7645,12 @@ class L10nZh extends L10n {
   String get localEnvSignInInstallFirst => '安装后即可登录';
 
   @override
+  String get engineStartReopensApp => '引擎每次打开 App 只能启动一次，再启动会重新打开 App。';
+
+  @override
+  String get engineReopenFailed => '引擎要重新打开 App 才能再启动，请手动重开一次。';
+
+  @override
   String get marketSectionOfficial => '官方';
 
   @override

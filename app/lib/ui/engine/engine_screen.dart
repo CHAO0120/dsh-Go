@@ -70,6 +70,7 @@ class EngineScreen extends ConsumerWidget {
     final l10n = context.l10n;
     final state = ref.watch(localRuntimeProvider);
     final status = state.status;
+    final guest = ref.watch(androidSystemFeaturesProvider);
     final view = EngineStatusView.of(state);
     final settings = ref.watch(settingsProvider);
     final colors = DshColors.of(context);
@@ -118,6 +119,11 @@ class EngineScreen extends ConsumerWidget {
                 padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
                 child: EngineActions(phase: status.phase),
               ),
+            if (!guest && !missing)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
+                child: Text(l10n.engineStartReopensApp, style: Theme.of(context).textTheme.bodySmall),
+              ),
             const EngineFailureCard(padding: EdgeInsets.fromLTRB(16, 0, 16, 16)),
             const SafeModeCard(padding: EdgeInsets.fromLTRB(16, 0, 16, 16)),
             SettingsSection(
@@ -128,8 +134,10 @@ class EngineScreen extends ConsumerWidget {
                   value: settings.autoStartLocal,
                   onChanged: (v) => unawaited(ref.read(settingsProvider.notifier).setAutoStartLocal(v)),
                 ),
-                const SafeModeAutoSwitch(icon: null),
-                const SafeModeSettingsTiles(showAutoSwitch: false, icon: false),
+                if (guest) ...[
+                  const SafeModeAutoSwitch(icon: null),
+                  const SafeModeSettingsTiles(showAutoSwitch: false, icon: false),
+                ],
               ],
             ),
             if (!missing)
@@ -145,7 +153,7 @@ class EngineScreen extends ConsumerWidget {
             SettingsSection(
               title: l10n.commonMore,
               children: [
-                if (ref.watch(androidSystemFeaturesProvider))
+                if (guest)
                   SettingsTile(
                     spot: SettingsIndex.entry(SettingsPageId.background),
                     subtitle: l10n.phoneEngineKeepAliveHint,
@@ -169,7 +177,7 @@ class EngineScreen extends ConsumerWidget {
                 InfoRow(label: l10n.phoneEngineArchitecture, value: status.abi ?? '—', mono: true),
               ],
             ),
-            if (!missing)
+            if (!missing && guest)
               SettingsSection(
                 children: [
                   _ResetRow(enabled: !status.phase.isBusy),

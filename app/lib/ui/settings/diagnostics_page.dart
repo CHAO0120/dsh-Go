@@ -11,6 +11,7 @@ import '../../diagnostics/diagnostics_publish.dart';
 import '../../diagnostics/redact.dart';
 import '../../runtime/runtime_state.dart';
 import '../../runtime/runtime_bridge.dart';
+import '../../state/android_features.dart';
 import '../../state/app_info.dart';
 import '../../state/connection_state.dart';
 import '../../state/settings_state.dart';
@@ -93,10 +94,7 @@ class DiagnosticsPage extends ConsumerWidget {
     Future<void> publishForAi() async {
       final published = await ref.read(diagnosticsPublisherProvider).publish();
       if (!context.mounted) return;
-      showBriefNotice(
-        context,
-        published == null ? l10n.diagnosticsForAiFailed : l10n.diagnosticsForAiDone,
-      );
+      showBriefNotice(context, published == null ? l10n.diagnosticsForAiFailed : l10n.diagnosticsForAiDone);
     }
 
     return AppPage.list(
@@ -148,8 +146,7 @@ class DiagnosticsPage extends ConsumerWidget {
         // The note belongs to the export card; the next group starts 24 below
         // it, as groups do.
         const DiagnosticsBundleNote(),
-        const SizedBox(height: 24),
-        const DirectEngineSettings(),
+        if (ref.watch(androidSystemFeaturesProvider)) ...[const SizedBox(height: 24), const DirectEngineSettings()],
       ],
     );
   }

@@ -4917,6 +4917,8 @@
   "localEnvPhoneNeedsRuntime": "安装本机运行环境后可用",
   "localEnvSignInNeedsRuntime": "需要本机运行环境",
   "localEnvSignInInstallFirst": "安装后即可登录",
+  "engineStartReopensApp": "引擎每次打开 App 只能启动一次，再启动会重新打开 App。",
+  "engineReopenFailed": "引擎要重新打开 App 才能再启动，请手动重开一次。",
   "marketSectionOfficial": "官方",
   "marketSectionAdapted": "适配 DSH Go",
   "marketSectionAll": "全部",

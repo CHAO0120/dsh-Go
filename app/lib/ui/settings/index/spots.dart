@@ -961,6 +961,7 @@ abstract final class Spots {
     page: SettingsPageId.engine,
     title: (l) => l.phoneSafeAutoSettings,
     keywords: (l) => l.searchKwAutoSafe,
+    androidOnly: true,
   );
   static final safeMode = SettingSpot(
     'safe-mode',
@@ -968,18 +969,21 @@ abstract final class Spots {
     title: (l) => l.phoneSafeStartSettings,
     altTitle: (l) => l.phoneSafeLeave,
     keywords: (l) => l.searchKwSafeMode,
+    androidOnly: true,
   );
   static final engineReset = SettingSpot(
     'engine-reset',
     page: SettingsPageId.engine,
     title: (l) => l.phoneEngineReset,
     keywords: (l) => l.searchKwEngineReset,
+    androidOnly: true,
   );
   static final engineUninstall = SettingSpot(
     'engine-uninstall',
     page: SettingsPageId.engine,
     title: (l) => l.localEnvUninstall,
     keywords: (l) => l.searchKwEngineUninstall,
+    androidOnly: true,
   );
 
   // 远程主机.

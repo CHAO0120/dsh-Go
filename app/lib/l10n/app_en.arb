@@ -2320,6 +2320,8 @@
   "localEnvPhoneNeedsRuntime": "Available after installing on this phone",
   "localEnvSignInNeedsRuntime": "Needs DSH on this phone",
   "localEnvSignInInstallFirst": "Install it to sign in",
+  "engineStartReopensApp": "The engine starts once each time the app opens, so starting it again reopens the app.",
+  "engineReopenFailed": "The engine needs the app reopened before it can start again. Please reopen it.",
   "marketSectionOfficial": "Official",
   "marketSectionAdapted": "Made for DSH Go",
   "marketSectionAll": "All",

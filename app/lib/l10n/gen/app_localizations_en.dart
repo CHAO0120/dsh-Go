@@ -8077,6 +8077,13 @@ class L10nEn extends L10n {
   String get localEnvSignInInstallFirst => 'Install it to sign in';
 
   @override
+  String get engineStartReopensApp =>
+      'The engine starts once each time the app opens, so starting it again reopens the app.';
+
+  @override
+  String get engineReopenFailed => 'The engine needs the app reopened before it can start again. Please reopen it.';
+
+  @override
   String get marketSectionOfficial => 'Official';
 
   @override
