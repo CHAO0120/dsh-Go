@@ -21,6 +21,12 @@ const source = fs.readFileSync(new URL('../../../app/ohos/entry/src/main/ets/plu
 const compiled = ts.transpileModule(source, { compilerOptions: {
   target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS,
 } });
+const pathModule = { exports: {} };
+vm.runInNewContext(ts.transpileModule(fs.readFileSync(new URL(
+  '../../../app/ohos/entry/src/main/ets/runtime/RuntimePaths.ets', import.meta.url), 'utf8'), {
+  compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS },
+}).outputText, { module: pathModule, exports: pathModule.exports });
+const { RuntimePaths } = pathModule.exports;
 const plain = value => Object.prototype.toString.call(value) === '[object Map]'
   ? Object.fromEntries([...value].map(([k, v]) => [k, plain(v)]))
   : Array.isArray(value) ? Array.from(value, plain) : value;
@@ -29,7 +35,8 @@ const deferred = () => { let resolve; const promise = new Promise(r => { resolve
 async function fixture(t, options = {}) {
   const root = await fsp.mkdtemp(join(tmpdir(), 'dsh-files-'));
   const context = { filesDir: join(root, 'files'), cacheDir: join(root, 'cache'), tempDir: join(root, 'temp') };
-  const workspace = join(context.filesDir, 'workspace');
+  const paths = new RuntimePaths(context.filesDir);
+  const workspace = paths.workspace;
   for (const path of [workspace, context.cacheDir, context.tempDir, join(root, 'selected'), join(root, 'album')]) {
     await fsp.mkdir(path, { recursive: true });
   }
@@ -121,6 +128,11 @@ async function fixture(t, options = {}) {
         const fd = native.openUserFile(root, relative); fds.add(fd); return fd;
       } };
       if (name === '@ohos/flutter_ohos') return { MethodChannel: Channel };
+      // The controller's path derivation is actual product code. Its native
+      // lifecycle is independently exercised by runtime-channel.test.mjs.
+      if (name === '../runtime/RuntimeController') return { RuntimeController: {
+        get(actual) { assert.equal(actual, context); return { paths }; },
+      } };
       throw new Error(`Unexpected runtime import ${name}`);
     },
   });
@@ -146,7 +158,7 @@ async function fixture(t, options = {}) {
       notImplemented: () => resolve({ missing: true }),
     });
   });
-  return { root, context, workspace, plugin, binding, engine, call, channels, fds, opened, starts, dialogs, photos, warnings, documentOpened, photoOpened,
+  return { root, context, workspace, paths, plugin, binding, engine, call, channels, fds, opened, starts, dialogs, photos, warnings, documentOpened, photoOpened,
     destination, imageDestination, get releases() { return releases; },
     async file(name = '中文 空格.txt', bytes = 'hello') { const path = join(workspace, name); await fsp.mkdir(resolve(path, '..'), { recursive: true }); await fsp.writeFile(path, bytes); return path; },
     async cacheFiles() { return await fsp.readdir(context.cacheDir, { recursive: true }); },
@@ -215,13 +227,29 @@ test('detach during copying cancels, closes descriptors and removes the uncommit
 
 test('listOutputs depth, hidden files, symlink exclusion and seconds to milliseconds match Dart', async t => {
   const f = await fixture(t);
-  const path = await f.file('top.txt', '1234');
-  await f.file('.private.txt'); await f.file('one/two/three.txt');
-  await fsp.symlink(path, join(f.workspace, 'link.txt'));
+  const path = await f.file('DSH-Go/top.txt', '1234');
+  await f.file('DSH-Go/.private.txt'); await f.file('DSH-Go/one/two/three.txt');
+  await fsp.symlink(path, join(f.paths.outputs, 'link.txt'));
+  await f.file('package.json', '{"name":"project"}');
+  await f.file('node_modules/package/index.js', 'project dependency');
+  await f.file('project/ordinary.txt', 'not a deliverable');
   const r = await f.call('dsh/files', 'listOutputs', { depth: 1 });
   assert.deepEqual(r.value, [{ path, bytes: 4, modified: Math.floor((await fsp.stat(path)).mtimeMs / 1000) * 1000 }]);
   const all = await f.call('dsh/files', 'listOutputs', { depth: 3 });
   assert.equal(all.value.length, 2);
+  assert.equal(f.fds.size, 0);
+});
+
+test('output listing refuses a replaced root symlink and exporting still excludes DSH_HOME', async t => {
+  const f = await fixture(t);
+  const secret = join(f.paths.dshHome, 'secret.txt');
+  await fsp.mkdir(f.paths.dshHome, { recursive: true });
+  await fsp.writeFile(secret, 'private fixture');
+  assert.deepEqual(await f.call('dsh/files', 'listOutputs'), { value: [] });
+  await fsp.symlink(f.paths.dshHome, f.paths.outputs);
+  assert.equal((await f.call('dsh/files', 'listOutputs')).error, 'outside_workspace');
+  assert.deepEqual(await f.call('dsh/files', 'resolveGuest', { path: secret }), { value: null });
+  assert.deepEqual(await f.call('dsh/files', 'resolveGuest', { path: join(f.paths.outputs, 'secret.txt') }), { value: null });
   assert.equal(f.fds.size, 0);
 });
 

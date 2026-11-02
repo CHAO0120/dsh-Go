@@ -10,6 +10,8 @@ import util from '@ohos.util';
 import hilog from '@ohos.hilog';
 import { BusinessError } from '@ohos.base';
 import { openUserFile } from 'libdsh_host.so';
+import { RuntimeController } from '../runtime/RuntimeController';
+import { RuntimePaths } from '../runtime/RuntimePaths';
 import {
   AbilityAware, AbilityPluginBinding, Any, FlutterPlugin, FlutterPluginBinding,
   MethodCall, MethodChannel, MethodResult
@@ -22,6 +24,7 @@ class FileChannelError extends Error {
 
 export default class FilesMediaPlugin implements FlutterPlugin, AbilityAware {
   private context?: common.Context;
+  private paths?: RuntimePaths;
   private ability?: AbilityPluginBinding;
   private files?: MethodChannel;
   private media?: MethodChannel;
@@ -32,6 +35,7 @@ export default class FilesMediaPlugin implements FlutterPlugin, AbilityAware {
 
   onAttachedToEngine(binding: FlutterPluginBinding): void {
     this.context = binding.getApplicationContext();
+    this.paths = RuntimeController.get(this.context).paths;
     this.files = new MethodChannel(binding.getBinaryMessenger(), 'dsh/files');
     this.media = new MethodChannel(binding.getBinaryMessenger(), 'dsh/media');
     this.files.setMethodCallHandler({ onMethodCall: (call: MethodCall, result: MethodResult): void => {
@@ -50,7 +54,7 @@ export default class FilesMediaPlugin implements FlutterPlugin, AbilityAware {
     this.onDetachedFromAbility();
     this.files?.setMethodCallHandler(null);
     this.media?.setMethodCallHandler(null);
-    this.files = undefined; this.media = undefined; this.context = undefined;
+    this.files = undefined; this.media = undefined; this.context = undefined; this.paths = undefined;
   }
 
   onAttachedToAbility(binding: AbilityPluginBinding): void { this.ability = binding; }
@@ -74,7 +78,7 @@ export default class FilesMediaPlugin implements FlutterPlugin, AbilityAware {
 
   private openLocal(path: string): number {
     const context = this.context!;
-    const roots = [context.filesDir + '/workspace', context.cacheDir, context.tempDir];
+    const roots = [this.paths!.workspace, context.cacheDir, context.tempDir];
     for (const root of roots) {
       if (path.startsWith(root + '/')) return openUserFile(root, path.substring(root.length + 1));
     }
@@ -223,9 +227,13 @@ export default class FilesMediaPlugin implements FlutterPlugin, AbilityAware {
   }
 
   private async outputs(depth: number, generation: number): Promise<Map<string, Any>[]> {
-    const root = this.context!.filesDir + '/workspace';
+    const root = this.paths!.outputs;
     const result: Map<string, Any>[] = [];
     if (!await fs.access(root)) return result;
+    const rootStat = await fs.lstat(root);
+    if (!rootStat.isDirectory() || rootStat.isSymbolicLink()) {
+      throw new FileChannelError('outside_workspace', '输出目录必须是本机工作区内的普通目录。');
+    }
     const walk = async (directory: string, level: number): Promise<void> => {
       this.active(generation);
       const names = (await fs.listFile(directory, { recursion: false })).sort();
