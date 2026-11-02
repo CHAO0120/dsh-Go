@@ -1,0 +1,436 @@
+// A build on an OS without Android's own concepts (HarmonyOS): none of them
+// show anywhere, in the hub, 全部功能, search, links, the pages that mention
+// them or first run; the relay goes straight to its server. And on Android,
+// every one is still there.
+
+import 'package:dsh_app/links/page_links.dart';
+import 'package:dsh_app/l10n/l10n.dart';
+import 'package:dsh_app/pets/pet_prefs.dart';
+import 'package:dsh_app/pets/pet_signals.dart';
+import 'package:dsh_app/remote/relay/dsh_remote_backend.dart';
+import 'package:dsh_app/remote/relay/webrtc_peer.dart';
+import 'package:dsh_app/remote/secret_store.dart';
+import 'package:dsh_app/runtime/runtime_bridge.dart';
+import 'package:dsh_app/runtime/runtime_state.dart';
+import 'package:dsh_app/state/android_features.dart';
+import 'package:dsh_app/state/connection_state.dart';
+import 'package:dsh_app/state/features_state.dart';
+import 'package:dsh_app/state/hosts_state.dart';
+import 'package:dsh_app/state/onboarding_state.dart';
+import 'package:dsh_app/state/settings_state.dart';
+import 'package:dsh_app/ui/engine/engine_screen.dart';
+import 'package:dsh_app/ui/features/all_features_page.dart';
+import 'package:dsh_app/ui/features/feature_catalog.dart';
+import 'package:dsh_app/ui/features/permission_page.dart';
+import 'package:dsh_app/ui/onboarding/access_step.dart';
+import 'package:dsh_app/ui/onboarding/connect_page.dart';
+import 'package:dsh_app/ui/onboarding/runtime_setup_page.dart';
+import 'package:dsh_app/ui/pets/overlay_settings_tile.dart';
+import 'package:dsh_app/ui/pets/pet_settings_page.dart';
+import 'package:dsh_app/ui/phone/phone_control_screen.dart';
+import 'package:dsh_app/ui/plugins/native/native_taps.dart' show openNativePage;
+import 'package:dsh_app/ui/safe_mode/engine_failure_card.dart';
+import 'package:dsh_app/ui/settings/appearance/app_icon_picker.dart';
+import 'package:dsh_app/ui/settings/appearance/appearance_page.dart';
+import 'package:dsh_app/ui/settings/appearance/icon_shortcut_sheet.dart';
+import 'package:dsh_app/ui/settings/appearance/launch_screen_section.dart';
+import 'package:dsh_app/ui/settings/appearance/wallpaper_section.dart';
+import 'package:dsh_app/ui/settings/index/spot_anchor.dart';
+import 'package:dsh_app/ui/settings/index/spots.dart';
+import 'package:dsh_app/ui/settings/search/settings_search.dart';
+import 'package:dsh_app/ui/settings/search/settings_search_page.dart';
+import 'package:dsh_app/ui/settings/settings_screen.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_riverpod/misc.dart' show Override;
+import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+
+import '../onboarding/parallel_setup_support.dart';
+import '../pets/support.dart' show FixedPetPrefs, diskPack;
+import '../phone/support.dart' show FixedActiveHost, FixedHosts;
+import '../safe_mode/support.dart' show FakeBridge, failedAt;
+import '../shell/golden_harness.dart';
+
+const _pages = {
+  'page:phone',
+  'page:phoneAppRules',
+  'page:phoneDnd',
+  'page:phoneUnlocks',
+  'page:background',
+  'page:systemAccess',
+};
+const _rows = {
+  'phone-a11y-restore',
+  'phone-confirm',
+  'phone-auto-collapse',
+  'phone-return',
+  'phone-background-guide',
+  'phone-files',
+  'permission-phone-confirm',
+  'app-icon',
+  'icon-shortcut',
+  'launch-screen',
+  'pet-outside-app',
+  'pet-display-when',
+};
+
+final _zh = lookupL10n(AppLocale.zhCN);
+final _en = lookupL10n(AppLocale.en);
+
+List<Override> _on({required bool android, RuntimeStatus status = runningStatus}) => [
+  androidSystemFeaturesProvider.overrideWithValue(android),
+  activeHostProvider.overrideWith(() => FixedActiveHost(HostRef.local)),
+  hostsProvider.overrideWith(FixedHosts.new),
+  localRuntimeProvider.overrideWith(() => FakeRuntime(LocalRuntimeState(loaded: true, status: status))),
+  settingsProvider.overrideWith(() => FakeSettings(const AppSettings(loaded: true))),
+];
+
+/// A surface tall enough that a list page builds every row.
+Future<void> _pump(
+  WidgetTester tester,
+  Widget home, {
+  required bool android,
+  List<Override> overrides = const [],
+}) async {
+  tester.view.devicePixelRatio = 2;
+  tester.view.physicalSize = const Size(390 * 2, 3600 * 2);
+  addTearDown(tester.view.reset);
+  await tester.pumpWidget(
+    goldenApp(
+      home: home,
+      brightness: Brightness.light,
+      overrides: [
+        ..._on(android: android),
+        ...overrides,
+      ],
+    ),
+  );
+  await tester.pumpAndSettle();
+}
+
+void main() {
+  setUp(() => SharedPreferences.setMockInitialValues({}));
+
+  test('everything but ohos counts as Android, so tests run on the Android path', () {
+    final container = ProviderContainer();
+    addTearDown(container.dispose);
+    expect(container.read(androidSystemFeaturesProvider), isTrue);
+  });
+
+  group('the index', () {
+    test('Android\'s own is exactly these pages and rows', () {
+      expect(
+        {
+          for (final spot in SettingsIndex.spots)
+            if (SettingsIndex.androidOnly(spot)) spot.id,
+        },
+        {..._pages, ..._rows},
+      );
+    });
+
+    test('links to them are known by name', () {
+      for (final id in ['phone', 'phone-unlocks', 'phone-confirm', 'phone-files', 'background', 'system-permissions']) {
+        expect(SettingsIndex.androidOnlyLink(id), isTrue, reason: id);
+      }
+      for (final id in ['engine', 'appearance', 'dark-mode', 'nope']) {
+        expect(SettingsIndex.androidOnlyLink(id), isFalse, reason: id);
+      }
+    });
+  });
+
+  group('settings hub', () {
+    const tiles = ['page:phone', 'page:background', 'page:systemAccess'];
+
+    testWidgets('on Android: phone control, background and system access', (tester) async {
+      await _pump(tester, const SettingsScreen(), android: true);
+      for (final id in tiles) {
+        expect(find.byKey(SpotKey(id)), findsOneWidget, reason: id);
+      }
+    });
+
+    testWidgets('on HarmonyOS: none of them, every group still there', (tester) async {
+      await _pump(tester, const SettingsScreen(), android: false);
+      for (final id in tiles) {
+        expect(find.byKey(SpotKey(id)), findsNothing, reason: id);
+      }
+      expect(find.text('手机操控'), findsNothing);
+      expect(find.text('系统权限'), findsNothing);
+      expect(find.byKey(const SpotKey('page:webSearch')), findsOneWidget);
+      expect(find.byKey(const SpotKey('page:privacy')), findsOneWidget);
+    });
+  });
+
+  group('全部功能', () {
+    testWidgets('on Android: 手机操控 is a card', (tester) async {
+      await _pump(tester, const AllFeaturesPage(), android: true);
+      expect(find.text('手机操控'), findsOneWidget);
+    });
+
+    testWidgets('on HarmonyOS: no card, the rest of its group stays', (tester) async {
+      await _pump(tester, const AllFeaturesPage(), android: false);
+      expect(find.text('手机操控'), findsNothing);
+      expect(find.text(_zh.catalogModels), findsOneWidget);
+      expect(find.byKey(const ValueKey('all-settings')), findsOneWidget);
+    });
+  });
+
+  group('search', () {
+    List<String> ids(String q, {required bool android}) => [
+      for (final h in searchSettings(
+        q,
+        spots: SettingsIndex.spots,
+        features: featureSections,
+        zh: _zh,
+        en: _en,
+        androidFeatures: android,
+      ))
+        h.spot?.id ?? 'feature:${h.feature!.id}',
+    ];
+
+    test('on Android: found by name in both languages', () {
+      expect(ids('手机操控', android: true), contains('page:phone'));
+      expect(ids('phone control', android: true), contains('page:phone'));
+      expect(ids('后台', android: true), contains('page:background'));
+      expect(ids('桌面图标', android: true), contains('app-icon'));
+      expect(ids('悬浮窗', android: true), contains('pet-outside-app'));
+    });
+
+    test('on HarmonyOS: nothing of Android\'s by any of its names, the rest as before', () {
+      for (final spot in SettingsIndex.spots.where(SettingsIndex.androidOnly)) {
+        for (final name in [spot.title(_zh), spot.title(_en)]) {
+          final found = ids(name, android: false);
+          expect(found.toSet().intersection({..._pages, ..._rows}), isEmpty, reason: name);
+        }
+      }
+      expect(ids('深色', android: false), contains('dark-mode'));
+      expect(ids('引擎', android: false), contains('page:engine'));
+    });
+
+    testWidgets('on Android: the page offers 后台运行 and lists the page', (tester) async {
+      await _pump(tester, const SettingsSearchPage(), android: true);
+      expect(find.text(_zh.searchSuggestBackground), findsOneWidget);
+      await tester.enterText(find.byType(TextField), '手机操控');
+      await tester.pumpAndSettle();
+      expect(find.text('手机操控'), findsWidgets);
+      expect(find.text(_zh.searchNoResults), findsNothing);
+    });
+
+    testWidgets('on HarmonyOS: no 后台运行 word, and 手机操控 finds nothing', (tester) async {
+      await _pump(tester, const SettingsSearchPage(), android: false);
+      expect(find.text(_zh.searchSuggestBackground), findsNothing);
+      expect(find.text(_zh.searchSuggestDark), findsOneWidget);
+      await tester.enterText(find.byType(TextField), '手机操控');
+      await tester.pumpAndSettle();
+      expect(find.text(_zh.searchNoResults), findsOneWidget);
+    });
+  });
+
+  group('links', () {
+    Widget? resolve(String id, {required bool android}) {
+      final container = ProviderContainer(overrides: [androidSystemFeaturesProvider.overrideWithValue(android)]);
+      addTearDown(container.dispose);
+      return container.read(pageLinkResolverProvider)(id, null);
+    }
+
+    test('on Android they open', () {
+      expect(resolve('phone', android: true), isA<PhoneControlScreen>());
+      expect(resolve('background', android: true), isNotNull);
+      expect(resolve('system-permissions', android: true), isNotNull);
+    });
+
+    test('on HarmonyOS they are unknown; other pages still open', () {
+      for (final id in ['phone', 'phone-unlocks', 'phone-confirm', 'phone-files', 'background', 'system-permissions']) {
+        expect(resolve(id, android: false), isNull, reason: id);
+      }
+      expect(resolve('engine', android: false), isA<EngineScreen>());
+    });
+
+    for (final android in [true, false]) {
+      testWidgets('a plugin\'s `open phone` with android=$android', (tester) async {
+        usePhoneSurface(tester);
+        await tester.pumpWidget(
+          goldenApp(
+            home: Consumer(
+              builder: (context, ref, _) =>
+                  TextButton(onPressed: () => openNativePage(context, ref, 'phone'), child: const Text('open')),
+            ),
+            brightness: Brightness.light,
+            overrides: _on(android: android),
+          ),
+        );
+        await tester.tap(find.text('open'));
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 500));
+        expect(find.byType(PhoneControlScreen), android ? findsOneWidget : findsNothing);
+      });
+    }
+  });
+
+  group('宠物设置', () {
+    List<Override> pets() => [
+      petPackProvider.overrideWith((ref, id) async => diskPack(id)),
+      petPrefsProvider.overrideWith(() => FixedPetPrefs(const PetPrefs(loaded: true))),
+    ];
+
+    testWidgets('on Android: App 外显示', (tester) async {
+      await _pump(tester, const PetSettingsPage(), android: true, overrides: pets());
+      expect(find.byType(PetOverlaySettingsSection), findsOneWidget);
+    });
+
+    testWidgets('on HarmonyOS: the in-app pet\'s rows only', (tester) async {
+      await _pump(tester, const PetSettingsPage(), android: false, overrides: pets());
+      expect(find.byType(PetOverlaySettingsSection), findsNothing);
+      expect(find.text(_zh.botsPetSize), findsOneWidget);
+      expect(find.text(_zh.botsPetQuiet), findsOneWidget);
+    });
+  });
+
+  group('主题', () {
+    testWidgets('on Android: launcher icon, picture shortcut, launch screen', (tester) async {
+      await _pump(tester, const AppearancePage(), android: true);
+      expect(find.byType(AppIconPicker), findsOneWidget);
+      expect(find.byType(IconShortcutTile), findsOneWidget);
+      expect(find.byType(LaunchScreenSection), findsOneWidget);
+    });
+
+    testWidgets('on HarmonyOS: none of them, the rest of the page stays', (tester) async {
+      await _pump(tester, const AppearancePage(), android: false);
+      expect(find.byType(AppIconPicker), findsNothing);
+      expect(find.byType(IconShortcutTile), findsNothing);
+      expect(find.byType(LaunchScreenSection), findsNothing);
+      expect(find.text(_zh.pluginsAppIcon), findsNothing);
+      expect(find.text(_zh.launchScreenTitle), findsNothing);
+      expect(find.byType(ThemeModePicker), findsOneWidget);
+      expect(find.byType(WallpaperSection), findsOneWidget);
+    });
+  });
+
+  group('权限', () {
+    List<Override> permission() => [
+      activeConnectionProvider.overrideWithValue(const AsyncData(null)),
+      permissionStateProvider.overrideWith((ref, id) => Future.error('offline')),
+    ];
+
+    testWidgets('on Android: the phone group', (tester) async {
+      await _pump(tester, const PermissionPage(), android: true, overrides: permission());
+      expect(find.text(_zh.hubPermissionPhone), findsOneWidget);
+      expect(find.text(_zh.hubPermissionPhoneConfirm), findsOneWidget);
+    });
+
+    testWidgets('on HarmonyOS: no phone group', (tester) async {
+      await _pump(tester, const PermissionPage(), android: false, overrides: permission());
+      expect(find.text(_zh.hubPermissionPhone), findsNothing);
+      expect(find.text(_zh.hubPermissionPhoneConfirm), findsNothing);
+      expect(find.text(_zh.hubSettingsPhoneFiles), findsNothing);
+    });
+  });
+
+  group('引擎', () {
+    List<Override> bridge() => [runtimeBridgeProvider.overrideWithValue(FakeBridge())];
+
+    testWidgets('on Android: 后台保活 under 更多', (tester) async {
+      await _pump(tester, const EngineScreen(), android: true, overrides: bridge());
+      expect(find.byKey(const SpotKey('page:background')), findsOneWidget);
+    });
+
+    testWidgets('on HarmonyOS: only 诊断 under 更多', (tester) async {
+      await _pump(tester, const EngineScreen(), android: false, overrides: bridge());
+      expect(find.byKey(const SpotKey('page:background')), findsNothing);
+      expect(find.byKey(const SpotKey('page:diagnostics')), findsOneWidget);
+    });
+
+    final killed = RuntimeStatus(
+      phase: RuntimePhase.error,
+      bundledVersion: 'r4',
+      installedVersion: 'r4',
+      failure: RuntimeFailure(kind: FailureKind.killed, at: failedAt),
+    );
+
+    for (final android in [true, false]) {
+      testWidgets('killed: the failure card with android=$android', (tester) async {
+        usePhoneSurface(tester);
+        await tester.pumpWidget(
+          goldenApp(
+            home: const Scaffold(body: EngineFailureCard()),
+            brightness: Brightness.light,
+            overrides: [
+              ..._on(android: android, status: killed),
+              ...bridge(),
+            ],
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(find.text(_zh.phoneFailureKilled), findsOneWidget);
+        expect(find.text(_zh.phoneEngineKeepAlive), android ? findsOneWidget : findsNothing);
+        expect(find.text(_zh.commonRetry), findsOneWidget);
+      });
+    }
+  });
+
+  group('first run', () {
+    final harmony = [androidSystemFeaturesProvider.overrideWithValue(false)];
+
+    testWidgets('on Android: 外观 → what DSH Go should do → 连接, four steps', (tester) async {
+      final rig = await pumpGate(tester);
+      await chooseThisPhone(tester);
+      expect(find.bySemanticsLabel('第 2 步，共 4 步'), findsOneWidget);
+      await tester.tap(find.widgetWithText(FilledButton, '继续'));
+      await frames(tester);
+      expect(find.byType(AccessStepPage), findsOneWidget);
+      expect(rig.prefs.setupStep, SetupStep.access);
+    });
+
+    testWidgets('on HarmonyOS: 外观 → 连接, three steps, the saved step goes with it', (tester) async {
+      final rig = await pumpGate(tester, overrides: harmony);
+      expect(find.bySemanticsLabel('第 1 步，共 3 步'), findsOneWidget);
+      await chooseThisPhone(tester);
+      expect(find.bySemanticsLabel('第 2 步，共 3 步'), findsOneWidget);
+      await tester.tap(find.widgetWithText(FilledButton, '继续'));
+      await frames(tester);
+      expect(find.byType(AccessStepPage), findsNothing);
+      expect(find.byType(ConnectPage), findsOneWidget);
+      expect(find.bySemanticsLabel('第 3 步，共 3 步'), findsOneWidget);
+      expect(rig.prefs.setupStep, SetupStep.connect);
+    });
+
+    testWidgets('on HarmonyOS, connected already: 外观 → the waiting page', (tester) async {
+      final rig = await pumpGate(
+        tester,
+        settings: const AppSettings(loaded: true, apiKey: 'sk-test'),
+        overrides: harmony,
+      );
+      await chooseThisPhone(tester);
+      await tester.tap(find.widgetWithText(FilledButton, '继续'));
+      await frames(tester);
+      expect(find.byType(AccessStepPage), findsNothing);
+      expect(find.byType(RuntimeSetupPage), findsOneWidget);
+      expect(rig.prefs.setupStep, SetupStep.finishing);
+    });
+  });
+
+  group('relay', () {
+    DshRemoteRelayBackend backend({required bool android}) {
+      final container = ProviderContainer(
+        overrides: [
+          secretStoreProvider.overrideWithValue(MemorySecretStore()),
+          androidSystemFeaturesProvider.overrideWithValue(android),
+        ],
+      );
+      addTearDown(container.dispose);
+      return container.read(relayBackendProvider) as DshRemoteRelayBackend;
+    }
+
+    test('on Android: direct first', () {
+      final relay = backend(android: true);
+      expect(relay.peerConnector, flutterPeerConnector);
+      expect(relay.account.peerConnector, flutterPeerConnector);
+    });
+
+    test('on HarmonyOS: straight to the relay', () {
+      final relay = backend(android: false);
+      expect(relay.peerConnector, isNull);
+      expect(relay.account.peerConnector, isNull);
+    });
+  });
+}
