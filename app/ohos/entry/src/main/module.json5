@@ -23,6 +23,7 @@
         "startWindowIcon": "$media:icon",
         "startWindowBackground": "$color:start_window_background",
         "exported": true,
+        "launchType": "singleton",
         "skills": [
           {
             "entities": [
@@ -31,6 +32,11 @@
             "actions": [
               "action.system.home"
             ]
+          },
+          {
+            "entities": ["entity.system.browsable"],
+            "actions": ["ohos.want.action.viewData"],
+            "uris": [{"scheme": "dshgo"}]
           }
         ]
       }
