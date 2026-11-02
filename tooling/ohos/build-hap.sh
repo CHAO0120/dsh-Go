@@ -3,6 +3,7 @@
 #
 #   FLUTTER_OHOS=/path/to/flutter-ohos/bin/flutter \
 #   DSH_OHOS_NATIVE_LIBS=/path/to/hap-libs/arm64-v8a DSH_NODE_HEADERS=/path/to/node-v24.22.1/src \
+#   DSH_OHOS_RUNTIME=/path/to/dsh-runtime-rawfile.zip \
 #     tooling/ohos/build-hap.sh [--debug]
 #
 # The OHOS plugin overrides apply only for this run: pubspec_overrides.yaml and
@@ -19,6 +20,9 @@ FLUTTER="${FLUTTER_OHOS:-flutter}"
 MODE="${1:---release}"
 NATIVE_LIBS="${DSH_OHOS_NATIVE_LIBS:?Set DSH_OHOS_NATIVE_LIBS to the arm64-v8a directory from build-hap-libs.py}"
 : "${DSH_NODE_HEADERS:?Set DSH_NODE_HEADERS to the pinned Node source src directory}"
+RUNTIME="${DSH_OHOS_RUNTIME:?Set DSH_OHOS_RUNTIME to the zip from runtime/ohos/package/compose-runtime.py}"
+RUNTIME="$(cd "$(dirname "$RUNTIME")" && pwd)/$(basename "$RUNTIME")"
+[[ -f "$RUNTIME" ]] || { printf 'Missing runtime zip: %s\n' "$RUNTIME" >&2; exit 1; }
 PREBUILT=(libnode.so libdsh_flock.so libdsh_require_builtin.so)
 for lib in "${PREBUILT[@]}"; do
   [[ -f "$NATIVE_LIBS/$lib" ]] || { printf 'Missing native library: %s\n' "$NATIVE_LIBS/$lib" >&2; exit 1; }
@@ -26,12 +30,15 @@ done
 
 cd "$APP"
 LIBS=ohos/entry/libs/arm64-v8a
+RAWFILE=ohos/entry/src/main/resources/rawfile
 LOCK="$(mktemp)"
 cp pubspec.lock "$LOCK"
 restore() {
   rm -rf pubspec_overrides.yaml ohos/.vendor
   for lib in "${PREBUILT[@]}"; do rm -f "$LIBS/$lib"; done
   rmdir "$LIBS" ohos/entry/libs 2>/dev/null || true
+  rm -rf "$RAWFILE/dsh-runtime"
+  rmdir "$RAWFILE" 2>/dev/null || true
   cp "$LOCK" pubspec.lock
   rm -f "$LOCK"
 }
@@ -39,6 +46,9 @@ trap restore EXIT
 
 mkdir -p "$LIBS"
 for lib in "${PREBUILT[@]}"; do cp "$NATIVE_LIBS/$lib" "$LIBS/$lib"; done
+mkdir -p "$RAWFILE"
+python3 -I -m zipfile -e "$RUNTIME" "$RAWFILE"
+[[ -f "$RAWFILE/dsh-runtime/manifest.json" ]] || { printf 'No dsh-runtime/manifest.json in %s\n' "$RUNTIME" >&2; exit 1; }
 export DSH_NODE_HEADERS
 cp ohos/pubspec_overrides.ohos.yaml pubspec_overrides.yaml
 "$FLUTTER" pub get
