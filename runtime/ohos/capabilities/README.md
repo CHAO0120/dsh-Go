@@ -68,7 +68,7 @@
   --tree /绝对路径/本次已整合源码 \
   --prefix /绝对路径/已锁定OHOS前缀 \
   --linked /绝对路径/libpublication-test-linked.so \
-  --addon /绝对路径/openharmony-x64-napi-v9.node \
+  --native-library-dir /绝对路径/含libdsh_require_builtin.so与libdsh_flock.so的目录 \
   --out /绝对路径/不存在的输出目录 \
   --base-profile /绝对路径/已验证的鸿蒙profile补丁.yml
 ```
