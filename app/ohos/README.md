@@ -8,9 +8,10 @@ FLUTTER_OHOS=/path/to/flutter-ohos/bin/flutter tooling/ohos/build-hap.sh
 
 ## 现状
 
-- 第一阶段只有远程主机：没有 `dsh/runtime` 原生宿主时，App 的「本机」入口全部转去远程（`LocalRuntimeState.available`）。本机引擎见 `docs/design/harmonyos/`。
-- 权限只有联网和读网络状态。文件走系统选择器，不申请 `READ_MEDIA`。
-- 图标暂用安卓 192px 的 `ic_launcher.png`；上架前要换成 1024px 的分层图标。
+- 本机引擎的通道和原生宿主都在仓库里（`docs/design/harmonyos/`），还没有在设备上跑过。没有 `dsh/runtime` 原生宿主的构建，「本机」入口全部转去远程（`LocalRuntimeState.available`）。
+- 权限只有联网、读网络状态和振动。文件走系统选择器，不申请 `READ_MEDIA`。
+- 读剪贴板要 `READ_PASTEBOARD`（`user_grant`、`system_basic`，大概率要 ACL），还没有申请，所以粘贴多半拿不到内容，待真机确认。
+- 图标是 1024px 分层图，来自 `app/assets/brand/tile.svg`。
 
 ## 依赖
 
