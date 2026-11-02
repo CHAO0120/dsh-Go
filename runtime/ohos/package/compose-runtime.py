@@ -212,7 +212,7 @@ def assemble(args):
         composer.dependencies(process, 'process-dependencies', 'runtime/ohos/process',
                               packages['process'], config['processRemovePackages'], config['processRemoveFiles'])
         source_runtime = repo / 'runtime/ohos'
-        for directory in ('net', 'publication', 'capabilities', 'process'):
+        for directory in ('net', 'publication', 'capabilities', 'lifecycle', 'process'):
             for source in sorted((source_runtime / directory).glob('*.mjs')):
                 if source.name.startswith(('build-', 'link-')):
                     continue
