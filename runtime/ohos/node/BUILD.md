@@ -121,16 +121,19 @@ addon 不需要用 clang 23 或这份 libc++：N-API 是 C 接口，SDK clang 15
 
 ## 实测
 
-本机（16 核、14 GB，与其他任务共用）首次完整链接的结果，API 26 SDK、clang 23.1.1、lld 15.0.4：
+本机（16 核、14 GB，与其他任务共用）从空目录完整重跑 `build-runtimes.py` 和 `build-node.py` 的结果，API 26 SDK、clang 23.1.1、lld 15.0.4、GCC 16.2.1：
 
 | 项目 | 结果 |
 | --- | --- |
+| 耗时 | 运行库 30 秒（`-j5`）；Node 4232 秒（`-j4`） |
+| 磁盘 | Node 工作目录 1695697781 字节；运行库构建目录 278 MB，安装目录 20 MB |
+| 可复现性 | 同一 `--work` 路径的两次独立构建，未精简库 SHA256 相同（`3769bedc…`）；换路径未测 |
 | ELF | ELF64、AArch64、ET_DYN，无 PT_INTERP，SONAME `libnode.so`，无 RUNPATH，BIND_NOW |
 | NEEDED | 只有 `libc.so` |
 | 动态导出 | 170 个：161 个 `dsh_napi_*` / `dsh_node_api_*`、2 个 `dsh_uv_*`、`node::Start`、require-builtin 的 6 个；无 `napi_*`、`node_api_*`、`uv_*`、C++ 运行库符号 |
 | 动态导入 | 469 个，强导入全部由 SDK sysroot 的 `libc.so` 提供；sysroot 之外只有 8 个弱引用（`ZSTD_trace_*` 4 个、`__cxa_thread_atexit_impl`、`__register_frame_info`、`__deregister_frame_info`、V8 的 `_ZTH…g_thread_in_wasm_code`） |
 | TLS | 无 PT_TLS，无 TLS 重定位 |
-| 大小 | 未精简 107831584 字节，`--strip-unneeded` 后 81662024 字节 |
+| 大小 | 未精简 107831584 字节，`--strip-unneeded` 后 81662024 字节（SHA256 `5113418d…`） |
 
 离线集成检查：`runtime/ohos/host` 用 SDK CMake 工具链链接成功（`-z defs`，只导入 `dsh_*` 和 `node::Start`）；`build-flock.py` 和一个 node-addon-api 探针用 SDK clang 15 构建成功，导入全部解析到 libnode；不带 force-include 的 addon 在 `-z defs` 下报 `undefined symbol: napi_get_undefined`。
 

@@ -42,7 +42,7 @@ DSH_GO_OHOS_SIM_PLATFORM=openharmony DSH_GO_OHOS_SIM_ADDONS='[]' \
 
 原生 v1 候选 `c31270dd…` 的代码函数没有因此改变；独审指出该候选没有写出 M3-3 的测试前置，且探针只比较主/worker 标记是否相等，二者都 false 也能通过。v2 保留旧候选与反例，并添加上述强制断言；不能将旧候选在干净 c094 上的 jitless 结果误称严格通过。最终 C++ 源码和两种测试原生二进制哈希保持不变。
 
-产品构建只接受 OHOS CMake toolchain、O7b 固定源码与目标 `libnode.so`。目标 SDK 尚不可用，CMake 链接、arm64 ABI、Ark/Node 符号隔离、HAP 签名与实机加载全部 `NOT_RUN`。产品构建 force-include `runtime/ohos/node/napi-rename.h`，绑定的 N-API 调用和两个 libuv 错误辅助函数都走 libnode 的 `dsh_*` 名字，不与 Ark 的 `napi_*` 同名（见 `runtime/ohos/node/BUILD.md`）。
+产品构建只接受 OHOS CMake toolchain、O7b 固定源码与目标 `libnode.so`。用 API 26 SDK 的 CMake 配置和 `-z defs` 链接已离线通过；arm64 ABI、Ark/Node 符号隔离、HAP 签名与实机加载的实际运行全部 `NOT_RUN`。产品构建 force-include `runtime/ohos/node/napi-rename.h`，绑定的 N-API 调用和两个 libuv 错误辅助函数都走 libnode 的 `dsh_*` 名字，不与 Ark 的 `napi_*` 同名（见 `runtime/ohos/node/BUILD.md`）。
 
 ## 设备核验与结论边界
 
