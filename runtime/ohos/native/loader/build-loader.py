@@ -119,7 +119,7 @@ def main():
         if re.search(r'SONAME.*\[libnode\.so\]', node_elf) is None:
             raise ValueError('Requires O7b SONAME libnode.so')
         node_exports = exported_symbols(node_symbols)
-        require_symbols(node_exports, pins['requiredNode24Symbols'] + ['napi_get_node_version', 'napi_typeof'])
+        require_symbols(node_exports, pins['requiredNode24Symbols'] + ['dsh_napi_get_node_version', 'dsh_napi_typeof'])
     except ValueError as error:
         parser.error(str(error))
 
@@ -154,6 +154,7 @@ def main():
     with tempfile.TemporaryDirectory(prefix='.loader-build-', dir=output) as temporary:
         binary = Path(temporary) / 'require_builtin.node'
         command = target + ['-std=c++17', '-O2', '-g0', '-fPIC', '-shared', '-pthread',
+            '-include', str(HERE.parents[1] / 'node/napi-rename.h'),
             '-stdlib=libc++', '-fvisibility=hidden', '-fno-exceptions',
             '-DNAPI_VERSION=9', '-DNARB_BACKEND=1', '-DNARB_PRODUCT=1',
             '-DNODE_ADDON_API_DISABLE_CPP_EXCEPTIONS', '-DNODE_GYP_MODULE_NAME=require_builtin',
@@ -170,8 +171,11 @@ def main():
         if re.search(r'NEEDED.*\[libnode\.so\]', addon_elf) is None:
             raise RuntimeError('Addon must explicitly depend on libnode.so')
         require_symbols(exported_symbols(addon_symbols), ['napi_register_module_v1'])
-        napi_imports = sorted(name for name in imported_symbols(addon_symbols) if name.startswith('napi_'))
-        require_symbols(node_exports, napi_imports)
+        addon_imports = imported_symbols(addon_symbols)
+        plain = sorted(name for name in addon_imports if name.startswith(('napi_', 'node_api_')))
+        if plain:
+            raise RuntimeError(f'Addon imports plain N-API names, which would bind to Ark: {plain}')
+        require_symbols(node_exports, sorted(name for name in addon_imports if name.startswith('dsh_')))
         (output / 'addon-dynamic-symbols.txt').write_text(addon_symbols)
         package = output / 'node_modules/node-addon-require-builtin-openharmony-arm64'
         (package / 'prebuilt').mkdir(parents=True)

@@ -8,6 +8,7 @@ import json
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 import tempfile
 from types import SimpleNamespace
 
@@ -21,6 +22,8 @@ spec = importlib.util.spec_from_file_location('ohos_build', root / 'runtime/ohos
 module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(module)
 pins = json.loads((module.HERE / 'node24-ohos-pins.json').read_text())
+subprocess.run([sys.executable, str(module.HERE / 'gen-napi-rename.py'), '--source', str(args.source), '--check'],
+               check=True)
 
 
 def suffix(filename, target, host):

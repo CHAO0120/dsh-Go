@@ -1,9 +1,21 @@
-/* libc++ stays private to libnode. --exclude-libs hides what the archives define; this hides the
-   template instantiations and inline variables Node's own objects emit with default visibility. */
+/* Everything else in libnode stays private: V8, Node internals, libuv, OpenSSL, zlib, ICU, SQLite and the
+   static C++ runtime. Other libraries in the app process can carry the same names. */
 {
-  global: *;
-  local:
-    _ZNSt3__1*; _ZNKSt3__1*; _ZSt*;
-    _ZTINSt3__1*; _ZTSNSt3__1*; _ZTVNSt3__1*; _ZTTNSt3__1*;
-    _ZGVNSt3__1*; _ZTHNSt3__1*; _ZTWNSt3__1*;
+  global:
+    /* N-API under the names napi-rename.h gives it; Ark's libace_napi owns the plain napi_* names. */
+    dsh_napi_*;
+    dsh_node_api_*;
+    /* libuv error helpers the linked publication binding calls. */
+    dsh_uv_err_name;
+    dsh_uv_translate_sys_error;
+    /* node::Start(int, char**), called by dsh_node_start in the node runner. */
+    _ZN4node5StartEiPPc;
+    /* What the require-builtin addon reads with dlsym(RTLD_DEFAULT, ...): native/loader/source-pins.json. */
+    _ZN2v82V810GetVersionEv;
+    _ZN2v87Context29GetNumberOfEmbedderDataFieldsEv;
+    _ZN2v87Context37SlowGetAlignedPointerFromEmbedderDataEi;
+    _ZN2v87Isolate10GetCurrentEv;
+    _ZN2v87Isolate17GetCurrentContextEv;
+    _ZNK4node14PrincipalRealm22builtin_module_requireEv;
+  local: *;
 };

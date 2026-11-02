@@ -6,11 +6,13 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import subprocess
 import tempfile
 
 
 SOURCE_SHA256 = 'c1aa773c7a62b03ce3973156b928f41773fef9407afd79d71b2f625b5616421f'
+NAPI_RENAME = Path(__file__).resolve().parents[1] / 'node/napi-rename.h'
 
 
 def digest(path):
@@ -57,12 +59,15 @@ def main():
                    f'--sysroot={sdk / "sysroot"}', '-std=c11', '-O2', '-g0',
                    '-fPIC', '-fvisibility=hidden', '-shared', '-DNAPI_VERSION=8',
                    f'-ffile-prefix-map={package}=node-addon-system-0.1.2',
-                   '-I', str(headers), str(source), '-Wl,-soname,system.node',
+                   '-include', str(NAPI_RENAME), '-I', str(headers), str(source), '-Wl,-soname,system.node',
                    '-o', str(binary)]
         subprocess.run(command, check=True)
         elf = subprocess.check_output([str(readelf), '-h', '-l', '-d', str(binary)], text=True)
         if 'AArch64' not in elf or 'DYN (Shared object file)' not in elf or 'INTERP' in elf:
             raise RuntimeError('Output is not an AArch64 shared object without PT_INTERP')
+        imports = subprocess.check_output([str(sdk / 'llvm/bin/llvm-nm'), '-D', '--undefined-only', str(binary)], text=True)
+        if re.search(r'\b(napi|node_api)_', imports):
+            raise RuntimeError('Addon imports a plain N-API name, which would bind to Ark instead of libnode')
         manifest = {
             'target': 'aarch64-linux-ohos', 'scope': 'cross-compiled; device load NOT_RUN',
             'package': metadata['name'], 'version': metadata['version'],

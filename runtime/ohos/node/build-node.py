@@ -2,6 +2,7 @@
 """Build the pinned Node 24.22.1 source as an OpenHarmony arm64 shared library."""
 
 import argparse
+import fnmatch
 import hashlib
 import json
 import os
@@ -17,8 +18,6 @@ import time
 
 HERE = Path(__file__).resolve().parent
 SOURCE_SHA256 = '4f5379796280cdaeb0c2f358fd04b6a16cc4fb7dfa83b5a8c91a9d963b435231'
-CXX_RUNTIME_EXPORT = re.compile(r'_Z(N|NK|TI|TS|TV|TT|GV|TH|TW)?N?St|_Z[nd][wal]|__cxa_|__cxxabi|__gxx_|__dynamic_cast'
-                                r'|_Unwind_|__emutls_get|__aarch64_|__clang_')
 
 
 def digest(path):
@@ -54,10 +53,16 @@ def audit_library(library, sdk):
     missing = [name for name in needed if not (libs / name).is_file()]
     if missing:
         raise RuntimeError(f'libnode needs libraries absent from the SDK sysroot: {missing}')
-    exports = [name for _, name in symbols(library, '--defined-only')]
-    private = [name for name in exports if CXX_RUNTIME_EXPORT.match(name)]
-    if private:
-        raise RuntimeError(f'libnode exports {len(private)} C++ runtime symbols, e.g. {private[:5]}')
+    exports = {name for _, name in symbols(library, '--defined-only')}
+    export_map = re.sub(r'/\*.*?\*/', '', (HERE / 'libnode-exports.map').read_text(), flags=re.S)
+    allowed = re.findall(r'([\w*]+);', export_map.split('global:')[1].split('local:')[0])
+    stray = sorted(name for name in exports if not any(fnmatch.fnmatchcase(name, glob) for glob in allowed))
+    if stray:
+        raise RuntimeError(f'libnode exports {len(stray)} symbols outside its export map, e.g. {stray[:5]}')
+    renamed = re.findall(r'^#define \w+ (dsh_\w+)$', (HERE / 'napi-rename.h').read_text(), re.M)
+    absent = sorted({*renamed, *(glob for glob in allowed if '*' not in glob)} - exports)
+    if absent:
+        raise RuntimeError(f'libnode does not export {absent}')
     provided = {name for dependency in needed for _, name in symbols(libs / dependency, '--defined-only')}
     undefined = symbols(library, '--undefined-only')
     unresolved = [name for kind, name in undefined if kind == 'U' and name.split('@')[0] not in provided]
@@ -94,7 +99,7 @@ def main():
     required = [sdk / 'llvm/bin' / name for name in
                 ['ld.lld', 'llvm-ar', 'llvm-nm', 'llvm-readelf', 'llvm-strip']]
     required += [sdk / 'oh-uni-package.json', sdk / 'sysroot/usr/include/stdio.h', HERE / 'libnode-exports.map',
-                 clang, clang.with_name('clang++'), runtimes / 'runtimes.json']
+                 HERE / 'napi-rename.h', clang, clang.with_name('clang++'), runtimes / 'runtimes.json']
     for file in required:
         if not file.is_file():
             parser.error(f'Missing toolchain input: {file}')
@@ -126,6 +131,7 @@ def main():
         source_tar.extractall(work, filter='data')
     source = work / 'node-v24.22.1'
     pins = apply_patches(source)
+    subprocess.run([sys.executable, str(HERE / 'gen-napi-rename.py'), '--source', str(source), '--check'], check=True)
     with (work / 'undici-build.log').open('w') as log:
         subprocess.run([str(node), str(HERE / 'patch-undici.mjs'), str(source)],
                        stdout=log, stderr=subprocess.STDOUT, check=True)
@@ -136,6 +142,7 @@ def main():
         command = [str(clang.with_name(name)), '--target=aarch64-linux-ohos',
                    f'--sysroot={sdk / "sysroot"}', f'-resource-dir={runtimes / "clang-resource"}',
                    f'--ld-path={sdk / "llvm/bin/ld.lld"}', '-Qunused-arguments', '-fPIC',
+                   '-include', str(HERE / 'napi-rename.h'),
                    '-D__OHOS__=1', '-D__MUSL__=1', '-DDSH_GO_EMBEDDED_RUNTIME=1',
                    f'-ffile-prefix-map={source}=/node-v24.22.1']
         if name == 'clang++':
@@ -150,9 +157,9 @@ def main():
         'LINK_target': str(wrappers / 'clang++'), 'AR': str(sdk / 'llvm/bin/llvm-ar'),
         'AR_target': str(sdk / 'llvm/bin/llvm-ar'), 'CC_host': args.host_cc,
         'CXX_host': args.host_cxx, 'LINK_host': args.host_cxx, 'AR_host': 'ar',
-        # libc++ stays private to libnode: the HAP also ships the SDK's libc++_shared.so for libflutter.so.
+        # The map keeps libc++ private to libnode (the HAP also ships the SDK's libc++_shared.so for
+        # libflutter.so) and every bundled library's names out of the app process's symbol space.
         'LDFLAGS': ' '.join(['-Wl,-Bsymbolic-functions', '-Wl,--no-undefined',
-                             '-Wl,--exclude-libs,libc++.a:libc++abi.a:libunwind.a:libclang_rt.builtins.a',
                              f'-Wl,--version-script={HERE / "libnode-exports.map"}']),
         'LDFLAGS_host': '',
         'CFLAGS': '', 'CXXFLAGS': '', 'CPPFLAGS': '',
@@ -169,6 +176,8 @@ def main():
     plan ={'configure': configure,
             'make': ['make', '-C', 'out', f'-j{args.jobs}', 'BUILDTYPE=Release', 'libnode'], 'environment': recipe,
             'nodeSourceSha256': SOURCE_SHA256, 'patches': pins,
+            'napiRenameSha256': digest(HERE / 'napi-rename.h'),
+            'exportMapSha256': digest(HERE / 'libnode-exports.map'),
             'diskFreeBefore': free_bytes, 'sourceUncompressedBytes': unpacked_bytes,
             'sdkManifest': json.loads((sdk / 'oh-uni-package.json').read_text()),
             'sdkManifestSha256': digest(sdk / 'oh-uni-package.json'),

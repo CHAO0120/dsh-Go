@@ -30,7 +30,9 @@ endif()
 add_library(dsh_node_runner SHARED node_runner.cpp publication_binding.cc)
 target_compile_features(dsh_node_runner PRIVATE cxx_std_20)
 target_compile_definitions(dsh_node_runner PRIVATE NAPI_VERSION=8)
-target_compile_options(dsh_node_runner PRIVATE -fvisibility=hidden)
+# libnode's N-API exists only under the dsh_ names; plain napi_* would bind to Ark's libace_napi.
+target_compile_options(dsh_node_runner PRIVATE -fvisibility=hidden
+  -include "${CMAKE_CURRENT_SOURCE_DIR}/../node/napi-rename.h")
 target_include_directories(dsh_node_runner PRIVATE
   "${CMAKE_CURRENT_BINARY_DIR}"
   "${DSH_DEVICEINFO_INCLUDE_DIR}"
