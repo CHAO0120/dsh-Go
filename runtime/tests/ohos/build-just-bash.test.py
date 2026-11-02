@@ -79,7 +79,8 @@ def main():
         def fresh():
             result = builder.build(package, output, config)
             assert result["status"] == "built"
-            assert result["files"] == 203
+            # The kept bundle files plus the private package.json, LICENSE and PROVENANCE.
+            assert result["files"] == len(pins["bundleFiles"]) - len(pins["omitFromPrivateEsm"]) + 3
             for name, expected in pins["changedAfter"].items():
                 assert sha((output / name).read_bytes()) == expected
             assert (output / "LICENSE").read_bytes() == (source / "LICENSE").read_bytes()
@@ -88,6 +89,8 @@ def main():
                 assert (output / name).read_bytes().startswith(b"/* Modified for dsh-go OHOS:")
             assert not (output / "index.cjs").exists()
             assert not (output / "browser.js").exists()
+            for name in pins["omitFromPrivateEsm"]:
+                assert not (output / name).exists()
             return result
 
         run("fresh exact-pinned ESM build and retained license", fresh)
