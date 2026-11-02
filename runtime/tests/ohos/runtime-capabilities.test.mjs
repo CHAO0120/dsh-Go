@@ -60,3 +60,25 @@ test('publication.atomic实时读取，读接口不调用publish或猜测死亡�
   assert.equal(first.publication.atomic, 'untried');
   assert.equal(publishes, 0);
 });
+
+test('生命周期能力每次读取已安装owner，缺失、关闭、持久化故障和异常立即熔断且不执行控制', () => {
+  let owner, calls = 0, controls = 0;
+  const ctx = { get: name => name === 'ohosLifecycle' ? owner : undefined };
+  const read = () => runtimeCapabilities(ctx, 'test-boot').background;
+  assert.equal(read().resume, 'none');
+  let state = { v: 1, closed: false, blocked: false, state: 'result-unknown' };
+  owner = { protocolVersion: 1, status() { calls++; return state; },
+    pause() { controls++; }, resume() { controls++; }, acknowledgeUnknown() { controls++; } };
+  assert.deepEqual(read(), { policy: 'may-freeze', computePermission: 'unknown', resume: 'reconcile' });
+  for (const next of [
+    { v: 1, closed: true, blocked: false }, { v: 1, closed: false, blocked: true },
+    { v: 2, closed: false, blocked: false }, { v: 1, closed: false }, null,
+  ]) { state = next; assert.equal(read().resume, 'none'); }
+  state = { v: 1, closed: false, blocked: false }; assert.equal(read().resume, 'reconcile');
+  owner = { protocolVersion: 2, status() { throw new Error('unsupported owner should not be called'); } };
+  assert.equal(read().resume, 'none');
+  owner = { protocolVersion: 1, status() { throw new Error('broken service'); } };
+  assert.equal(read().resume, 'none');
+  owner = undefined; assert.equal(read().resume, 'none');
+  assert.equal(calls, 7); assert.equal(controls, 0);
+});

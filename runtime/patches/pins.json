@@ -385,6 +385,30 @@
           "after": "027c3246d8174ad2c519fd989e0ab157eedbe3535a5afa41121dc05e5e5615d3"
         }
       }
+    },
+    "zzzzzzzzzzzzz-ohos-lifecycle.diff": {
+      "0.2.1-rc.4": {
+        "node_modules/@deepseek-ai/dsh-agent-loop/lib/index.js": {
+          "before": "83e26a1b11be4d40532fd7ce6192490f5b595de4f795459c7b27723d56eb9711",
+          "after": "8eb83beabd47c5122e872c451ea588d6a97fb3b2dc6abbcb9d5c119e782750a3"
+        },
+        "node_modules/@deepseek-ai/dsh-timeout/lib/index.js": {
+          "before": "f9a79fd5194bb4d6321e6d2d5b5eb72f99c683452e1defbb75fad52f76aed667",
+          "after": "5fdd1b252b3df7ba09db2b9f84ac1e8737d3fd094104c7e9a832fdcf42df5e92"
+        },
+        "node_modules/@deepseek-ai/dsh-http-proxy/lib/index.js": {
+          "before": "a7fc14bf0adad3d4dedaa391296ecbbaf1075baf3d23dfdc4eb6ff53b7a3f650",
+          "after": "61254bcefd6a84084c021ca83b69834790347d56ee8f154554cb86b74869ba4d"
+        },
+        "node_modules/@deepseek-ai/dsh-tool-fs-search/lib/index.js": {
+          "before": "72a34a51e60d2bca3a3a9b5187e7c13a72446da156b35b5d8b5c0b60e6e1b663",
+          "after": "16d30013167a7881f66f07f2263f6412a32340614fdeeb27957ee524899d1086"
+        },
+        "node_modules/@deepseek-ai/dsh-spill-policy/lib/index.js": {
+          "before": "970dc4c00c488f11d96cd25ad3bbdc4d034ed754506b2c0c46563b75102291ac",
+          "after": "02c489f249c5a8ac4a43f526daa800d0e3a7d49d96d30a33829bc7426e21c1ee"
+        }
+      }
     }
   },
   "schema": 2,
@@ -427,7 +451,8 @@
       "zzzzzzzzzz-ohos-shell-limit-description.diff",
       "zzzzzzzzzzz-ohos-search-ignore-description.diff",
       "zzzzzzzzzzzz-ohos-composition.diff",
-      "zzzzzzzzzzzz-ohos-runtime-capabilities.diff"
+      "zzzzzzzzzzzz-ohos-runtime-capabilities.diff",
+      "zzzzzzzzzzzzz-ohos-lifecycle.diff"
     ]
   }
 }
