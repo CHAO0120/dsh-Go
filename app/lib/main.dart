@@ -8,6 +8,7 @@ import 'app.dart';
 import 'dev/frame_probe.dart';
 import 'diagnostics/app_error_log.dart';
 import 'launch/launch_state.dart';
+import 'runtime/local_paths.dart';
 import 'state/locale_state.dart';
 import 'ui/common/third_party_licenses.dart';
 import 'ui/settings/font_licenses.dart';
@@ -20,7 +21,7 @@ Future<void> _startApp() async {
   appErrorCapture.install();
   // The first frame is already in the chosen language (设置 → 语言), and is the launch
   // window's own picture (启动画面, lib/launch/launch_state.dart).
-  await Future.wait([AppLanguageController.load(), LaunchController.begin()]);
+  await Future.wait([AppLanguageController.load(), LaunchController.begin(), LocalPaths.load()]);
   // MIT / OFL notices must ship with the APK, not just the sources.
   registerThirdPartyLicenses();
   registerFontLicenses();
