@@ -35,7 +35,7 @@ class ScreenDigestTest {
     @Test fun onlyChangedLinesComeBackWhenTheIdsStillLineUp() {
         val before = screen("甲", "乙", "丙", "丁")
         val after = screen("甲", "乙2", "丙", "丁", id = "s8")
-        val text = digest("s7", before, "s8", after)
+        val text = ScreenDigest.text("s7", before, "s8", after, observationChanged = true)
         assertTrue(text, text.contains("乙2"))
         assertFalse(text, text.contains("甲"))
         assertTrue(text, text.contains("（只列变化：其余 3 项与 s7 相同，编号不变）"))

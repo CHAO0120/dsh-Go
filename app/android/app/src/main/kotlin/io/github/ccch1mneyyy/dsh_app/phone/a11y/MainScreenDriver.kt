@@ -258,35 +258,24 @@ internal class MainScreenDriver(private val service: PhoneA11yService, private v
                         stop = "这一屏读不到内容（可能受敏感视图策略限制）"
                         break
                     }
-                    if (cap.truncated || cap.partial) {
-                        // l10n:keep agent screen result
-                        stop = "页面只读了一部分，无法确认列表是否到底"
-                        break
-                    }
                     val list = ScreenFormat.followList(ScreenFormat.index(cap.windows), el.fingerprint, lastBounds)
                         // l10n:keep agent screen result
                         ?: run { stop = "列表不见了（界面变了）"; null } ?: break
+                    val page = items.readPage(list.itemTexts, wanted, cap.truncated || cap.partial)
+                    if (list.itemTexts.isNotEmpty()) read++
+                    if (page.stopReason != null) { stop = page.stopReason; break }
                     if (list.itemTexts.isEmpty()) {
                         // l10n:keep agent screen result
                         stop = "列表没有可读条目，无法确认是否到底"
                         break
                     }
                     lastBounds = list.bounds
-                    read++
-                    var added = 0
-                    var found = false
-                    for (t in list.itemTexts) {
-                        if (items.add(t)) {
-                            added++
-                            if (wanted != null && t.contains(wanted, ignoreCase = true)) found = true
-                        }
-                    }
                     // l10n:keep agent screen result
-                    if (found) { stop = "找到了「$wanted」"; break }
+                    if (page.found) { stop = "找到了「$wanted」"; break }
                     // l10n:keep agent screen result
                     if (items.chars > COLLECT_CHARS) { stop = "内容太多，先停在这里"; break }
                     // l10n:keep agent screen result
-                    if (read > 1 && added == 0) { if (++misses >= 2) { stop = "没有读到更多条目，可能已经到底"; break } } else misses = 0
+                    if (read > 1 && page.added == 0) { if (++misses >= 2) { stop = "没有读到更多条目，可能已经到底"; break } } else misses = 0
                     // l10n:keep agent screen result
                     if (read >= pages) { stop = "达到页数上限（$pages 页）"; break }
                     // l10n:keep agent screen result
@@ -524,7 +513,7 @@ internal class MainScreenDriver(private val service: PhoneA11yService, private v
             // Missing content still needs an explicit warning, even when app/window/IME changed.
             val note = ScreenVerdict.note(comparable = comparable, changed = changed, keyboard = keyboard, scrolled = scrolled)
             val canReuse = comparable && observation.sameContext(old) && observation.keyboardShown == old.keyboardShown
-            val text = ScreenDigest.text(previous?.id, previous?.screen, snap.id, snap.screen, canReuse = canReuse)
+            val text = ScreenDigest.text(previous?.id, previous?.screen, snap.id, snap.screen, canReuse = canReuse, observationChanged = changed)
             return ActionResult(true, message + note, toSnapshot(snap, text))
         } finally { cap.recycle() }
     }
