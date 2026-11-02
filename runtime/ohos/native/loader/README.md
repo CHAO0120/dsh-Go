@@ -39,9 +39,9 @@ Node24.22.1 的 `node.gyp` 中，隐藏 Node 源符号的选项仍处于注释�
 
 ## Node-API 与 Ark NAPI 必须区分
 
-这里的 `node_api.h` 来自官方 Node24.22.1，C++ 的 `node-addon-api` 包装的是 Node-API。ArkTS 宿主的 `napi/native_api.h` 是另一套运行时接口；它们有同名 `napi_*` 符号，不能混用头文件、环境对象或句柄。
+这里的 `node_api.h` 来自官方 Node24.22.1，C++ 的 `node-addon-api` 包装的是 Node-API。ArkTS 宿主的 `napi/native_api.h` 是另一套运行时接口，不能混用头文件、环境对象或句柄。
 
-生成 addon 显式依赖 `libnode.so`，且静态检查它的所有 `napi_*` 导入都在输入 libnode 的导出表中。**这只是必要条件，不证明宿主最终绑定归属。** HAP 中 Ark NAPI、Node 与 addon 同时加载时，必须记录：libnode 的真实加载方式与作用域、六个 `RTLD_DEFAULT` 查找地址所归属的映像、`napi_*` 导入实际提供者、原生 probe 完整返回结果。`DT_NEEDED`、`-Bsymbolic-functions` 或链接顺序都不能单独替代这个验证。本脚本没有声称某组猜测参数已经解决同名绑定。
+Ark 和 Node 不再共用符号名：本脚本 force-include `runtime/ohos/node/napi-rename.h`，生成的 addon 导入 `dsh_napi_*`，显式依赖 `libnode.so`，并静态检查这些导入都在输入 libnode 的导出表中，任何残留的 `napi_*`、`node_api_*` 导入都拒绝构建。详见 `runtime/ohos/node/BUILD.md`。**这只是必要条件，不证明运行时绑定。** HAP 中 Ark NAPI、Node 与 addon 同时加载时，仍须记录：libnode 的真实加载方式与作用域、六个 `RTLD_DEFAULT` 查找地址所归属的映像、原生 probe 完整返回结果。
 
 ## 构建输入与输出
 

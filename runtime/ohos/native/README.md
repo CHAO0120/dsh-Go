@@ -26,7 +26,7 @@ SDK 必须来自官方发布包，下载后先用该发布目录的 `.sha256` �
 
 上游 `lib/flock.js` 只选择 Linux/macOS 的预编译包；即使构建成功，也还需单独的、仅在 OpenHarmony 生效的加载补丁以及设备验证，才能替换 O3b。下列检查不能用 Linux 结果代替：
 
-1. ArkTS 宿主和 Node 的 `napi_*` 符号同时存在时，确认该插件每个导入解析到 **Node**；不能将 ArkTS 的 `napi_env` 与 Node 的 `napi_env` 互换。
+1. 脚本 force-include `runtime/ohos/node/napi-rename.h`，插件导入的是 libnode 的 `dsh_napi_*`，不与 ArkTS 的 `napi_*` 同名（见 `runtime/ohos/node/BUILD.md`）。确认这些导入在设备上解析到 **Node**；不能将 ArkTS 的 `napi_env` 与 Node 的 `napi_env` 互换。
 2. 签名 HAP 内 `process.dlopen` 成功，运行 `tryLock` 而非仅检查动态装载返回值；覆盖竞争、关句柄释放、worker 环境退出时的异步清理。
 3. 用两次独立 `open()` 得到的句柄验证同一 inode 排他，`close()` 后后继获得锁；在设备允许的独立进程测试环境验证跨进程竞争。没有该环境时仍记 `NOT_RUN`。
 4. 核对设备是否实际支持 `flock(2)`，失败时返回具体 errno。SDK 声明和 Linux 成功都不足以证明设备支持。
