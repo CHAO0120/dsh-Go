@@ -6,11 +6,15 @@ import { start as startNative, stop as stopNative, getState, drainEvents, HostSt
 import { RuntimeChannelError, RuntimeManifest, RuntimeFile, RuntimeInstaller, RuntimeLogs, RuntimeLogEntry,
   InstallProgress, validateManifest, validateEnvironment, validateStartOptions, resolveNativeLibraryDir } from './RuntimeCore';
 import { OhosRuntimeStorage } from './OhosRuntimeStorage';
+import { RuntimePaths } from './RuntimePaths';
+import { ManagedSkillService, ManagedSkillScope } from './ManagedSkillService';
 
 type RuntimeSink = (event: Map<string, Object | null>) => void;
 
 export class RuntimeController {
   private static shared: RuntimeController | null = null;
+  readonly paths: RuntimePaths;
+  readonly managedSkills: ManagedSkillService;
   private context: common.Context;
   private storage: OhosRuntimeStorage;
   private installer: RuntimeInstaller;
@@ -27,6 +31,7 @@ export class RuntimeController {
   private requestedStop: boolean = false;
   private timer: number | null = null;
   private lastNative: HostState | null = null;
+  private runtimeGeneration: number = 0;
 
   static get(context: common.Context): RuntimeController {
     if (RuntimeController.shared === null) RuntimeController.shared = new RuntimeController(context);
@@ -35,6 +40,13 @@ export class RuntimeController {
 
   constructor(context: common.Context) {
     this.context = context;
+    this.paths = new RuntimePaths(context.filesDir);
+    this.runtimeGeneration = getState().consumed ? 1 : 0;
+    this.managedSkills = new ManagedSkillService(this.paths.guestRoot, (scope: ManagedSkillScope): boolean => {
+      const state = getState();
+      return !this.requestedStop && this.pending === null && state.phase === 'running' &&
+        scope.runtimeGeneration === this.runtimeGeneration && scope.token === state.token;
+    });
     this.storage = new OhosRuntimeStorage(context.resourceManager, context.filesDir);
     this.installer = new RuntimeInstaller(this.storage, context.filesDir + '/dsh-runtime');
     this.startPolling();
@@ -72,6 +84,7 @@ export class RuntimeController {
 
   snapshot(): Map<string, Object | null> {
     const native = getState();
+    this.syncManagedSkills(native);
     let phase = this.current() ? 'installed' : 'notInstalled';
     if (this.pending === 'install') phase = 'installing';
     else if (this.pending === 'start') phase = 'starting';
@@ -85,7 +98,8 @@ export class RuntimeController {
       ['installedVersion', this.installed?.runtimeVersion ?? null], ['dshVersion', this.manifest?.dshVersion ?? null],
       ['nodeVersion', this.manifest?.nodeVersion ?? null], ['phase', phase],
       ['baseUrl', active ? native.baseUrl : null], ['token', active ? native.token : null],
-      ['managedSkillGeneration', null], ['error', this.lastError ?? this.setupError ?? native.errorMessage ??
+      ['managedSkillGeneration', active ? this.managedSkills.generationFor(native.token) : null],
+      ['error', this.lastError ?? this.setupError ?? native.errorMessage ??
         (native.phase === 'exited' && !this.requestedStop ? '本机引擎已退出；请关闭并重新打开 App 后再启动。' : null)],
       ['mode', 'normal'], ['safeState', 'off'], ['safeReason', null], ['strikes', 0], ['autoSafe', false],
       ['failure', null], ['mainFailure', null], ['healthyAt', null], ['networkBlocked', false], ['networkBlockedAt', null],
@@ -124,6 +138,7 @@ export class RuntimeController {
 
   collect(): void {
     const state = getState();
+    this.syncManagedSkills(state);
     if (state.token !== null) this.logs.rememberSecret(state.token);
     const batch: RuntimeLogEntry[] = [];
     const events: HostEvent[] = drainEvents();
@@ -187,18 +202,20 @@ export class RuntimeController {
       this.installed = await this.installer.installed();
       if (!this.current()) throw new RuntimeChannelError('ohos_install_required', '运行时尚未完整安装到当前版本，请先安装。');
       const nativeLibraryDir = resolveNativeLibraryDir(this.context.bundleCodeDir, this.context.applicationInfo.nativeLibraryPath);
-      const dshHome = this.context.filesDir + '/dsh-home';
-      const workspace = this.context.filesDir + '/workspace';
+      const dshHome = this.paths.dshHome;
+      const workspace = this.paths.workspace;
       const cache = this.context.cacheDir + '/dsh-runtime';
       await this.storage.ensureDirectory(dshHome);
-      await this.storage.ensureDirectory(workspace);
+      await this.storage.ensureDirectory(this.paths.agentsHome);
+      await this.storage.ensureDirectory(this.paths.outputs);
       await new OhosRuntimeStorage(this.context.resourceManager, this.context.cacheDir).ensureDirectory(cache);
       await this.writeInstructions(dshHome, workspace, visualReplies);
       if (this.startCancelled) throw new RuntimeChannelError('ohos_start_cancelled', '启动已取消。');
       Object.keys(environment).forEach((key: string) => this.logs.rememberSecret(environment[key]));
-      const options: HostOptions = { runtimeRoot: this.installer.root, dshHome: dshHome,
+      const options: HostOptions = { runtimeRoot: this.installer.root, guestRoot: this.paths.guestRoot, dshHome: dshHome,
         workspaceRoots: [workspace], cacheDir: cache, nativeLibraryDir: nativeLibraryDir, env: environment };
       this.requestedStop = false;
+      this.runtimeGeneration++;
       startNative(options);
       this.startPolling();
     } catch (error) {
@@ -213,12 +230,23 @@ export class RuntimeController {
 
   stop(): void {
     if (this.pending === 'start') this.startCancelled = true;
+    this.requestedStop = true;
+    this.managedSkills.stop(this.runtimeGeneration);
     const state = getState();
     if (['starting', 'running', 'stopping'].includes(state.phase)) {
       stopNative();
-      this.requestedStop = true;
       this.startPolling();
       this.emitStatus();
+    }
+  }
+
+  private syncManagedSkills(state: HostState): void {
+    if (state.phase === 'running' && state.token !== null && !this.requestedStop && this.pending === null) {
+      this.managedSkills.ready(this.runtimeGeneration, state.token);
+    } else if (state.phase === 'stopping' || this.requestedStop) {
+      this.managedSkills.stop(this.runtimeGeneration);
+    } else if (state.phase === 'idle' || state.phase === 'exited' || state.phase === 'error') {
+      this.managedSkills.retire();
     }
   }
 
@@ -239,7 +267,7 @@ export class RuntimeController {
   async publishDiagnostics(markdown: string): Promise<Map<string, Object | null> | null> {
     const bytes = markdown.length === 0 ? new Uint8Array(0) : new util.TextEncoder().encodeInto(markdown);
     if (!this.current() || bytes.byteLength > 256 * 1024) return null;
-    const directory = this.context.filesDir + '/dsh-home/dsh-app';
+    const directory = this.paths.dshHome + '/dsh-app';
     await this.storage.ensureDirectory(directory);
     const path = directory + '/diagnostics.md';
     await this.storage.writeTextAtomic(path, markdown);
@@ -261,6 +289,7 @@ export class RuntimeController {
     if (await this.storage.exists(path) && !(await this.storage.readText(path)).startsWith(marker)) return;
     let text = `${marker} — 删除这一行后，DSH App 不再覆盖本文件 -->\n# 运行环境（DSH 鸿蒙版）\n\n` +
       `- 你运行在鸿蒙 App 的进程内 Node 中，默认工作区是 \`${workspace}\`。\n` +
+      `- 要交给用户的文件放在 \`${this.paths.outputs}\`；App 的产出列表只显示这个目录中的文件。\n` +
       '- bash、rg 和 git 等能力以引擎当前能力清单为准；没有 Android 的 Ubuntu、PRoot、apt 或 /sdcard 挂载。\n' +
       '- 对不支持的命令说明限制，可请用户交给已连接的电脑执行；不能声称命令已经成功。\n' +
       '- 手机文件通过 App 的系统选择器导入或导出；不能遍历其他应用的数据。\n' +

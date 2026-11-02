@@ -1,6 +1,6 @@
 // 未编译 OpenHarmony SDK、未在真机核实。
 // This translation unit uses genuine Ark N-API; never force-include the Node
-// rename header here. The separately built runner crosses only a C ABI.
+// rename header here. The runner inside libnode crosses only a C ABI.
 #include "host_core.h"
 #include "file_access.h"
 #include <napi/native_api.h>
@@ -48,6 +48,7 @@ napi_value Property(napi_env env, napi_value object, const char* key) {
 dsh::HostOptions Options(napi_env env, napi_value value) {
   dsh::HostOptions options;
   options.runtime_root = String(env, Property(env, value, "runtimeRoot"));
+  options.guest_root = String(env, Property(env, value, "guestRoot"));
   options.dsh_home = String(env, Property(env, value, "dshHome"));
   options.cache_dir = String(env, Property(env, value, "cacheDir"));
   options.native_library_dir = String(env, Property(env, value, "nativeLibraryDir"));

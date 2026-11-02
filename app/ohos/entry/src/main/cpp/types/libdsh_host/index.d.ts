@@ -1,6 +1,8 @@
 // OpenHarmony Ark bridge. Target SDK compilation and device behavior require validation.
 export interface HostOptions {
   runtimeRoot: string;
+  // Same trusted Context as the runtime/file channels; not supplied by Dart.
+  guestRoot: string;
   dshHome: string;
   workspaceRoots: string[];
   cacheDir: string;

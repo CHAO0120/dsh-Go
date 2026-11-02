@@ -12,7 +12,7 @@
 
 namespace dsh {
 struct HostOptions {
-  std::string runtime_root, dsh_home, cache_dir, native_library_dir;
+  std::string runtime_root, guest_root, dsh_home, cache_dir, native_library_dir;
   std::vector<std::string> workspace_roots;
   std::map<std::string, std::string> env;
 };

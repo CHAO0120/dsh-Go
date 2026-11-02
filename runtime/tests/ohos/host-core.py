@@ -28,17 +28,21 @@ def main():
     for name in ['normal', 'large', 'multiline-secret', 'stop-running', 'stop-race', 'no-roots', 'filesystem-root',
                  'missing-home', 'protected-env', 'inherited-node-options', 'runtime-symlink',
                  'native-relative', 'native-root', 'native-missing-dir', 'native-nul',
-                 'native-missing-file', 'native-not-regular', 'native-file-symlink', 'native-env-override']:
+                 'native-missing-file', 'native-not-regular', 'native-file-symlink', 'native-env-override',
+                 'layout-no-guest', 'layout-relative-guest', 'layout-root-guest', 'layout-missing-guest',
+                 'layout-wrong-home', 'layout-wrong-workspace', 'layout-many-roots', 'layout-missing-agents',
+                 'layout-agents-link', 'layout-workspace-link', 'layout-env-agents']:
         case = args.out / name
         env = {k: v for k, v in os.environ.items() if k in ['PATH', 'LANG', 'LC_ALL']}
         result = subprocess.run([str(args.out / 'host-core'), name, str(case)], env=env,
                                 capture_output=True, text=True, timeout=15)
         passed = result.returncode == 0 and f'PASS {name}' in result.stdout
-        profile = case / 'home/ohos-host.patch.json'
+        guest = case / '中文 guest"root/runtime/rootfs'
+        profile = guest / 'root/.dsh/ohos-host.patch.json'
         if profile.exists():
             config = json.loads(profile.read_text())
             roots = config[-1]['insert'][0]['config']['workspaceRoots']
-            assert roots == [str(case / '中文工作区"quoted')]
+            assert roots == [str(guest / 'root/workspace')]
             assert config[2]['config']['defaultDirectory'] == roots[0]
             assert config[3]['config'] == {'mode': 'workspace-write', 'workspaceRoot': roots[0]}
             assert config[0] == {'id': 'subprocess', 'disabled': True}

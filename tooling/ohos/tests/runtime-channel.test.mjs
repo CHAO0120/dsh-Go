@@ -8,6 +8,8 @@ import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { makePack, fileIo } from './runtime-storage-fixture.mjs';
 import { native, MethodCall } from './runtime-host-fixture.mjs';
+import { prepareManagedSkillModules } from './managed-skill-loader.mjs';
+import { managedSkillIo } from './managed-skill-fixture.mjs';
 
 // Node executes these exact ETS logic bodies after extension/import adaptation.
 // This is not an ArkTS compile or an OH filesystem/ResourceManager test.
@@ -17,6 +19,8 @@ const temp = await fs.mkdtemp(path.join(os.tmpdir(), 'dsh-ohos-channel-'));
 after(async () => { await fs.rm(temp, { recursive: true, force: true }); });
 const corePath = path.join(temp, 'RuntimeCore.mts');
 await fs.copyFile(path.join(source, 'RuntimeCore.ets'), corePath);
+await fs.copyFile(path.join(source, 'RuntimePaths.ets'), path.join(temp, 'RuntimePaths.mts'));
+await prepareManagedSkillModules({ source, directory: temp });
 const fixtureUrl = new URL('./runtime-storage-fixture.mjs', import.meta.url).href;
 let adapterText = await fs.readFile(path.join(source, 'OhosRuntimeStorage.ets'), 'utf8');
 adapterText = adapterText.replace("import fs from '@ohos.file.fs';", `import { fileIo as fs } from '${fixtureUrl}';`)
@@ -40,13 +44,17 @@ controllerText = controllerText.replace("import common from '@ohos.app.ability.c
   .replace('RuntimeChannelError, RuntimeManifest, RuntimeFile, RuntimeInstaller', 'RuntimeChannelError, type RuntimeManifest, type RuntimeFile, RuntimeInstaller')
   .replace('  InstallProgress,', '  type InstallProgress,')
   .replace("from './RuntimeCore'", "from './RuntimeCore.mts'")
+  .replace("from './RuntimePaths'", "from './RuntimePaths.mts'")
+  .replace("from './ManagedSkillService'", "from './ManagedSkillService.mts'")
   .replace("from './OhosRuntimeStorage'", "from './OhosRuntimeStorage.mts'");
 const controllerPath = path.join(temp, 'RuntimeController.mts');
 await fs.writeFile(controllerPath, controllerText);
 const { RuntimeController } = await import(pathToFileURL(controllerPath));
 let pluginText = await fs.readFile(path.join(source, 'RuntimePlugin.ets'), 'utf8');
 pluginText = pluginText.replace(/^import .* from '@ohos\/flutter_ohos[^\n]+\n/gm, '')
+  .replace("import { BusinessError } from '@ohos.base';", '')
   .replace("from './RuntimeCore'", "from './RuntimeCore.mts'")
+  .replace("from './ManagedSkillService'", "from './ManagedSkillService.mts'")
   .replace("from './RuntimeController'", "from './RuntimeController.mts'");
 pluginText = `import { MethodCall, MethodChannel, EventChannel } from '${hostFixtureUrl}';\n` + pluginText;
 const pluginPath = path.join(temp, 'RuntimePlugin.mts');
@@ -262,7 +270,7 @@ test('日志快照/live边界单调去重、2000行有界，敏感值不落日�
 });
 
 test('start参数拒绝暗中改变宿主配置，明确拒绝sdcard和安全模式', () => {
-  for (const key of ['NODE_OPTIONS', 'DSH_HOME', 'LD_PRELOAD', 'DSH_GO_OHOS_SIM', 'DSH_GO_OHOS_NATIVE_LIBRARY_DIR', 'NODE_PATH', 'HOME']) {
+  for (const key of ['NODE_OPTIONS', 'DSH_HOME', 'DSH_AGENTS_HOME', 'LD_PRELOAD', 'DSH_GO_OHOS_SIM', 'DSH_GO_OHOS_NATIVE_LIBRARY_DIR', 'NODE_PATH', 'HOME']) {
     assert.throws(() => core.validateEnvironment(new Map([[key, 'value']])), { code: 'ohos_invalid_env' });
   }
   assert.deepEqual(core.validateEnvironment(new Map([['DEEPSEEK_API_KEY', 'test-only']])), { DEEPSEEK_API_KEY: 'test-only' });
@@ -360,7 +368,7 @@ test('status与事件沿用Dart字段，ready前不报告running，stop完成后
   await c.controller.install(false);
   await c.controller.start(new Map([['DEEPSEEK_API_KEY', 'fixture-credential']]), false, null, true);
   assert.equal(native.starts.length, 1);
-  assert.deepEqual(native.starts[0].workspaceRoots, [c.dir + '/workspace']);
+  assert.deepEqual(native.starts[0].workspaceRoots, [c.dir + '/runtime/rootfs/root/workspace']);
   assert.equal(native.starts[0].nativeLibraryDir, '/private/安装包/libs/arm64');
   assert.equal(c.controller.snapshot().get('phase'), 'starting');
   assert.equal(c.controller.snapshot().get('token'), null);
@@ -392,10 +400,10 @@ test('stop发生在异步启动准备期间时不会随后偷偷启动；用户A
   c.controller.stop();
   await assert.rejects(starting, {code: 'ohos_start_cancelled'});
   assert.equal(native.starts.length, 0);
-  assert.doesNotMatch(await fs.readFile(c.dir + '/dsh-home/AGENTS.md', 'utf8'), /可视化回复/);
-  await fs.writeFile(c.dir + '/dsh-home/AGENTS.md', '# 用户自有规则\n');
+  assert.doesNotMatch(await fs.readFile(c.dir + '/runtime/rootfs/root/.dsh/AGENTS.md', 'utf8'), /可视化回复/);
+  await fs.writeFile(c.dir + '/runtime/rootfs/root/.dsh/AGENTS.md', '# 用户自有规则\n');
   await c.controller.start(null, false, null, true);
-  assert.equal(await fs.readFile(c.dir + '/dsh-home/AGENTS.md', 'utf8'), '# 用户自有规则\n');
+  assert.equal(await fs.readFile(c.dir + '/runtime/rootfs/root/.dsh/AGENTS.md', 'utf8'), '# 用户自有规则\n');
 });
 
 test('原生在线程间于drain与state之间退出时保留下一次收尾轮询，失败快照含完整尾部', async () => {
@@ -448,10 +456,12 @@ test('实际RuntimePlugin逐个处理28个Android方法，unknown才notImplement
   assert.equal(diagnostic.kind, 'success'); assert.equal(diagnostic.value.get('bytes'), Buffer.byteLength('# 测试\n'));
   assert.equal((await invoke('publishDiagnostics', {markdown: ''})).value.get('bytes'), 0);
   for (const method of ['reset', 'restoreLastKnownGood', 'safePreflight', 'moveAside', 'setAutoSafe', 'setDirectEngine',
-    'installManagedSkill', 'cancelManagedSkill', 'requestStorage', 'openAllFilesAccess', 'batteryExempt',
+    'requestStorage', 'openAllFilesAccess', 'batteryExempt',
     'requestBatteryExempt', 'backgroundSettings', 'openBackgroundSettings', 'openVendorSettings', 'voiceModelLine']) {
     assert.deepEqual((await invoke(method)).code, 'ohos_unsupported', method);
   }
+  assert.equal((await invoke('installManagedSkill')).value.get('reason'), 'invalid');
+  assert.equal((await invoke('cancelManagedSkill')).value, null);
   assert.equal((await invoke('start', {phoneStorage: true})).code, 'ohos_unsupported');
   assert.equal((await invoke('start', {env: new Map()})).value, null);
   assert.equal((await invoke('stop')).value, null);
@@ -470,4 +480,229 @@ test('实际RuntimePlugin逐个处理28个Android方法，unknown才notImplement
   controller.collect();
   assert.equal(events.length, count);
   assert.equal((await invoke('getStatus')).code, 'ohos_detached');
+});
+
+test('P2 v6: 原生参数、真实沙箱目录和交付指令使用同一个guestRoot', async () => {
+  const c = await controllerCase('v6-layout-中文');
+  await c.controller.install(false);
+  await c.controller.start(null, false, null, true);
+  const root = c.dir + '/runtime/rootfs';
+  const options = native.starts[0];
+  assert.equal(options.guestRoot, root);
+  assert.equal(options.dshHome, root + '/root/.dsh');
+  assert.deepEqual(options.workspaceRoots, [root + '/root/workspace']);
+  assert.equal(options.runtimeRoot, c.dir + '/dsh-runtime/tree');
+  for (const relative of ['root/.dsh', 'root/.agents', 'root/workspace/DSH-Go']) {
+    assert((await fs.stat(root + '/' + relative)).isDirectory());
+  }
+  const instructions = await fs.readFile(root + '/root/.dsh/AGENTS.md', 'utf8');
+  assert(instructions.includes(root + '/root/workspace/DSH-Go'));
+  const diagnostic = await c.controller.publishDiagnostics('# 实际报告\n');
+  assert.equal(diagnostic.get('path'), root + '/root/.dsh/dsh-app/diagnostics.md');
+  assert.equal(await fs.readFile(diagnostic.get('path'), 'utf8'), '# 实际报告\n');
+});
+
+test('P2 v6: guestRoot在未安装且清单读取失败时仍同步返回且不读rawfile', async () => {
+  native.reset();
+  managedSkillIo.reset();
+  const previous = RuntimeController.shared;
+  RuntimeController.shared = null;
+  let reads = 0, answer;
+  const context = { filesDir: '/private/中文 应用/files', cacheDir: '/private/cache', resourceManager: {
+    async getRawFileContent() { reads++; throw new Error('no rawfile fixture'); },
+  } };
+  const binding = { getApplicationContext: () => context, getBinaryMessenger: () => ({ setMessageHandler() {} }) };
+  const plugin = new RuntimePlugin();
+  try {
+    plugin.onAttachedToEngine(binding);
+    plugin.onMethodCall(new MethodCall('guestRoot', null), {
+      success: value => { answer = { value }; }, error: code => { answer = { code }; },
+      notImplemented: () => { answer = { missing: true }; },
+    });
+    assert.equal(reads, 0, 'guestRoot不应先读取安装清单');
+    assert.deepEqual(answer, { value: context.filesDir + '/runtime/rootfs' });
+    assert.equal(native.starts.length, 0);
+    assert.equal(managedSkillIo.calls.length, 0);
+  } finally {
+    await new Promise(resolve => setImmediate(resolve));
+    plugin.onDetachedFromEngine(binding);
+    RuntimeController.shared = previous;
+  }
+});
+
+test('P2 v6: reopenApp无Ability明确报错且不误启Node', async () => {
+  const c = await controllerCase('v6-reopen-no-ability');
+  const previous = RuntimeController.shared; RuntimeController.shared = c.controller;
+  const plugin = new RuntimePlugin();
+  const binding = { getApplicationContext: () => c.context, getBinaryMessenger: () => ({ setMessageHandler() {} }) };
+  try {
+    plugin.onAttachedToEngine(binding);
+    const answer = await new Promise(resolve => plugin.onMethodCall(new MethodCall('reopenApp', null), {
+      success: value => resolve({ value }), error: (code, message) => resolve({ code, message }),
+      notImplemented: () => resolve({ missing: true }),
+    }));
+    assert.equal(answer.code, 'ohos_no_ability');
+    assert.equal(native.starts.length, 0); assert.equal(native.stops, 0);
+  } finally { plugin.onDetachedFromEngine(binding); RuntimeController.shared = previous; }
+});
+
+test('P2 v6: reopenApp先stop，当前Ability固定Want及SDK错误码消息原样返回', async () => {
+  const c = await controllerCase('v6-reopen-current');
+  const previous = RuntimeController.shared; RuntimeController.shared = c.controller;
+  const plugin = new RuntimePlugin();
+  const binding = { getApplicationContext: () => c.context, getBinaryMessenger: () => ({ setMessageHandler() {} }) };
+  const attempts = []; let failure = { code: 16000065, message: 'fixture ability not focused' };
+  const ability = { context: { filesDir: '/different/AbilityContext/files',
+    abilityInfo: { bundleName: 'test.bundle', moduleName: 'entry', name: 'EntryAbility' },
+    async restartApp(want) { attempts.push({ want, stops: native.stops }); if (failure) throw failure; },
+  } };
+  const invoke = () => new Promise(resolve => plugin.onMethodCall(new MethodCall('reopenApp', null), {
+    success: value => resolve({ value }), error: (code, message) => resolve({ code, message }),
+    notImplemented: () => resolve({ missing: true }),
+  }));
+  try {
+    plugin.onAttachedToEngine(binding);
+    plugin.onAttachedToAbility?.({ getAbility: () => ability });
+    await c.controller.install(false); await c.controller.start(null, false, null, true);
+    native.state.phase = 'running'; native.state.token = 'fixture-reopen-token';
+    assert.deepEqual(await invoke(), { code: '16000065', message: 'fixture ability not focused' });
+    assert.deepEqual(attempts[0], { want: { bundleName: 'test.bundle', moduleName: 'entry', abilityName: 'EntryAbility' }, stops: 1 });
+    assert.equal(c.controller.snapshot().get('managedSkillGeneration'), null);
+    native.state.phase = 'exited'; native.state.token = null;
+    failure = { code: 16000064, message: 'fixture restart too frequently' };
+    assert.deepEqual(await invoke(), { code: '16000064', message: 'fixture restart too frequently' });
+    failure = null;
+    assert.deepEqual(await invoke(), { value: null });
+    assert.equal(native.starts.length, 1);
+  } finally { plugin.onDetachedFromEngine(binding); RuntimeController.shared = previous; }
+});
+
+async function managedChannelCase(name) {
+  managedSkillIo.reset();
+  const c = await controllerCase(name);
+  const previous = RuntimeController.shared; RuntimeController.shared = c.controller;
+  const bindings = [];
+  const attach = (plugin = new RuntimePlugin()) => {
+    const binding = { getApplicationContext: () => c.context, getBinaryMessenger: () => ({ setMessageHandler() {} }) };
+    const replies = [];
+    plugin.onAttachedToEngine(binding); bindings.push([plugin, binding]);
+    const invoke = (method, args = {}) => new Promise(resolve => plugin.onMethodCall(
+      new MethodCall(method, new Map(Object.entries(args))), {
+        success(value) { replies.push([method, value]); resolve(value); },
+        error(code, message) { replies.push([method, code]); resolve({ code, message }); },
+        notImplemented() { replies.push([method, 'notImplemented']); resolve({ missing: true }); },
+      }));
+    return { plugin, binding, replies, invoke };
+  };
+  const attached = attach();
+  assert.equal((await attached.invoke('getStatus')).get('managedSkillGeneration'), null);
+  assert.equal(managedSkillIo.calls.length, 0);
+  await c.controller.install(false); await c.controller.start(null, false, null, true);
+  native.state.phase = 'running'; native.state.baseUrl = 'http://127.0.0.1:3080'; native.state.token = 'fixture-managed-token';
+  const request = async (connection, id, text = '中文技能') => ({ requestId: id,
+    expectedRoot: c.controller.paths.guestRoot, expectedToken: native.state.token,
+    expectedGeneration: (await connection.invoke('getStatus')).get('managedSkillGeneration'), name: 'dsh-go-ui',
+    files: new Map([['notes/readme.txt', text], ['SKILL.md', '---\n# dsh-go:managed\nname: dsh-go-ui\n---\n' + text + '\n']]),
+  });
+  return { ...c, ...attached, attach, request,
+    directory: c.controller.paths.dshHome + '/skills/dsh-go-ui',
+    close() {
+      for (const [plugin, binding] of bindings) plugin.onDetachedFromEngine(binding);
+      RuntimeController.shared = previous;
+      managedSkillIo.before = null; managedSkillIo.after = null;
+    },
+  };
+}
+
+test('P2 v6: 实际通道安装中文技能，Activity变化保留grant而stop立即退休', async () => {
+  const c = await managedChannelCase('v6-managed-wire');
+  try {
+    const args = await c.request(c, 'first');
+    assert(Number.isSafeInteger(args.expectedGeneration) && args.expectedGeneration > 0);
+    assert.equal(managedSkillIo.calls.length, 0, 'status/ready不做技能文件IO');
+    const reply = await c.invoke('installManagedSkill', args);
+    assert.deepEqual(Object.fromEntries(reply), { result: 'installed', current: true, reason: null });
+    assert.equal(await fs.readFile(c.directory + '/notes/readme.txt', 'utf8'), '中文技能');
+    const renames = managedSkillIo.calls.filter(call => call.operation === 'rename');
+    assert.equal(renames.at(-1).to, c.directory + '/SKILL.md');
+    c.plugin.onAttachedToAbility({ getAbility: () => ({ context: {} }) });
+    c.plugin.onDetachedFromAbility();
+    assert.equal((await c.invoke('getStatus')).get('managedSkillGeneration'), args.expectedGeneration);
+    const updated = await c.invoke('installManagedSkill', await c.request(c, 'update', '更新后的正文'));
+    assert.equal(updated.get('result'), 'updated'); assert.equal(updated.get('current'), true);
+    assert.equal(await fs.readFile(c.directory + '/notes/readme.txt', 'utf8'), '更新后的正文');
+    const oldRequest = await c.request(c, 'after-stop', '不能落盘');
+    await c.invoke('stop');
+    assert.equal((await c.invoke('getStatus')).get('managedSkillGeneration'), null);
+    const count = managedSkillIo.calls.length;
+    const stale = await c.invoke('installManagedSkill', oldRequest);
+    assert.equal(stale.get('current'), false); assert.equal(stale.get('reason'), 'stale');
+    assert.equal(managedSkillIo.calls.length, count);
+    assert.equal(await fs.readFile(c.directory + '/notes/readme.txt', 'utf8'), '更新后的正文');
+    assert.equal(managedSkillIo.opened.size, 0);
+  } finally { c.close(); }
+});
+
+test('P2 v6: 旧owner取消/迟到detach不伤新owner，同id新任务等待真实IO退出', { timeout: 15000 }, async () => {
+  const c = await managedChannelCase('v6-managed-owner');
+  const entered = Promise.withResolvers(), release = Promise.withResolvers();
+  let oldWork, newWork;
+  try {
+    let held = false;
+    managedSkillIo.before = async operation => {
+      if (!held && operation.operation === 'write') { held = true; entered.resolve(); await release.promise; }
+    };
+    const oldArgs = await c.request(c, 'same-id', '旧owner未完成内容');
+    oldWork = c.invoke('installManagedSkill', oldArgs);
+    await entered.promise;
+    const next = c.attach();
+    const newArgs = await c.request(next, 'same-id', '新owner内容');
+    assert(newArgs.expectedGeneration > oldArgs.expectedGeneration);
+    newWork = next.invoke('installManagedSkill', newArgs);
+    await c.invoke('cancelManagedSkill', { requestId: 'same-id' });
+    c.plugin.onDetachedFromEngine(c.binding);
+    const oldReply = await oldWork;
+    assert.equal(oldReply.get('reason'), 'stale'); assert.equal(oldReply.get('current'), false);
+    assert.equal(managedSkillIo.calls.filter(call => call.operation === 'write').length, 1,
+      '新owner不能在旧物理write尚未退出时占用第二个写槽');
+    release.resolve();
+    const fresh = await newWork;
+    assert.deepEqual(Object.fromEntries(fresh), { result: 'installed', current: true, reason: null });
+    assert.equal(await fs.readFile(c.directory + '/notes/readme.txt', 'utf8'), '新owner内容');
+    assert.equal(c.replies.filter(([method]) => method === 'installManagedSkill').length, 1);
+    assert.equal(next.replies.filter(([method]) => method === 'installManagedSkill').length, 1);
+    const third = c.attach(next.plugin);
+    next.plugin.onDetachedFromEngine(next.binding);
+    const thirdArgs = await c.request(third, 'third', '同实例新binding');
+    assert(thirdArgs.expectedGeneration > newArgs.expectedGeneration);
+    assert.equal((await third.invoke('installManagedSkill', thirdArgs)).get('current'), true);
+    assert.equal(managedSkillIo.opened.size, 0);
+  } finally {
+    release.resolve();
+    await Promise.allSettled([oldWork, newWork].filter(Boolean));
+    c.close();
+  }
+});
+
+test('P2 v6: 未轮询的宿主终态也阻止迟到技能提交和成功回报', { timeout: 15000 }, async () => {
+  const c = await managedChannelCase('v6-managed-host-exit');
+  const entered = Promise.withResolvers(), release = Promise.withResolvers();
+  let work;
+  try {
+    let held = false;
+    managedSkillIo.before = async operation => {
+      if (!held && operation.operation === 'write') { held = true; entered.resolve(); await release.promise; }
+    };
+    work = c.invoke('installManagedSkill', await c.request(c, 'exit-before-publish'));
+    await entered.promise;
+    native.state.phase = 'exited'; native.state.token = null; native.state.exitCode = 0;
+    // No collect() or stop(): the service must consult the current host state.
+    release.resolve();
+    const reply = await work;
+    assert.equal(reply.get('current'), false); assert.equal(reply.get('reason'), 'stale');
+    await assert.rejects(fs.access(c.directory + '/SKILL.md'), { code: 'ENOENT' });
+    await assert.rejects(fs.access(c.directory + '/notes/readme.txt'), { code: 'ENOENT' });
+    assert.equal(managedSkillIo.opened.size, 0);
+    assert.equal(c.replies.filter(([method]) => method === 'installManagedSkill').length, 1);
+  } finally { release.resolve(); if (work) await work; c.close(); }
 });

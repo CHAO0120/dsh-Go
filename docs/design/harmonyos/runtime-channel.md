@@ -1,6 +1,6 @@
 # 鸿蒙本机运行时通道约定（P2）
 
-基底：`c818155`。本约定在 ArkTS 实现之前写定，后续变动在本文件同步。
+当前增量基底：`3fc4081`。初版约定在 `c818155` 的 ArkTS 实现之前写定；v6 依据追加2/3/4同步目录、重开 App 与托管技能，具体协议见 [P2 v6](runtime-channel-v6.md)。下文 v4/v5 段落保留各版的历史验证范围。
 
 **验证边界：ArkTS 尚未用 HarmonyOS SDK 编译，未在真机核实。** Linux 可以验证协议状态机、日志序号、清单校验与文件更新算法，不能替代 `hvigor`、两种 NAPI 共存及设备生命周期验证。
 
@@ -18,6 +18,7 @@
 
 | 方法 | 鸿蒙行为与返回 |
 | --- | --- |
+| `guestRoot` | 同步返回 Controller 保存的应用 Context 的 `filesDir + '/runtime/rootfs'`，不等清单、安装或 Node，不做文件 IO。 |
 | `getStatus` | 返回下述完整状态 map；缺运行时 payload 时仍有原生通道，报告 `notInstalled` 或具体错误，不能伪装正在运行。 |
 | `install` | 落地随 HAP 的 JS/JSON/资源文件；同版本、完整文件集合不重写。并行安装返回 `install_busy`；Node 已启动后拒绝修改运行时，要求关闭并重新打开 App。成功返回 null，进度由事件流发送。`dropKept` 仅允许 false/省略，鸿蒙没有 Android 的 reset 保留恢复事务。 |
 | `start` | 只接受字符串 env map、`phoneStorage`、`mode`、`visualReplies`。安装未完成、版本不符、载荷不完整均拒绝。只以固定入口启动一次，成功受理返回 null，ready 后才报告 running。运行中重复 start 仍返回 null，状态由 getStatus/事件取得，不第二次启动；退出后返回 `ohos_restart_required`。 |
@@ -33,8 +34,9 @@
 | `moveAside` | 不支持；不会按 Android `/root` 路径重命名鸿蒙文件。 |
 | `setAutoSafe` | 不支持；状态 `autoSafe:false`，不承诺自动重启到救援 profile。 |
 | `setDirectEngine` | 不支持；鸿蒙始终为进程内 libnode，没有 Android Direct/PRoot 开关。 |
-| `installManagedSkill` | 本阶段不支持 Android 的原生技能写入事务；`managedSkillGeneration:null`，不授予虚假的本地写入资格。 |
-| `cancelManagedSkill` | 本阶段不支持；不声称撤销了未实现的事务。 |
+| `installManagedSkill` | 与 Kotlin 同形的有限请求，固定写 `<guestRoot>/root/.dsh/skills/<四个App技能名>/`；实际 ready、token、grant 与 Flutter owner 同时有效才可写。逐文件原子替换，SKILL.md 最后，不承诺整体回滚；返回 result/current/reason。 |
+| `cancelManagedSkill` | 当前 owner 的精确 requestId 取消，返回 null；旧 owner 不能取消新 owner；已提交文件可保留，物理 IO 退出前不释放写槽。 |
+| `reopenApp` | 当前 UIAbility 的公开 restartApp，先走已有 stop；目标由系统 abilityInfo 固定，不接受任意 Want。系统失败码与消息回传 Dart；无窗口明确失败，不用 process.exit。 |
 | `publishDiagnostics` | 与 Android 返回形状相同：运行时已安装时原子写入 `$DSH_HOME/dsh-app/diagnostics.md` 并返回 `{path,bytes}`；无可写运行时或参数超 256 KiB 返回 null。并发调用按进程内队列串行提交，每次成功提交的文件都是完整的一次输入；后一次允许覆盖前一次。只写调用方提供的已脱敏文本，不采集额外数据。 |
 | `storageStatus` | 返回 `{granted:false, permission:false, legacy:false, guestPath:""}`。鸿蒙没有 `/sdcard` 全盘挂载；通过 `dsh/files` 系统选择器导入/导出。 |
 | `requestStorage` | 不支持；不申请 `READ_MEDIA`、`WRITE_MEDIA` 或全文件权限。 |
@@ -49,7 +51,7 @@
 
 ### start 参数
 
-`env` 不得包含 `NODE_OPTIONS`、`NODE_PATH`、`LD_PRELOAD`、`LD_LIBRARY_PATH`、`DSH_HOME`、编译缓存目录或宿主内部字段；宿主固定的配置不能由 Dart 覆盖。值不写入日志。`phoneStorage:true` 明确拒绝并提示系统文件选择器，不能静默当作已挂载。`mode:"safe"` 明确拒绝；省略/null/normal 使用正常 profile。`visualReplies` 控制鸿蒙自有托管 AGENTS 里的 dsh-ui 说明，移除托管标记的用户文件保持不变。
+`env` 不得包含 `NODE_OPTIONS`、`NODE_PATH`、`LD_PRELOAD`、`LD_LIBRARY_PATH`、`DSH_HOME`、`DSH_AGENTS_HOME`、编译缓存目录或宿主内部字段；宿主固定的配置不能由 Dart 覆盖。值不写入日志。`phoneStorage:true` 明确拒绝并提示系统文件选择器，不能静默当作已挂载。`mode:"safe"` 明确拒绝；省略/null/normal 使用正常 profile。`visualReplies` 控制鸿蒙自有托管 AGENTS 里的 dsh-ui 说明，移除托管标记的用户文件保持不变。
 
 ## 状态字段
 
@@ -59,7 +61,7 @@
 | `bundledVersion`, `installedVersion`, `dshVersion`, `nodeVersion` | 来自 HAP manifest/成功提交的安装记录；未知为 null。安装中断时不得报告旧记录为可启动。 |
 | `phase` | 只用 Dart 现有枚举：notInstalled/installing/installed/starting/running/stopping/error。native 的 exited 不直接透传：手动 stop 完成后是 installed，意外退出是 error。 |
 | `baseUrl`, `token` | 只取原生 ready/state。退出后清空；token 只在状态通道传递，不进入日志、磁盘或说明。 |
-| `managedSkillGeneration` | null。 |
+| `managedSkillGeneration` | 实际 ready 且当前 Flutter owner 有效时的正安全整数 grant；此前、stop、退出或 detach 后为 null。重挂引擎授新 grant；Ability 变化不退休 owner。 |
 | `error` | 稳定错误码和不含凭据的说明，成功时 null。 |
 | `mode`, `safeState`, `safeReason`, `strikes`, `autoSafe` | normal/off/null/0/false。 |
 | `failure`, `mainFailure`, `healthyAt` | 无已核分类时 null；不把任何非零退出猜成 Android 的某一种 fatal 分类。 |
@@ -88,7 +90,7 @@
 
 实现采用**固定代码目录、安装归属记录、逐文件原子替换**：开始前原子持久写入 installing.json，其中保存当前与历次未完成安装的 ownedPaths/stagingHashes；先按深路径优先清理本版已退役的登记文件和空祖先目录，遇到当前版本需要的目录则保留，未知内容不递归删除。逐个核已有文件的 size/SHA256，相同则复用，不重复读取 HAP 内容；变更文件从 RawFd 的 `{fd,offset,length}` 分块读出，写同文件系统的 staging 临时文件，核摘要后 rename；最后清理登记的临时文件、提交安装记录并清掉 installing 标记。任何中断都保留“待续装”状态，start 必须拒绝；换 HAP 版本后也继承未完成事务的归属记录，再按新版本清单续装。这样升级只写变化部分，不承诺旧版本即时回滚，也不在已经启动过 Node 的 App 进程内换代码。
 
-`DSH_HOME` 和默认工作区在 `context.filesDir` 下的独立目录；缓存放 `context.cacheDir`。运行时代码目录不在 workspaceRoots 中。任何安装/首次启动的目录创建失败均明确失败，不回退到 `/` 或 `process.cwd()`。
+`guestRoot = context.filesDir + '/runtime/rootfs'`；`HOME`、`DSH_HOME`、`DSH_AGENTS_HOME` 分别为其下的 `root`、`root/.dsh`、`root/.agents`，唯一 workspaceRoot 为 `root/workspace`。交付文件放 `root/workspace/DSH-Go`；缓存仍放 `context.cacheDir`。`rootfs` 只是目录名，没有 Linux guest。运行时代码仍在 `context.filesDir + '/dsh-runtime/tree'`，不在 workspaceRoots 中。任何安装/首次启动的目录创建失败均明确失败，不回退到 `/` 或 `process.cwd()`。
 
 ## 公开 API 依据与设备待验
 

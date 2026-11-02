@@ -1,12 +1,30 @@
 // TypeScript semantic check against fixed public OH declarations; not an ArkTS compiler.
 import { createRequire } from 'node:module';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { resolve, join } from 'node:path';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { resolve, join, dirname, parse } from 'node:path';
+import { createHash } from 'node:crypto';
 const [source, sdk, output, processPrefix] = process.argv.slice(2).map(x => resolve(x));
 const ts = createRequire(join(processPrefix, 'package.json'))('typescript');
 mkdirSync(output, { recursive: true });
-const plugin = join(output, 'Plugin.ts');
-writeFileSync(plugin, readFileSync(source));
+const sources = [];
+const staged = new Map();
+function stage(input) {
+  input = resolve(input);
+  if (staged.has(input)) return staged.get(input);
+  const target = join(output, 'sources', input.slice(parse(input).root.length)).replace(/\.ets$/, '.ts');
+  staged.set(input, target);
+  const bytes = readFileSync(input);
+  sources.push({ path: input, sha256: createHash('sha256').update(bytes).digest('hex') });
+  mkdirSync(dirname(target), { recursive: true });
+  writeFileSync(target, bytes);
+  for (const match of bytes.toString('utf8').matchAll(/from\s+['"](\.[^'"]+)['"]/g)) {
+    const imported = resolve(dirname(input), match[1]);
+    if (existsSync(imported + '.ets')) stage(imported + '.ets');
+    else if (existsSync(imported + '.ts')) stage(imported + '.ts');
+  }
+  return target;
+}
+const plugin = stage(source);
 writeFileSync(join(output, 'flutter.d.ts'), `
 import common from '@ohos.app.ability.common';
 import UIAbility from '@ohos.app.ability.UIAbility';
@@ -27,15 +45,26 @@ export interface EventSink { success(event: Any): void; error(code: string, mess
 export interface StreamHandler { onListen(args: Any, events: EventSink): void; onCancel(args: Any): void; }
 export class EventChannel { constructor(messenger: BinaryMessenger, name: string); setStreamHandler(handler: StreamHandler): void; }
 `);
-writeFileSync(join(output, 'host.d.ts'), 'export function openUserFile(root: string, relative: string): number;\n');
+const main = source.split('/ets/')[0];
+const hostTypes = join(main, 'cpp/types/libdsh_host/index.d.ts');
+writeFileSync(join(output, 'host.d.ts'), readFileSync(hostTypes));
+for (const [name, exports] of Object.entries({
+  MethodCall: 'MethodCall as default',
+  MethodChannel: 'MethodChannel as default, MethodCallHandler, MethodResult',
+  EventChannel: 'EventChannel as default, StreamHandler, EventSink',
+  Any: 'Any as default',
+})) writeFileSync(join(output, name + '.d.ts'), `export { ${exports} } from './flutter';\n`);
 const options = { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS, strict: true, noEmit: true,
   skipLibCheck: true, types: [], baseUrl: output, paths: {
-    'libdsh_host.so': [join(output, 'host.d.ts')], '@ohos/flutter_ohos': [join(output, 'flutter.d.ts')], '@ohos.*': [join(sdk, '@ohos.*.d.ts')],
+    'libdsh_host.so': [join(output, 'host.d.ts')], '@ohos/flutter_ohos': [join(output, 'flutter.d.ts')],
+    '@ohos/flutter_ohos/src/main/ets/embedding/engine/plugins/FlutterPlugin': [join(output, 'flutter.d.ts')],
+    '@ohos/flutter_ohos/src/main/ets/plugin/common/*': [join(output, '*.d.ts')],
+    '@ohos.*': [join(sdk, '@ohos.*.d.ts')],
   }, moduleResolution: ts.ModuleResolutionKind.Node10 };
 const program = ts.createProgram([plugin], options);
 const diagnostics = ts.getPreEmitDiagnostics(program).map(x => ({ code: x.code,
   file: x.file?.fileName, line: x.file && x.start !== undefined ? x.file.getLineAndCharacterOfPosition(x.start).line + 1 : null,
   message: ts.flattenDiagnosticMessageText(x.messageText, '\n') }));
-const report = { compiler: ts.version, source, sdk, scope: 'TypeScript+fixed public OH .d.ts+minimal public Flutter signatures; not ArkTS/hvigor', diagnostics };
+const report = { compiler: ts.version, source, sources, sdk, scope: 'TypeScript+fixed public OH .d.ts+minimal public Flutter signatures; not ArkTS/hvigor', diagnostics };
 writeFileSync(join(output, 'report.json'), JSON.stringify(report, null, 2) + '\n');
 console.log(JSON.stringify(report, null, 2)); process.exitCode = diagnostics.length ? 1 : 0;

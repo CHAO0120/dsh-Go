@@ -57,7 +57,7 @@ export function validateManifest(manifest: RuntimeManifest): RuntimeManifest {
 export function validateEnvironment(env: Map<string, Object> | null): Record<string, string> {
   const result: Record<string, string> = {};
   if (env === null) return result;
-  const reserved = ['NODE_OPTIONS', 'NODE_PATH', 'LD_PRELOAD', 'LD_LIBRARY_PATH', 'DSH_HOME',
+  const reserved = ['NODE_OPTIONS', 'NODE_PATH', 'LD_PRELOAD', 'LD_LIBRARY_PATH', 'DSH_HOME', 'DSH_AGENTS_HOME',
     'NODE_COMPILE_CACHE', 'HOME', 'TMPDIR'];
   env.forEach((value: Object, key: string) => {
     if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(key) || typeof value !== 'string' || value.includes('\0') ||

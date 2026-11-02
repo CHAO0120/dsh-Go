@@ -14,23 +14,36 @@
 | `drainEvents()` | 一次取走有界队列中的 log/ready/exit/error；没有跨引擎回调或 Ark 对象引用。 |
 | `openUserFile(root, relative)` | 打开可信 workspace/cache 根下的普通文件并返回 fd，调用方拥有 fd，必须在 finally 中关闭。 |
 
-`start` 的六个输入是 `runtimeRoot`、`dshHome`、非空 `workspaceRoots`、`cacheDir`、可信 `nativeLibraryDir`、字符串字典 `env`。路径由 P2 的 Ark 控制器提供，不是 Dart 传入的任意命令行。`openUserFile` 的根也只由 Ark 的工作区/缓存策略选择，不能允许 Dart 自选根或授权 `DSH_HOME`。
+`start` 的七个输入是 `runtimeRoot`、`guestRoot`、`dshHome`、只含一个路径的 `workspaceRoots`、`cacheDir`、可信 `nativeLibraryDir`、字符串字典 `env`。路径由 P2 的 Ark 控制器提供，不是 Dart 传入的任意命令行。`openUserFile` 的根也只由 Ark 的工作区/缓存策略选择，不能允许 Dart 自选根或授权 `DSH_HOME`。
+
+P2 v6 的 `guestRoot` 固定为同一个 ApplicationContext 的 `filesDir + '/runtime/rootfs'`；查询该路径不依赖引擎 ready，也不做目录或 manifest IO。`rootfs` 沿用既有目录名字，不表示存在 Linux 根文件系统、PRoot 或 chroot。宿主在启动时要求下表目录已存在，并拒绝根下四个目录被 symlink 重定向；`dshHome` 和唯一工作区必须等于表中路径。这些校验在消耗一次启动之前完成。
+
+| 用途 | 相对 guestRoot 的路径 |
+|---|---|
+| `HOME` | `root` |
+| `DSH_HOME`、诊断与应用配置 | `root/.dsh` |
+| `DSH_AGENTS_HOME`、共享 skills / AGENTS.md | `root/.agents` |
+| 唯一工作区 | `root/workspace` |
+| 托管技能 | `root/.dsh/skills/<固定 name>` |
+| 给用户交付的输出目录 | `root/workspace/DSH-Go` |
+
+运行时代码仍放在原来的 `filesDir/dsh-runtime/tree`，不移进 guestRoot。托管技能的许可、取消和逐文件提交见 `managed-skills.md`；输出目录策略由文件通道负责。
 
 模块内有应用寿命的 Host 单例。它不持有 `napi_env`、`napi_value` 或 JS callback；引擎线程和两个输出读取线程都不调用 N-API。Flutter detach 仅由 P2 移除事件接收者；P2 的模块级控制器继续抽取事件，重挂后读取同一原生状态。宿主和 runner 以 `-z nodelete` 链接，构建门检查实际 ELF 标志，避免 Ark 模块卸载时丢掉仍在运行的 C++ 代码。
 
 ## 启动前提逐项落地
 
 1. runtime/home/cache/workspace 必须是已存在的绝对目录，不能是文件系统根；固定入口文件 canonical path 必须仍在 runtimeRoot 内。缓存的子目录不能被 symlink 重定向。
-2. `NODE_OPTIONS` 必须缺省或严格为空。空格也拒绝。调用方不能覆盖 `HOME`、`TMPDIR`、`DSH_HOME`、`NODE_*`、`UV_*`、动态加载器变量、`DSH_GO_*`、`NARB_*` 或 OpenSSL 配置入口。
+2. `NODE_OPTIONS` 必须缺省或严格为空。空格也拒绝。调用方不能覆盖 `HOME`、`TMPDIR`、`DSH_HOME`、`DSH_AGENTS_HOME`、`NODE_*`、`UV_*`、动态加载器变量、`DSH_GO_*`、`NARB_*` 或 OpenSSL 配置入口。
 3. 命令行固定为下面的 13 个参数，只有一个 `--import`，不提供额外 CLI 参数接口：
 
    ```text
    dsh-node --jitless --import RUNTIME/runtime/ohos/preload.mjs
      RUNTIME/node_modules/@deepseek-ai/dsh/lib/bin.js web
-     --patch HOME/ohos-host.patch.json --host 127.0.0.1 --port 0 --no-open
+     --patch DSH_HOME/ohos-host.patch.json --host 127.0.0.1 --port 0 --no-open
    ```
 
-4. `DSH_HOME` 和 `HOME` 指向 P2 先建立的私有 home；临时文件和 V8 编译缓存分别放在 cache 下的 `ohos-process`、`node-compile-cache`。`NARB_DISABLE_NATIVE_CACHE=1` 禁用另一路原生加载器缓存。临时修改的进程环境在终态发布前恢复。
+4. `HOME`、`DSH_HOME`、`DSH_AGENTS_HOME` 使用上表的三个不同目录；宿主显式设置它们，避免继承来的 agents 环境变量改变共享指令和技能的根。临时文件和 V8 编译缓存分别放在 cache 下的 `ohos-process`、`node-compile-cache`。`NARB_DISABLE_NATIVE_CACHE=1` 禁用另一路原生加载器缓存。临时修改的进程环境在终态发布前恢复，包括原先存在的 HOME 和 DSH_AGENTS_HOME。
 5. `workspaceRoots` 写入实际 Cordis 的 `ohos-subprocess.config.workspaceRoots`，不是只写一个无消费者的环境变量。Host 生成 JSON 格式的合法 YAML patch：禁用旧 `subprocess`、`sandbox`；通过 `insert` 引入两个 OHOS 后端；保留 bash sandbox 和 approval 插件。
 6. `working-directory.config.defaultDirectory` 与 `sandbox-policy.config.workspaceRoot` 都使用第一工作区根。权限模式与 `DSH_PERMISSION_MODE` 同步，允许既有 `workspace-write`、`read-only`、`danger-full-access` 三种值，默认 workspace-write。Cordis 的 config 是整块替换，因此明确给出 policy 所需字段。
 7. publication 的可靠系统身份仍由 linked binding 直接调用 `OH_GetOSFullName`、`OH_GetDisplayVersion`、`OH_GetIncrementalVersion`、`OH_GetSecurityPatchTag` 四个公开 deviceinfo C API。没有 Ark 环境变量或 Linux kernel release 替代值。缺失/空值会在改动既有恢复状态前明确失败。**这四个 API 在设备上的值和可用性待真机核实**；Linux 回归使用明确的 deviceinfo 测试夹具。
@@ -55,7 +68,7 @@ stdout/stderr 使用管道读取。fd 1/2 属于整个进程，捕获期间其�
 
 P2 的 rawfile manifest 按文件哈希描述 JS/JSON 等普通资源，安装到固定 `filesDir/dsh-runtime/tree`；已有文件 hash 一致时保留，变动文件写私有临时文件再 rename。持久 installing 标记阻止中断后的半成品启动；重新执行安装续完后才清除。已经消耗 Node 实例的进程不更新活动树。home/workspace 不随运行时替换，缓存可重建。这一过程不是全量解压几百 MB 的归档。
 
-`libdsh_host.so` 由 App CMake 构建；主线提供的 `libnode.so` 在 `entry/libs/arm64-v8a/`，runner 已编入其中。Ark target 不包含 Node 头、不强制改名，只经 C ABI 进入 libnode。详见 `napi-isolation.md`。
+`libdsh_host.so` 由 App CMake 构建；主线提供的 `libnode.so` 在 `entry/libs/arm64-v8a/`，runner 已编入其中。Ark target 不包含 Node 头、不强制改名，只经 C ABI 进入 libnode。Linux 测试中的独立 runner DSO 是测量夹具。详见 `napi-isolation.md`。
 
 P1B v2 要求 P2 v5 从自己的可信 Context 生成 `nativeLibraryDir`：普通自有 Context 的 `bundleCodeDir` 加上 `applicationInfo.nativeLibraryPath` 的相对路径组件。公开 6.1 源码中后者不是绝对路径。Ark 必须拒绝空值、绝对 nativeLibraryPath、NUL、空组件、`.` 和 `..`，不接受 Dart 或配置传入的覆盖，也不硬编码安装路径。entry 模块固定 `extractNativeLibs: true`、`libIsolation: false`；这些 Ark 和模块字段由 P2 v5 提供。
 
@@ -71,10 +84,12 @@ Host 再 canonicalize 已存在的非根目录，要求 `libdsh_flock.so` 和 `l
 
 ## 已执行的检查与待验证项
 
-- HostCore：Linux Clang 18，19 个场景，覆盖真实线程、固定 argv、环境恢复、有限队列、ready/token、尾日志、停止竞态、多行密钥、启动前提和路径越界；新增可信原生目录、缺库/非普通文件/库 symlink、NUL/相对/根路径和 env 覆盖拒绝。
+- HostCore：Linux Clang 18，30 个场景，覆盖真实线程、固定 argv、环境恢复、有限队列、ready/token、尾日志、停止竞态、多行密钥、启动前提和路径越界；含可信原生目录、缺库/非普通文件/库 symlink、NUL/相对/根路径和 env 覆盖拒绝，以及 guestRoot 缺失/相对/根路径、home/workspace 错位、多工作区、agents 缺失/重定向和 DSH_AGENTS_HOME 覆盖拒绝。
 - 适配层：公开 OH native_api/common/hilog 头配合官方 Node 24.22.1 的通用 N-API 声明，桌面实际调用五个导出。Node runner 与 hilog 是明确替身。这是接口转换检查，不是 OH SDK 编译或 Ark 运行结果。
 - 工作区 opener：10000 次父目录与 symlink 置换，接受的 fd 全部读到授权根内容，其他请求拒绝；测试前后 fd 均为 4。具体成功/拒绝数随真实调度变化，不能作为性能指标。
-- 配置：生产布局 driver 调用真正 HostCore 生成原始 patch，固定真实 DSH 通过 `--dump-config`；严格仿真下两个完整回合各完成 write/edit/read/grep/bash 与两次审批，其中一个 session/create 完全不传 cwd，实际使用中文默认工作区。仿真驱动额外导入测试约束并加假模型 overlay，生成的生产 profile 不改。
+- 配置：旧布局的两个真实回合证据保留。P2 v6 又从 `3fc4081` 的 22 个鸿蒙补丁重新构造私有运行目录，重新构建该基底的 just-bash/re2js，生产 driver 记录实际 HostCore 的 13 个 argv 和 8 个固定环境键。原样 profile 通过真实 `--dump-config`；严格仿真中 session/create 完全不传 cwd，实际中文默认工作区完成 write/edit/read/grep/bash 与两次审批，并观察到 native-addon 路线。生成 profile 没有改写。
+- 目录消费者：新布局的实际 `dsh-home-paths`、`FileSystemSkillProvider` 和 `dsh-agent-instructions` 使用 HostCore 捕获的环境，验证 HOME、DSH_HOME、DSH_AGENTS_HOME，以及两个 home 中各自的 skill 和 AGENTS.md 读取。不是只核对环境字符串。
+- 重跑入口 `runtime/tests/ohos/host-layout.py`。它只读取调用方给定的固定 prefix、npm 依赖缓存和 Linux addon 夹具，全部构建及写入发生在新的输出目录。严格回合在生产 argv 之外显式加入 sim/observe 测试导入及假模型 overlay，这些不属于产品启动参数。它不是冷/热性能比较，也不证明目标 ABI。
 - 正式 SDK 编译、Ark 模块重挂、改名 Node 与 Ark 同进程、native addon 的实际 HAP 安装路径、真实 deviceinfo/errno、设备后台与恢复：**未验证，待主线/真机**。
 
 ## 来源

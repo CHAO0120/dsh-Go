@@ -92,7 +92,9 @@ export class OhosRuntimeStorage implements RuntimeStorage {
       const bytes = content.length === 0 ? new Uint8Array(0) : new util.TextEncoder().encodeInto(content);
       let offset = 0;
       while (offset < bytes.byteLength) {
-        const count = await fs.write(file.fd, bytes.buffer.slice(offset), {offset: offset});
+        const buffer = new ArrayBuffer(Math.min(64 * 1024, bytes.byteLength - offset));
+        new Uint8Array(buffer).set(bytes.subarray(offset, offset + buffer.byteLength));
+        const count = await fs.write(file.fd, buffer, {offset: offset});
         if (count === 0) throw new RuntimeChannelError('ohos_write_failed', '运行时记录写入未完成。');
         offset += count;
       }

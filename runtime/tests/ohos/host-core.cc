@@ -32,6 +32,8 @@ int Run(int argc, char** argv) {
   assert(std::string(argv[8]) == "--host" && std::string(argv[9]) == "127.0.0.1");
   assert(std::string(argv[10]) == "--port" && std::string(argv[11]) == "0" && std::string(argv[12]) == "--no-open");
   assert(std::string(std::getenv("DSH_HOME")) == options.dsh_home);
+  assert(std::string(std::getenv("HOME")) == options.guest_root + "/root");
+  assert(std::string(std::getenv("DSH_AGENTS_HOME")) == options.guest_root + "/root/.agents");
   assert(std::string(std::getenv("NODE_COMPILE_CACHE")) == options.cache_dir + "/node-compile-cache");
   assert(std::string(std::getenv("DSH_GO_OHOS_NATIVE_LIBRARY_DIR")) == options.native_library_dir);
   entered = true;
@@ -60,13 +62,14 @@ int main(int argc, char** argv) {
   scenario = argv[1]; main_thread = std::this_thread::get_id();
   const std::filesystem::path base = argv[2];
   options.runtime_root = (base / "runtime").string();
-  options.dsh_home = (base / "home").string(); options.cache_dir = (base / "cache").string();
+  options.guest_root = (base / "中文 guest\"root/runtime/rootfs").string();
+  options.dsh_home = options.guest_root + "/root/.dsh"; options.cache_dir = (base / "cache").string();
   options.native_library_dir = (base / "libs").string();
-  options.workspace_roots = {(base / "中文工作区\"quoted").string()};
+  options.workspace_roots = {options.guest_root + "/root/workspace"};
   options.env = {{"DEEPSEEK_API_KEY", "fixture_SECRET"}};
   if (scenario == "multiline-secret") options.env["TEST_PASSWORD"] = "fixture_FIRST\r\nfixture_SECOND";
   for (const auto& path : {options.runtime_root, options.dsh_home, options.cache_dir,
-                           options.native_library_dir, options.workspace_roots[0]}) {
+                           options.native_library_dir, options.workspace_roots[0], options.guest_root + "/root/.agents"}) {
     std::filesystem::create_directories(path);
   }
   for (const char* name : {"libdsh_flock.so", "libdsh_require_builtin.so"})
@@ -77,6 +80,8 @@ int main(int argc, char** argv) {
     std::filesystem::create_directories(path.parent_path()); std::ofstream(path) << "// fixture only\n";
   }
   const std::string previous_home = std::getenv("DSH_HOME") ? std::getenv("DSH_HOME") : "";
+  setenv("HOME", "/inherited-user-home", 1);
+  setenv("DSH_AGENTS_HOME", "/inherited-agents-home", 1);
   setenv("DSH_GO_OHOS_NATIVE_LIBRARY_DIR", "/inherited-value-must-be-restored", 1);
   if (scenario == "native-relative") options.native_library_dir = "libs";
   if (scenario == "native-root") options.native_library_dir = "/";
@@ -93,6 +98,24 @@ int main(int argc, char** argv) {
     std::filesystem::create_symlink(base / "outside.so", base / "libs/libdsh_flock.so");
   }
   if (scenario == "native-env-override") options.env["DSH_GO_OHOS_NATIVE_LIBRARY_DIR"] = "/untrusted";
+  if (scenario == "layout-no-guest") options.guest_root.clear();
+  if (scenario == "layout-relative-guest") options.guest_root = "runtime/rootfs";
+  if (scenario == "layout-root-guest") options.guest_root = "/";
+  if (scenario == "layout-missing-guest") options.guest_root += "/missing";
+  if (scenario == "layout-wrong-home") {
+    options.dsh_home = (base / "other-home").string(); std::filesystem::create_directory(options.dsh_home);
+  }
+  if (scenario == "layout-wrong-workspace") {
+    options.workspace_roots = {(base / "other-workspace").string()}; std::filesystem::create_directory(options.workspace_roots[0]);
+  }
+  if (scenario == "layout-many-roots") options.workspace_roots.push_back(options.workspace_roots[0]);
+  if (scenario == "layout-missing-agents") std::filesystem::remove(options.guest_root + "/root/.agents");
+  if (scenario == "layout-agents-link" || scenario == "layout-workspace-link") {
+    const auto path = options.guest_root + (scenario == "layout-agents-link" ? "/root/.agents" : "/root/workspace");
+    const auto other = (base / "other-directory").string(); std::filesystem::create_directory(other);
+    std::filesystem::remove(path); std::filesystem::create_directory_symlink(other, path);
+  }
+  if (scenario == "layout-env-agents") options.env["DSH_AGENTS_HOME"] = "/untrusted";
   if (scenario == "no-roots") options.workspace_roots.clear();
   if (scenario == "filesystem-root") options.workspace_roots[0] = "/";
   if (scenario == "missing-home") options.dsh_home += "/missing";
@@ -110,7 +133,7 @@ int main(int argc, char** argv) {
   });
   const bool invalid = scenario == "no-roots" || scenario == "filesystem-root" || scenario == "missing-home" ||
       scenario == "protected-env" || scenario == "inherited-node-options" || scenario == "runtime-symlink" ||
-      scenario.compare(0, 7, "native-") == 0;
+      scenario.compare(0, 7, "native-") == 0 || scenario.compare(0, 7, "layout-") == 0;
   try {
     host.Start(options, Run, Stop);
     assert(!invalid);
@@ -118,6 +141,9 @@ int main(int argc, char** argv) {
     assert(invalid && !entered && !host.State().consumed);
     if (scenario.compare(0, 7, "native-") == 0)
       assert(error.code == (scenario == "native-env-override" ? "ERR_OHOS_HOST_ENV" : "ERR_OHOS_NATIVE_LIBRARY_PATH"));
+    if (scenario.compare(0, 7, "layout-") == 0)
+      assert(error.code == (scenario == "layout-env-agents" ? "ERR_OHOS_HOST_ENV" :
+          scenario == "layout-many-roots" ? "ERR_OHOS_HOST_WORKSPACES" : "ERR_OHOS_HOST_LAYOUT"));
     std::cout << "PASS " << scenario << '\n'; return 0;
   }
   if (scenario == "stop-race" || scenario == "stop-running") {
@@ -147,6 +173,8 @@ int main(int argc, char** argv) {
   assert(forwarded.find("fixture_FIRST") == std::string::npos && forwarded.find("fixture_SECOND") == std::string::npos);
   if (scenario == "large") assert(dropped && forwarded.find("oversized log line discarded") != std::string::npos);
   assert((std::getenv("DSH_HOME") ? std::getenv("DSH_HOME") : "") == previous_home);
+  assert(std::string(std::getenv("HOME")) == "/inherited-user-home");
+  assert(std::string(std::getenv("DSH_AGENTS_HOME")) == "/inherited-agents-home");
   assert(std::string(std::getenv("DSH_GO_OHOS_NATIVE_LIBRARY_DIR")) == "/inherited-value-must-be-restored");
   try { host.Start(options, Run, Stop); assert(false); }
   catch (const dsh::HostError& error) { assert(error.code == "ERR_OHOS_HOST_ALREADY_STARTED"); }

@@ -86,7 +86,7 @@ void WriteProfile(const std::string& path, const std::string& contents) {
 }
 
 bool ProtectedEnv(const std::string& key) {
-  return key == "DSH_HOME" || key == "HOME" || key == "TMPDIR" ||
+  return key == "DSH_HOME" || key == "DSH_AGENTS_HOME" || key == "HOME" || key == "TMPDIR" ||
       key == "OPENSSL_CONF" || key == "OPENSSL_MODULES" ||
       key.compare(0, 5, "NODE_") == 0 || key.compare(0, 3, "UV_") == 0 ||
       key.compare(0, 3, "LD_") == 0 || key.compare(0, 5, "DYLD_") == 0 ||
@@ -196,11 +196,22 @@ void Host::Start(HostOptions options, StartNode start_node, StopNode stop_node) 
   const char* node_options = std::getenv("NODE_OPTIONS");
   Require(!node_options || !node_options[0], "ERR_OHOS_HOST_NODE_OPTIONS", "NODE_OPTIONS must be absent or empty");
   options.runtime_root = Directory(options.runtime_root);
+  options.guest_root = Directory(options.guest_root, "ERR_OHOS_HOST_LAYOUT");
   options.dsh_home = Directory(options.dsh_home);
   options.cache_dir = Directory(options.cache_dir);
   options.native_library_dir = NativeDirectory(options.native_library_dir);
-  Require(!options.workspace_roots.empty(), "ERR_OHOS_HOST_WORKSPACES", "Explicit authorized workspace roots are required");
+  Require(options.workspace_roots.size() == 1, "ERR_OHOS_HOST_WORKSPACES", "The single authorized guest workspace is required");
   for (auto& root : options.workspace_roots) root = Directory(root);
+  const auto user_home = options.guest_root + "/root";
+  const auto expected_home = user_home + "/.dsh";
+  const auto expected_agents = user_home + "/.agents";
+  const auto expected_workspace = user_home + "/workspace";
+  for (const auto& path : {user_home, expected_home, expected_agents, expected_workspace}) {
+    Require(Directory(path, "ERR_OHOS_HOST_LAYOUT") == path,
+            "ERR_OHOS_HOST_LAYOUT", "Guest layout directories must not be redirected by symlinks");
+  }
+  Require(options.dsh_home == expected_home && options.workspace_roots[0] == expected_workspace,
+          "ERR_OHOS_HOST_LAYOUT", "Home and workspace must match the trusted guest root");
   for (const auto& [key, value] : options.env) {
     Require(!key.empty() && key.find_first_of("=\0", 0, 2) == std::string::npos &&
                 value.find('\0') == std::string::npos && !ProtectedEnv(key),
@@ -263,7 +274,8 @@ void Host::Run(HostOptions options, StartNode start_node) {
       Environment environment;
       for (const auto& [key, value] : options.env) environment.Set(key, value);
       environment.Set("DSH_HOME", options.dsh_home);
-      environment.Set("HOME", options.dsh_home);
+      environment.Set("HOME", options.guest_root + "/root");
+      environment.Set("DSH_AGENTS_HOME", options.guest_root + "/root/.agents");
       environment.Set("TMPDIR", temporary);
       environment.Set("NODE_COMPILE_CACHE", cache);
       environment.Set("NARB_DISABLE_NATIVE_CACHE", "1");

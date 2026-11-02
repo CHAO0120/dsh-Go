@@ -45,10 +45,11 @@ const fs = require('node:fs');
 const path = require('node:path');
 const host = require(process.argv[2]);
 const base = process.argv[3];
-const options = {runtimeRoot:path.join(base,'runtime'),dshHome:path.join(base,'home'),
-  cacheDir:path.join(base,'cache'),nativeLibraryDir:path.join(base,'libs'),workspaceRoots:[path.join(base,'中文工作区')],
+const guestRoot=path.join(base,'中文 root/runtime/rootfs');
+const options = {runtimeRoot:path.join(base,'runtime'),guestRoot,dshHome:path.join(guestRoot,'root/.dsh'),
+  cacheDir:path.join(base,'cache'),nativeLibraryDir:path.join(base,'libs'),workspaceRoots:[path.join(guestRoot,'root/workspace')],
   env:{DEEPSEEK_API_KEY:'fixture_SECRET'}};
-for (const dir of [options.runtimeRoot,options.dshHome,options.cacheDir,options.nativeLibraryDir,...options.workspaceRoots])
+for (const dir of [options.runtimeRoot,options.dshHome,options.cacheDir,options.nativeLibraryDir,path.join(guestRoot,'root/.agents'),...options.workspaceRoots])
   fs.mkdirSync(dir,{recursive:true});
 for (const name of ['libdsh_flock.so','libdsh_require_builtin.so'])
   fs.writeFileSync(path.join(options.nativeLibraryDir,name),'path fixture, not an ELF library');
@@ -60,9 +61,12 @@ for (const relative of ['runtime/ohos/preload.mjs','node_modules/@deepseek-ai/ds
 for (const key of ['start','stop','getState','drainEvents','openUserFile']) assert.equal(typeof host[key],'function');
 assert.equal(host.getState().phase,'idle');assert.equal(host.getState().consumed,false);
 assert.throws(()=>host.start(),{code:'ERR_OHOS_HOST_ARGUMENT'});
+assert.throws(()=>host.start({...options,guestRoot:undefined}),{code:'ERR_OHOS_HOST_ARGUMENT'});
+assert.throws(()=>host.start({...options,guestRoot:'/missing-guest-root'}),{code:'ERR_OHOS_HOST_LAYOUT'});
 assert.throws(()=>host.start({...options,nativeLibraryDir:undefined}),{code:'ERR_OHOS_HOST_ARGUMENT'});
 assert.throws(()=>host.start({...options,nativeLibraryDir:'/missing-native-dir'}),{code:'ERR_OHOS_NATIVE_LIBRARY_PATH'});
 assert.throws(()=>host.start({...options,env:{DSH_GO_OHOS_NATIVE_LIBRARY_DIR:'/untrusted'}}),{code:'ERR_OHOS_HOST_ENV'});
+assert.throws(()=>host.start({...options,env:{DSH_AGENTS_HOME:'/untrusted'}}),{code:'ERR_OHOS_HOST_ENV'});
 assert.throws(()=>host.start({...options,workspaceRoots:[]}),{code:'ERR_OHOS_HOST_WORKSPACES'});
 assert.equal(host.getState().consumed,false);
 const workspace=options.workspaceRoots[0];
@@ -74,6 +78,8 @@ for (const name of ['../home','link','中文.txt\0tail'])
   assert.throws(()=>host.openUserFile(workspace,name),{code:'ERR_OHOS_FILE_ACCESS'});
 assert.throws(()=>host.openUserFile(workspace),{code:'ERR_OHOS_HOST_ARGUMENT'});
 const previous=process.env.DSH_HOME;
+const previousHome=process.env.HOME;
+const previousAgents=process.env.DSH_AGENTS_HOME;
 const previousNative=process.env.DSH_GO_OHOS_NATIVE_LIBRARY_DIR;
 async function until(phase) {
   const deadline=Date.now()+5000;
@@ -91,10 +97,15 @@ async function until(phase) {
   assert.equal(ready.baseUrl,'http://127.0.0.1:3080');assert.equal(ready.token,'fixture_LAUNCH');
   assert.equal(ready.exitCode,null);assert.equal(ready.errorCode,null);assert.equal(ready.consumed,true);
   assert.equal(process.env.DSH_GO_OHOS_NATIVE_LIBRARY_DIR,options.nativeLibraryDir);
+  assert.equal(process.env.DSH_HOME,options.dshHome);
+  assert.equal(process.env.HOME,path.join(guestRoot,'root'));
+  assert.equal(process.env.DSH_AGENTS_HOME,path.join(guestRoot,'root/.agents'));
   const events=host.drainEvents();host.stop();const exit=await until('exited');
   events.push(...host.drainEvents());
   assert.equal(exit.exitCode,23);assert.equal(exit.token,null);assert.equal(exit.baseUrl,null);
   assert.equal(process.env.DSH_HOME,previous);
+  assert.equal(process.env.HOME,previousHome);
+  assert.equal(process.env.DSH_AGENTS_HOME,previousAgents);
   assert.equal(process.env.DSH_GO_OHOS_NATIVE_LIBRARY_DIR,previousNative);
   assert.equal(events.at(-1).kind,'exit');assert.equal(events.at(-1).exitCode,23);
   assert.ok(events.some(e=>e.kind==='ready'&&e.token==='fixture_LAUNCH'));
