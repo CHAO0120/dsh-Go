@@ -1,5 +1,5 @@
 import { parentPort, workerData } from 'node:worker_threads';
-import { Bash, defineCommand } from 'just-bash';
+import { Bash, defineCommand } from './build/just-bash/index.js';
 import { createFilesystem } from './filesystem.mjs';
 import { shellCommands, unavailableMessage } from './commands.mjs';
 import { executeRg } from './rg.mjs';

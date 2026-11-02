@@ -54,6 +54,8 @@ JSON 搜索路径的单次读取和 4 MiB 单行预算见 [M4-3](M4-3.md)，非 
 
 ## 安装与复跑
 
+M4-4b 后继使用固定 just-bash 3.6.0 的 OHOS 私有 ESM 构建，以恢复越界读取的 EACCES 诊断及合并输出的字节标记；构建方式、先失败证据与仍存在的上游边界见 [M4-4b.md](M4-4b.md)。Worker 启动前须运行下面的 `build-just-bash.py`，生成物不随源码补丁提交。
+
 manifest 中直接声明的运行时依赖保持题面已批准的 `just-bash 3.6.0`（Apache-2.0）与 `isomorphic-git 1.44.9`（MIT）。本项还直接依赖原锁闭包中的 `re2js 1.3.3`（MIT）来生成仅供 rg 使用的私有构建，修改其非生成源码；不改原 npm 包、原 Unicode 表或其他消费者，也没有安装新的 ignore/glob 依赖。它不再只是调用未修改 re2js 的公开 matcher：构建耦合包括固定 sourcemap 与其中 24 个源码的身份。追加6已要求把 re2js 记录为 manifest 直接依赖，由主线 M4-6 独立落实；本包不抢改该锁文件。生成脚本复用已批准的 esbuild 0.27.3；`build/` 产物不提交，完整 MIT 归属保留在产物头部。
 
 从 `afb5cdd` 根目录应用独立补丁后，使用官方 Node 24.22.1：
@@ -65,6 +67,7 @@ npm ci --prefix runtime/ohos/process --ignore-scripts --omit=optional
 node runtime/ohos/process/link-dsh.mjs /已装DSH的独立prefix
 # 应用 M3-3 标记迁移与本 M4-1 差分后：
 node runtime/ohos/process/build-rg-regex.mjs /已有esbuild0.27.3的prefix
+python3 runtime/ohos/process/build-just-bash.py
 ```
 
 DSH 厂商包补丁为 `runtime/patches/ohos-virtual-process.diff`，`pins.json` 只登记 `0.2.1-rc.4` 两个文件的 before/after SHA256。完整 OHOS 前缀用 `runtime/lib/rtbuild.py patch-dsh --prefix ... --dsh-version 0.2.1-rc.4 --target ohos`。阶段验证只要本 diff 时，把它拷到临时补丁目录，旁边放一份 schema 2 的 pins：`targetSets` 为 `{"android": [], "ohos": ["ohos-virtual-process.diff"]}`，`patches` 只含本项条目；再传 `--patches <临时目录> --target ohos`。不要对指向共享 npm-ci 包的符号链接树运行全部厂商补丁。
