@@ -77,3 +77,13 @@ jobs:
           file "$lib"
           echo "$(basename "$lib"): $(wc -c < "$lib") bytes" >> "$GITHUB_STEP_SUMMARY"
           wc -c "$lib"
+
+      # The Dart half of a HAP. tooling/ohos/check-arkts.sh --full packages it with
+      # the native libraries, which are cross-compiled on Linux.
+      - name: Keep the compiled app
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ohos-aot-${{ github.sha }}
+          path: app/build/ohos-aot
+          if-no-files-found: error
+          retention-days: 14
