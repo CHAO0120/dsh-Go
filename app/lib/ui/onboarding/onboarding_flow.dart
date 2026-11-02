@@ -38,6 +38,7 @@ class OnboardingFlow extends StatefulWidget {
     this.onAccessDone,
     this.onFinished,
     this.beside = false,
+    this.access = true,
   });
 
   final OnboardingStep step;
@@ -66,6 +67,10 @@ class OnboardingFlow extends StatefulWidget {
 
   /// The steps run beside an unpack (first run on this phone).
   final bool beside;
+
+  /// First run has [OnboardingStep.access]: not on HarmonyOS, which has none
+  /// of what it asks for.
+  final bool access;
 
   @override
   State<OnboardingFlow> createState() => _OnboardingFlowState();
@@ -104,7 +109,12 @@ class _OnboardingFlowState extends State<OnboardingFlow> {
     // phone, first run) the look and what DSH Go should do, then the
     // connection.
     final steps = widget.chooseRuntime || widget.beside
-        ? const [OnboardingStep.runtime, OnboardingStep.appearance, OnboardingStep.access, OnboardingStep.apiKey]
+        ? [
+            OnboardingStep.runtime,
+            OnboardingStep.appearance,
+            if (widget.access) OnboardingStep.access,
+            OnboardingStep.apiKey,
+          ]
         : const [OnboardingStep.runtime, OnboardingStep.apiKey];
     final index = steps.indexOf(step);
     return OnboardingSwitcher(
