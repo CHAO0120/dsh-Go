@@ -11,7 +11,11 @@ import java.io.IOException
  * su runs only from [start]: behind an explicit user action, or, once the person turned on
  * keeping root, from the keeper. Tasks and [grantSecureSettings] only use what a start left alive.
  */
-class RootStarter(private val context: Context, private val onChanged: () -> Unit) {
+class RootStarter(
+    private val context: Context,
+    private val onDisconnected: (PrivilegedChannel) -> Unit = {},
+    private val onChanged: () -> Unit,
+) {
     private val guard = Any()
     private val startLock = Any()
     private val state = RootState()
@@ -19,14 +23,18 @@ class RootStarter(private val context: Context, private val onChanged: () -> Uni
     private var pending: RootProcess? = null
     private var pendingAllowed: (() -> Boolean)? = null
 
-    fun status(): RootStatus = synchronized(guard) {
-        discardDead()
-        state.status()
+    fun status(): RootStatus {
+        var retired: PrivilegedChannel? = null
+        val result = synchronized(guard) { retired = discardDead(); state.status() }
+        retired?.let(onDisconnected)
+        return result
     }
 
-    fun connect(): PrivilegedChannel? = synchronized(guard) {
-        discardDead()
-        channel
+    fun connect(): PrivilegedChannel? {
+        var retired: PrivilegedChannel? = null
+        val result = synchronized(guard) { retired = discardDead(); channel }
+        retired?.let(onDisconnected)
+        return result
     }
 
     /**
@@ -34,11 +42,14 @@ class RootStarter(private val context: Context, private val onChanged: () -> Uni
      * takes, so a cancel either comes first and nothing starts, or ends this start's ticket.
      */
     fun start(mayStart: () -> Boolean = { true }): PrivilegedChannel? = synchronized(startLock) start@{
+        var retired: PrivilegedChannel? = null
         val ticket = synchronized(guard) {
-            discardDead()
+            retired = discardDead()
             channel?.let { return@start if (mayStart()) it else null }
-            (state.beginIfAllowed(mayStart) ?: return@start null).also { pendingAllowed = mayStart }
+            state.beginIfAllowed(mayStart)?.also { pendingAllowed = mayStart }
         }
+        retired?.let(onDisconnected)
+        if (ticket == null) return@start null
         onChanged()
         val stillAccepted = synchronized(guard) {
             if (!state.current(ticket) || !mayStart()) {
@@ -111,29 +122,36 @@ class RootStarter(private val context: Context, private val onChanged: () -> Uni
     }
 
     fun disconnect() {
-        synchronized(guard) {
+        val retired = synchronized(guard) {
             state.disconnect()
             pendingAllowed = null
             pending?.close(); pending = null
-            channel?.close(); channel = null
+            channel.also { it?.close(); channel = null }
         }
+        retired?.let(onDisconnected)
         onChanged()
     }
 
-    private fun discardDead() {
-        if (channel?.alive() == false) {
-            channel?.close(); channel = null
-            state.disconnect()
-        }
+    /** Caller holds guard; notification is delivered only after leaving it. */
+    private fun discardDead(): PrivilegedChannel? {
+        val previous = channel ?: return null
+        if (previous.alive()) return null
+        previous.close()
+        channel = null
+        state.disconnect()
+        return previous
     }
 
     private fun channelFailed(process: RootProcess, failure: String) {
-        synchronized(guard) {
-            if (channel?.process !== process) return
+        val retired = synchronized(guard) {
+            val previous = channel ?: return
+            if (previous.process !== process) return
             channel = null
             state.disconnect()
             state.note(failure)
+            previous
         }
+        onDisconnected(retired)
         onChanged()
     }
 

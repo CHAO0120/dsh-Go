@@ -55,6 +55,33 @@ void main() {
     expect(c.read(phoneProvider).status.a11y.ok, isTrue);
   });
 
+  test('preview changes leave the current status and task untouched', () async {
+    final native = FakePhoneNative(status: phoneStatus(taskActive: true, taskApp: '美团'))..install();
+    final c = make();
+    c.read(phoneProvider);
+    await settle();
+    final before = c.read(phoneProvider);
+    expect(before.status.task.active, isTrue);
+    final logCalls = native.callsOf('actionLog').length;
+    final preview = <int>[];
+    final sub = c.read(phoneChannelProvider).previewChanges.listen(preview.add);
+    addTearDown(sub.cancel);
+    await settle();
+    native.pushPreview(12);
+    await settle();
+    expect(preview, [12]);
+    expect(identical(c.read(phoneProvider).status, before.status), isTrue);
+    expect(c.read(phoneProvider).status.task.app, '美团');
+    expect(native.callsOf('actionLog'), hasLength(logCalls));
+    expect(native.callsOf('previewSnapshot'), isEmpty);
+    await sub.cancel();
+    await settle();
+    native.push(phoneStatus(taskActive: false));
+    await settle();
+    expect(c.read(phoneProvider).status.task.active, isFalse);
+    expect(native.callsOf('actionLog'), hasLength(logCalls + 1));
+  });
+
   test('a finished task refreshes the log', () async {
     final native = FakePhoneNative(status: phoneStatus(taskActive: true, taskApp: '美团'))..install();
     final c = make();

@@ -41,6 +41,28 @@ class PhoneCore(
 ) {
     private val ui: PhoneUiText get() = env.uiText()
     val safety = SafetyGate(env::policies, tasks, env::gate, uiText = env.uiText())
+    private val preview = PhonePreview(tasks)
+
+    init { tasks.addListener { preview.taskChanged() } }
+
+    /** Reads existing memory only. In particular, this does not ask a driver for availability. */
+    fun previewSnapshot(): PhonePreviewSnapshot {
+        val revision = preview.revision()
+        return preview.snapshot(previewBlockedReason(), revision)
+    }
+
+    private fun previewBlockedReason(): String? = when {
+        !env.enabled() -> "unavailable"
+        env.isLocked() -> "locked"
+        tasks.activeOwner() == null -> "inactive"
+        else -> null
+    }
+
+    fun addPreviewListener(listener: (Long) -> Unit) = preview.addListener(listener)
+    fun removePreviewListener(listener: (Long) -> Unit) = preview.removeListener(listener)
+    internal fun invalidatePreview(expectedTaskId: Long? = null) =
+        preview.invalidate("unavailable", expectedTaskId = expectedTaskId)
+    internal fun invalidatePreviewIfCurrent(current: () -> Boolean) = preview.invalidateIfCurrent(current)
 
     /** The overlay's status line; 免确认 stays visible the whole time nothing is asked. */
     private fun say(text: String) {
@@ -64,6 +86,7 @@ class PhoneCore(
         val app: String? = null,
         val summary: String? = null,
         val decision: String? = null,
+        val capturedAt: Long? = null,
     )
 
     fun call(name: String, args: Map<String, Any?>): ToolOutput {
@@ -81,11 +104,14 @@ class PhoneCore(
             // l10n:keep agent tool result
             return ToolOutput("没有这个手机工具：$name。可用：${PhoneToolCatalog.names.joinToString("、")}", isError = true)
         }
+        val checkedRevision = preview.revision()
         if (!env.enabled()) {
+            preview.invalidate("unavailable", checkedRevision)
             // l10n:keep agent tool result
             return ToolOutput("手机操控已在 DSH 设置里关闭。请用户在 设置 → 手机操控 里打开后重启引擎。", isError = true)
         }
-        val outcome = worker.run(budgetMs(name), MAX_TOTAL_MS) { scope -> execute(name, Args(args), scope) }
+        val capture = if (name == PhoneToolCatalog.SCREEN) preview.admit() else null
+        val outcome = worker.run(budgetMs(name), MAX_TOTAL_MS) { scope -> execute(name, Args(args), scope, capture) }
         tasks.touch()
         val out = when (outcome) {
             is SerialWorker.Outcome.Done -> outcome.value
@@ -118,7 +144,13 @@ class PhoneCore(
             out.screen?.let { if (out.text.isNotEmpty()) append("\n\n"); append(it.text) }
         }
         val image = out.screen?.image
-        return ToolOutput(text, out.error, image, if (image != null) out.screen.imageMime else null)
+        val result = ToolOutput(text, out.error, image, if (image != null) out.screen.imageMime else null)
+        if (capture != null) {
+            // A cancelled worker can still finish later. Only this returned outcome can publish.
+            preview.complete(capture, if (outcome is SerialWorker.Outcome.Done) image else null,
+                out.capturedAt, previewBlockedReason())
+        }
+        return result
     }
 
     private fun noteRefusal(tool: String, decision: String?) {
@@ -131,10 +163,12 @@ class PhoneCore(
         }
     }
 
-    private fun execute(name: String, a: Args, scope: SerialWorker.Scope): Out {
+    private fun execute(name: String, a: Args, scope: SerialWorker.Scope, capture: PhonePreview.Capture?): Out {
         when (val b = tasks.begin()) {
             is PhoneTasks.Begin.Refused -> return Out(b.message + "。", error = true, summary = name, decision = "stopped")
-            is PhoneTasks.Begin.Go -> Unit
+            is PhoneTasks.Begin.Go -> if (capture != null) {
+                preview.begin(capture, tasks.activeOwner(b.taskId))
+            }
         }
         if (tasks.isPaused) {
             val go = scope.userWait { tasks.awaitResume(PAUSE_WAIT_MS) }
@@ -374,6 +408,7 @@ class PhoneCore(
         val snap = driver.observe(detail = a.bool("detail") == true, image = a.bool("image") == true)
         tasks.setApp(snap.appLabel)
         val shown = safety.filterScreen(snap)
+        val capturedAt = if (shown.image != null) System.currentTimeMillis() else null
         val refused = shown !== snap
         return Out(
             // l10n:keep agent tool result
@@ -383,6 +418,7 @@ class PhoneCore(
             app = snap.appLabel ?: snap.packageName,
             summary = "$summary ${snap.id}",
             decision = if (refused) "refused:read" else "ok",
+            capturedAt = capturedAt,
         )
     }
 

@@ -1,6 +1,7 @@
 package io.github.ccch1mneyyy.dsh_app.phone.background
 
 import android.os.Bundle
+import android.os.DeadObjectException
 import io.github.muntashirakon.adb.AdbStream
 
 /**
@@ -16,8 +17,16 @@ interface PrivilegedChannel {
 }
 
 /** Shizuku transport: a straight Binder call into [PrivilegedDisplayService]. */
-class ShizukuChannel(private val remote: IPrivilegedDisplay) : PrivilegedChannel {
-    override fun execute(request: Bundle): Bundle = remote.execute(request)
+class ShizukuChannel(
+    private val remote: IPrivilegedDisplay,
+    private val onDisconnected: (PrivilegedChannel) -> Unit = {},
+) : PrivilegedChannel {
+    override fun execute(request: Bundle): Bundle = try {
+        remote.execute(request)
+    } catch (e: DeadObjectException) {
+        onDisconnected(this)
+        throw e
+    }
     override fun alive(): Boolean = runCatching { remote.asBinder().pingBinder() }.getOrDefault(false)
     override fun close() { /* UserService unbind is the starter's job */ }
 }
@@ -27,7 +36,10 @@ class ShizukuChannel(private val remote: IPrivilegedDisplay) : PrivilegedChannel
  * [PrivilegedDisplayMain]. A response frame always follows its request frame on this
  * single stream, so one lock keeps request/response paired.
  */
-class AdbChannel(private val stream: AdbStream) : PrivilegedChannel {
+class AdbChannel(
+    private val stream: AdbStream,
+    private val onDisconnected: (PrivilegedChannel) -> Unit = {},
+) : PrivilegedChannel {
     private val session = AdbFramedSession(
         stream.openInputStream(), stream.openOutputStream(),
         transportAlive = { !stream.isClosed }, closeTransport = { stream.close() },
@@ -45,7 +57,11 @@ class AdbChannel(private val stream: AdbStream) : PrivilegedChannel {
 
     override fun close() = session.close()
 
-    private fun unavailable(detail: String) = Bundle().apply {
-        putBoolean(Proto.OK, false); putString(Proto.ERROR, "deviceUnavailable"); putString(Proto.ERROR_DETAIL, detail)
+    private fun unavailable(detail: String): Bundle {
+        // exchange has already left its lock and retired the incomplete session.
+        onDisconnected(this)
+        return Bundle().apply {
+            putBoolean(Proto.OK, false); putString(Proto.ERROR, "deviceUnavailable"); putString(Proto.ERROR_DETAIL, detail)
+        }
     }
 }

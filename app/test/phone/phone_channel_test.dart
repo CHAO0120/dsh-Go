@@ -1,6 +1,8 @@
 // The typed wrapper over `dsh/phone`: parsing the contract's maps, and staying
 // usable when the native side is missing or throws.
 
+import 'dart:async';
+
 import 'package:dsh_app/phone/phone_channel.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -177,5 +179,196 @@ void main() {
     expect(log[4].decision, PhoneDecision.done);
     expect(log[5].decision, PhoneDecision.blocked);
     expect(log[6].decision, PhoneDecision.stopped);
+  });
+  test('preview reads the existing JPEG and capture metadata with one method only', () async {
+    final bytes = Uint8List.fromList([0xff, 0xd8, 7, 0xff, 0xd9]);
+    final native = FakePhoneNative()
+      ..preview = {'revision': 4, 'available': true, 'jpegBytes': bytes, 'taskId': 12, 'capturedAt': 1762045200123}
+      ..install();
+    final snapshot = await PhoneChannel().previewSnapshot();
+    expect(snapshot.available, isTrue);
+    expect(snapshot.revision, 4);
+    expect(snapshot.jpegBytes, bytes);
+    expect(snapshot.taskId, 12);
+    expect(snapshot.capturedAt, 1762045200123);
+    expect(snapshot.reason, isNull);
+    expect(native.methods, ['previewSnapshot']);
+    expect(native.calls.single.arguments, isNull);
+    expect(native.listening, isFalse);
+    expect(native.previewListening, isFalse);
+  });
+
+  for (final reason in ['noImage', 'inactive', 'locked', 'unavailable']) {
+    test('preview $reason never exposes old image metadata', () async {
+      final native = FakePhoneNative()
+        ..preview = {
+          'revision': 8,
+          'available': false,
+          'reason': reason,
+          'jpegBytes': Uint8List.fromList([1]),
+          'taskId': 2,
+          'capturedAt': 3,
+        }
+        ..install();
+      final snapshot = await PhoneChannel().previewSnapshot();
+      expect(snapshot.available, isFalse);
+      expect(snapshot.revision, 8);
+      expect(snapshot.reason, reason);
+      expect(snapshot.jpegBytes, isNull);
+      expect(snapshot.taskId, isNull);
+      expect(snapshot.capturedAt, isNull);
+      expect(native.methods, ['previewSnapshot']);
+    });
+  }
+
+  test('preview missing fields or unknown reason stays unavailable', () {
+    for (final map in <Map<Object?, Object?>>[
+      {},
+      {'available': true},
+      {'available': false, 'reason': 'futureReason'},
+      {'revision': 1, 'available': true, 'jpegBytes': Uint8List(0), 'taskId': 1, 'capturedAt': 2},
+      {
+        'available': true,
+        'jpegBytes': Uint8List.fromList([1]),
+        'taskId': 1,
+        'capturedAt': 2,
+      },
+      {
+        'revision': 1,
+        'available': true,
+        'jpegBytes': Uint8List.fromList([1]),
+        'capturedAt': 2,
+      },
+      {
+        'revision': 1,
+        'available': true,
+        'jpegBytes': Uint8List.fromList([1]),
+        'taskId': 1,
+      },
+    ]) {
+      final snapshot = PhonePreviewSnapshot.fromMap(map);
+      expect(snapshot.available, isFalse);
+      expect(snapshot.reason, 'unavailable');
+      expect(snapshot.jpegBytes, isNull);
+    }
+  });
+
+  test('preview missing plugin, null or platform error makes no fallback call', () async {
+    final messenger = TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+    removePhoneNative();
+    expect((await PhoneChannel().previewSnapshot()).reason, 'unavailable');
+    final calls = <MethodCall>[];
+    messenger.setMockMethodCallHandler(phoneMethods, (call) async {
+      calls.add(call);
+      return null;
+    });
+    addTearDown(() => messenger.setMockMethodCallHandler(phoneMethods, null));
+    expect((await PhoneChannel().previewSnapshot()).available, isFalse);
+    messenger.setMockMethodCallHandler(phoneMethods, (call) async {
+      calls.add(call);
+      throw PlatformException(code: 'nativeFailed', message: 'not a preview reason');
+    });
+    expect((await PhoneChannel().previewSnapshot()).reason, 'unavailable');
+    expect(calls.map((c) => c.method), ['previewSnapshot', 'previewSnapshot']);
+  });
+
+  test('preview events are separate and cancelling them leaves status alive', () async {
+    final native = FakePhoneNative()..install();
+    final channel = PhoneChannel();
+    final statuses = <PhoneStatus>[];
+    final revisions = <int>[];
+    var statusArrived = Completer<void>();
+    final previewArrived = Completer<void>();
+    final statusSub = channel.statusChanges.listen((s) {
+      statuses.add(s);
+      statusArrived.complete();
+    });
+    final previewSub = channel.previewChanges.listen((r) {
+      revisions.add(r);
+      previewArrived.complete();
+    });
+    addTearDown(statusSub.cancel);
+    addTearDown(previewSub.cancel);
+    await Future.wait([native.statusStarted.future, native.previewStarted.future]);
+    expect(native.listening, isTrue);
+    expect(native.previewListening, isTrue);
+    native.pushPreview(2);
+    await previewArrived.future;
+    expect(revisions, [2]);
+    expect(statuses, isEmpty);
+    expect(native.methods, isEmpty);
+    native.push(phoneStatus(taskActive: true, taskApp: 'existing task'));
+    await statusArrived.future;
+    expect(statuses.single.task.app, 'existing task');
+    expect(revisions, [2]);
+    await previewSub.cancel();
+    expect(native.previewListening, isFalse);
+    expect(native.listening, isTrue);
+    statusArrived = Completer<void>();
+    native.push(phoneStatus(taskActive: false));
+    await statusArrived.future;
+    expect(statuses, hasLength(2));
+    expect(statuses.last.task.active, isFalse);
+  });
+
+  test('preview stream shares one native listener until its last subscriber cancels', () async {
+    final native = FakePhoneNative()..install();
+    final channel = PhoneChannel();
+    final first = <int>[];
+    final second = <int>[];
+    final arrivedA = Completer<void>();
+    var arrivedB = Completer<void>();
+    final a = channel.previewChanges.listen((r) {
+      first.add(r);
+      arrivedA.complete();
+    });
+    final b = channel.previewChanges.listen((r) {
+      second.add(r);
+      arrivedB.complete();
+    });
+    addTearDown(a.cancel);
+    addTearDown(b.cancel);
+    await native.previewStarted.future;
+    native.pushPreview(3);
+    await Future.wait([arrivedA.future, arrivedB.future]);
+    expect(first, [3]);
+    expect(second, [3]);
+    await a.cancel();
+    expect(native.previewListening, isTrue);
+    arrivedB = Completer<void>();
+    native.pushPreview(4);
+    await arrivedB.future;
+    expect(first, [3]);
+    expect(second, [3, 4]);
+    await b.cancel();
+    expect(native.previewListening, isFalse);
+  });
+
+  test('late snapshot retains its own revision after a newer invalidation', () async {
+    final native = FakePhoneNative()..install();
+    final reply = Completer<Map<String, Object?>>();
+    final requested = Completer<void>();
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockMethodCallHandler(phoneMethods, (call) {
+      requested.complete();
+      return reply.future;
+    });
+    final channel = PhoneChannel();
+    final revisions = <int>[];
+    final eventArrived = Completer<void>();
+    final sub = channel.previewChanges.listen((r) {
+      revisions.add(r);
+      eventArrived.complete();
+    });
+    addTearDown(sub.cancel);
+    await native.previewStarted.future;
+    final pending = channel.previewSnapshot();
+    await requested.future;
+    native.pushPreview(6);
+    await eventArrived.future;
+    reply.complete({'revision': 5, 'available': false, 'reason': 'noImage'});
+    final snapshot = await pending;
+    expect(snapshot.revision, 5);
+    expect(revisions.single, greaterThan(snapshot.revision));
+    expect(snapshot.available, isFalse);
   });
 }

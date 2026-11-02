@@ -25,6 +25,8 @@ import java.util.concurrent.Executors
 class PhonePlugin : FlutterPlugin, ActivityAware, MethodChannel.MethodCallHandler, EventChannel.StreamHandler, PluginRegistry.NewIntentListener {
     private lateinit var methods: MethodChannel
     private lateinit var events: EventChannel
+    private lateinit var previewEvents: EventChannel
+    private var previewSink: ((Long) -> Unit)? = null
     private lateinit var appContext: Context
     private lateinit var control: PhoneControl
     private var activity: ActivityPluginBinding? = null
@@ -44,6 +46,20 @@ class PhonePlugin : FlutterPlugin, ActivityAware, MethodChannel.MethodCallHandle
         control.background.restoreKeptChannel()
         methods = MethodChannel(binding.binaryMessenger, "dsh/phone").also { it.setMethodCallHandler(this) }
         events = EventChannel(binding.binaryMessenger, "dsh/phone/events").also { it.setStreamHandler(this) }
+        previewEvents = EventChannel(binding.binaryMessenger, "dsh/phone/preview/events").also {
+            it.setStreamHandler(object : EventChannel.StreamHandler {
+                override fun onListen(arguments: Any?, events: EventChannel.EventSink) {
+                    removePreviewSink()
+                    lateinit var listener: (Long) -> Unit
+                    listener = { revision -> main.post {
+                        if (attached && previewSink === listener) events.success(mapOf("revision" to revision))
+                    } }
+                    previewSink = listener
+                    control.core.addPreviewListener(listener)
+                }
+                override fun onCancel(arguments: Any?) = removePreviewSink()
+            })
+        }
     }
 
     override fun onDetachedFromEngine(binding: FlutterPlugin.FlutterPluginBinding) {
@@ -54,6 +70,8 @@ class PhonePlugin : FlutterPlugin, ActivityAware, MethodChannel.MethodCallHandle
         activity = null
         methods.setMethodCallHandler(null)
         events.setStreamHandler(null)
+        previewEvents.setStreamHandler(null)
+        removePreviewSink()
         sink?.let { control.removeSink(it) }
         sink = null
     }
@@ -107,6 +125,8 @@ class PhonePlugin : FlutterPlugin, ActivityAware, MethodChannel.MethodCallHandle
     override fun onMethodCall(call: MethodCall, result: MethodChannel.Result) {
         when (call.method) {
             "status" -> async(result, shortControl = true) { control.status() }
+            "previewSnapshot" -> result.success(PhoneControl.peek()?.core?.previewSnapshot()?.toMap()
+                ?: PhonePreviewSnapshot(0, reason = "inactive").toMap())
             "setBackgroundKeep" -> {
                 val selected = call.argument<String>("mode").orEmpty()
                 val enabled = call.argument<Boolean>("enabled") == true
@@ -128,6 +148,7 @@ class PhonePlugin : FlutterPlugin, ActivityAware, MethodChannel.MethodCallHandle
             "setEnabled" -> {
                 val enabled = call.argument<Boolean>("enabled") == true
                 if (!enabled) {
+                    control.core.invalidatePreview()
                     privilegedActions.select()
                     val cleared = control.background.clearKeep()
                     controlIo.execute { control.background.saveKeep(cleared) }
@@ -143,6 +164,7 @@ class PhonePlugin : FlutterPlugin, ActivityAware, MethodChannel.MethodCallHandle
             "testScreen" -> async(result) { control.testScreen() }
             "setBackgroundMode" -> {
                 val mode = call.argument<String>("mode") ?: "off"
+                if (mode == "off") control.core.invalidatePreview()
                 val live = stillWanted(privilegedActions.select())
                 // A mode intent revokes keep before it waits behind any older long operation.
                 control.background.clearKeepForMode(mode)?.let { cleared ->
@@ -240,6 +262,11 @@ class PhonePlugin : FlutterPlugin, ActivityAware, MethodChannel.MethodCallHandle
                 ).start(closed, busy, reopen, result::success)
             }
         }
+    }
+
+    private fun removePreviewSink() {
+        previewSink?.let { control.core.removePreviewListener(it) }
+        previewSink = null
     }
 
     override fun onListen(arguments: Any?, events: EventChannel.EventSink) {

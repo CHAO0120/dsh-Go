@@ -2,6 +2,8 @@
 // PhonePlugin.kt implements), plus a runtime that records restarts. Widget
 // tests run the real PhoneChannel against it, so parsing is exercised too.
 
+import 'dart:async';
+
 import 'package:dsh_app/runtime/runtime_bridge.dart';
 import 'package:dsh_app/runtime/runtime_state.dart';
 import 'package:dsh_app/state/hosts_state.dart';
@@ -10,6 +12,7 @@ import 'package:flutter_test/flutter_test.dart';
 
 const phoneMethods = MethodChannel('dsh/phone');
 const phoneEvents = EventChannel('dsh/phone/events');
+const phonePreviewEvents = EventChannel('dsh/phone/preview/events');
 
 /// A `status` map as the native module sends it.
 Map<String, Object?> phoneStatus({
@@ -179,6 +182,7 @@ class FakePhoneNative {
   Map<String, Object?> policies;
   List<Map<String, Object?>> log;
   Map<String, Object?> screen = {'ok': true, 'text': sampleScreenText};
+  Map<String, Object?> preview = {'revision': 0, 'available': false, 'reason': 'inactive'};
 
   /// Reply of `setEnabled` / `setPolicies`.
   bool accept = true;
@@ -200,6 +204,9 @@ class FakePhoneNative {
 
   final calls = <MethodCall>[];
   MockStreamHandlerEventSink? _sink;
+  MockStreamHandlerEventSink? _previewSink;
+  final statusStarted = Completer<void>();
+  final previewStarted = Completer<void>();
 
   List<String> get methods => [for (final c in calls) c.method];
 
@@ -215,9 +222,22 @@ class FakePhoneNative {
         // Block bodies: an arrow would return the sink, which the mock then tries to encode.
         onListen: (_, sink) {
           _sink = sink;
+          if (!statusStarted.isCompleted) statusStarted.complete();
         },
         onCancel: (_) {
           _sink = null;
+        },
+      ),
+    );
+    _messenger.setMockStreamHandler(
+      phonePreviewEvents,
+      MockStreamHandler.inline(
+        onListen: (_, sink) {
+          _previewSink = sink;
+          if (!previewStarted.isCompleted) previewStarted.complete();
+        },
+        onCancel: (_) {
+          _previewSink = null;
         },
       ),
     );
@@ -227,9 +247,13 @@ class FakePhoneNative {
   void uninstall() {
     _messenger.setMockMethodCallHandler(phoneMethods, null);
     _messenger.setMockStreamHandler(phoneEvents, null);
+    _messenger.setMockStreamHandler(phonePreviewEvents, null);
   }
 
   bool get listening => _sink != null;
+  bool get previewListening => _previewSink != null;
+
+  void pushPreview(int revision) => _previewSink?.success({'revision': revision});
 
   /// Pushes a status event, as the native side does on every change.
   void push(Map<String, Object?> next) {
@@ -245,6 +269,8 @@ class FakePhoneNative {
     switch (call.method) {
       case 'status':
         return status;
+      case 'previewSnapshot':
+        return preview;
       case 'setEnabled':
         if (accept) status = {...status, 'enabled': args['enabled']};
         return accept;

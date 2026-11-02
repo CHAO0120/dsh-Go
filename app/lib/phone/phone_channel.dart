@@ -906,15 +906,61 @@ class PhoneLogEntry {
 
 // ── Channel ──────────────────────────────────────────────────────────────────
 
+/// The last filtered screen result, never a new screen observation.
+class PhonePreviewSnapshot {
+  const PhonePreviewSnapshot._({required this.revision, this.jpegBytes, this.taskId, this.capturedAt}) : reason = null;
+
+  const PhonePreviewSnapshot.unavailable({this.revision = 0, this.reason = 'unavailable'})
+    : jpegBytes = null,
+      taskId = null,
+      capturedAt = null;
+
+  factory PhonePreviewSnapshot.fromMap(Map<Object?, Object?> m) {
+    final revision = _int(m['revision']);
+    final bytes = m['jpegBytes'];
+    final taskId = _int(m['taskId']);
+    final capturedAt = _int(m['capturedAt']);
+    if (revision != null &&
+        _flag(m['available']) &&
+        bytes is Uint8List &&
+        bytes.isNotEmpty &&
+        taskId != null &&
+        capturedAt != null) {
+      return PhonePreviewSnapshot._(revision: revision, jpegBytes: bytes, taskId: taskId, capturedAt: capturedAt);
+    }
+    return PhonePreviewSnapshot.unavailable(
+      revision: revision ?? 0,
+      reason: switch (m['reason']) {
+        'noImage' => 'noImage',
+        'inactive' => 'inactive',
+        'locked' => 'locked',
+        _ => 'unavailable',
+      },
+    );
+  }
+
+  final int revision;
+  final Uint8List? jpegBytes;
+  final int? taskId;
+
+  /// Unix milliseconds when observe and safety filtering finished, not read time.
+  final int? capturedAt;
+  final String? reason;
+  bool get available => jpegBytes != null;
+}
+
 /// Typed wrapper over `dsh/phone` + `dsh/phone/events`.
 class PhoneChannel {
-  PhoneChannel({MethodChannel? methods, EventChannel? events})
+  PhoneChannel({MethodChannel? methods, EventChannel? events, EventChannel? previewEvents})
     : _methods = methods ?? const MethodChannel('dsh/phone'),
-      _events = events ?? const EventChannel('dsh/phone/events');
+      _events = events ?? const EventChannel('dsh/phone/events'),
+      _previewEvents = previewEvents ?? const EventChannel('dsh/phone/preview/events');
 
   final MethodChannel _methods;
   final EventChannel _events;
+  final EventChannel _previewEvents;
   Stream<PhoneStatus>? _stream;
+  Stream<int>? _previewStream;
 
   /// Status pushes. Listen only after [status] came back ready: activating the
   /// stream without a native side reports an error to Flutter.
@@ -923,6 +969,25 @@ class PhoneChannel {
       .where((raw) => raw is Map)
       .map((raw) => PhoneStatus.fromMap((raw as Map).cast<Object?, Object?>()))
       .asBroadcastStream();
+
+  /// Byte-free invalidations. Subscribe before reading a snapshot; consumers keep
+  /// the greatest revision and discard older events or completed reads.
+  Stream<int> get previewChanges => _previewStream ??= _previewEvents
+      .receiveBroadcastStream()
+      .where((raw) => raw is Map && raw['revision'] is int)
+      .map((raw) => (raw as Map)['revision'] as int);
+
+  /// Reads an existing native frame without observing, connecting or polling.
+  Future<PhonePreviewSnapshot> previewSnapshot() async {
+    try {
+      final map = await _methods.invokeMapMethod<Object?, Object?>('previewSnapshot');
+      return map == null ? const PhonePreviewSnapshot.unavailable() : PhonePreviewSnapshot.fromMap(map);
+    } on MissingPluginException {
+      return const PhonePreviewSnapshot.unavailable();
+    } on PlatformException {
+      return const PhonePreviewSnapshot.unavailable();
+    }
+  }
 
   Future<PhoneStatus> status() async {
     try {

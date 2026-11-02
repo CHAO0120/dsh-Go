@@ -19,6 +19,7 @@ import java.util.concurrent.Future
 import java.util.concurrent.FutureTask
 import io.github.ccch1mneyyy.dsh_app.phone.PhoneRegistry
 import java.util.concurrent.atomic.AtomicLong
+import java.util.concurrent.atomic.AtomicReference
 
 /**
  * The 不打扰模式 surface the core's `PhonePlugin` calls into: the `background` block of `status`,
@@ -48,13 +49,13 @@ class BackgroundControl private constructor(context: Context) {
     private val networkGuard = Any()
     private var networkCallback: ConnectivityManager.NetworkCallback? = null
 
-    private val shizuku = ShizukuStarter(app) { transportChanged("sharedApi") }
-    private val adb = AdbStarter(app) { transportChanged("adb") }
-    private val root = RootStarter(app) { transportChanged("root") }
+    private val shizuku = ShizukuStarter(app, onDisconnected = ::channelRetired) { transportChanged("sharedApi") }
+    private val adb = AdbStarter(app, onDisconnected = ::channelRetired) { transportChanged("adb") }
+    private val root = RootStarter(app, onDisconnected = ::channelRetired) { transportChanged("root") }
 
     private val mode: String get() = keep.mode
     @Volatile private var rootSelected = mode == "root"
-    @Volatile private var channel: PrivilegedChannel? = null
+    private val channel = AtomicReference<PrivilegedChannel?>()
     @Volatile private var driver: BackgroundDisplay? = null
     @Volatile private var driverTaskId: Long? = null
     private val endedTaskId = AtomicLong(Long.MIN_VALUE)
@@ -104,7 +105,7 @@ class BackgroundControl private constructor(context: Context) {
                     secureSettingsGranted(), shizukuStatus, adbStatus, rootSelected, rootStatus.connected,
                 ),
                 "rootSelected" to rootSelected,
-                "keep" to keep.map(channel?.alive() == true),
+                "keep" to keep.map(channel.get()?.alive() == true),
             ),
         )
     }
@@ -157,6 +158,7 @@ class BackgroundControl private constructor(context: Context) {
         }
         if (selected != "off" && !androidOk()) return mapOf("ok" to false, "reason" to AppStrings.get(app, R.string.background_requires_android))
         if (selected != mode || selected == "off") {
+            if (selected == "off") PhoneControl.peek()?.core?.invalidatePreview()
             endTask()
             // Only the transport being left closes: a paired ADB connection or a root process
             // prepared ahead belongs to the mode being enabled. Off closes everything.
@@ -177,7 +179,7 @@ class BackgroundControl private constructor(context: Context) {
             "off" -> { notifyChanged(); return mapOf("ok" to true) }
             "shizuku", "sui" -> shizuku.ensureListeners()
             // 不打扰模式's only su; tasks just connect() to what it leaves.
-            "root" -> root.start(mayStart)?.let { if (mayStart() && mode == "root") channel = it }
+            "root" -> root.start(mayStart)?.let { if (mayStart() && mode == "root") replaceChannel(it) }
         }
         notifyChanged()
         if (!mayStart()) return keepFailure("selectionChanged")
@@ -300,7 +302,7 @@ class BackgroundControl private constructor(context: Context) {
             if (driver != null) endTask()
             val d = BackgroundDisplay(
                 channelProvider = { activeChannel() },
-                releaseChannelProvider = { channel?.takeIf { it.alive() } },
+                releaseChannelProvider = { channel.get()?.takeIf { it.alive() } },
             ).also { driver = it }
             // Publish the pending owner before checking cancellation: a stop
             // either records the ended ID first, or sees this owner and releases
@@ -328,9 +330,11 @@ class BackgroundControl private constructor(context: Context) {
         synchronized(this) {
             if (expectedTaskId != null && expectedTaskId != driverTaskId) return
             val ended = driver
+            val releasedTaskId = driverTaskId
             driver = null
             driverTaskId = null
             if (PhoneRegistry.backgroundDriver === ended) PhoneRegistry.backgroundDriver = null
+            if (ended != null && releasedTaskId != null) PhoneControl.peek()?.core?.invalidatePreview(releasedTaskId)
             ended?.release()
             notifyChanged()
         }
@@ -341,6 +345,7 @@ class BackgroundControl private constructor(context: Context) {
      * reopens by itself ([PrivilegedPathPolicy.closesOnInterrupt]; root's would need su again).
      */
     fun interrupt() {
+        PhoneControl.peek()?.core?.invalidatePreview()
         endTask()
         disconnectAll(PrivilegedPathPolicy::closesOnInterrupt)
     }
@@ -349,19 +354,39 @@ class BackgroundControl private constructor(context: Context) {
 
     private fun activeChannel(mayStart: () -> Boolean = { true }, explicit: Boolean = false): PrivilegedChannel? {
         if (!mayStart()) return null
-        channel?.takeIf { it.alive() }?.let { return it }
+        channel.get()?.let { previous ->
+            if (previous.alive()) return previous
+            channelRetired(previous)
+        }
         if (keep.enabled && !explicit) return null
-        channel = when (mode) {
+        val connected = when (mode) {
             "shizuku", "sui" -> shizuku.connect(mayStart = mayStart)
             "root" -> root.connect()
             "adb" -> adb.connect(mayStart = mayStart)
             else -> null
         }
-        return channel
+        replaceChannel(connected)
+        return connected
+    }
+
+    /** Retirement is reported with the actual old channel, after the starter's lock is released. */
+    private fun channelRetired(retired: PrivilegedChannel) {
+        val core = PhoneControl.peek()?.core
+        if (core == null) channel.compareAndSet(retired, null)
+        else core.invalidatePreviewIfCurrent { channel.compareAndSet(retired, null) }
+    }
+
+    private fun replaceChannel(next: PrivilegedChannel?) {
+        val core = PhoneControl.peek()?.core
+        if (core == null) channel.set(next)
+        else core.invalidatePreviewIfCurrent {
+            val previous = channel.getAndSet(next)
+            previous != null && previous !== next
+        }
     }
 
     private fun disconnectAll(closes: (String) -> Boolean = { true }) {
-        channel = null
+        replaceChannel(null)
         if (closes("shizuku")) shizuku.disconnect()
         if (closes("adb")) adb.disconnect()
         if (closes("root")) root.disconnect()
@@ -515,7 +540,7 @@ class BackgroundControl private constructor(context: Context) {
                 else -> null
             }
             // Starter publication owns successful channels. A stale borrower must never close one.
-            synchronized(keepGuard) { if (keep.current(ticket) && value?.alive() == true) channel = value }
+            synchronized(keepGuard) { if (keep.current(ticket) && value?.alive() == true) replaceChannel(value) }
             return value?.takeIf { keep.current(ticket) && it.alive() }
         } catch (_: InterruptedException) {
             Thread.currentThread().interrupt()

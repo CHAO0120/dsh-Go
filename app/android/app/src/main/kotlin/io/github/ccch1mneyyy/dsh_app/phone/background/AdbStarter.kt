@@ -27,7 +27,11 @@ data class AdbStatus(
         mapOf("wirelessDebugging" to wirelessDebugging, "paired" to paired, "connected" to connected)
 }
 
-class AdbStarter(private val context: Context, private val onChanged: () -> Unit) {
+class AdbStarter(
+    private val context: Context,
+    private val onDisconnected: (PrivilegedChannel) -> Unit = {},
+    private val onChanged: () -> Unit,
+) {
 
     private val keys = AdbKeyStore(context)
     private val pairedFlag = File(File(context.filesDir, "phone-adb"), "paired").apply { parentFile?.mkdirs() }
@@ -120,8 +124,10 @@ class AdbStarter(private val context: Context, private val onChanged: () -> Unit
         }
         val discovered = connectEndpoint
         return try {
-            channel?.close()
+            val previous = channel
             channel = null
+            previous?.close()
+            previous?.let(onDisconnected)
             manager.disconnect()
             if (!wanted(op)) return null
             val connected = if (port != null) {
@@ -146,7 +152,7 @@ class AdbStarter(private val context: Context, private val onChanged: () -> Unit
             if (!wanted(op) || (!connected && !manager.isConnected)) return null
             val info = context.applicationInfo
             val stream = manager.openStream("shell:" + PrivilegedCommands.appProcess(info.sourceDir, info.splitSourceDirs?.toList().orEmpty()))
-            val value = AdbChannel(stream)
+            val value = AdbChannel(stream, onDisconnected)
             synchronized(guard) { op.candidate = value }
             if (!wanted(op)) return null
             val probe = value.execute(android.os.Bundle().apply { putString(Proto.OP, Proto.OP_PROBE) })
@@ -181,7 +187,7 @@ class AdbStarter(private val context: Context, private val onChanged: () -> Unit
             } else true
         }
         if (cleanup) {
-            op.candidate?.close()
+            op.candidate?.let { it.close(); onDisconnected(it) }
             runCatching { manager.disconnect() }
             synchronized(guard) { operation = null; available = op.whenAvailable }
         }
@@ -214,8 +220,10 @@ class AdbStarter(private val context: Context, private val onChanged: () -> Unit
     }
 
     private fun retire(expected: PrivilegedChannel?) {
+        var retired: PrivilegedChannel? = null
         val cleanup = synchronized(guard) {
             if (expected != null && channel !== expected) return
+            retired = channel
             channel?.close()
             channel = null
             val pending = operation
@@ -228,6 +236,7 @@ class AdbStarter(private val context: Context, private val onChanged: () -> Unit
                 Operation({ false }, null).also { it.valid = false; operation = it }
             }
         }
+        retired?.let(onDisconnected)
         if (cleanup != null) Thread({ finish(cleanup, preserve = false); onChanged() }, "dsh-adb-disconnect").apply {
             isDaemon = true
             start()

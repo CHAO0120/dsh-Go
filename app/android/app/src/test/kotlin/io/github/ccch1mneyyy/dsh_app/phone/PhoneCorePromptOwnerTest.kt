@@ -12,18 +12,29 @@ class PhoneCorePromptOwnerTest {
     private var handoff: () -> HandoffResult = { HandoffResult.CONTINUE }
     private var beforeHandoff: () -> Unit = {}
     private var asked = 0
+    private var enabled = true
+    private var locked = false
+    private var beforeLockRead: () -> Unit = {}
+    private var driverRequests = 0
     private val main = Driver(PhoneScreen.MAIN)
     private val background = Driver(PhoneScreen.BACKGROUND)
     private val core = PhoneCore(object : PhoneEnv {
-        override fun enabled() = true
+        override fun enabled() = enabled
         override fun policies() = PhonePolicies()
-        override fun isLocked() = false
+        override fun isLocked(): Boolean {
+            val result = locked
+            beforeLockRead()
+            return result
+        }
         override fun gate() = object : UserGate {
             override fun confirm(request: ConfirmRequest): Decision { asked++; return confirm() }
             override fun handoff(reason: String, timeoutMs: Long): HandoffResult { asked++; return handoff() }
             override fun status(text: String?) {}
         }
-        override fun driver(screen: PhoneScreen) = if (screen == PhoneScreen.MAIN) main else background
+        override fun driver(screen: PhoneScreen): PhoneDriver {
+            driverRequests++
+            return if (screen == PhoneScreen.MAIN) main else background
+        }
         override fun a11yState() = A11yState.CONNECTED
         override fun backgroundUnavailable() = "unavailable"
         override fun zone() = ZoneId.of("UTC")
@@ -45,14 +56,22 @@ class PhoneCorePromptOwnerTest {
 
     private class Driver(override val screen: PhoneScreen) : PhoneDriver {
         var reads = 0
+        var availabilityReads = 0
         var writes = 0
         var opens = 0
         val actions = mutableListOf<PhoneAction>()
-        override fun availability() = Availability(true)
+        var onObserve: () -> Unit = {}
+        var imageBytes: ByteArray? = null
+        var secure = false
+        var packageName = "example.app"
+        var screenText = "Example"
+        override fun availability(): Availability { availabilityReads++; return Availability(true) }
         override fun foregroundPackage() = "example.app"
         override fun observe(detail: Boolean, image: Boolean): ScreenSnapshot {
             reads++
-            return ScreenSnapshot("${screen.prefix}1", "Example", "Example", "example.app")
+            onObserve()
+            return ScreenSnapshot("${screen.prefix}1", screenText, "Example", packageName,
+                secure = secure, image = imageBytes.takeIf { image }, imageMime = "image/jpeg")
         }
         override fun collect(screenId: String, listElementId: Int, maxPages: Int, until: String?) = error("unexpected collect")
         override fun target(screenId: String, elementId: Int) = TargetInfo(screenId, elementId,
@@ -150,4 +169,184 @@ class PhoneCorePromptOwnerTest {
             assertEquals(1, driver.writes)
         }
     }
+    private fun await(latch: java.util.concurrent.CountDownLatch) =
+        assertTrue(latch.await(5, java.util.concurrent.TimeUnit.SECONDS))
+
+    private fun previewCall(background: Boolean = false, image: Boolean = true) =
+        core.call(PhoneToolCatalog.SCREEN, mapOf("background" to background, "image" to image))
+
+    @Test fun previewReadsOnlyTheFinalMainOrBackgroundImageWithoutObservingAgain() {
+        assertEquals("inactive", core.previewSnapshot().reason)
+        core.call(PhoneToolCatalog.APPS, emptyMap())
+        assertEquals("noImage", core.previewSnapshot().reason)
+        for ((driver, isBackground) in listOf(main to false, background to true)) {
+            driver.imageBytes = byteArrayOf(1, 2, 3)
+            val before = System.currentTimeMillis()
+            val output = previewCall(isBackground)
+            val reads = main.reads + background.reads
+            val requests = driverRequests
+            val availability = main.availabilityReads + background.availabilityReads
+            val snapshot = core.previewSnapshot()
+            assertArrayEquals(output.image, snapshot.jpegBytes)
+            assertEquals(tasks.activeOwner()!!.taskId, snapshot.taskId)
+            assertTrue(snapshot.capturedAt!! >= before)
+            assertTrue(snapshot.capturedAt!! <= System.currentTimeMillis())
+            repeat(3) { core.previewSnapshot() }
+            assertEquals(reads, main.reads + background.reads)
+            assertEquals(requests, driverRequests)
+            assertEquals(availability, main.availabilityReads + background.availabilityReads)
+            assertEquals(0, main.writes + background.writes + main.opens + background.opens)
+        }
+    }
+
+    @Test fun previewNoImageAndSecureResultsClearPreviousImage() {
+        main.imageBytes = byteArrayOf(1)
+        assertNotNull(previewCall().image)
+        assertNotNull(core.previewSnapshot().jpegBytes)
+        previewCall(image = false)
+        assertNull(core.previewSnapshot().jpegBytes)
+        assertNotNull(previewCall().image)
+        main.secure = true
+        assertNull(previewCall().image)
+        assertNull(core.previewSnapshot().jpegBytes)
+    }
+
+    @Test fun previewOwnAppAndSensitiveScreenNeverRetainEarlierImage() {
+        main.imageBytes = byteArrayOf(1)
+        for ((pkg, text) in listOf(SafetyRules.OWN_PACKAGE to "Example", SafetyRules.DEFAULT_DENY.first() to "Example",
+            "example.app" to "«银行卡••••1234»", "example.app" to "«身份证••••1234»")) {
+            main.packageName = "example.app"
+            main.screenText = "Example"
+            assertNotNull(previewCall().image)
+            main.packageName = pkg
+            main.screenText = text
+            assertNull(previewCall().image)
+            assertNull(core.previewSnapshot().jpegBytes)
+        }
+    }
+
+    @Test fun previewOldTaskAndSameTaskReleaseCannotPublishLateImage() {
+        main.imageBytes = byteArrayOf(1)
+        main.onObserve = { replace() }
+        previewCall()
+        assertNull(core.previewSnapshot().jpegBytes)
+        main.onObserve = { core.invalidatePreview(tasks.activeOwner()!!.taskId) }
+        previewCall()
+        assertNull(core.previewSnapshot().jpegBytes)
+        main.onObserve = {}
+        assertNotNull(previewCall().image)
+        assertNotNull(core.previewSnapshot().jpegBytes)
+        tasks.endTask()
+        assertNull(core.previewSnapshot().jpegBytes)
+    }
+
+    @Test fun oldBackgroundReleaseCannotClearNewMainTaskImage() {
+        background.imageBytes = byteArrayOf(1)
+        previewCall(background = true)
+        val oldTaskId = core.previewSnapshot().taskId!!
+        tasks.endTask()
+        main.imageBytes = byteArrayOf(2)
+        previewCall()
+        val ready = core.previewSnapshot()
+        core.invalidatePreview(oldTaskId)
+        assertEquals(ready.revision, core.previewSnapshot().revision)
+        assertArrayEquals(byteArrayOf(2), core.previewSnapshot().jpegBytes)
+    }
+
+    @Test fun previewLockAndMasterOffClearWithoutAnotherCapture() {
+        main.imageBytes = byteArrayOf(1)
+        previewCall()
+        val reads = main.reads
+        locked = true
+        assertEquals("locked", core.previewSnapshot().reason)
+        assertNull(core.previewSnapshot().jpegBytes)
+        locked = false
+        assertNull(core.previewSnapshot().jpegBytes)
+        previewCall()
+        enabled = false
+        assertEquals("unavailable", core.previewSnapshot().reason)
+        assertEquals(reads + 1, main.reads)
+    }
+
+    @Test fun interruptedOuterCallCannotPublishAnObserveThatReturnsLater() {
+        val entered = java.util.concurrent.CountDownLatch(1)
+        val release = java.util.concurrent.CountDownLatch(1)
+        val returned = java.util.concurrent.CountDownLatch(1)
+        var output: ToolOutput? = null
+        main.imageBytes = byteArrayOf(1)
+        main.onObserve = {
+            entered.countDown()
+            var waiting = true
+            while (waiting) {
+                try { release.await(); waiting = false } catch (_: InterruptedException) { }
+            }
+        }
+        val caller = Thread { try { output = previewCall() } finally { returned.countDown() } }
+        caller.start()
+        try {
+            await(entered)
+            caller.interrupt()
+            await(returned)
+            assertTrue(output!!.isError)
+            assertNull(output!!.image)
+            assertNull(core.previewSnapshot().jpegBytes)
+        } finally { release.countDown() }
+        // A real next worker call is the completion barrier for the abandoned observe.
+        core.call(PhoneToolCatalog.APPS, emptyMap())
+        assertNull(core.previewSnapshot().jpegBytes)
+    }
+
+    @Test fun lateGetterLockFactCannotClearANewerActualScreen() {
+        main.imageBytes = byteArrayOf(1)
+        previewCall()
+        val entered = java.util.concurrent.CountDownLatch(1)
+        val release = java.util.concurrent.CountDownLatch(1)
+        val returned = java.util.concurrent.CountDownLatch(1)
+        var old: PhonePreviewSnapshot? = null
+        locked = true
+        beforeLockRead = { entered.countDown(); release.await() }
+        val reader = Thread { try { old = core.previewSnapshot() } finally { returned.countDown() } }
+        reader.start()
+        try {
+            await(entered)
+            beforeLockRead = {}
+            locked = false
+            main.imageBytes = byteArrayOf(2)
+            previewCall()
+            val current = core.previewSnapshot()
+            release.countDown()
+            await(returned)
+            assertNull(old!!.jpegBytes)
+            assertTrue(old!!.revision < current.revision)
+            assertEquals(current.revision, core.previewSnapshot().revision)
+            assertArrayEquals(byteArrayOf(2), core.previewSnapshot().jpegBytes)
+        } finally { beforeLockRead = {}; release.countDown() }
+    }
+
+    @Test fun lateFinalLockFactCannotClearANewerActualScreen() {
+        val entered = java.util.concurrent.CountDownLatch(1)
+        val release = java.util.concurrent.CountDownLatch(1)
+        val returned = java.util.concurrent.CountDownLatch(1)
+        main.imageBytes = byteArrayOf(1)
+        main.onObserve = {
+            locked = true
+            beforeLockRead = { entered.countDown(); release.await() }
+        }
+        val caller = Thread { try { previewCall() } finally { returned.countDown() } }
+        caller.start()
+        try {
+            await(entered)
+            beforeLockRead = {}
+            locked = false
+            main.onObserve = {}
+            main.imageBytes = byteArrayOf(2)
+            previewCall()
+            val current = core.previewSnapshot()
+            release.countDown()
+            await(returned)
+            assertEquals(current.revision, core.previewSnapshot().revision)
+            assertArrayEquals(byteArrayOf(2), core.previewSnapshot().jpegBytes)
+        } finally { beforeLockRead = {}; release.countDown() }
+    }
+
 }

@@ -16,7 +16,11 @@ import java.util.concurrent.TimeUnit
 import rikka.shizuku.Shizuku
 import rikka.sui.Sui
 
-class ShizukuStarter(private val context: Context, private val onChanged: () -> Unit) {
+class ShizukuStarter(
+    private val context: Context,
+    private val onDisconnected: (PrivilegedChannel) -> Unit = {},
+    private val onChanged: () -> Unit,
+) {
     companion object {
         const val PACKAGE = "moe.shizuku.privileged.api"
         private const val PERMISSION_REQUEST_CODE = 4601
@@ -112,17 +116,20 @@ class ShizukuStarter(private val context: Context, private val onChanged: () -> 
     /** The 15 s bind wait does not impose a deadline on Binder PROBE or remote teardown. */
     fun connect(whenAvailable: (() -> Unit)? = null, mayStart: () -> Boolean = { true }): PrivilegedChannel? {
         if (!granted()) return null
+        var retired: PrivilegedChannel? = null
         val owner = synchronized(guard) {
             if (!mayStart()) return null
             channel?.takeIf { it.alive() }?.let { return it }
             // An old service/cleanup still owns this fixed tag. Never replace it underneath unbind.
             binding?.let {
                 if (whenAvailable != null) it.whenAvailable = whenAvailable
-                if (it.worker == null) retire(it)
-                return null
+                if (it.worker == null) retired = retire(it)
+                return@synchronized null
             }
             Binding(mayStart, args0).also { binding = it }
         }
+        retired?.let(onDisconnected)
+        if (owner == null) return null
         owner.listener = object : ServiceConnection {
             override fun onServiceConnected(name: ComponentName?, binder: IBinder?) {
                 synchronized(guard) {
@@ -132,7 +139,8 @@ class ShizukuStarter(private val context: Context, private val onChanged: () -> 
                 }
             }
             override fun onServiceDisconnected(name: ComponentName?) {
-                synchronized(guard) { if (binding === owner) retire(owner) }
+                val old = synchronized(guard) { if (binding === owner) retire(owner) else null }
+                old?.let(onDisconnected)
                 onChanged()
             }
         }
@@ -155,17 +163,19 @@ class ShizukuStarter(private val context: Context, private val onChanged: () -> 
             if (!probe.getBoolean(Proto.OK) || probe.getString("revision") != Proto.REVISION) return null
             return synchronized(guard) {
                 if (!owner.valid || !owner.mayStart()) return null
-                ShizukuChannel(remote).also { channel = it }
+                ShizukuChannel(remote, onDisconnected).also { channel = it }
             }
         } catch (e: Exception) {
             if (e is InterruptedException) Thread.currentThread().interrupt()
             return null
         } finally {
+            var old: PrivilegedChannel? = null
             val available = synchronized(guard) {
                 owner.worker = null
-                if (!owner.valid || channel == null) { retire(owner); null }
+                if (!owner.valid || channel == null) { old = retire(owner); null }
                 else owner.whenAvailable.also { owner.whenAvailable = null }
             }
+            old?.let(onDisconnected)
             available?.invoke()
             onChanged()
         }
@@ -180,22 +190,25 @@ class ShizukuStarter(private val context: Context, private val onChanged: () -> 
 
     fun disconnectIfCurrent(expected: PrivilegedChannel?) {
         if (expected == null) return
-        synchronized(guard) {
-            if (channel === expected) binding?.let { retire(it) }
+        val retired = synchronized(guard) {
+            if (channel === expected) binding?.let { retire(it) } else null
         }
+        retired?.let(onDisconnected)
     }
 
     fun disconnect() {
-        synchronized(guard) { binding?.let { retire(it) } }
+        val retired = synchronized(guard) { binding?.let { retire(it) } }
+        retired?.let(onDisconnected)
     }
 
     // Caller holds guard. A pending Binder operation must finish before its tag may be reused.
-    private fun retire(owner: Binding) {
+    private fun retire(owner: Binding): PrivilegedChannel? {
         owner.valid = false
+        val retired = channel
         channel = null
         owner.latch.countDown()
         owner.worker?.interrupt()
-        if (owner.worker != null || owner.cleaning) return
+        if (owner.worker != null || owner.cleaning) return retired
         owner.cleaning = true
         main.post {
             var detached = true
@@ -217,5 +230,6 @@ class ShizukuStarter(private val context: Context, private val onChanged: () -> 
             available?.invoke()
             onChanged()
         }
+        return retired
     }
 }
