@@ -25,3 +25,15 @@ FLUTTER_OHOS=/path/to/flutter-ohos/bin/flutter tooling/ohos/build-hap.sh
 | `hdc install`、真机调试 | 可以 | 可以 |
 
 `hvigor`、`ohpm` 来自 HarmonyOS Command Line Tools（要登录华为账号下载），版本跟 DevEco 26.0.0。OpenHarmony 公开 SDK 只够编原生库，打不了能装到华为手机的 HAP。
+
+## ArkTS 检查
+
+```sh
+JAVA_HOME=/path/to/jdk tooling/ohos/check-arkts.sh --sdk /path/to/ohos-sdk/linux
+```
+
+真编译，不是类型擦除：公开源的 hvigor 6.26.9 → restool → ets-loader 严格 ArkTS → es2abc → 未签名 HAP，不用登录，下载一次后可以断网跑。它在临时副本上工作，诊断按文件写进 `<work>/diagnostics.txt`，有错误或有文件没进字节码就退出 1；警告默认不算失败，`--werror` 才算。`--with-forks` 把 `pubspec_overrides.ohos.yaml` 的七个 fork 一起编。
+
+- 用的是 OpenHarmony 分支，公开 SDK 只有这个。另用空 HMS 层跑过 HarmonyOS 分支（除 `externalNativeOptions` 外配置不改，用真的 `flutter-hvigor-plugin`），ArkTS 诊断逐条相同；但只有 HMS 才有的 API 这里编不过，真 HMS SDK 没跑过。
+- HAP 不能运行：没有原生库，没有 Dart 产物。
+- 工具不查的东西：权限名、分层图标的键名和图片内容；`entry` 下与 `AppScope` 同名的资源会被遮蔽，改坏了也不报。依赖里的部分类型错误会被降成警告。
