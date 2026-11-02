@@ -11,6 +11,11 @@ if(NOT EXISTS "${NODE_SOURCE_DIR}/src/node.h" OR NOT EXISTS "${NODE_LIBRARY_DIR}
 endif()
 
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
+find_path(DSH_DEVICEINFO_INCLUDE_DIR NAMES deviceinfo.h)
+find_library(DSH_DEVICEINFO_LIBRARY NAMES deviceinfo_ndk.z)
+if(NOT DSH_DEVICEINFO_INCLUDE_DIR OR NOT DSH_DEVICEINFO_LIBRARY)
+  message(FATAL_ERROR "The OpenHarmony SDK must provide deviceinfo.h and libdeviceinfo_ndk.z.so (API 10+)")
+endif()
 set(DSH_NODE_VERSION_PIN "${CMAKE_CURRENT_SOURCE_DIR}/../node-version.json")
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
   "${DSH_NODE_VERSION_PIN}" "${CMAKE_CURRENT_SOURCE_DIR}/generate-node-version.py")
@@ -28,6 +33,7 @@ target_compile_definitions(dsh_node_runner PRIVATE NAPI_VERSION=8)
 target_compile_options(dsh_node_runner PRIVATE -fvisibility=hidden)
 target_include_directories(dsh_node_runner PRIVATE
   "${CMAKE_CURRENT_BINARY_DIR}"
+  "${DSH_DEVICEINFO_INCLUDE_DIR}"
   "${NODE_SOURCE_DIR}/src" "${NODE_SOURCE_DIR}/deps/v8/include" "${NODE_SOURCE_DIR}/deps/uv/include")
-target_link_libraries(dsh_node_runner PRIVATE "${NODE_LIBRARY_DIR}/libnode.so")
+target_link_libraries(dsh_node_runner PRIVATE "${NODE_LIBRARY_DIR}/libnode.so" "${DSH_DEVICEINFO_LIBRARY}")
 target_link_options(dsh_node_runner PRIVATE -Wl,-z,defs)

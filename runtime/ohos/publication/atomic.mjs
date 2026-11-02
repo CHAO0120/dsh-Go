@@ -51,7 +51,8 @@ async function copyStream(input, output, signal) {
 }
 
 // This is deliberately the existing risky fallback: a partial final file may
-// remain after failure/SIGKILL. It is used only for the native commit's EINVAL.
+// remain after failure/SIGKILL. The guarded product also uses it when an earlier
+// EINVAL or unfinished trial has durably disabled the native commit.
 async function legacyExclusiveCopy(source, target, fs, signal) {
   const input = await fs.open(source, 'r');
   try {
@@ -75,6 +76,7 @@ async function legacyExclusiveCopy(source, target, fs, signal) {
 export function createAtomicPublisher({
   renameNoReplace,
   ledger,
+  atomicFuse,
   fs = promises,
   selectTemporaryPath = chooseTemporaryPath,
   onFallback = () => {},
@@ -84,6 +86,7 @@ export function createAtomicPublisher({
     throw new TypeError('A durable ownership ledger with reserve, identify and release is required');
   }
   if (typeof selectTemporaryPath !== 'function') throw new TypeError('selectTemporaryPath must be a function');
+  if (atomicFuse !== undefined && typeof atomicFuse?.run !== 'function') throw new TypeError('Invalid publication atomic fuse');
   const publications = new Map();
   const publish = async function publish(source, target, { signal, fs: callFs } = {}) {
     source = requirePath(source, 'source');
@@ -135,21 +138,38 @@ export function createAtomicPublisher({
       await ledger.identify(token, identityOf(info));
       await copyStream(input, output, signal);
       signal?.throwIfAborted();
-      // No await separates the same-Node ownership check and synchronous commit.
-      const current = lstatSync(path, { bigint: true });
-      if (!current.isFile() || !sameIdentity(current, receipt)) {
-        throw Object.assign(new Error('Publication temporary changed before atomic commit'),
-          { code: 'ERR_OHOS_PUBLICATION_TEMP_REPLACED' });
+      const beforeCommit = () => {
+        signal?.throwIfAborted();
+        // The fuse invokes this check immediately before the synchronous native
+        // call, after its persistent trial marker; no await separates the two.
+        const current = lstatSync(path, { bigint: true });
+        if (!current.isFile() || !sameIdentity(current, receipt)) {
+          throw Object.assign(new Error('Publication temporary changed before atomic commit'),
+            { code: 'ERR_OHOS_PUBLICATION_TEMP_REPLACED' });
+        }
+      };
+      let fallback;
+      if (atomicFuse) {
+        const outcome = await atomicFuse.run(() => renameNoReplace(path, target), { beforeCommit });
+        if (outcome?.atomic === true) method = 'rename-noreplace';
+        else if (outcome?.atomic === false && ['unsupported', 'disabled-after-crash'].includes(outcome.reason)) {
+          fallback = { reason: outcome.reason };
+        } else throw new TypeError('Invalid publication atomic fuse result');
+      } else {
+        // Kept for isolated factory tests; production install always supplies
+        // the durable fuse. This path retains the previously reviewed contract.
+        beforeCommit();
+        try {
+          const result = renameNoReplace(path, target);
+          if (result !== undefined) throw new TypeError('renameNoReplace must be synchronous and return undefined');
+          method = 'rename-noreplace';
+        } catch (error) {
+          if (error?.code !== 'EINVAL' || error?.syscall !== 'renameat2') throw error;
+          fallback = { code: error.code, syscall: error.syscall, reason: 'unsupported' };
+        }
       }
-      try {
-        const result = renameNoReplace(path, target);
-        if (result !== undefined) throw new TypeError('renameNoReplace must be synchronous and return undefined');
-        method = 'rename-noreplace';
-      } catch (error) {
-        // File write/sync/close errors, EEXIST, EXDEV, EACCES and ENOSYS never
-        // enter this branch merely because they happened during publication.
-        if (error?.code !== 'EINVAL' || error?.syscall !== 'renameat2') throw error;
-        await onFallback({ code: error.code, syscall: error.syscall,
+      if (fallback) {
+        await onFallback({ ...fallback,
           risk: 'partial final file remains possible after failure or process death' });
         await legacyExclusiveCopy(source, target, activeFs, signal);
         method = 'exclusive-copy-fallback';

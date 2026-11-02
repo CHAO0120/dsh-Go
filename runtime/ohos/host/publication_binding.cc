@@ -4,6 +4,7 @@
 #include <node.h>
 #include <node_api.h>
 #include <uv.h>
+#include <deviceinfo.h>
 
 #include <cerrno>
 #include <cmath>
@@ -19,6 +20,31 @@
 #include <vector>
 
 namespace {
+
+napi_value GetSystemBuildIdentity(napi_env env, napi_callback_info) {
+  // These are public OS build properties, never a device serial or user ID.
+  // Product builds resolve these four APIs from libdeviceinfo_ndk.z.so.
+  const char* names[] = {"osFullName", "displayVersion", "incrementalVersion", "securityPatchTag"};
+  const char* values[] = {OH_GetOSFullName(), OH_GetDisplayVersion(),
+                          OH_GetIncrementalVersion(), OH_GetSecurityPatchTag()};
+  constexpr size_t maximum_bytes = 1024;
+  napi_value result;
+  if (napi_create_object(env, &result) != napi_ok) return nullptr;
+  for (size_t i = 0; i < sizeof(names) / sizeof(names[0]); ++i) {
+    // The public API permits NULL, and GetOSFullName can return an empty string.
+    // A missing identity must not reset a previously armed/disabled crash fuse.
+    const size_t length = values[i] == nullptr ? 0 : strnlen(values[i], maximum_bytes + 1);
+    if (length == 0 || length > maximum_bytes) {
+      napi_throw_error(env, "ERR_OHOS_SYSTEM_BUILD_IDENTITY",
+                       "The operating-system build identity is unavailable or invalid");
+      return nullptr;
+    }
+    napi_value value;
+    if (napi_create_string_utf8(env, values[i], length, &value) != napi_ok ||
+        napi_set_named_property(env, result, names[i], value) != napi_ok) return nullptr;
+  }
+  return result;
+}
 
 bool ReadPath(napi_env env, napi_value value, std::string* path) {
   napi_valuetype type;
@@ -245,6 +271,9 @@ napi_value Initialize(napi_env env, napi_value exports) {
   if (napi_create_function(env, "getOwnershipMarker", NAPI_AUTO_LENGTH, GetOwnershipMarker,
                            nullptr, &function) != napi_ok ||
       napi_set_named_property(env, exports, "getOwnershipMarker", function) != napi_ok) return nullptr;
+  if (napi_create_function(env, "getSystemBuildIdentity", NAPI_AUTO_LENGTH, GetSystemBuildIdentity,
+                           nullptr, &function) != napi_ok ||
+      napi_set_named_property(env, exports, "getSystemBuildIdentity", function) != napi_ok) return nullptr;
   return exports;
 }
 

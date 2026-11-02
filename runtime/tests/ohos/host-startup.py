@@ -51,6 +51,8 @@ def main():
     runner = build / 'libhost-startup-test.so'
     command = [os.environ.get('CXX', 'c++'), '-std=c++20', '-shared', '-fPIC', '-fvisibility=hidden',
                '-DNAPI_VERSION=8', '-I', str(args.node_root.resolve() / 'include/node'), '-I', str(build),
+               '-I', str(HERE / 'publication-deviceinfo-fixture'),
+               str(HERE / 'publication-deviceinfo-fixture/deviceinfo.cc'),
                str(OHOS / 'host/node_runner.cpp'), str(OHOS / 'host/publication_binding.cc'),
                str(HERE / 'host-startup-linux.cc'), '-ldl', '-o', str(runner)]
     result = subprocess.run(command, env=environment(), capture_output=True, text=True)
@@ -215,13 +217,15 @@ def main():
     addon = version / 'publication.node'
     command = [os.environ.get('CXX', 'c++'), '-std=c++20', '-shared', '-fPIC', '-fvisibility=hidden',
                '-DNAPI_VERSION=8', '-DDSH_PUBLICATION_TEST_ADDON', '-I', str(version),
+               '-I', str(HERE / 'publication-deviceinfo-fixture'),
+               str(HERE / 'publication-deviceinfo-fixture/deviceinfo.cc'),
                '-I', str(args.node_root.resolve() / 'include/node'), str(OHOS / 'host/publication_binding.cc'), '-o', str(addon)]
     c = subprocess.run(command, capture_output=True, text=True); c.check_returncode()
     run('native-consumes-alternate-pin', ['-e', 'require(' + json.dumps(str(addon)) + ')'], environment(),
         lambda p: p.returncode != 0 and 'ERR_OHOS_NATIVE_NODE_VERSION' in p.stderr and mutant in p.stderr,
         pin=mutant, generatedHeaderSHA256=sha(generated), addonSHA256=sha(addon))
     publication = version / 'publication'; publication.mkdir(exist_ok=True)
-    for name in ['index.mjs', 'atomic.mjs', 'ledger.mjs']:
+    for name in ['index.mjs', 'atomic.mjs', 'ledger.mjs', 'atomic-fuse.mjs']:
         shutil.copyfile(OHOS / 'publication' / name, publication / name)
     run('js-consumes-alternate-pin', ['--import', str(OHOS / 'sim/marker.mjs'), '--input-type=module', '-e',
         'const {installPublication}=await import(' + json.dumps((publication / 'index.mjs').as_uri()) + ');await installPublication();'], environment(),
@@ -234,6 +238,7 @@ def main():
     paths = [node, entry, runner, linked, OHOS / 'node-version.json', OHOS / 'preload.mjs',
              OHOS / 'host/node_runner.cpp', OHOS / 'host/publication_binding.cc',
              OHOS / 'host/generate-node-version.py', OHOS / 'publication/index.mjs', Path(__file__).resolve()]
+    paths += [HERE / 'publication-deviceinfo-fixture/deviceinfo.h', HERE / 'publication-deviceinfo-fixture/deviceinfo.cc']
     report = {'scope': 'Linux contract and explicit simulation evidence; OHOS SDK, ABI, HAP, device NOT_RUN',
               'nodePin': pin, 'inputs': {str(p): sha(p) for p in paths},
               'counts': {'total': len(rows), 'pass': sum(bool(row['passed']) for row in rows),

@@ -3,6 +3,7 @@ import * as promises from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import { dirname, isAbsolute, join, resolve, sep } from 'node:path';
 import { cleanupOwnedTemporary } from './atomic.mjs';
+import { decodeAtomicState, encodeAtomicState } from './atomic-fuse.mjs';
 
 const fail = (code, message, cause) => Object.assign(new Error(message, { cause }), { code });
 const identity = info => ({ dev: String(info.dev), ino: String(info.ino) });
@@ -16,6 +17,13 @@ const absolute = value => {
 const nonempty = value => typeof value === 'string' && value.length > 0 && !value.includes('\0');
 const decimal = value => typeof value === 'string' && /^(0|[1-9][0-9]*)$/.test(value);
 const inside = (directory, path) => path === directory || path.startsWith(directory + sep);
+const reportsFailure = (error, expected, visited = new Set()) => {
+  if (error === expected) return true;
+  if (!error || typeof error !== 'object' || visited.has(error)) return false;
+  visited.add(error);
+  return reportsFailure(error.cause, expected, visited)
+    || (Array.isArray(error.errors) && error.errors.some(item => reportsFailure(item, expected, visited)));
+};
 
 function decodeLedger(text, directory) {
   let value;
@@ -69,6 +77,8 @@ export async function openOwnershipLedger({ directory, ownerId, lockExclusive,
   const lockPath = join(directory, '.lock');
   const ledgerPath = join(directory, 'ledger.json');
   const pendingPath = join(directory, 'ledger.pending');
+  const atomicStatePath = join(directory, 'atomic-state.json');
+  const atomicPendingPath = join(directory, 'atomic-state.pending');
   let lock, directoryHandle, entries;
   try {
     lock = await fs.open(lockPath, constants.O_RDWR | constants.O_CREAT | constants.O_NOFOLLOW, 0o600);
@@ -144,6 +154,89 @@ export async function openOwnershipLedger({ directory, ownerId, lockExclusive,
       throw error;
     }
   }
+  async function readAtomicState() {
+    let file, value = null;
+    try {
+      try {
+        file = await fs.open(atomicStatePath, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+        const info = await file.stat();
+        if (!info.isFile() || info.size > 32768) {
+          throw fail('ERR_OHOS_PUBLICATION_ATOMIC_STATE_CORRUPT', 'Publication atomic state must be a bounded regular file');
+        }
+        value = decodeAtomicState(await file.readFile('utf8'));
+      } catch (error) { if (error.code !== 'ENOENT') throw error; }
+      finally { if (file) { await file.close(); file = undefined; } }
+      // This exact pending slot belongs to the state protocol. Decode the
+      // committed record first; preserve evidence if that record is corrupt.
+      try {
+        const pending = lstatSync(atomicPendingPath, { bigint: true });
+        if (!pending.isFile()) {
+          throw fail('ERR_OHOS_PUBLICATION_ATOMIC_PENDING', 'Publication atomic pending slot is not a regular file');
+        }
+        unlinkSync(atomicPendingPath);
+        await directoryHandle.sync();
+      } catch (error) { if (error.code !== 'ENOENT') throw error; }
+      return value;
+    } catch (error) { poisoned = error; throw error; }
+  }
+  async function persistAtomicState(text) {
+    let pending;
+    try {
+      pending = await fs.open(atomicPendingPath, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600);
+      await pending.writeFile(text);
+      await pending.sync();
+      await pending.close(); pending = undefined;
+      await fs.rename(atomicPendingPath, atomicStatePath);
+      await directoryHandle.sync();
+    } catch (error) {
+      poisoned = error;
+      if (pending) {
+        try { await pending.close(); }
+        catch (closeError) { throw new AggregateError([error, closeError], 'Publication state write and close failed', { cause: error }); }
+      }
+      throw error;
+    }
+  }
+  const publicationAtomicState = Object.freeze({
+    transaction(operation) {
+      if (typeof operation !== 'function') return Promise.reject(new TypeError('A state transaction is required'));
+      return enqueue(async () => {
+        let active = true, ioQueue = Promise.resolve();
+        const accepted = [];
+        const submit = action => {
+          if (!active) return Promise.reject(fail('ERR_OHOS_PUBLICATION_ATOMIC_TRANSACTION', 'Publication state transaction has ended'));
+          const result = ioQueue.then(() => {
+            if (poisoned) throw fail('ERR_OHOS_LEDGER_POISONED', 'Ownership ledger persistence failed; restart is required', poisoned);
+            return action();
+          });
+          ioQueue = result.catch(() => {});
+          accepted.push(result);
+          return result;
+        };
+        const io = Object.freeze({
+          read() { return submit(readAtomicState); },
+          commit(value) {
+            const text = encodeAtomicState(value);
+            if (decodeAtomicState(text).ownerId !== ownerId) throw fail('ERR_OHOS_LEDGER_OWNER', 'Publication state belongs to a different process');
+            return submit(() => persistAtomicState(text));
+          },
+        });
+        let result;
+        const failures = [];
+        try { result = await operation(io); }
+        catch (error) { failures.push(error); }
+        finally { active = false; }
+        // Even an accidentally unawaited accepted state IO must settle before
+        // this queue slot, close(), or the following owner operation proceeds.
+        for (const settled of await Promise.allSettled(accepted)) {
+          if (settled.status === 'rejected' && !failures.some(error => reportsFailure(error, settled.reason))) failures.push(settled.reason);
+        }
+        if (failures.length === 1) throw failures[0];
+        if (failures.length > 1) throw new AggregateError(failures, 'Publication state transaction failed', { cause: failures[0] });
+        return result;
+      });
+    },
+  });
   function currentEntry(token) {
     const entry = entries.get(token);
     if (!entry || entry.ownerId !== ownerId) {
@@ -159,6 +252,7 @@ export async function openOwnershipLedger({ directory, ownerId, lockExclusive,
   }
   return Object.freeze({
     ownerId,
+    publicationAtomicState,
     reserve(tempPath, finalPath) {
       return enqueue(async () => {
         await externalPath(tempPath); await externalPath(finalPath);

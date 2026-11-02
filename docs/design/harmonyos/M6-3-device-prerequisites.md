@@ -146,3 +146,21 @@ python3 runtime/tests/ohos/device-prerequisites/audit.py   --cache /absolute/pat
 - 首版解释器不接受官方生成 C 的 `(unsigned long)` 常量转换，UID 负对照抛 SyntaxError；修正只接受这一固定 ARM64 转换后重跑通过，没有跳过 UID 断言。
 - 找到 init 的包装调用点后曾暂推可能再加一层；完整条件明确跳过 appspawn，因此已撤回。早期统一双层组合还没有体现 `SECCOMP_PRIVILEGE` 去掉父层；最终改为9个源码条件组合。旧调查文件保留，正式结果只引用 `audit-final-02` 的62/72。
 - 全程未在研究宿主或目标设备安装过滤器，未执行可能因未知策略终止应用的盲探测；目标全部待真机核实。
+
+## 六、M6-3b 后继：崩溃熔断的真机核验记录
+
+前五节保留37号来源查证的范围；本节是追加12后的设备验收增补。后继发布服务在每个进程第一次实际进入 NOREPLACE 提交前持久写入 `trying`，重启发现未结束的尝试则记为 `disabled-after-crash` 并降级。它没有增加一个额外的试探 syscall。以下各行目前均为 **NOT_RUN（目标设备）**。
+
+| 必记维度 | 要保存的实际证据与判定 |
+| --- | --- |
+| 机型和系统 | 机型、四项系统版本原值、版本身份、内核、应用/Node/binding 构建身份；分别登记哪些组合得到 `available`、哪些得到 `unsupported`，不能把一台机的结果外推到其他版本。 |
+| 版本字段可靠性 | 冷启动多次读取四字段；检查 NULL/空白/不稳定导致的明确启动拒绝。升级前后记录元组，确认确实变化后才声称“升级重新尝试”已验证。字段来源与限制见 `M6-3b-system-build.md`。 |
+| 实际文件系统 | 在应用自己的 mount namespace 中对 session、attachment、账本和最终目标分别取可见挂载；对 sharefs、hmdfs 的 local/remote/merge、f2fs 分别登记。未取得某种挂载就填 NOT_RUN，不用相似目录替代。 |
+| 成功路径 | 记录 link 与 rename 的实际方法。link 成功时本来就无需试用 rename；只有真实 NOREPLACE 成功才支持 `available`。之后同进程不再为成功调用反复写状态，新进程第一次实际 rename 仍重新持久 arm。 |
+| EINVAL 路径 | 区分实际 native `renameat2/EINVAL` 与账本写入/临时文件/同步错误。登记 `unsupported`、明确警告和后续无额外 rename；非原子回退的半 final 风险继续存在。 |
+| 崩溃恢复 | 在持久 `trying` 后受控终止测试 App，再以相同版本启动；核对 `disabled-after-crash` 持久化、rename 次数为0、回退能否完成，以及旧归属临时资源的恢复结果。不能删除标记后重试冒充自动恢复。 |
+| 误触发 | 分别记录调用前被杀、原生已成功但 available 未持久化、低电/断电等未确认窗口。残留 trying 只证明上次没有完成状态记录，不证明发生了 SIGSYS。误触发仍必须保留已提交 final，不能回滚或覆盖。 |
+| 能力观察 | 读取发布服务的动态 `atomic` 状态，并核对已鉴权 `GET /dsh-go/v1/runtime-capabilities` 的 `publication.atomic`。配套增量已在 Linux 严格仿真的真实 DSH/connection 下验证 HTTP；本表的目标设备项与 Dart 仍为 NOT_RUN。完整 O6 其他能力字段未在本项实现。 |
+| 状态持久化失败 | 在允许的测试目录检验状态文件与目录同步失败如何暴露；禁止绕过未落盘的 trying 继续 native。已有 final 成功但记录 available 失败应明确报错并保留 final。 |
+
+“最多崩一次”的范围必须限定为**同一个已识别系统版本、已持久 arm 的首次实际调用及稳定策略前提**。同进程已有成功后再发生动态过滤策略变化、标记被清除/数据被恢复到旧备份、系统身份不可用等情形，不在一个未加限定的保证内。Linux SIGKILL 证明进程死亡恢复路径；不等于真实 SIGSYS、设备断电持久性或任何挂载上的实现已经验证。

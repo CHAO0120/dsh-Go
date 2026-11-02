@@ -5,6 +5,7 @@ import { randomUUID } from 'node:crypto';
 import { isAbsolute, join, parse } from 'node:path';
 import { createAtomicPublisher } from './atomic.mjs';
 import { openOwnershipLedger } from './ledger.mjs';
+import { openAtomicFuse, readSystemBuildIdentity } from './atomic-fuse.mjs';
 
 export const publicationSymbol = Symbol.for('dsh.go.ohos.publication');
 const simulationSymbol = Symbol.for('dsh.go.ohos.sim');
@@ -31,7 +32,7 @@ export async function installPublication() {
     throw Object.assign(new Error('OpenHarmony publication linked binding is unavailable', { cause }),
       { code: 'ERR_OHOS_PUBLICATION_BINDING_MISSING' });
   }
-  const required = ['renameNoReplace', 'lockExclusive', 'setOwnershipMarker', 'getOwnershipMarker'];
+  const required = ['renameNoReplace', 'lockExclusive', 'setOwnershipMarker', 'getOwnershipMarker', 'getSystemBuildIdentity'];
   if (required.some(name => typeof binding[name] !== 'function')) {
     throw Object.assign(new Error('OpenHarmony publication binding lacks required ownership operations'),
       { code: 'ERR_OHOS_PUBLICATION_BINDING_INVALID' });
@@ -53,6 +54,9 @@ export async function installPublication() {
       throw Object.assign(new Error('OpenHarmony publication requires an explicit valid DSH_HOME', { cause }),
         { code: 'ERR_OHOS_PUBLICATION_DATA_DIRECTORY' });
     }
+    // Read the actual platform identity before opening or mutating old state.
+    // No environment variable, Node version or kernel release substitutes it.
+    const build = readSystemBuildIdentity(binding.getSystemBuildIdentity);
     ledger = await openOwnershipLedger({
       directory: join(home, 'ohos-ownership'),
       ownerId: randomUUID(),
@@ -61,6 +65,8 @@ export async function installPublication() {
       getOwnershipMarker: binding.getOwnershipMarker,
     });
     const recovered = await ledger.recover();
+    const atomicFuse = await openAtomicFuse({ storage: ledger.publicationAtomicState,
+      ownerId: ledger.ownerId, systemVersion: build.systemVersion });
     const recoverySummary = Object.freeze(Object.fromEntries(Object.entries(recovered)
       .map(([name, rows]) => [name, Object.freeze(rows.map(row => Object.freeze({ ...row })))])));
     if (recoverySummary.unresolved.length) {
@@ -71,10 +77,14 @@ export async function installPublication() {
     const publish = createAtomicPublisher({
       renameNoReplace: binding.renameNoReplace,
       ledger,
-      onFallback() {
+      atomicFuse,
+      onFallback({ reason }) {
         if (fallbackWarningIssued) return;
         fallbackWarningIssued = true;
-        process.emitWarning('renameat2(RENAME_NOREPLACE) returned EINVAL. OpenHarmony publication is using exclusive copy; a partial final file can remain after failure or process death.',
+        const basis = reason === 'disabled-after-crash'
+          ? 'An earlier renameat2 trial did not record normal completion and atomic publication is disabled for this system build.'
+          : 'renameat2(RENAME_NOREPLACE) is unsupported for this system build after an EINVAL result.';
+        process.emitWarning(`${basis} OpenHarmony publication is using exclusive copy; a partial final file can remain after failure or process death.`,
           { code: 'OHOS_PUBLICATION_NONATOMIC_FALLBACK' });
       },
     });
@@ -83,6 +93,9 @@ export async function installPublication() {
       recovery: 'durable ledger; unidentified or replaced entries are preserved',
       ownerId: ledger.ownerId,
       recoverySummary,
+      get atomic() { return atomicFuse.atomic; },
+      systemVersion: build.systemVersion,
+      systemBuildIdentity: build.identity,
       get pendingCount() { return publish.pendingCount; },
       publish,
     });
