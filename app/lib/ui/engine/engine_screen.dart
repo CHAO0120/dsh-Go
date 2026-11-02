@@ -7,6 +7,7 @@ import '../../l10n/l10n.dart';
 import '../../runtime/runtime_bridge.dart';
 import '../../runtime/runtime_state.dart';
 import '../../runtime/local_footprint.dart';
+import '../../state/android_features.dart';
 import '../../state/engine_control.dart';
 import '../../state/safe_mode_state.dart';
 import '../../state/settings_state.dart';
@@ -144,11 +145,12 @@ class EngineScreen extends ConsumerWidget {
             SettingsSection(
               title: l10n.commonMore,
               children: [
-                SettingsTile(
-                  spot: SettingsIndex.entry(SettingsPageId.background),
-                  subtitle: l10n.phoneEngineKeepAliveHint,
-                  onTap: () => _push(context, const BackgroundGuidePage()),
-                ),
+                if (ref.watch(androidSystemFeaturesProvider))
+                  SettingsTile(
+                    spot: SettingsIndex.entry(SettingsPageId.background),
+                    subtitle: l10n.phoneEngineKeepAliveHint,
+                    onTap: () => _push(context, const BackgroundGuidePage()),
+                  ),
                 SettingsTile(
                   spot: SettingsIndex.entry(SettingsPageId.diagnostics),
                   subtitle: l10n.phoneEngineDiagnosticsHint,

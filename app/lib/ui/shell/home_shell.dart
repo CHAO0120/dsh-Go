@@ -13,6 +13,7 @@ import '../../links/app_links.dart';
 import '../../pets/overlay_channel.dart' show petOverlayChannelProvider;
 import '../../pets/pet_overlay_bridge.dart';
 import '../../state/adaptive_layout_state.dart';
+import '../../state/android_features.dart';
 import '../../state/drawer_view_state.dart' show drawerSelectionProvider;
 import '../../state/sessions_state.dart' show currentSessionProvider;
 import '../bots/bot_alerts.dart';
@@ -261,7 +262,7 @@ class _HomeShellState extends ConsumerState<HomeShell> with SingleTickerProvider
                       // Notifications: routes taps, raises the in-app banner (draws nothing here).
                       ChatAlertHost(onReveal: _revealChat),
                       // Background running cut off by the phone: one line under the header (draws nothing here).
-                      const BackgroundNetHost(),
+                      if (ref.watch(androidSystemFeaturesProvider)) const BackgroundNetHost(),
                       // Daily update check + install resume (draws nothing).
                       const UpdateLaunchCheck(),
                       // The voice model chosen during setup: download, resume, ready / failed notices (draws nothing).

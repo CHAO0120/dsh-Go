@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../l10n/l10n.dart';
 import '../../runtime/runtime_bridge.dart';
 import '../../runtime/runtime_state.dart';
+import '../../state/android_features.dart';
 import '../../state/safe_mode_state.dart';
 import '../common/status_chip.dart';
 import '../engine/diagnostics_export_card.dart';
@@ -144,6 +145,7 @@ class EngineFailureCard extends ConsumerWidget {
     final hazards = failure.safeMode && failure.kind.isFatal
         ? ref.watch(safePreflightProvider).value ?? const <SafeHazard>[]
         : const <SafeHazard>[];
+    final android = ref.watch(androidSystemFeaturesProvider);
     final theme = Theme.of(context);
     final colors = DshColors.of(context);
 
@@ -204,7 +206,8 @@ class EngineFailureCard extends ConsumerWidget {
                   : () => run(model.primary),
               secondary: [
                 for (final action in model.secondary)
-                  if (action != FailureAction.showLog) (label: action.label, onPressed: () => run(action)),
+                  if (action != FailureAction.showLog && (android || action != FailureAction.background))
+                    (label: action.label, onPressed: () => run(action)),
               ],
               onLog: () => run(FailureAction.showLog),
               onExport: () => unawaited(showDiagnosticsExportSheet(context)),
