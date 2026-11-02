@@ -15,6 +15,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../state/android_features.dart';
 import '../ui/features/feature_catalog.dart';
 import '../ui/settings/index/settings_pages.dart';
 import 'app_links.dart';
@@ -58,8 +59,12 @@ Widget? pageForId(String id, String? sessionId) {
 
 typedef PageResolver = Widget? Function(String id, String? sessionId);
 
-/// [pageForId] (tests swap in light pages).
-final pageLinkResolverProvider = Provider<PageResolver>((ref) => pageForId);
+/// [pageForId] (tests swap in light pages); on HarmonyOS, Android's own pages
+/// are unknown ones.
+final pageLinkResolverProvider = Provider<PageResolver>((ref) {
+  if (ref.watch(androidSystemFeaturesProvider)) return pageForId;
+  return (id, sessionId) => SettingsIndex.androidOnlyLink(id) ? null : pageForId(id, sessionId);
+});
 
 /// Routes `dshgo://open/…` to its page, pushed over the home route. [session]
 /// reads the conversation open in the chat. Returns the unregister function.
