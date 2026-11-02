@@ -23,6 +23,7 @@ const digest = bytes => createHash('sha256').update(bytes).digest('hex');
 const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
 const rows = [];
 const route = '/dsh-go/v1/runtime-capabilities';
+const { capabilities: subprocessCapabilities } = await import(pathToFileURL(join(tree, 'runtime/ohos/process/commands.mjs')));
 
 function exchange(base, { path = route, method = 'GET', cookie, headers = {} } = {}) {
   return new Promise((resolve, reject) => {
@@ -149,6 +150,17 @@ for (const name of ['before-route', 'available', 'unsupported', 'disabled-after-
     const first = JSON.parse(initial.body);
     assert.equal(first.v, 1); assert.equal(first.platform, 'openharmony'); assert.equal(first.arch, process.arch);
     assert.equal(first.nodeVersion, process.versions.node); assert.equal(first.simulated, true); assert.equal(typeof first.bootId, 'string');
+    assert.equal(first.shell.kind, 'virtual');
+    assert.deepEqual(first.shell.commands, subprocessCapabilities.commands);
+    assert.equal(first.shell.pty, 'unsupported');
+    assert.equal(first.processSpawn, 'unsupported');
+    assert.equal(first.nodeScripts, subprocessCapabilities.nodeScripts);
+    assert.equal(first.python, 'unsupported'); assert.equal(first.wasm, 'unsupported');
+    assert.deepEqual(first.plugins, { bundled: 'supported', marketInstall: 'unsupported' });
+    assert.equal(first.nativeModules, null);
+    assert.deepEqual(first.storage, { sessionLock: 'main-thread' });
+    assert.deepEqual(first.background, { policy: 'may-freeze', computePermission: 'unknown', resume: 'none' });
+    row.assertions.push('O6 reads the live Cordis backend/command table and JSONL main-thread lock marker');
     assert.equal(first.publication.atomic, name === 'disabled-after-crash' ? name : 'untried');
     row.initial = first;
     const beforeRead = await snapshot(home), observedBefore = await invoke('observe');
@@ -193,6 +205,7 @@ for (const name of ['before-route', 'available', 'unsupported', 'disabled-after-
 }
 const inputs = [process.execPath, linked, addon, entry, profile,
   join(tree, 'runtime/ohos/capabilities/index.mjs'), join(tree, 'runtime/ohos/publication/capabilities.mjs'),
+  join(tree, 'runtime/ohos/capabilities/snapshot.mjs'), join(tree, 'runtime/ohos/process/commands.mjs'),
   join(tree, 'runtime/ohos/publication/index.mjs'), join(tree, 'runtime/ohos/publication/atomic-fuse.mjs'),
   join(tree, 'runtime/ohos/publication/ledger.mjs'), join(tree, 'runtime/ohos/publication/atomic.mjs'),
   fileURLToPath(import.meta.url), join(here, 'publication-capabilities-arm.mjs'), join(here, 'publication-capabilities-test-preload.mjs')];

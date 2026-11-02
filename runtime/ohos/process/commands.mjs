@@ -20,6 +20,8 @@ export const capabilities = Object.freeze({
   streamingOutput: false,
   stdin: 'batch',
   pty: false,
+  processSpawn: false,
+  nodeScripts: 'none',
   python: false,
   wasm: false,
 });

@@ -37,6 +37,7 @@ export 'src/plugins_api.dart';
 export 'src/providers_api.dart';
 export 'src/references_api.dart';
 export 'src/rpc.dart';
+export 'src/runtime_capabilities.dart';
 export 'src/schedule_list_api.dart';
 export 'src/session_api.dart';
 export 'src/session_deletion_api.dart';

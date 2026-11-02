@@ -1,12 +1,14 @@
 import { STATUS_CODES } from 'node:http';
-import { readPublicationCapabilities } from '../publication/capabilities.mjs';
+import { randomUUID } from 'node:crypto';
+import { runtimeCapabilities } from './snapshot.mjs';
 
 export const name = 'dsh-go-ohos-runtime-capabilities';
-const publicationSymbol = Symbol.for('dsh.go.ohos.publication');
 const simulationSymbol = Symbol.for('dsh.go.ohos.sim');
+let bootId;
 
 export function apply(ctx) {
   if (process.platform !== 'openharmony' && globalThis[simulationSymbol] !== true) return;
+  bootId ??= randomUUID();
   ctx.inject(['webServer'], webCtx => {
     webCtx.effect(() => webCtx.webServer.register({
       kind: 'exact',
@@ -26,12 +28,9 @@ export function apply(ctx) {
           return;
         }
         // Read on every request. No discovery, syscall trial, or persistence is
-        // performed here. O6 fields outside this implemented slice stay absent.
-        const service = globalThis[publicationSymbol];
-        const body = { v: 1, platform: process.platform, arch: process.arch,
-          nodeVersion: process.versions.node, simulated: globalThis[simulationSymbol] === true,
-          ...(service?.protocolVersion === 1 ? { bootId: service.ownerId } : {}),
-          ...readPublicationCapabilities() };
+        // performed here. A missing service stays unknown rather than being
+        // inferred from a package or the App's platform.
+        const body = runtimeCapabilities(webCtx, bootId);
         res.writeHead(200, headers);
         res.end(JSON.stringify(body));
       },

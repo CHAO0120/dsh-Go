@@ -1,6 +1,6 @@
-# M6-3b：发布熔断的 O6 HTTP 读取接入
+# O6：运行时能力及发布熔断的 HTTP 读取
 
-本目录实现先行 O6 v1 约定中的 **GET `/dsh-go/v1/runtime-capabilities`**。当前只提供实际已装配的发布能力片段及引擎基础身份；其他 O6 字段尚未实现，按既有兼容规则省略并由客户端视为 unknown。**没有实现 Dart 模型、完整 O6 能力清单或真机验证。**
+本目录实现 O6 v1 约定中的 **GET `/dsh-go/v1/runtime-capabilities`**。第二波在已有发布熔断片段上接入实际 Cordis 执行/锁能力和纯 Dart 模型/API。没有观测依据的原生模块、后台授权仍为 null/unknown；真机验证未执行。字段来源、旧引擎兼容和 Dart 使用约定见 [capabilities-v1.md](../../../docs/design/harmonyos/capabilities-v1.md) 第八节。
 
 ## 装配
 
@@ -19,7 +19,7 @@
 ]
 ```
 
-需要同包的 `publication/capabilities.mjs`、M6-3b 发布核心以及 M6-3b 原生第五个方法。插件不修改 Android 的 bridge、共享 profile、vendor 补丁或 pins。普通 Linux / Android 即使遗留旧 `DSH_GO_OHOS_SIM=1`，也不注册路由；只有实际平台 openharmony 或显式仿真 Symbol 才注册。完整鸿蒙 profile 的最终裁剪仍属 O1/O2；本项给出明确插入项，并已在真实 DSH profile 上执行。
+需要同包的 `snapshot.mjs`、`publication/capabilities.mjs`、M6-3b 发布核心以及 M6-3b 原生第五个方法。会话锁的准确观测需在 `--target ohos` 下应用 `zzzzzzzzzzzz-ohos-runtime-capabilities.diff`；Android target 未选择它，其输入摘要不变。普通 Linux / Android 即使遗留旧 `DSH_GO_OHOS_SIM=1`，也不注册路由；只有实际平台 openharmony 或显式仿真 Symbol 才注册。完整鸿蒙 profile 的最终裁剪仍属 O1/O2；本项给出明确插入项，并已在真实 DSH profile 上执行。
 
 ## 鉴权与响应
 
@@ -32,11 +32,17 @@
 | 字段 | 当前含义 |
 | --- | --- |
 | `v` | 1；新增可选字段不改变主版本 |
-| `bootId` | 已安装 protocol1 publication 服务的进程 ownerId；同实例不变，服务不存在或未知协议时省略 |
+| `bootId` | 本 Node 实例首次装配本插件时生成的随机标识；同实例不变，和启动凭据、publication 是否存在无关 |
 | `platform` / `arch` / `nodeVersion` | 当前进程实值；x64 仿真不报告 arm64 |
 | `simulated` | 是否存在显式仿真 Symbol |
 | `publication.atomic` | 当前 `untried`、`trying`、`available`、`unsupported`、`disabled-after-crash`；服务缺失、未知协议或未知状态为 `unknown` |
 | `publication.systemVersion` | 经验证的系统版本元组身份；缺失/非法为 null；不是 Node 版本，也不暴露原始四字段或设备标识 |
+| `shell` / `processSpawn` / `nodeScripts` / `python` | 实际 shell/subprocess 服务，命令表与执行器和工具说明同源；此基底 nodeScripts 是 none |
+| `wasm` | 当前实例缺 WebAssembly 为 unsupported，存在对象但未经执行验证为 unknown |
+| `plugins` | bundle 已实际装配的证据，以及 OHOS 第一阶段禁止市场安装的策略；不在 GET 中发现/安装插件 |
+| `nativeModules` | null，宿主尚无已签名清单及逐模块实际加载观测 |
+| `storage.sessionLock` | 真实 JSONL OHOS 分支的 main-thread 标记；服务缺失或不识别为 unknown |
+| `background` | may-freeze / unknown / none，不外推设备授权或 O8 恢复实现 |
 
 `available` 表示该版本已有一次真实 NOREPLACE 成功记录；新进程首次实际调用仍会重新写入 trying。`disabled-after-crash` 只表示上次尝试未记录正常完成，不等于已经证明 SIGSYS。状态详情由 M6-3b 核心文档定义。能力响应不授予操作权限；未知字段、未知枚举及未知协议的客户端兼容行为保持 O6 v1 先行约定。
 
@@ -71,4 +77,4 @@
 
 平台门控测试：设置 `M6_TEST_PREFIX` 为上述前缀，`M6_TEST_CAPABILITIES_MODULE` 为本目录 index.mjs 的绝对路径，执行 `node --jitless --test runtime/tests/ohos/publication-capabilities-route.test.mjs`，不加载仿真预载；该测试自己控制明确的门控输入。
 
-目标 SDK、arm64/musl、HAP、手机挂载和真实 SIGSYS 尚未执行；Linux 的设备信息实现是明确的 `DSH-Linux-Test-*` C API 夹具。完整 O6 的 shell/插件/原生模块/后台能力及 Dart 解析仍待后续实现。
+第二波在同一四场景上增加完整 O6 字段断言，并在严格仿真下执行真实五工具回合；纯 Dart 3.11.0 模型和实际 HTTP 客户端测试也已经执行，精确结果见交付说明。`node --jitless --test --test-isolation=none runtime/tests/ohos/runtime-capabilities.test.mjs` 另检服务缺失/卸载及只读快照。目标 SDK、arm64/musl、HAP、手机挂载和真实 SIGSYS 尚未执行；Linux 的设备信息实现是明确的 `DSH-Linux-Test-*` C API 夹具。

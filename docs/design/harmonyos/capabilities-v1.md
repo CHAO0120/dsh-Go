@@ -1,6 +1,6 @@
 # O6 能力清单协议 v1：先行约定
 
-状态：协议设计先行交付，尚未宣称引擎或 Dart 实现通过。基底 `afb5cdd`；已读 ADDENDUM 追加1。本协议不改 `app/lib/runtime/runtime_state.dart`，也不涉及本机正在改的界面。日期：2026-11-02，UTC+8。
+状态：本文前七节保留协议先行约定；第八节记录第二波在基底 `c818155` 上的引擎与纯 Dart 实现及证据边界。本协议不改 `app/lib/runtime/runtime_state.dart`，也不涉及本机正在改的界面。日期：2026-11-02。
 
 ## 1. 三层状态
 
@@ -125,3 +125,29 @@
 证据：本次官方 Node24.22.1 Linux x64 O0 仿真中无 WebAssembly；严格 child_process/dlopen/link 限制及真实 App HTTP/WS 回合已执行。O3b 只读复核绑定 e5502a4c…f26e，确认临时锁限主线程；O5 网络规范缺口仍独立列出，不通过此协议隐去。
 
 本机 e85e2c9 的 available 语义以 ADDENDUM 为依据，本环境未取该分支，不修改它。手机的后台冻结、受限计算授权、平台名和签名模块加载仍需设备验证。协议可表达 unknown，前提被证伪时只调整相应字段与后端，不改变宿主存在性的定义。
+
+## 8. 第二波实现（c818155）
+
+`runtime/ohos/capabilities/index.mjs` 延续已有的只读端点和连接鉴权，`snapshot.mjs` 每次请求读取已安装服务。插件未在普通 Linux/Android 下注册；旧环境变量不能开启。`bootId` 在本模块第一次实际 OHOS/显式仿真装配时生成，在本 Node 实例内保持不变，不依赖 publication 是否已装配，也不包含启动 token。
+
+| 字段 | 当前实现的依据与边界 |
+| --- | --- |
+| shell | 先检查实际 `ctx.shell`，再读实际 `ctx.subprocess.capabilities`；命令数组与执行器、bash 工具说明使用同一个 commands.mjs。没有 shell 时是 none/空数组；存在 shell 但没有后端声明时是 unknown/null。 |
+| processSpawn / nodeScripts / python | 后端声明来自当前已安装的虚拟进程服务。此基底是 unsupported/none/unsupported；工作线程存在不代表 `node <脚本>` 已实现。O4 后继启用 node 时须同时更新同一能力表。 |
+| wasm | 当前实例没有 WebAssembly 时是 unsupported；仅存在对象不证明能编译，保留 unknown。读取不运行任何 wasm 探测。 |
+| plugins.bundled | 当前 profile 已组合 bundle，且 loader 存在至少一个未禁用、fiber active 的官方包条目，才报告 supported；证明本 profile 的发现/加载机制已经运行，不保证每个插件功能均兼容。证据不足为 unknown。 |
+| plugins.marketInstall | 当前 OHOS 第一阶段策略为 unsupported。O1/O2 的显式安装拒绝另交；能力读取自身不安装包、不修改市场策略。 |
+| nativeModules | null。主机尚未提供已签名原生清单及逐模块加载观测，不能把包名、编译成功或 Linux 加载器结果写成设备 loaded。 |
+| storage.sessionLock | 新的仅 OHOS DSH diff 在真实 JSONL 实例的 openharmony 锁分支上暴露 main-thread 标记；未安装/缺标记时 unknown。不把 publication 的内核账本锁误作会话锁。 |
+| background | may-freeze / unknown / none。无设备后台授权观测，O8 恢复对账未装配；不自动触发工具重试。 |
+| publication | 延续 `publication/capabilities.mjs` 的实时 getter；每次 GET 独立快照，包含 atomic 与 systemVersion。未知服务仍是 unknown/null，不运行探测、恢复或写入。 |
+
+`packages/dsh_client/lib/src/runtime_capabilities.dart` 提供只读模型及 `DshClient.readRuntimeCapabilities()`。它不缓存、不轮询，不改变宿主 available 或当前连接状态；调用方在 `$events` ready、重连及前台连接重新验证后显式调用，并把快照绑定当前连接及 bootId。新的 UI 由主线消费此数据。
+
+解析只接受整数 v=1，忽略新可选字段；字段类型/枚举未知不使用 truthy 转换。commands/nativeModules 的 null 与空数组严格区分；原生模块重复名字保守合并成 unknown，无法确定名字的行令清单整体未知。publication 的五种状态和 unknown 独立于 Support 枚举，disabled-after-crash 不推测上次死亡原因。
+
+HTTP 读取复用该连接已注入的 HttpClient、代理/TLS 策略、Host 和 Cookie。`DshConnection.get` 仅增加可选的跳转/正文预算参数，旧调用默认行为不变；新接口禁跳转，正文限 128 KiB，默认期限10秒。404/405/501、有效但未知主版本返回 null；401/403、其他失败状态、非 JSON、无有效版本信封和正文超限均保留类型化异常。relay carrier 无任意 HTTP 路由，返回明确 transport-unavailable，不能混成旧引擎404。
+
+实际 Linux 验证：真实锁定 DSH/Cordis/connection 的四场景 HTTP 集成通过（含真实 SIGKILL 后熔断恢复）；真实 Cordis 平台门控4项、服务快照3项通过；装入此插件后严格 OHOS 仿真五工具完整回合通过。固定官方 Dart 3.11.0 上新增模型/真实HTTP测试及现有相关HTTP回归实际执行，结果与精确补丁哈希由交付报告记录；没有以 JavaScript 替身冒充 Dart。
+
+Android 的选中 DSH diff、pins 和 companion 字节输入与基底一致，构建脚本及版本输入规则未改。真机后台、原生模块装载、SDK/HAP 与手机网络仍未验证；本协议的 unknown 保留这些限制，不用桌面证据消除它们。
