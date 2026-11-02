@@ -36,6 +36,26 @@
         }
       }
     },
+    "zzzzzzzzzzzz-ohos-composition.diff": {
+      "0.2.1-rc.4": {
+        "node_modules/@deepseek-ai/dsh-office-to-pdf/lib/index.js": {
+          "before": "74cf9df9ab605a7675797ee1304d7af7059e97e90c3728ce4e40fbd2333fd7b8",
+          "after": "3cc19074929316c8d511ab757fbfd76eb6019de7e13de8dea0999b371c593f0e"
+        },
+        "node_modules/@deepseek-ai/dsh-skill-office/lib/index.js": {
+          "before": "3fb0b9f3151fc6da8f10d9d2f89b6496234ad302346bc5d28c5feefea572bb14",
+          "after": "906e88075e67bdda47d9d5e13686d44dc3a1d332eef2c3df4af1d1be5f15df42"
+        },
+        "node_modules/@deepseek-ai/dsh-attachment-local/lib/index.js": {
+          "before": "b1b9a6610a04643433c5dba552262bc68d2c034b71168228d380fe1ce7eb998d",
+          "after": "3ca9a82a1d9f82cad1a4aff6c37c98de57bc3fc815de8c01a644a3dfb9d81a50"
+        },
+        "node_modules/@deepseek-ai/dsh-experimental-speech-to-text-sensevoice/lib/index.js": {
+          "before": "286792bd82085586fbb0869aa32b3e3733425b4059a517465abed97dd710a15a",
+          "after": "cc5bc09cf6a034694788b04980c4f9fe2c3ceaf532d7d7179ded47fe417f496e"
+        }
+      }
+    },
     "zz-direct-runtime.diff": {
       "0.2.1-rc.2": {
         "node_modules/@deepseek-ai/dsh-fs-local/lib/index.js": {
@@ -384,6 +404,7 @@
       "zzzzzzzzz-ohos-search-confinement.diff",
       "zzzzzzzzzz-ohos-shell-limit-description.diff",
       "zzzzzzzzzzz-ohos-search-ignore-description.diff",
+      "zzzzzzzzzzzz-ohos-composition.diff",
       "zzzzzzzzzzzz-ohos-runtime-capabilities.diff"
     ]
   }

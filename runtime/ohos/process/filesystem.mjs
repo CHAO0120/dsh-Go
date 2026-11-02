@@ -1,5 +1,5 @@
 import { dirname, resolve, sep } from 'node:path';
-import { MountableFs, ReadWriteFs } from 'just-bash';
+import { MountableFs, ReadWriteFs } from './build/just-bash/index.js';
 
 export const isInside = (root, path) => path === root || path.startsWith(root + sep);
 export const distinctRoots = roots => [...new Set(roots)].filter(root => !roots.some(other => other !== root && isInside(other, root)));

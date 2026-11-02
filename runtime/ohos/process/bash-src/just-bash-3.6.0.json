@@ -824,7 +824,13 @@
   "licenseSha256": "014bb31e83d5c2e76aea1cc6e82217346ab41362f32cb355ad0f5c10aa0aeaff",
   "omitFromPrivateEsm": [
     "browser.js",
-    "index.cjs"
+    "index.cjs",
+    "chunks/python3-SDFCGIU4.js",
+    "chunks/worker.js",
+    "chunks/sqlite3-7MBPFI6W.js",
+    "chunks/chunk-BM3X75NC.js",
+    "chunks/sqlite3-worker.js",
+    "chunks/js-exec-NDLXDUBN.js"
   ],
   "package": "just-bash",
   "packageJsonSha256": "f72d75389d49043e91be80b48928fd3ed7fe37a941fbed1e160872fd2377ba3e",

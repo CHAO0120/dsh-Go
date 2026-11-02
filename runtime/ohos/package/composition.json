@@ -1,0 +1,41 @@
+{
+  "schema": 1,
+  "target": "ohos",
+  "dshVersion": "0.2.1-rc.4",
+  "nodeVersion": "24.22.1",
+  "dshLockSha256": "9b61c5b60c82a3b64fb252af5c142d40d0c86aff30a17cdd5e1ca9d73df9a25c",
+  "processLockSha256": "5a815fc00cafc62fca834fe3e2abf6792bd3263c1a386cb2948d6a4063ed8f30",
+  "regexSha256": "80eaea2a9e50a2851e332fa4fccffeb01550584ad3c448a2eadd88b43373d5f1",
+  "dshRemovePackages": {
+    "@deepseek-ai/libreoffice-kit": "Office 转换在鸿蒙明确 unavailable；保留原文档与 PDF 打开/下载",
+    "@deepseek-ai/libreoffice-kit-wasm": "无 WebAssembly，删除完整 LibreOffice wasm 运行时",
+    "@deepseek-ai/node-addon-system-*": "系统原生 addon 使用两个固定 HAP libs，不携其他平台包",
+    "@img/*": "没有已核的鸿蒙图像 codec；删除其他平台 native/wasm 产物",
+    "sharp": "图像解码/重编码在鸿蒙明确拒绝，用户可连接电脑处理",
+    "@koromix/*": "Windows FFI/其他平台 native 库不进入鸿蒙数据树",
+    "koffi": "Windows FFI 分支不在鸿蒙执行",
+    "node-pty": "无进程/PTy，既有虚拟后端明确拒绝终端",
+    "sherpa-onnx-*": "既有本地语音平台门拒绝鸿蒙，删除其他平台推理库",
+    "@vscode/ripgrep": "鸿蒙搜索使用固定虚拟 rg 路径，不启动外部二进制",
+    "@vscode/ripgrep-*": "鸿蒙搜索使用固定虚拟 rg 路径，不携其他平台二进制",
+    "node-addon-require-builtin-*": "require-builtin 使用固定 HAP libs，不携其他平台预构建包",
+    "node-addon-internal-loader-*": "未批准的原生产品不进入鸿蒙组成"
+  },
+  "processRemovePackages": {
+    "just-bash": "使用固定私有 ESM 构建，原包的 CLI/browser/CJS/vendor 全部不分发",
+    "sql.js": "删除完整 SQLite wasm 包；Node 内建 node:sqlite 保留",
+    "typescript": "构建期/已禁用脚本路径，不进入运行时",
+    "run": "JS/QuickJS wasm 命令不在已批准的命令表",
+    "minimisted": "仅 isomorphic-git CLI 使用，CLI 同时排除；保留 Git API",
+    "@mongodb-js/*": "未启用的可选原生解压模块",
+    "node-liblzma": "未启用的可选原生解压模块",
+    "node-addon-api": "原生模块构建头，不是运行时依赖"
+  },
+  "processRemoveFiles": {
+    "node_modules/isomorphic-git/cli.cjs": "不用 isogit CLI；git 由同进程 API 后端提供"
+  },
+  "nativeLibraries": {
+    "flock": "libdsh_flock.so",
+    "require-builtin": "libdsh_require_builtin.so"
+  }
+}
