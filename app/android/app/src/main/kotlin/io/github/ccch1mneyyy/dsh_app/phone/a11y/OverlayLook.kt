@@ -104,7 +104,7 @@ internal fun Context.dpf(v: Float): Float = TypedValue.applyDimension(TypedValue
  * filled: Phosphor-like, the weight of the app's own icons.
  */
 internal enum class Glyph(val filled: Boolean) {
-    PAUSE(true), PLAY(true), STOP(true), CHEVRON(false), LOCK(false), SEND(false), BALL(false);
+    PAUSE(true), PLAY(true), STOP(true), CHEVRON(false), LOCK(false), SEND(false), BALL(false), EYE(false), CLOSE(false);
 
     fun path(): Path = Path().apply {
         when (this@Glyph) {
@@ -138,6 +138,19 @@ internal enum class Glyph(val filled: Boolean) {
                 moveTo(6.5f, 11f); lineTo(12f, 5.5f); lineTo(17.5f, 11f)
             }
             BALL -> addCircle(12f, 12f, 6.5f, Path.Direction.CW)
+            EYE -> {
+                moveTo(3f, 12f)
+                cubicTo(5.5f, 7.8f, 8.5f, 6f, 12f, 6f)
+                cubicTo(15.5f, 6f, 18.5f, 7.8f, 21f, 12f)
+                cubicTo(18.5f, 16.2f, 15.5f, 18f, 12f, 18f)
+                cubicTo(8.5f, 18f, 5.5f, 16.2f, 3f, 12f)
+                close()
+                addCircle(12f, 12f, 2.8f, Path.Direction.CW)
+            }
+            CLOSE -> {
+                moveTo(7f, 7f); lineTo(17f, 17f)
+                moveTo(17f, 7f); lineTo(7f, 17f)
+            }
         }
     }
 

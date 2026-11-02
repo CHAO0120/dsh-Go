@@ -14,6 +14,7 @@ import android.content.SharedPreferences
 import android.content.res.ColorStateList
 import android.content.res.Configuration
 import android.content.res.Resources
+import android.graphics.BitmapFactory
 import android.graphics.Color
 import android.graphics.PixelFormat
 import android.graphics.Typeface
@@ -51,6 +52,7 @@ import io.github.ccch1mneyyy.dsh_app.links.LinkTrampolineActivity
 import io.github.ccch1mneyyy.dsh_app.phone.HandoffCause
 import io.github.ccch1mneyyy.dsh_app.phone.HandoffResult
 import io.github.ccch1mneyyy.dsh_app.phone.PhoneControl
+import io.github.ccch1mneyyy.dsh_app.phone.PhoneCore
 import io.github.ccch1mneyyy.dsh_app.phone.PhoneRegistry
 import io.github.ccch1mneyyy.dsh_app.phone.PhoneUnlocks
 import io.github.ccch1mneyyy.dsh_app.phone.UserGate
@@ -95,6 +97,10 @@ internal class ControlOverlay(private val service: AccessibilityService) : UserG
 
     /** Debug probe only: the task's app, as the core would have set it. */
     @Volatile var debugApp: String? = null
+
+    /** Debug probe: the 查看画面 row without a background task, with this image as if screen returned it. */
+    @Volatile var debugPreview: ByteArray? = null
+    @Volatile var debugPreviewAt: Long? = null
 
     /** Debug probe only: no timer changes the form (screenshots of the card). */
     @Volatile var debugFreeze = false
@@ -164,6 +170,18 @@ internal class ControlOverlay(private val service: AccessibilityService) : UserG
     private class Card(val root: FrameLayout, val params: WindowManager.LayoutParams, val tick: Runnable?)
 
     // ---- UserGate --------------------------------------------------------------------------------
+
+    private var previewCore: PhoneCore? = null
+    private var previewTracker = PreviewTracker()
+    private var previewWindow: OverlayPreview? = null
+    private var previewParams: WindowManager.LayoutParams? = null
+    private val previewListener: (Long) -> Unit = { revision -> main.post { onPreviewRevision(revision) } }
+    private val previewAgeTick = object : Runnable {
+        override fun run() {
+            previewWindow?.setAge(previewAge())
+            main.postDelayed(this, 1_000)
+        }
+    }
 
     override fun status(text: String?) {
         main.post {
@@ -299,6 +317,7 @@ internal class ControlOverlay(private val service: AccessibilityService) : UserG
             if (pendingHandoff === handoff) { handoff?.resolve(HandoffResult.STOP); dismissHandoff() }
             paused = false
             endEditing()
+            dismissPreview()
             if (statusText != null) { setStopped(true); renderPill(); clearStoppedLater() }
         }
     }
@@ -340,6 +359,11 @@ internal class ControlOverlay(private val service: AccessibilityService) : UserG
         }
     }
 
+    /** Debug probe: the row's tap. */
+    fun debugOpenPreview() {
+        main.post { openPreview() }
+    }
+
     /** Debug probe: 暂停 / 继续 / 停止 / the steer field, as the keys do. */
     fun debugKey(key: String) {
         main.post {
@@ -369,6 +393,7 @@ internal class ControlOverlay(private val service: AccessibilityService) : UserG
                     placeCapsule(p)
                     ball?.let { b -> if (ballShown) b.move(b.dockPos()) }
                 }
+                renderPreview()
                 confirmCard?.let { place(it.root, it.params, top = false) }
                 handoffCard?.let { place(it.root, it.params, top = true) }
             }
@@ -403,6 +428,7 @@ internal class ControlOverlay(private val service: AccessibilityService) : UserG
             if (!add(p.root, p.params)) return
             pill = p
             ballShown = false
+            attachPreview()
             fold.start(now())
             syncWindows()
             renderPill(animated = false)
@@ -443,6 +469,7 @@ internal class ControlOverlay(private val service: AccessibilityService) : UserG
             unlockedLine = if (u.any) unlockedLine(u) else null,
             meta = meta,
             steps = steps.before(base, StepHistory.CAPACITY),
+            preview = !stoppedNote && (debugPreview != null || PhoneRegistry.backgroundDriver != null),
         )
         p.render(state, animated && p.root.isShown && !ballShown, now())
         main.removeCallbacks(shrinkTick)
@@ -487,6 +514,7 @@ internal class ControlOverlay(private val service: AccessibilityService) : UserG
         main.removeCallbacks(shrinkTick)
         fold.reset()
         val b = ball
+        detachPreview()
         pill = null
         ball = null
         ballShown = false
@@ -515,6 +543,7 @@ internal class ControlOverlay(private val service: AccessibilityService) : UserG
             stop = s(R.string.overlay_stop_description), steerHint = s(R.string.overlay_steer_hint), send = s(R.string.overlay_send),
             unlocksDescription = s(R.string.overlay_unlocked_description), review = s(R.string.overlay_unlocks_review),
             foldRow = s(R.string.overlay_fold_row), holdHint = s(R.string.overlay_hold_hint),
+            preview = s(R.string.overlay_preview_open),
         )
         lateinit var capsule: OverlayCapsule
         val actions = object : OverlayCapsule.Actions {
@@ -527,6 +556,7 @@ internal class ControlOverlay(private val service: AccessibilityService) : UserG
             override fun steer() = startSteer()
             override fun send() = sendInterjection()
             override fun inputDone() = endEditing()
+            override fun preview() = openPreview()
         }
         capsule = OverlayCapsule(service, c, strings, actions) { update(capsule.root, capsule.params) }
         capsule.params = params(top = true, keepScreenOn = true)
@@ -594,6 +624,80 @@ internal class ControlOverlay(private val service: AccessibilityService) : UserG
             p.expand(animationsOn())
         }
         scheduleFold()
+    }
+
+    // ---- preview ----------------------------------------------------------------------------------
+
+    private fun attachPreview() {
+        previewTracker = PreviewTracker()
+        previewCore = PhoneControl.peek()?.core?.also { it.addPreviewListener(previewListener) }
+    }
+
+    private fun detachPreview() {
+        previewCore?.removePreviewListener(previewListener)
+        previewCore = null
+        dismissPreview()
+    }
+
+    private fun onPreviewRevision(revision: Long) {
+        val core = previewCore ?: return
+        if (!previewTracker.event(revision)) return
+        val snapshot = core.previewSnapshot()
+        previewTracker.snapshot(snapshot.revision, snapshot.jpegBytes, snapshot.capturedAt)
+        // Between screens there is no picture yet; once the task or channel is gone, none will come.
+        if (snapshot.jpegBytes == null && snapshot.reason != "noImage") dismissPreview() else renderPreview()
+    }
+
+    private fun openPreview() {
+        if (fold.expanded) onLineTapped()
+        if (previewWindow != null) return
+        val c = colors()
+        val window = OverlayPreview(
+            service, c, surface(c, dp(20).toFloat()),
+            OverlayPreview.Strings(
+                title = s(R.string.overlay_preview_title), close = s(R.string.overlay_preview_close),
+                image = s(R.string.overlay_preview_image), empty = s(R.string.overlay_preview_empty),
+            ),
+        ) { dismissPreview() }
+        val layout = params(top = false, keepScreenOn = false)
+        previewWindow = window
+        previewParams = layout
+        renderPreview()
+        if (!add(window.root, layout)) { previewWindow = null; previewParams = null; return }
+        syncWindows()
+        enter(window.root)
+        main.removeCallbacks(previewAgeTick)
+        main.postDelayed(previewAgeTick, 1_000)
+    }
+
+    private fun renderPreview() {
+        val window = previewWindow ?: return
+        val layout = previewParams ?: return
+        val bytes = debugPreview ?: previewTracker.image
+        val bitmap = bytes?.let { BitmapFactory.decodeByteArray(it, 0, it.size) }
+        val (screenW, _, insetBottom) = metrics()
+        layout.width = window.widthFor(bitmap, screenW, service.resources.displayMetrics.heightPixels)
+        layout.y = insetBottom + dp(6)
+        window.show(bitmap, if (bitmap == null) null else previewAge())
+        if (window.root.isAttachedToWindow) update(window.root, layout)
+    }
+
+    private fun previewAge(): String? {
+        val at = (if (debugPreview != null) debugPreviewAt else previewTracker.capturedAt) ?: return null
+        val seconds = ((System.currentTimeMillis() - at) / 1_000).coerceAtLeast(0)
+        return when {
+            seconds < 5 -> s(R.string.overlay_preview_just_now)
+            seconds < 60 -> s(R.string.overlay_preview_seconds_ago, seconds)
+            else -> s(R.string.overlay_preview_minutes_ago, seconds / 60)
+        }
+    }
+
+    private fun dismissPreview() {
+        val window = previewWindow ?: return
+        main.removeCallbacks(previewAgeTick)
+        previewWindow = null
+        previewParams = null
+        remove(window.root)
     }
 
     /** The steer field in the card: the window takes the keyboard until the text goes or is sent. */
@@ -1120,6 +1224,7 @@ internal class ControlOverlay(private val service: AccessibilityService) : UserG
         val shown = if (captureHidden) View.INVISIBLE else View.VISIBLE
         p.root.visibility = if (handoff || ballShown) View.GONE else shown
         ball?.root?.visibility = if (handoff || !ballShown) View.GONE else shown
+        previewWindow?.root?.visibility = if (handoff) View.GONE else shown
     }
 
     private fun showWindow(root: View) {
@@ -1191,6 +1296,7 @@ internal class ControlOverlay(private val service: AccessibilityService) : UserG
 
     private fun windows(): List<Pair<View, WindowManager.LayoutParams>> = listOfNotNull(
         pill?.let { it.root to it.params }, ball?.let { it.root to it.params },
+        previewWindow?.let { w -> previewParams?.let { w.root to it } },
         confirmCard?.let { it.root to it.params }, handoffCard?.let { it.root to it.params },
     )
 

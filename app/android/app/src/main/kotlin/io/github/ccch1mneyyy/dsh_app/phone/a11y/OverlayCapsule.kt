@@ -50,6 +50,8 @@ internal data class CapsuleState(
     val meta: String?,
     /** The steps before this one, newest first. */
     val steps: List<String>,
+    /** The card offers 查看画面: the task runs on the background screen, out of the user's sight. */
+    val preview: Boolean = false,
 )
 
 /**
@@ -75,7 +77,7 @@ internal class OverlayCapsule(
         val pause: String, val resume: String, val stop: String,
         val steerHint: String, val send: String,
         val unlocksDescription: String, val review: String,
-        val foldRow: String, val holdHint: String,
+        val foldRow: String, val holdHint: String, val preview: String,
     )
 
     interface Actions {
@@ -89,6 +91,7 @@ internal class OverlayCapsule(
         fun steer()
         fun send()
         fun inputDone()
+        fun preview()
     }
 
     enum class Shape { CAPSULE, CARD }
@@ -290,6 +293,29 @@ internal class OverlayCapsule(
         addView(send, LinearLayout.LayoutParams(ctx.dp(40), ctx.dp(40)))
     }
 
+    private val previewRow = LinearLayout(ctx).apply {
+        orientation = LinearLayout.HORIZONTAL
+        gravity = Gravity.CENTER_VERTICAL
+        minimumHeight = ctx.dp(48)
+        isClickable = true
+        isFocusable = true
+        visibility = View.GONE
+        foreground = RippleDrawable(ColorStateList.valueOf(c.ripple), null,
+            InsetDrawable(GradientDrawable().apply { cornerRadius = ctx.dpf(INNER_RADIUS_DP); setColor(Color.WHITE) }, ctx.dp(BODY_INSET_DP), 0, ctx.dp(BODY_INSET_DP), 0))
+        contentDescription = strings.preview
+        addView(GlyphView(ctx, Glyph.EYE, 16f).apply { color = c.muted },
+            LinearLayout.LayoutParams(ctx.dp(CapsuleMetrics.KEY_DP), ctx.dp(16)).apply { marginEnd = column - ctx.dp(CapsuleMetrics.KEY_DP) })
+        addView(TextView(ctx).apply {
+            text = strings.preview
+            textSize = 13f
+            setTextColor(c.ink)
+            importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+        }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+        addView(GlyphView(ctx, Glyph.CHEVRON, 12f).apply { color = c.faint; turn = -90f },
+            LinearLayout.LayoutParams(ctx.dp(12), ctx.dp(12)).apply { marginEnd = ctx.dp(20) })
+        setOnClickListener { actions.preview() }
+    }
+
     private val footer = LinearLayout(ctx).apply {
         orientation = LinearLayout.HORIZONTAL
         gravity = Gravity.CENTER_VERTICAL
@@ -325,6 +351,7 @@ internal class OverlayCapsule(
         visibility = View.GONE
         addView(meta)
         stepRows.forEach { addView(it) }
+        addView(previewRow, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { topMargin = ctx.dp(4) })
         val m = ctx.dp(BODY_INSET_DP)
         addView(unlocks, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { setMargins(m, ctx.dp(8), m, 0) })
         addView(steer, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { setMargins(m, ctx.dp(10), m, 0) })
@@ -469,6 +496,7 @@ internal class OverlayCapsule(
             row.visibility = if (step == null) View.GONE else View.VISIBLE
             row.text = step.orEmpty()
         }
+        previewRow.visibility = if (s.preview) View.VISIBLE else View.GONE
         unlocks.visibility = if (s.unlocked && s.unlockedLine != null) View.VISIBLE else View.GONE
         unlockText.text = s.unlockedLine
     }

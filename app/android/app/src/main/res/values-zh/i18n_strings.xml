@@ -58,6 +58,14 @@
     <string name="overlay_channel">手机操控确认</string>
     <string name="overlay_channel_description">DSH 操作手机时请你确认的提示（允许 / 拒绝 / 停止）</string>
     <string name="overlay_stopped">已停止</string>
+    <string name="overlay_preview_open">查看画面</string>
+    <string name="overlay_preview_title">最近的画面</string>
+    <string name="overlay_preview_close">关闭</string>
+    <string name="overlay_preview_image">DSH 最近一次截取的后台屏画面</string>
+    <string name="overlay_preview_empty">DSH 这一步没有截图，下次截图会显示在这里。</string>
+    <string name="overlay_preview_just_now">刚刚</string>
+    <string name="overlay_preview_seconds_ago">%1$d 秒前</string>
+    <string name="overlay_preview_minutes_ago">%1$d 分钟前</string>
     <string name="overlay_paused">已暂停 · 点「继续」后 DSH 接着做</string>
     <string name="overlay_pause">暂停</string>
     <string name="overlay_resume_description">继续让 DSH 操作</string>

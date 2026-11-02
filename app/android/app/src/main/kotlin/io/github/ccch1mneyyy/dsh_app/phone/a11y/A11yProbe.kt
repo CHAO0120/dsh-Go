@@ -120,6 +120,13 @@ internal class A11yProbe(private val service: PhoneA11yService, private val driv
                     "unlocks=${overlay.debugUnlocks}"
                 }
                 "app" -> { overlay.debugApp = a.s("name"); "app=${overlay.debugApp}" }
+                "preview" -> {
+                    overlay.debugPreview = a.s("path")?.let { java.io.File(it).readBytes() }
+                    overlay.debugPreviewAt = System.currentTimeMillis() - (a.i("age") ?: 0) * 1_000L
+                    overlay.onConfigurationChanged()
+                    "preview=${overlay.debugPreview?.size}"
+                }
+                "previewOpen" -> { overlay.debugOpenPreview(); "ok" }
                 "freeze" -> { overlay.debugFreeze = a.b("on"); "freeze=${overlay.debugFreeze}" }
                 "state" -> overlay.debugState()
                 "windows" -> windows()

@@ -61,6 +61,14 @@
     <string name="overlay_channel">Phone control approval</string>
     <string name="overlay_channel_description">Approve, decline or stop DSH’s phone actions</string>
     <string name="overlay_stopped">Stopped</string>
+    <string name="overlay_preview_open">See the screen</string>
+    <string name="overlay_preview_title">Latest picture</string>
+    <string name="overlay_preview_close">Close</string>
+    <string name="overlay_preview_image">The latest picture DSH took of the background screen</string>
+    <string name="overlay_preview_empty">DSH hasn’t taken a picture this step. The next one shows up here.</string>
+    <string name="overlay_preview_just_now">just now</string>
+    <string name="overlay_preview_seconds_ago">%1$d s ago</string>
+    <string name="overlay_preview_minutes_ago">%1$d min ago</string>
     <string name="overlay_paused">Paused · Tap Continue to resume</string>
     <string name="overlay_pause">Pause</string>
     <string name="overlay_resume_description">Resume DSH’s actions</string>
