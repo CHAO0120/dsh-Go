@@ -19,8 +19,6 @@ import time
 HERE = Path(__file__).resolve().parent
 HOST = HERE.parent / 'host'
 SOURCE_SHA256 = '4f5379796280cdaeb0c2f358fd04b6a16cc4fb7dfa83b5a8c91a9d963b435231'
-
-
 RUNNER_SOURCES = {'node_runner.cpp': 'node_runner.o', 'publication_binding.cc': 'publication_binding.o'}
 
 
@@ -194,9 +192,9 @@ def main():
         wrapper.write_text('#!/bin/sh\nexec ' + shlex.join(command) + ' "$@"\n')
         wrapper.chmod(0o755)
     # What only libnode's link takes; make also links openssl-cli, so none of it can sit in LDFLAGS. The map keeps
-    # libc++ private to libnode (the HAP also ships the SDK's libc++_shared.so for libflutter.so) and every bundled
-    # library's names out of the app process's symbol space. The embedded host's objects join here, so Node's
-    # sources and gyp files stay as they are.
+    # libc++ private to libnode (libdsh_host.so uses the SDK's libc++_shared.so) and every bundled library's names
+    # out of the app process's symbol space. The embedded host's objects join here, so Node's sources and gyp files
+    # stay as they are.
     libnode_link = ['-Wl,-z,nodelete', f'-Wl,--version-script={HERE / "libnode-exports.map"}',
                     *(str(runner / name) for name in RUNNER_SOURCES.values()), '-ldeviceinfo_ndk.z']
     compiler = shlex.quote(str(wrappers / 'clang++'))

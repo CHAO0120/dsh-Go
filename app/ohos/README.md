@@ -3,8 +3,13 @@
 用 [oh-flutter](https://atomgit.com/oh-flutter/flutter_flutter) 3.47.9-ohos 构建，最低 API 26（模板的 `compatibleSdkVersion`，也是这一版 Flutter 引擎的要求）。安卓不读这个目录。
 
 ```sh
-FLUTTER_OHOS=/path/to/flutter-ohos/bin/flutter tooling/ohos/build-hap.sh
+FLUTTER_OHOS=/path/to/flutter-ohos/bin/flutter \
+DSH_OHOS_NATIVE_LIBS=/path/to/hap-libs/arm64-v8a \
+DSH_NODE_HEADERS=/path/to/node-v24.22.1/src \
+  tooling/ohos/build-hap.sh
 ```
+
+`DSH_OHOS_NATIVE_LIBS` 是 `runtime/ohos/native/build-hap-libs.py` 的输出（见 `runtime/ohos/node/BUILD.md`），只在本次构建放进 `entry/libs/arm64-v8a`，缺任何一个库都直接失败。
 
 ## 现状
 

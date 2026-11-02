@@ -16,7 +16,7 @@ set(DSH_NODE_HEADERS "$ENV{DSH_NODE_HEADERS}" CACHE PATH "Pinned Node 24.22.1 in
 set(DSH_NODE_NAPI_RENAME_HEADER "${DSH_REPOSITORY}/runtime/ohos/node/napi-rename.h"
     CACHE FILEPATH "Mainline-generated Node N-API rename header; verification input only")
 if(NOT CMAKE_READELF)
-  find_program(CMAKE_READELF NAMES llvm-readelf readelf)
+  find_program(CMAKE_READELF NAMES llvm-readelf readelf HINTS "${OHOS_SDK_NATIVE}/llvm/bin")
 endif()
 if(NOT CMAKE_READELF OR NOT EXISTS "${DSH_NODE_LIBRARY_DIR}/libnode.so")
   message(FATAL_ERROR "Supply readelf and the separately built libnode in entry/libs/arm64-v8a")
