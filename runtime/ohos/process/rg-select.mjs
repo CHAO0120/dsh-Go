@@ -99,9 +99,11 @@ export async function selectRgFiles(ctx, options, globs, roots) {
     if (!noIgnore) {
       if (await ctx.fs.exists(join(base, '.git'))) {
         const stat = await ctx.fs.stat(join(base, '.git'));
-        if (!stat.isDirectory) throw new Error('rg: 鸿蒙 JSON 目录搜索暂不支持 .git 文件指向 gitdir，可以连接电脑执行');
+        if (!stat.isDirectory && !stat.isFile) throw new Error('rg: .git 不是普通文件或目录');
         value.repo = true;
-        value.git = await readRules(base, '.git/info/exclude');
+        // Worktree/submodule gitdir can lie outside the authorized workspace.
+        // A .git file starts a repository boundary; do not follow its pointer.
+        value.git = stat.isDirectory ? await readRules(base, '.git/info/exclude') : [];
       }
       value.rg = [...value.rg, ...await readRules(base, '.rgignore')];
       value.ignore = [...value.ignore, ...await readRules(base, '.ignore')];
