@@ -317,6 +317,14 @@
           "after": "e1526706c2ac3261e6fea1f6508337b02fc5c26b754e454acf374277eee42f7a"
         }
       }
+    },
+    "zzzzzzzzzzz-ohos-search-ignore-description.diff": {
+      "0.2.1-rc.4": {
+        "node_modules/@deepseek-ai/dsh-tool-fs-search/lib/index.js": {
+          "before": "a286677984da1565ee5191e320b575ac4ab5e56cd921177d95820e0575fa6c76",
+          "after": "72a34a51e60d2bca3a3a9b5187e7c13a72446da156b35b5d8b5c0b60e6e1b663"
+        }
+      }
     }
   },
   "schema": 2,
@@ -353,7 +361,8 @@
       "zzzzzzz-ohos-session-publication.diff",
       "zzzzzzzz-ohos-atomic-publication.diff",
       "zzzzzzzzz-ohos-search-confinement.diff",
-      "zzzzzzzzzz-ohos-shell-limit-description.diff"
+      "zzzzzzzzzz-ohos-shell-limit-description.diff",
+      "zzzzzzzzzzz-ohos-search-ignore-description.diff"
     ]
   }
 }

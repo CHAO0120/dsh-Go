@@ -78,13 +78,26 @@ function lastMatch(rules, absolute, directory) {
 
 export function validateRgGlobs(globs) { for (const glob of globs) globRule(glob); }
 
+class SelectionLimitError extends Error {}
+const filesystemErrorCodes = new Set(['EACCES', 'EPERM', 'ENOENT', 'ENOTDIR', 'ELOOP', 'EMFILE', 'ENFILE', 'EIO', 'ESTALE']);
+export function isRgFilesystemError(error) {
+  const code = typeof error?.code === 'string' ? error.code : /^([A-Z]+):/.exec(error?.message ?? '')?.[1];
+  return filesystemErrorCodes.has(code);
+}
+
+export function rgDiagnostic(error) {
+  const message = String(error?.message ?? error).replace(/^rg: /, '');
+  return `rg: ${message}\n`;
+}
+
 export async function selectRgFiles(ctx, options, globs, roots) {
   const overrides = globs.map(pattern => globRule(pattern)).filter(Boolean);
   const hasPositive = overrides.some(rule => !rule.negative);
   const hidden = options.includes('--hidden'), noIgnore = options.includes('--no-ignore');
-  const contexts = new Map(), result = [];
+  const contexts = new Map(), result = [], diagnostics = [];
+  const diagnostic = error => diagnostics.push(rgDiagnostic(error));
   let visited = 0;
-  const checkpoint = () => { if (++visited > ctx.limits.maxGlobOperations) throw new Error('rg: 文件遍历超过解释器上限'); };
+  const checkpoint = () => { if (++visited > ctx.limits.maxGlobOperations) throw new SelectionLimitError(`遍历检查超过鸿蒙本机上限（${ctx.limits.maxGlobOperations}）；结果不完整`); };
   async function readRules(base, name) {
     const path = join(base, name);
     if (!await ctx.fs.exists(path)) return [];
@@ -129,8 +142,17 @@ export async function selectRgFiles(ctx, options, globs, roots) {
   }
   async function walk(path, display) {
     checkpoint();
-    const rules = await context(path);
-    const entries = ctx.fs.readdirWithFileTypes ? await ctx.fs.readdirWithFileTypes(path) : await Promise.all((await ctx.fs.readdir(path)).map(async name => ({ name, ...await ctx.fs.lstat(join(path, name)) })));
+    let rules, entries;
+    try {
+      rules = await context(path);
+      entries = ctx.fs.readdirWithFileTypes ? await ctx.fs.readdirWithFileTypes(path) : await Promise.all((await ctx.fs.readdir(path)).map(async name => ({ name, ...await ctx.fs.lstat(join(path, name)) })));
+    } catch (error) {
+      // An unreadable directory does not discard files selected elsewhere.
+      // A resource budget still stops the entire traversal below.
+      if (!isRgFilesystemError(error)) throw error;
+      diagnostic(error);
+      return;
+    }
     for (const entry of entries) {
       checkpoint();
       if (entry.isSymbolicLink) continue;
@@ -139,11 +161,16 @@ export async function selectRgFiles(ctx, options, globs, roots) {
       const shown = display === '.' ? entry.name : display === './' ? './' + entry.name : display.replace(/\/$/, '') + '/' + entry.name;
       if (entry.isDirectory) await walk(absolute, shown);
       else if (entry.isFile) {
-        if (result.length >= ctx.limits.maxArrayElements) throw new Error('rg: 文件数超过解释器上限');
+        if (result.length >= ctx.limits.maxArrayElements) throw new SelectionLimitError(`候选文件数超过鸿蒙本机上限（${ctx.limits.maxArrayElements}）；结果不完整`);
         result.push(shown);
       }
     }
   }
-  for (const root of roots.length ? roots : ['.']) await walk(resolve(ctx.cwd, root), root);
-  return { stdout: result.join('\0') + (result.length ? '\0' : ''), stderr: '', exitCode: result.length ? 0 : 1 };
+  try {
+    for (const root of roots.length ? roots : ['.']) await walk(resolve(ctx.cwd, root), root);
+  } catch (error) {
+    if (!(error instanceof SelectionLimitError)) throw error;
+    diagnostic(error);
+  }
+  return { stdout: result.join('\0') + (result.length ? '\0' : ''), stderr: diagnostics.join(''), exitCode: diagnostics.length ? 2 : result.length ? 0 : 1 };
 }

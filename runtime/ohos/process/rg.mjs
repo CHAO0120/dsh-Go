@@ -1,5 +1,5 @@
 import { isUtf8 } from 'node:buffer';
-import { selectRgFiles, validateRgGlobs } from './rg-select.mjs';
+import { isRgFilesystemError, rgDiagnostic, selectRgFiles, validateRgGlobs } from './rg-select.mjs';
 const unsupported = detail => ({ stdout: '', stderr: `rg: 鸿蒙本机尚不支持${detail}，可以连接电脑执行\n`, exitCode: 2 });
 const flags = new Set(['--files', '--json', '--no-ignore', '--hidden', '--case-sensitive', '--ignore-case', '-i', '-s', '-n', '--line-number', '-F', '--fixed-strings', '--text', '-a']);
 // UTF-8 字节预算：先检查，再展开为 RE2JS 的 number[]；不降低原 JSON 输出预算。
@@ -104,14 +104,24 @@ async function searchJson({ ctx, options, rawPatterns, fixed, globs, paths }) {
   }
   const selected = paths.length && !directories.length ? { stdout: '', stderr: '', exitCode: 0 }
     : await selectRgFiles(ctx, options, globs, directories.map(path => path.startsWith('-') ? ctx.fs.resolvePath(ctx.cwd, path) : path));
-  if (selected.exitCode === 1 && !paths.length) return { stdout: '', stderr: 'rg: 过滤后没有可搜索文件；请检查 include 与忽略规则\n', exitCode: 2 };
-  if (selected.exitCode > 1 || (selected.exitCode === 1 && !explicit.length)) return selected;
-  const records = [];
-  let outputBytes = 0;
+  if (selected.exitCode === 1 && !paths.length) return { stdout: '', stderr: "rg: No files were searched, which means ripgrep probably applied a filter you didn't expect.\nRunning with --debug will show why files are being skipped.\n", exitCode: 2 };
+  if (selected.exitCode === 1 && !explicit.length) return selected;
+  // Selection errors retain already-selected files. A nonempty result with
+  // an error remains exit 2; it must not look like a complete successful search.
+  const records = [], diagnostics = selected.stderr ? [selected.stderr] : [];
+  let outputBytes = 0, failed = selected.exitCode > 1;
   const filePaths = [...explicit, ...selected.stdout.split('\0').filter(Boolean)];
   for (let fileIndex = 0; fileIndex < filePaths.length; fileIndex++) {
     const path = filePaths[fileIndex];
-    const content = await ctx.fs.readFileBuffer(ctx.fs.resolvePath(ctx.cwd, path));
+    let content;
+    try {
+      content = await ctx.fs.readFileBuffer(ctx.fs.resolvePath(ctx.cwd, path));
+    } catch (error) {
+      if (!isRgFilesystemError(error)) throw error;
+      failed = true;
+      diagnostics.push(rgDiagnostic(error));
+      continue;
+    }
     // IFileSystem 的公开返回类型为 Uint8Array；使用同一 backing store，不再复制整文件。
     let bytes = Buffer.from(content.buffer, content.byteOffset, content.byteLength);
     // rg 的 UTF-8 BOM 探测仅移除文件最前的一枚 BOM；JSON 坐标以解码后字节计。
@@ -150,7 +160,7 @@ async function searchJson({ ctx, options, rawPatterns, fixed, globs, paths }) {
       start = end + 1;
     }
   }
-  return { stdout: records.join('\n') + (records.length ? '\n' : ''), stderr: selected.stderr, exitCode: records.length ? 0 : 1 };
+  return { stdout: records.join('\n') + (records.length ? '\n' : ''), stderr: diagnostics.join(''), exitCode: failed ? 2 : records.length ? 0 : 1 };
 }
 
 export async function executeRg(args, ctx) {
