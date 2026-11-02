@@ -17,7 +17,11 @@ import time
 
 
 HERE = Path(__file__).resolve().parent
+HOST = HERE.parent / 'host'
 SOURCE_SHA256 = '4f5379796280cdaeb0c2f358fd04b6a16cc4fb7dfa83b5a8c91a9d963b435231'
+
+
+RUNNER_SOURCES = {'node_runner.cpp': 'node_runner.o', 'publication_binding.cc': 'publication_binding.o'}
 
 
 def digest(path):
@@ -38,12 +42,36 @@ def apply_patches(source):
     return pins
 
 
-def audit_library(library, sdk):
+def compile_runner(source, compiler, output, environment):
+    """Compile the embedded host with the exact flags of gyp's libnode target.
+
+    They share std:: types, and -fno-rtti alone changes the layout of std::function.
+    """
+    makefile = (source / 'out/libnode.target.mk').read_text()
+    flags = []
+    for name in ['DEFS_Release', 'INCS_Release', 'CFLAGS_Release', 'CFLAGS_CC_Release']:
+        block = re.search(rf'^{name} :=((?:.*\\\n)*.*)$', makefile, re.M).group(1)
+        flags += shlex.split(block.replace('\\\n', ' ').replace('$(srcdir)', str(source)))
+    if any('$(' in flag for flag in flags):
+        raise RuntimeError(f'Unexpected make variable in the libnode flags: {flags}')
+    subprocess.run([sys.executable, str(HOST / 'generate-node-version.py'),
+                    '--output', str(output / 'dsh_node_version.h')], check=True)
+    with (output / 'compile.log').open('w') as log:
+        for name, target in RUNNER_SOURCES.items():
+            subprocess.run([str(compiler), *flags, '-DNAPI_VERSION=8', '-I', str(output),
+                            f'-ffile-prefix-map={HOST}=/dsh-ohos-host',
+                            '-c', str(HOST / name), '-o', str(output / target)],
+                           env=environment, stdout=log, stderr=subprocess.STDOUT, check=True)
+
+
+def audit_library(library, sdk, source_headers):
     tools, libs = sdk / 'llvm/bin', sdk / 'sysroot/usr/lib/aarch64-linux-ohos'
     elf = subprocess.check_output([str(tools / 'llvm-readelf'), '-h', '-l', '-d', str(library)], text=True)
     if ('AArch64' not in elf or 'DYN (Shared object file)' not in elf or 'INTERP' in elf
-            or re.search(r'SONAME.*\[libnode\.so\]', elf) is None):
-        raise RuntimeError('libnode must be AArch64 ET_DYN, no PT_INTERP, SONAME libnode.so')
+            or re.search(r'SONAME.*\[libnode\.so\]', elf) is None or 'NODELETE' not in elf):
+        raise RuntimeError('libnode must be AArch64 ET_DYN, no PT_INTERP, SONAME libnode.so, NODELETE')
+    if 'RUNPATH' in elf or 'RPATH' in elf:
+        raise RuntimeError('libnode must not carry a RUNPATH')
 
     def symbols(path, *options):
         output = subprocess.check_output([str(tools / 'llvm-nm'), '-D', *options, str(path)], text=True)
@@ -59,6 +87,14 @@ def audit_library(library, sdk):
     stray = sorted(name for name in exports if not any(fnmatch.fnmatchcase(name, glob) for glob in allowed))
     if stray:
         raise RuntimeError(f'libnode exports {len(stray)} symbols outside its export map, e.g. {stray[:5]}')
+    embedded = sorted(name for name in exports if name.startswith('_Z'))
+    loader = json.loads((HERE.parent / 'native/loader/source-pins.json').read_text())['requiredNode24Symbols']
+    if embedded != sorted(loader):
+        raise RuntimeError(f'libnode C++ exports must be exactly the loader list, found {embedded}')
+    demangled = subprocess.run([str(tools / 'llvm-cxxfilt')], input='\n'.join(embedded), text=True,
+                               capture_output=True, check=True).stdout
+    if 'std::' in demangled:
+        raise RuntimeError('A libnode export carries std:: types across the C boundary')
     renamed = re.findall(r'^#define \w+ (dsh_\w+)$', (HERE / 'napi-rename.h').read_text(), re.M)
     absent = sorted({*renamed, *(glob for glob in allowed if '*' not in glob)} - exports)
     if absent:
@@ -68,6 +104,9 @@ def audit_library(library, sdk):
     unresolved = [name for kind, name in undefined if kind == 'U' and name.split('@')[0] not in provided]
     if unresolved:
         raise RuntimeError(f'libnode imports symbols the SDK sysroot does not provide: {unresolved}')
+    subprocess.run([sys.executable, str(HOST / 'napi_isolation.py'), '--node-headers', str(source_headers),
+                    '--rename-header', str(HERE / 'napi-rename.h'), '--libnode', str(library),
+                    '--readelf', str(tools / 'llvm-readelf')], stdout=subprocess.DEVNULL, check=True)
     return elf, {'needed': needed, 'exports': len(exports), 'imports': len(undefined),
                  'weakImportsOutsideSysroot': sorted(name for kind, name in undefined if kind != 'U'
                                                      and name.split('@')[0] not in provided),
@@ -97,10 +136,11 @@ def main():
     if args.jobs < 1:
         parser.error('--jobs must be positive')
     required = [sdk / 'llvm/bin' / name for name in
-                ['ld.lld', 'llvm-ar', 'llvm-nm', 'llvm-readelf', 'llvm-strip']]
+                ['ld.lld', 'llvm-ar', 'llvm-cxxfilt', 'llvm-nm', 'llvm-readelf', 'llvm-strip']]
     required += [sdk / 'oh-uni-package.json', sdk / 'sysroot/usr/include/stdio.h', HERE / 'libnode-exports.map',
                  HERE / 'napi-rename.h', clang, clang.with_name('clang++'), runtimes / 'runtimes.json',
-                 runtimes / 'LLVM-LICENSE.txt']
+                 runtimes / 'LLVM-LICENSE.txt', *(HOST / name for name in RUNNER_SOURCES),
+                 sdk / 'sysroot/usr/include/deviceinfo.h']
     for file in required:
         if not file.is_file():
             parser.error(f'Missing toolchain input: {file}')
@@ -137,8 +177,9 @@ def main():
         subprocess.run([str(node), str(HERE / 'patch-undici.mjs'), str(source)],
                        stdout=log, stderr=subprocess.STDOUT, check=True)
 
-    wrappers = work / 'toolchain'
+    wrappers, runner = work / 'toolchain', work / 'host'
     wrappers.mkdir()
+    runner.mkdir()
     for name in ['clang', 'clang++']:
         command = [str(clang.with_name(name)), '--target=aarch64-linux-ohos',
                    f'--sysroot={sdk / "sysroot"}', f'-resource-dir={runtimes / "clang-resource"}',
@@ -152,16 +193,27 @@ def main():
         wrapper = wrappers / name
         wrapper.write_text('#!/bin/sh\nexec ' + shlex.join(command) + ' "$@"\n')
         wrapper.chmod(0o755)
+    # What only libnode's link takes; make also links openssl-cli, so none of it can sit in LDFLAGS. The map keeps
+    # libc++ private to libnode (the HAP also ships the SDK's libc++_shared.so for libflutter.so) and every bundled
+    # library's names out of the app process's symbol space. The embedded host's objects join here, so Node's
+    # sources and gyp files stay as they are.
+    libnode_link = ['-Wl,-z,nodelete', f'-Wl,--version-script={HERE / "libnode-exports.map"}',
+                    *(str(runner / name) for name in RUNNER_SOURCES.values()), '-ldeviceinfo_ndk.z']
+    compiler = shlex.quote(str(wrappers / 'clang++'))
+    (wrappers / 'link').write_text(f'''#!/bin/sh
+case " $* " in
+  *" -Wl,-soname=libnode.so "*) exec {compiler} "$@" {shlex.join(libnode_link)} ;;
+  *) exec {compiler} "$@" ;;
+esac
+''')
+    (wrappers / 'link').chmod(0o755)
     recipe = {
         'CC': str(wrappers / 'clang'), 'CC_target': str(wrappers / 'clang'),
         'CXX': str(wrappers / 'clang++'), 'CXX_target': str(wrappers / 'clang++'),
-        'LINK_target': str(wrappers / 'clang++'), 'AR': str(sdk / 'llvm/bin/llvm-ar'),
+        'LINK_target': str(wrappers / 'link'), 'AR': str(sdk / 'llvm/bin/llvm-ar'),
         'AR_target': str(sdk / 'llvm/bin/llvm-ar'), 'CC_host': args.host_cc,
         'CXX_host': args.host_cxx, 'LINK_host': args.host_cxx, 'AR_host': 'ar',
-        # The map keeps libc++ private to libnode (the HAP also ships the SDK's libc++_shared.so for
-        # libflutter.so) and every bundled library's names out of the app process's symbol space.
-        'LDFLAGS': ' '.join(['-Wl,-Bsymbolic-functions', '-Wl,--no-undefined',
-                             f'-Wl,--version-script={HERE / "libnode-exports.map"}']),
+        'LDFLAGS': '-Wl,-Bsymbolic-functions -Wl,--no-undefined',
         'LDFLAGS_host': '',
         'CFLAGS': '', 'CXXFLAGS': '', 'CPPFLAGS': '',
         'CFLAGS_host': '', 'CXXFLAGS_host': '', 'CPPFLAGS_host': '',
@@ -179,6 +231,8 @@ def main():
             'nodeSourceSha256': SOURCE_SHA256, 'patches': pins,
             'napiRenameSha256': digest(HERE / 'napi-rename.h'),
             'exportMapSha256': digest(HERE / 'libnode-exports.map'),
+            'libnodeLink': libnode_link,
+            'runnerSha256': {name: digest(HOST / name) for name in RUNNER_SOURCES},
             'diskFreeBefore': free_bytes, 'sourceUncompressedBytes': unpacked_bytes,
             'sdkManifest': json.loads((sdk / 'oh-uni-package.json').read_text()),
             'sdkManifestSha256': digest(sdk / 'oh-uni-package.json'),
@@ -200,13 +254,14 @@ def main():
                           'node_v8_options': '--jitless'}.items():
         if config.get(key) != expected:
             raise RuntimeError(f'Unexpected Node configuration: {key}={config.get(key)!r}')
+    compile_runner(source, wrappers / 'clang++', runner, environment)
     with (work / 'make.log').open('w') as log:
         subprocess.run(plan['make'], cwd=source, env=environment, stdout=log,
                        stderr=subprocess.STDOUT, check=True)
     library = source / 'out/Release/libnode.so'
     if not library.is_file():
         library = source / 'out/Release/lib.target/libnode.so'
-    elf, audit = audit_library(library, sdk)
+    elf, audit = audit_library(library, sdk, source / 'src')
     unstripped = {'bytes': library.stat().st_size, 'sha256': digest(library)}
     shutil.copyfile(library, output / 'libnode.so')
     subprocess.run([str(sdk / 'llvm/bin/llvm-strip'), '--strip-unneeded', str(output / 'libnode.so')], check=True)

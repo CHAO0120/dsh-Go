@@ -5,11 +5,9 @@
     /* N-API under the names napi-rename.h gives it; Ark's libace_napi owns the plain napi_* names. */
     dsh_napi_*;
     dsh_node_api_*;
-    /* libuv error helpers the linked publication binding calls. */
-    dsh_uv_err_name;
-    dsh_uv_translate_sys_error;
-    /* node::Start(int, char**), called by dsh_node_start in the node runner. */
-    _ZN4node5StartEiPPc;
+    /* The C ABI libdsh_host.so imports; defined by runtime/ohos/host/node_runner.cpp, linked into libnode. */
+    dsh_node_start;
+    dsh_node_stop;
     /* What the require-builtin addon reads with dlsym(RTLD_DEFAULT, ...): native/loader/source-pins.json. */
     _ZN2v82V810GetVersionEv;
     _ZN2v87Context29GetNumberOfEmbedderDataFieldsEv;

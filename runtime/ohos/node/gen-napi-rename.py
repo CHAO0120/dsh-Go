@@ -14,13 +14,11 @@ HEADERS = {
     'src/js_native_api.h': '82d3708ce120f8000ec34d72e1aa70b0d7d8a43027986293681374a71b2cb840',
     'src/node_api.h': '2d4560831e525b47b060ec8a0864ab73993df9e20215ce9f0fe7b24cd31af32a',
 }
-# Not N-API: the two libuv error helpers the linked publication binding calls. libuv itself stays private.
-EXTRA = ['uv_err_name', 'uv_translate_sys_error']
 DECLARATION = re.compile(r'\bNAPI_EXTERN\b[^;{}]*?\b((?:napi|node_api)_\w+)\s*\(')
 
 
 def render(source):
-    names = set(EXTRA)
+    names = set()
     for name, pin in HEADERS.items():
         data = (source / name).read_bytes()
         if hashlib.sha256(data).hexdigest() != pin:

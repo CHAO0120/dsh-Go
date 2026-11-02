@@ -111,13 +111,21 @@ def main():
     rejected('actual-unrenamed-addon', lambda: isolation.verify_consumer('addon', bad_exports, bad_imports, exports))
     rejected('renamed-API-in-Ark', lambda: isolation.verify_consumer('ark', set(),
         {'napi_module_register', 'dsh_node_start', 'dsh_node_stop', 'dsh_napi_create_function'}, exports))
+    start_stop = {'napi_module_register', 'dsh_node_start', 'dsh_node_stop'}
+    rejected('start-stop-absent-from-libnode', lambda: isolation.verify_consumer('ark', set(), start_stop, exports))
+    rejected('start-stop-not-imported-by-Ark', lambda: isolation.verify_consumer('ark', set(),
+        {'napi_module_register'}, exports | isolation.C_ABI))
+    rejected('other-libnode-import-in-Ark', lambda: isolation.verify_consumer('ark', set(),
+        start_stop | {'dsh_private'}, exports | isolation.C_ABI | {'dsh_private'}))
+    isolation.verify_consumer('ark', set(), start_stop, exports | isolation.C_ABI)
     inputs = [ROOT / 'runtime/ohos/host/napi_isolation.py', Path(__file__).resolve(),
               headers / 'node_api.h', headers / 'js_native_api.h', args.node_executable]
     report = {'scope': 'Linux ELF symbol routing with explicit fake APIs; no Ark or actual renamed Node execution',
               'functionsMapped': len(names), 'inputs': {str(p): isolation.digest(p) for p in inputs},
               'rows': rows}
     (out / 'report.json').write_text(json.dumps(report, indent=2) + '\n')
-    print(json.dumps({'out': str(out), 'routingCases': 4, 'gateRejections': 6, 'functionsMapped': len(names)}))
+    print(json.dumps({'out': str(out), 'routingCases': 4, 'gateRejections': sum(row['kind'] == 'gate' for row in rows),
+                      'functionsMapped': len(names)}))
 
 
 if __name__ == '__main__':

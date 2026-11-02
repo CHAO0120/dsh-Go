@@ -163,6 +163,4 @@
 #define node_api_set_prototype dsh_node_api_set_prototype
 #define node_api_symbol_for dsh_node_api_symbol_for
 #define node_api_throw_syntax_error dsh_node_api_throw_syntax_error
-#define uv_err_name dsh_uv_err_name
-#define uv_translate_sys_error dsh_uv_translate_sys_error
 #endif  // DSH_NAPI_RENAME_H_

@@ -13,6 +13,7 @@ HEADERS = {
     'node_api.h': '2d4560831e525b47b060ec8a0864ab73993df9e20215ce9f0fe7b24cd31af32a',
 }
 ENTRY_POINTS = {'napi_register_module_v1', 'node_api_module_get_api_version_v1'}
+C_ABI = {'dsh_node_start', 'dsh_node_stop'}
 
 
 def digest(path):
@@ -76,6 +77,8 @@ def verify_node(exports, imports, functions):
     missing = sorted('dsh_' + name for name in functions if 'dsh_' + name not in exports)
     if missing:
         raise ValueError('libnode lacks renamed API exports: ' + ', '.join(missing))
+    if not C_ABI <= exports:
+        raise ValueError('libnode must export the C ABI start/stop pair: ' + ', '.join(sorted(C_ABI - exports)))
 
 
 def verify_consumer(role, exports, imports, node_exports):
@@ -84,8 +87,13 @@ def verify_consumer(role, exports, imports, node_exports):
                            name.startswith(('_ZN4node', '_ZN2v8', '_ZNK4node', '_ZNK2v8')))
         if forbidden or 'napi_module_register' not in imports:
             raise ValueError('Ark module must use only the real Ark N-API: ' + ', '.join(forbidden))
-        if not {'dsh_node_start', 'dsh_node_stop'} <= imports:
+        if not C_ABI <= imports:
             raise ValueError('Ark module must import the C ABI start/stop pair')
+        if not C_ABI <= node_exports:
+            raise ValueError('The supplied libnode does not provide the Ark module\'s C ABI start/stop pair')
+        crossing = sorted((imports & node_exports) - C_ABI)
+        if crossing:
+            raise ValueError('Ark module may import only the C ABI from libnode: ' + ', '.join(crossing))
         return
     forbidden = sorted(name for name in imports if api(name) or name.startswith('uv_'))
     if forbidden:
@@ -94,8 +102,6 @@ def verify_consumer(role, exports, imports, node_exports):
     if not required or not required <= node_exports:
         raise ValueError('Renamed consumer API imports do not resolve in the supplied libnode: ' +
                          ', '.join(sorted(required - node_exports)))
-    if role == 'runner' and 'dsh_node_start' not in exports:
-        raise ValueError('Runner must export dsh_node_start')
     if role == 'addon' and not ENTRY_POINTS <= exports:
         raise ValueError('Addon must retain both original dlsym entry points')
 
@@ -104,7 +110,10 @@ def verify(headers, rename, libnode, readelf, consumer=None, role=None):
     functions = verify_header(headers, rename)
     exports, imports = symbols(readelf, libnode)
     verify_node(exports, imports, functions)
-    static_cpp_runtime(dynamic_info(readelf, libnode))
+    node_dynamic = dynamic_info(readelf, libnode)
+    static_cpp_runtime(node_dynamic)
+    if 'NODELETE' not in node_dynamic:
+        raise ValueError('libnode holds the embedded runner and must be linked with -z nodelete')
     report = {'nodeApiVersionSource': 'Node 24.22.1', 'renamedFunctions': len(functions),
               'renameHeaderSHA256': digest(rename), 'libnodeSHA256': digest(libnode),
               'scope': 'header and ELF ownership only; target loading NOT_RUN'}
@@ -114,8 +123,10 @@ def verify(headers, rename, libnode, readelf, consumer=None, role=None):
         dynamic = dynamic_info(readelf, consumer)
         if role != 'ark':
             static_cpp_runtime(dynamic)
-        if role in ('runner', 'ark') and 'NODELETE' not in dynamic:
-            raise ValueError('The embedded host and runner must be linked with -z nodelete')
+        if role == 'ark' and 'NODELETE' not in dynamic:
+            raise ValueError('The embedded host must be linked with -z nodelete')
+        if not re.search(r'\(NEEDED\).*\[libnode\.so\]', dynamic):
+            raise ValueError('Consumer imports must come from libnode.so, but it is not a dependency')
         report.update({'consumerRole': role, 'consumerSHA256': digest(consumer),
                        'renamedImports': sorted(name for name in own_imports if renamed(name))})
     return report
@@ -128,7 +139,7 @@ def main():
     parser.add_argument('--libnode', required=True, type=Path)
     parser.add_argument('--readelf', required=True, type=Path)
     parser.add_argument('--consumer', type=Path)
-    parser.add_argument('--role', choices=['addon', 'runner', 'ark'])
+    parser.add_argument('--role', choices=['addon', 'ark'])
     parser.add_argument('--report', type=Path)
     args = parser.parse_args()
     if bool(args.consumer) != bool(args.role):
