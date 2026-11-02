@@ -4,6 +4,7 @@
 // [NotifyChannel.status] says so without flagging anything as blocked.
 
 import 'dart:async';
+import 'dart:io' show Platform;
 
 import 'package:dsh_client/dsh_client.dart';
 import 'package:flutter/foundation.dart';
@@ -258,7 +259,9 @@ class NotifyChannel {
     } on MissingPluginException {
       return const NotifySystemStatus.unavailable();
     } on PlatformException {
-      return const NotifySystemStatus();
+      // Android's answer is only ever a stale one; HarmonyOS's failure means it
+      // doesn't know, which mustn't read as every switch on.
+      return Platform.operatingSystem == 'ohos' ? const NotifySystemStatus.unavailable() : const NotifySystemStatus();
     }
   }
 
