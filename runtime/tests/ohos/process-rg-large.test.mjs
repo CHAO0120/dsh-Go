@@ -15,6 +15,7 @@ const { VirtualSubprocessRuntime } = await import(new URL('runtime.mjs', process
 assert.ok(process.env.OHOS_TEST_PROCESS_PREFIX, '需要固定的 OHOS DSH prefix');
 const require = createRequire(join(resolve(process.env.OHOS_TEST_PROCESS_PREFIX), 'package.json'));
 const search = await import(pathToFileURL(require.resolve('@deepseek-ai/dsh-tool-fs-search')));
+const { Session } = await import(pathToFileURL(require.resolve('@deepseek-ai/dsh-session')));
 const limit = 4 * 1024 * 1024, outputLimit = 64 * 1024 * 1024;
 let root, work, temp, runtime, filesystem;
 before(async () => {
@@ -167,7 +168,9 @@ test('超过 4 MiB 的整个文件仍可搜索，只限制单行而非文件或�
 
 test('真实 DSH 把超行预算传播为 SEARCH_FAILED', async () => {
   const context = { subprocess: runtime, workingDirectory: { ensure: async () => work } };
-  await assert.rejects(search.runRipgrep(context, { agent: {}, signal: new AbortController().signal }, 'grep', search.buildGrepCommand({ pattern: 'z', path: 'over-limit.txt' }), outputLimit, 200, 10000), error => {
+  const id = 'm4-4a-large-file-session';
+  const session = Session.create(id, undefined, { version: 4, id, createdAt: Date.now(), isSeeded: false, cwd: work });
+  await assert.rejects(search.runRipgrep(context, { agent: { session }, signal: new AbortController().signal }, 'grep', search.buildGrepCommand({ pattern: 'z', path: 'over-limit.txt' }), outputLimit, 200, 10000), error => {
     assert.equal(error.code, 'SEARCH_FAILED');
     assert.match(error.message, /4194304/);
     return true;

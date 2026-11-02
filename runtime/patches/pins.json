@@ -301,6 +301,14 @@
           "after": "766947337bf8f64a97ef6e2729c14fb2e823b6f2942707beb6a5af845172e471"
         }
       }
+    },
+    "zzzzzzzzz-ohos-search-confinement.diff": {
+      "0.2.1-rc.4": {
+        "node_modules/@deepseek-ai/dsh-tool-fs-search/lib/index.js": {
+          "before": "ee10095eccd8ec3c7070bb8fd6fbadb5f69e49630fbeffe259d7d8b166559870",
+          "after": "a286677984da1565ee5191e320b575ac4ab5e56cd921177d95820e0575fa6c76"
+        }
+      }
     }
   },
   "schema": 2,
@@ -335,7 +343,8 @@
       "zzzzzz-session-deletion.diff",
       "zzzzzzz-ohos-fs-exclusive.diff",
       "zzzzzzz-ohos-session-publication.diff",
-      "zzzzzzzz-ohos-atomic-publication.diff"
+      "zzzzzzzz-ohos-atomic-publication.diff",
+      "zzzzzzzzz-ohos-search-confinement.diff"
     ]
   }
 }

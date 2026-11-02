@@ -1,4 +1,5 @@
-import { mkdtempSync, realpathSync, statSync } from 'node:fs';
+import { lstatSync, mkdtempSync, realpathSync, statSync } from 'node:fs';
+import { lstat, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, isAbsolute, join, resolve } from 'node:path';
 import { PassThrough } from 'node:stream';
@@ -26,11 +27,33 @@ export class VirtualSubprocessRuntime {
   lanes = { search: { queue: [] }, execution: { queue: [] } };
   closed = false;
   prepared = new Map();
+  #temporaryOwner;
+  #disposePromise;
 
-  constructor({ workspaceRoots = [process.cwd()], temporaryRoot, onSpillFailure = () => {} } = {}) {
-    this.temporaryRoot = realpathSync(temporaryRoot ?? mkdtempSync(join(tmpdir(), 'dsh-ohos-process-')));
-    this.roots = distinctRoots([...workspaceRoots.map(root => realpathSync(root)), this.temporaryRoot]);
-    if (this.roots.includes('/')) throw new Error('鸿蒙虚拟进程不允许把整个文件系统作为工作区');
+  constructor({ workspaceRoots, temporaryRoot, onSpillFailure = () => {} } = {}) {
+    if (!Array.isArray(workspaceRoots) || workspaceRoots.length === 0) {
+      throw new TypeError('workspaceRoots 必须由宿主显式配置为非空的绝对工作区目录数组');
+    }
+    const directory = (path, label) => {
+      if (typeof path !== 'string' || !isAbsolute(path) || path.includes('\0')) {
+        throw new TypeError(`${label} 必须是无 NUL 的绝对目录路径`);
+      }
+      const canonical = realpathSync(path);
+      if (canonical === '/' || !statSync(canonical).isDirectory()) {
+        throw new Error(`${label} 必须是实际目录，不能授权整个文件系统根`);
+      }
+      return canonical;
+    };
+    // 验证所有宿主输入后才分配自身资源；配置拒绝不能留下新 mkdtemp。
+    this.workspaceRoots = distinctRoots(workspaceRoots.map(root => directory(root, 'workspaceRoots')));
+    if (temporaryRoot !== undefined) this.temporaryRoot = directory(temporaryRoot, 'temporaryRoot');
+    else {
+      this.temporaryRoot = mkdtempSync(join(tmpdir(), 'dsh-ohos-process-'));
+      const identity = lstatSync(this.temporaryRoot, { bigint: true });
+      this.#temporaryOwner = { path: this.temporaryRoot, dev: identity.dev, ino: identity.ino };
+      this.temporaryRoot = realpathSync(this.temporaryRoot);
+    }
+    this.roots = distinctRoots([...this.workspaceRoots, this.temporaryRoot]);
     this.onSpillFailure = onSpillFailure;
   }
 
@@ -153,6 +176,11 @@ export class VirtualSubprocessRuntime {
           if (!this.roots.some(root => isInside(root, cwd)) || !statSync(cwd).isDirectory()) {
             throw Object.assign(new Error('EACCES: 工作目录不在授权工作区内'), { code: 'EACCES' });
           }
+          // 没有会话票据的调用只保守取得本次 cwd；不能推断它拥有其他宿主根。
+          const roots = distinctRoots([policy?.workspaceRoot ?? cwd, this.temporaryRoot]);
+          if (!roots.some(root => isInside(root, cwd))) {
+            throw Object.assign(new Error('EACCES: OHOS_SANDBOX_DENIED: 工作目录不在本次会话授权根内'), { code: 'EACCES' });
+          }
           const env = { ...scrubbedParentEnv(), ...spec.env, TMPDIR: this.temporaryRoot };
           for (const [key, value] of Object.entries(env)) if (value === undefined) delete env[key];
           // Worker 通过继承 --import 重新建立测试标记；环境变量不能启用仿真。
@@ -163,7 +191,7 @@ export class VirtualSubprocessRuntime {
           const worker = state.worker = new Worker(new URL('./worker.mjs', import.meta.url), {
             workerData: {
               argv: [name, ...argv.slice(1)], cwd, policy,
-              roots: policy ? distinctRoots([policy.workspaceRoot, this.temporaryRoot]) : this.roots,
+              roots,
               env, stdin: typeof spec.stdio.stdin === 'object' ? spec.stdio.stdin.data : '',
             },
             env: workerEnv, stdout: true, stderr: true,
@@ -209,13 +237,27 @@ export class VirtualSubprocessRuntime {
     }
   }
 
-  async dispose() {
+  dispose() {
+    if (this.#disposePromise) return this.#disposePromise;
     this.closed = true;
     for (const prepared of this.prepared.values()) prepared.signal?.removeEventListener('abort', prepared.cancel);
     this.prepared.clear();
     const handles = [...this.live];
     for (const handle of handles) handle.terminate();
     for (const lane of Object.values(this.lanes)) lane.queue.length = 0;
-    await Promise.all(handles.map(handle => handle.waitForExit()));
+    this.#disposePromise = (async () => {
+      await Promise.all(handles.map(handle => handle.waitForExit()));
+      const owner = this.#temporaryOwner;
+      if (!owner) return;
+      const current = await lstat(owner.path, { bigint: true }).catch(error => {
+        if (error.code !== 'ENOENT') throw error;
+      });
+      if (!current) return;
+      if (!current.isDirectory() || current.dev !== owner.dev || current.ino !== owner.ino) {
+        throw Object.assign(new Error('鸿蒙虚拟进程临时根的身份已改变，拒绝删除替换目录'), { code: 'ERR_OHOS_TEMP_ROOT_REPLACED' });
+      }
+      await rm(owner.path, { recursive: true });
+    })();
+    return this.#disposePromise;
   }
 }
