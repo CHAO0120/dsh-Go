@@ -22,7 +22,7 @@ export class OhosRuntimeStorage implements RuntimeStorage {
     } catch (error) {
       const code = (error as BusinessError).code;
       if (code === 13900002 || code === 13900018) return false;
-      throw error;
+      throw error as Error;
     }
   }
 
@@ -59,7 +59,7 @@ export class OhosRuntimeStorage implements RuntimeStorage {
           await fs.mkdir(current);
         } catch (error) {
           // Another diagnostics/start call may have created the same directory.
-          if ((error as BusinessError).code !== 13900015) throw error;
+          if ((error as BusinessError).code !== 13900015) throw error as Error;
         }
         await this.syncParent(current);
       }

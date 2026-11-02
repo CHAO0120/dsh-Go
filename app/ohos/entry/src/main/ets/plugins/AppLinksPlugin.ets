@@ -27,10 +27,10 @@ export default class AppLinksPlugin implements FlutterPlugin, AbilityAware, Meth
       onMethodCall: (call: MethodCall, result: MethodResult): void => {
         if (call.method !== 'ready') { result.notImplemented(); return; }
         this.ready = true;
-        const held = AppLinksPlugin.pending;
+        const held: Map<string, Any>[] = AppLinksPlugin.pending;
         AppLinksPlugin.pending = [];
         result.success(true);
-        for (const event of held) this.links?.invokeMethod('link', event);
+        held.forEach((event: Map<string, Any>) => { this.links?.invokeMethod('link', event); });
       }
     });
   }
@@ -70,7 +70,7 @@ export default class AppLinksPlugin implements FlutterPlugin, AbilityAware, Meth
     const colon = uri.indexOf(':');
     if (colon < 1) return false;
     const scheme = uri.slice(0, colon).toLowerCase();
-    const event = new Map<string, Any>();
+    const event: Map<string, Any> = new Map<string, Any>();
     switch (scheme) {
       case 'dshgo': case 'https': case 'http':
         event.set('uri', uri);

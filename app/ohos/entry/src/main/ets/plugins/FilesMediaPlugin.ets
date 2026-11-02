@@ -95,7 +95,7 @@ export default class FilesMediaPlugin implements FlutterPlugin, AbilityAware {
 
   private async directory(path: string): Promise<void> {
     try { await fs.mkdir(path); }
-    catch (error) { if ((error as BusinessError).code !== 13900015) throw error; }
+    catch (error) { if ((error as BusinessError).code !== 13900015) throw error as Error; }
     const stat = await fs.lstat(path);
     if (!stat.isDirectory() || stat.isSymbolicLink()) throw new FileChannelError('invalid', '文件缓存目录不可用。');
   }

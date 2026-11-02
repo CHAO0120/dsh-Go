@@ -119,7 +119,7 @@ export default class NotifyPlugin implements FlutterPlugin, AbilityAware, NewWan
       }
       const mutate = ['show', 'cancel', 'cancelGroup', 'cancelAll'].includes(call.method);
       const generation = this.generation;
-      const work = mutate ? this.serial(() => this.handle(call, generation)) : this.handle(call, generation);
+      const work: Promise<Any> = mutate ? this.serial(() => this.handle(call, generation)) : this.handle(call, generation);
       work.then((value: Any) => result.success(value)).catch((error: Error) => {
         if (error instanceof NotifyError) result.error(error.code, error.message, null);
         else result.error('ohos_notify_failed', '系统通知操作未完成，请检查通知设置后重试。', null);
@@ -130,7 +130,7 @@ export default class NotifyPlugin implements FlutterPlugin, AbilityAware, NewWan
         this.sink = events;
         NotifyPlugin.receiver = this;
         if (NotifyPlugin.pendingTap) {
-          const tap = NotifyPlugin.pendingTap; NotifyPlugin.pendingTap = undefined; events.success(tap);
+          const tap: Map<string, Any> = NotifyPlugin.pendingTap; NotifyPlugin.pendingTap = undefined; events.success(tap);
         }
       },
       onCancel: (_args: Any): void => {
@@ -189,7 +189,7 @@ export default class NotifyPlugin implements FlutterPlugin, AbilityAware, NewWan
       const route = JSON.parse(payload) as NotifyRoute;
       if (typeof route.sessionId !== 'string' || route.sessionId.length === 0 || route.sessionId.length > 200 ||
           typeof route.host !== 'string' || typeof route.kind !== 'string' || typeof route.eventId !== 'string') return;
-      const tap = new Map<string, Any>([['host', route.host], ['sessionId', route.sessionId], ['kind', route.kind]]);
+      const tap: Map<string, Any> = new Map<string, Any>([['host', route.host], ['sessionId', route.sessionId], ['kind', route.kind]]);
       if (route.eventId !== '') tap.set('eventId', route.eventId);
       const sink = NotifyPlugin.receiver?.sink;
       if (sink) sink.success(tap); else NotifyPlugin.pendingTap = tap;
@@ -197,7 +197,7 @@ export default class NotifyPlugin implements FlutterPlugin, AbilityAware, NewWan
   }
 
   private serial(work: () => Promise<Any>): Promise<Any> {
-    const next = NotifyPlugin.queue.then(work);
+    const next: Promise<Any> = NotifyPlugin.queue.then(work);
     NotifyPlugin.queue = next.then(() => {}).catch((_error: Error) => {});
     return next;
   }

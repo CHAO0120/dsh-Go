@@ -167,7 +167,7 @@ export class RuntimeController {
       this.setupError = null;
     } catch (error) {
       this.lastError = error instanceof RuntimeChannelError ? error.message : '运行时安装失败，保留中断记录；请重试安装。';
-      throw error;
+      throw error as Error;
     } finally {
       this.pending = null; this.emitStatus();
     }
@@ -205,7 +205,7 @@ export class RuntimeController {
       if (!(error instanceof RuntimeChannelError && error.code === 'ohos_start_cancelled')) {
         this.lastError = error instanceof RuntimeChannelError ? error.message : '本机引擎启动失败，请检查随包原生库和运行时。';
       }
-      throw error;
+      throw error as Error;
     } finally {
       this.pending = null; this.collect(); this.emitStatus();
     }
