@@ -131,6 +131,9 @@ async function fixture(t, options = {}) {
         } };
       } };
       if (name === '@ohos/flutter_ohos') return { MethodChannel: Channel };
+      // PDF page behaviour has its own suite, files-pdf-channel.test.mjs.
+      if (name === './HmsPdfPages') return { HmsPdfPages: class { async close() {} } };
+      if (name === './PdfInput') return { PdfChannelError: class extends Error { constructor(code, message) { super(message); this.code = code; } } };
       // The controller's path derivation is actual product code. Its native
       // lifecycle is independently exercised by runtime-channel.test.mjs.
       if (name === '../runtime/RuntimeController') return { RuntimeController: {
@@ -175,8 +178,8 @@ test('wire names, missing methods, documented unsupported preview and settings',
   assert.deepEqual(await f.call('dsh/media', 'unknown'), { missing: true });
   assert.deepEqual(await f.call('dsh/media', 'openSettings'), { value: false });
   assert.deepEqual(await f.call('dsh/files', 'pdfClose'), { value: null });
-  assert.equal((await f.call('dsh/files', 'pdfInfo')).error, 'ohos_unsupported');
-  assert.equal((await f.call('dsh/files', 'pdfPage')).error, 'ohos_unsupported');
+  assert.equal((await f.call('dsh/files', 'pdfInfo')).error, 'no_ability');
+  assert.equal((await f.call('dsh/files', 'pdfPage')).error, 'no_ability');
   assert.equal((await f.call('dsh/files', 'open')).error, 'no_ability');
   assert.deepEqual(await f.call('dsh/files', 'resolveGuest', { path: '/etc/passwd' }), { value: null });
 });
