@@ -153,7 +153,7 @@ void main() {
   }
 
   group('the row', () {
-    for (final code in const ['secrets_unreadable', 'secrets_key_missing']) {
+    for (final code in const ['secrets_unreadable', 'secrets_key_missing', 'secrets_key_unusable']) {
       testWidgets('shows on HarmonyOS when the vault says $code', (tester) async {
         vault.failure = code;
         await pumpPrivacy(tester, 'ohos');
@@ -252,7 +252,7 @@ void main() {
       await engine.settle(tester);
     }
 
-    for (final code in const ['secrets_unreadable', 'secrets_key_missing']) {
+    for (final code in const ['secrets_unreadable', 'secrets_key_missing', 'secrets_key_unusable']) {
       testWidgets('API key, $code: says the keys can\'t be read, not to try again', (tester) async {
         final settings = _FailingSettings(code);
         await saveKey(tester, 'ohos', settings);
@@ -329,7 +329,7 @@ void main() {
       expect(find.text(_zh.harmonyCredentialsClearBody), findsNothing);
     });
 
-    for (final code in const ['secrets_unreadable', 'secrets_key_missing']) {
+    for (final code in const ['secrets_unreadable', 'secrets_key_missing', 'secrets_key_unusable']) {
       test('relay account, $code: says so, and is not retried as a network error', () async {
         final backend = DshRemoteRelayBackend(secrets: _UnreadableSecrets(code), serverUrl: 'https://relay.example');
         addTearDown(backend.close);
@@ -360,10 +360,11 @@ void main() {
       expect(c.read(forumAuthProvider).error, appL10n.harmonyCredentialsUnreadableHint);
     });
 
-    test('the failures trying again can\'t fix are exactly these two', () {
+    test('the failures trying again can\'t fix are exactly these three', () {
       PlatformException failure(String code) => PlatformException(code: code);
       expect(credentialsUnreadable(failure('secrets_unreadable')), isTrue);
       expect(credentialsUnreadable(failure('secrets_key_missing')), isTrue);
+      expect(credentialsUnreadable(failure('secrets_key_unusable')), isTrue);
       for (final code in const ['secrets_unavailable', 'secrets_io', 'secrets_invalid', 'cancelled']) {
         expect(credentialsUnreadable(failure(code)), isFalse);
       }
