@@ -6,6 +6,28 @@ import { join } from 'node:path';
 import test from 'node:test';
 import { pdfFixture, deferred, until, plain } from './pdf-fixture.mjs';
 
+test('missing PDF module leaves file channel and close available and fails only the requested PDF operation', async t => {
+  const f = await pdfFixture(t, { filesChannel: true, kitFailure: true }), c = f.createFilesPlugin();
+  assert.equal(f.stats().kitLoads, 0);
+  assert.deepEqual(await c.call('pdfClose'), { value: null }); assert.equal(f.stats().kitLoads, 0);
+  assert.deepEqual(await c.call('unknown'), { missing: true });
+  assert.equal((await c.call('pdfInfo', { path: f.source })).error, 'pdf_unavailable');
+  assert.equal(f.stats().kitLoads, 1); assert.equal(f.docs.length, 0); assert.equal(f.fds.size, 0);
+  f.change({ kitFailure: false });
+  assert.deepEqual(plain((await c.call('pdfInfo', { path: f.source })).value), f.metadata.pages);
+  assert.equal(f.stats().kitLoads, 2);
+  assert.deepEqual(await c.call('pdfClose'), { value: null }); assert.equal(f.fds.size, 0);
+});
+
+test('late PDF module resolution after detach never opens a document or revives the retired owner', async t => {
+  const gate = deferred(), f = await pdfFixture(t, { filesChannel: true, beforeKitLoad: () => gate.promise }), c = f.createFilesPlugin();
+  const pending = c.call('pdfInfo', { path: f.source }); await until(() => f.stats().kitLoads === 1);
+  c.plugin.onDetachedFromAbility(); gate.resolve();
+  assert.equal((await pending).error, 'cancelled'); await until(() => f.fds.size === 0);
+  assert.equal(f.docs.length, 0); assert(!f.events.includes('open-input'));
+  assert.deepEqual(await c.call('pdfClose'), { value: null }); assert.equal(f.stats().kitLoads, 1);
+});
+
 test('channel passes real PDF metadata and PNG bytes and loads native only on use', async t => {
   const f=await pdfFixture(t,{filesChannel:true}),c=f.createFilesPlugin();
   assert.equal(f.stats().nativeLoads,0);assert.equal(f.docs.length,0);

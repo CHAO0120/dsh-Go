@@ -1,5 +1,6 @@
 // UNCOMPILED_HMS. PDFKit signatures follow hms-contracts.md D; scaling still needs device evidence.
-import { pdfService } from '@kit.PDFKit';
+import type { pdfService } from '@kit.PDFKit';
+import { PdfKit, loadPdfKit } from './HmsKits';
 import image from '@ohos.multimedia.image';
 import common from '@ohos.app.ability.common';
 import { Any } from '@ohos/flutter_ohos';
@@ -16,6 +17,7 @@ export class HmsPdfPages {
   private openLocal: (path: string) => Promise<number>;
   private retired: boolean = false;
   private input?: PdfInput;
+  private kit?: PdfKit;
   private document?: pdfService.PdfDocument;
   private original: string = '';
   private pageCount: number = 0;
@@ -76,12 +78,14 @@ export class HmsPdfPages {
     await this.closeDocument(); this.current(); HmsPdfPages.physical = this;
     this.input = new PdfInput();
     try {
+      const kit = await loadPdfKit();
+      this.current(); this.kit = kit;
       await this.input.copy(this.context.cacheDir, path, this.openLocal, (): void => this.current());
-      this.current(); this.document = new pdfService.PdfDocument();
+      this.current(); this.document = kit.createDocument();
       const result = this.document.loadDocument(this.input.snapshotPath);
-      if (result !== pdfService.ParseResult.PARSE_SUCCESS) {
-        throw new PdfChannelError(result === pdfService.ParseResult.PARSE_ERROR_PASSWORD ? 'pdf_password' : 'pdf_unavailable',
-          result === pdfService.ParseResult.PARSE_ERROR_PASSWORD ? '此 PDF 需要密码，请用系统应用打开。' : '无法预览此 PDF，请用系统应用打开。');
+      if (result !== kit.success) {
+        throw new PdfChannelError(result === kit.password ? 'pdf_password' : 'pdf_unavailable',
+          result === kit.password ? '此 PDF 需要密码，请用系统应用打开。' : '无法预览此 PDF，请用系统应用打开。');
       }
       const count = this.document.getPageCount();
       if (!Number.isSafeInteger(count) || count < 1 || count > 1000) throw new PdfChannelError('pdf_size', '内嵌预览支持 1 到 1000 页，请用系统应用打开此文件。');
@@ -129,9 +133,9 @@ export class HmsPdfPages {
         const size = this.dimensions(this.page);
         const width = Math.max(64, Math.min(2400, requestedWidth));
         const height = Math.max(1, Math.min(4800, Math.floor(width * size.height / size.width)));
-        const matrix = new pdfService.PdfMatrix();
+        const matrix = this.kit!.createMatrix();
         matrix.x = 0; matrix.y = 0; matrix.width = width; matrix.height = height; matrix.rotate = 0;
-        const options = new pdfService.PixelOptions();
+        const options = this.kit!.createPixelOptions();
         options.isGray = false; options.drawAnnotations = true; options.isTransparent = false;
         this.pixels = this.page.getAreaPixelMapWithOptions(matrix, width, height, options);
         const actual = await this.pixels.getImageInfo(); this.current();

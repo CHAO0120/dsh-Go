@@ -38,6 +38,7 @@ export async function shareFixture(t, options = {}) {
   for (const path of [workspace, app.cacheDir, app.tempDir, ui.filesDir, ui.cacheDir, ui.tempDir,
     join(root, 'external')]) await fsp.mkdir(path, { recursive: true });
   const channels = [], panels = [], fds = new Set(), opens = [], delivered = [], dataCalls = [], history = [];
+  let kitLoads = 0;
   const uris = new Map(), moduleCache = new Map();
   let reads = 0, writes = 0, pendingIO = 0;
   let currentOptions = options;
@@ -145,7 +146,10 @@ export async function shareFixture(t, options = {}) {
     getTypeDescriptor(type) { return { mimeTypes: ({ 'general.png': ['image/png'], 'com.adobe.pdf': ['application/pdf'] })[type] ?? [] }; },
   };
   const boundary = name => {
-    if (name === '@kit.ShareKit') return { systemShare: kit };
+    if (name === '@kit.ShareKit') {
+      if (currentOptions.kitFailure) throw new Error('controlled unavailable Share Kit');
+      return { systemShare: kit };
+    }
     if (name === '@ohos.file.fs') return { default: api };
     if (name === '@ohos.file.fileuri') return { default: {
       getUriFromPath: path => 'file://io.dsh.app' + path.split('/').map(encodeURIComponent).join('/'),
@@ -170,10 +174,14 @@ export async function shareFixture(t, options = {}) {
     const compiled = ts.transpileModule(fs.readFileSync(path, 'utf8'), {
       compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS },
     });
-    vm.runInNewContext(compiled.outputText, {
+    try { vm.runInNewContext(compiled.outputText, {
       module, exports: module.exports, Map, Set, ArrayBuffer, Uint8Array, Promise,
       canIUse: capability => { assert.equal(capability, 'SystemCapability.Collaboration.SystemShare'); return currentOptions.supported !== false; },
       require(name) {
+        if (name === './HmsShareKit') {
+          kitLoads++;
+          return Promise.resolve(currentOptions.beforeKitLoad?.()).then(() => load(resolve(dirname(path), name + '.ets')));
+        }
         if (name.startsWith('.')) {
           if (path.endsWith('EntryAbility.ets') && !name.includes('HmsShare')) {
             return { default: class {}, GeneratedPluginRegistrant: { registerWith() {} }, RuntimePlugin: class {} };
@@ -182,7 +190,7 @@ export async function shareFixture(t, options = {}) {
         }
         return boundary(name);
       },
-    }, { filename: path });
+    }, { filename: path }); } catch (error) { moduleCache.delete(path); throw error; }
     return module.exports;
   }
   const pluginPath = resolve(repo, 'app/ohos/entry/src/main/ets/plugins/HmsSharePlugin.ets');
@@ -232,6 +240,6 @@ export async function shareFixture(t, options = {}) {
     externalTarget(name, path) { const uri = 'file://other.bundle/' + encodeURIComponent(name); uris.set(uri, path); return uri; },
     receive(records, extra = {}) { return inbox.receive(ui, { records, ...extra }, { launchReasonMessage: 'ReasonMessage_SystemShare' }); },
     startEntry() { const value = new entry(); value.context = ui; return value; },
-    get reads() { return reads; }, get writes() { return writes; }, get pendingIO() { return pendingIO; },
+    get reads() { return reads; }, get writes() { return writes; }, get pendingIO() { return pendingIO; }, get kitLoads() { return kitLoads; },
   };
 }

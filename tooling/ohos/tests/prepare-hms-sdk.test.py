@@ -53,7 +53,7 @@ assert first.returncode == 0
 cached = Path(first.stdout.decode().strip())
 repeat = run('plain-repeat', sdk, work)
 record('ordinary prepare/reuse', repeat.returncode == 0 and repeat.stdout == first.stdout)
-stub = cached / '26.0.0/ets/api/@hms.share.systemShare.d.ts'
+stub = cached / '26.0.0/ets/api/@hms.collaboration.systemShare.d.ts'
 good = stub.read_bytes()
 stub.write_bytes(good + b'\n// changed fixture\n')
 p = run('changed-stub', sdk, work)
@@ -84,7 +84,7 @@ record('SDK directory symlink never writes through', p.returncode == 0 and befor
 record('private API copy has no directory link', private is not None and not (private / '26.0.0/ets/api').is_symlink())
 
 sdk, work = setup('existing-declaration')
-p = sdk / 'ets/api/@hms.share.systemShare.d.ts'
+p = sdk / 'ets/api/@hms.collaboration.systemShare.d.ts'
 p.write_text('// original official declaration fixture\n')
 identity = sha(p)
 result = run('existing-declaration', sdk, work)

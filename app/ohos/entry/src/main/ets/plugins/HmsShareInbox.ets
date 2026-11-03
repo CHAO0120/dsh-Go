@@ -1,5 +1,6 @@
 // UNCOMPILED_HMS / 未在真机核实。EntryAbility 显式传递首次与后续 Want，普通启动不读取分享数据。
-import { systemShare } from '@kit.ShareKit';
+import type { systemShare } from '@kit.ShareKit';
+import { ShareKit, loadShareKit } from './HmsKits';
 import common from '@ohos.app.ability.common';
 import Want from '@ohos.app.ability.Want';
 import AbilityConstant from '@ohos.app.ability.AbilityConstant';
@@ -69,9 +70,9 @@ export class HmsShareInbox {
       arrival.event = problem('unreadable'); HmsShareInbox.flush(); return true;
     }
     HmsShareInbox.reading++;
-    // 此调用在生命周期回调中立即开始，不等待 Dart ready 或前一批复制。
+    // 先保留到达顺序和在途额度；首次加载只影响真实分享，不等待 Dart ready。
     try {
-      systemShare.getSharedData(want).then((data: systemShare.SharedData) => {
+      loadShareKit().then((kit: ShareKit): Promise<systemShare.SharedData> => kit.getSharedData(want)).then((data: systemShare.SharedData) => {
         return HmsShareInbox.read(arrival, data.getRecords(), context.abilityInfo.bundleName);
       }).catch(() => {
         arrival.event = problem('unreadable');

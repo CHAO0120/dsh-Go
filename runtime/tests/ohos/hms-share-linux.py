@@ -64,6 +64,7 @@ def main() -> int:
             'OHOS_SHARE_FIFO': str(fifo),
         })
     tested = [*sorted((repo / 'app/ohos/entry/src/main/ets/plugins').glob('HmsShare*.ets')),
+              repo / 'app/ohos/entry/src/main/ets/plugins/HmsKits.ets',
               paths, repo / 'app/ohos/entry/src/main/ets/entryability/EntryAbility.ets',
               repo / 'app/ohos/entry/src/main/module.json5', source,
               repo / 'app/ohos/entry/src/main/cpp/file_access.h', Path(__file__).resolve(),

@@ -67,10 +67,14 @@ export function voiceFixture(options = {}) {
     if(cache.has(path)) return cache.get(path).exports;
     const module={exports:{}};cache.set(path,module);
     const source=ts.transpileModule(fs.readFileSync(path,'utf8'),{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS}}).outputText;
-    vm.runInNewContext(source,{module,exports:module.exports,Map,Set,ArrayBuffer,Uint8Array,DataView,Promise,Error,
+    try { vm.runInNewContext(source,{module,exports:module.exports,Map,Set,ArrayBuffer,Uint8Array,DataView,Promise,Error,
       canIUse:cap=>{assert.equal(cap,'SystemCapability.Multimedia.Audio.Capturer');return current.audioSupported!==false;},
-      require(name){if(name.startsWith('.'))return load(resolve(dirname(path),name+'.ets'));assert(name in boundaries,'unadapted boundary '+name);return boundaries[name];}
-    },{filename:path});return module.exports;
+      require(name){
+        if(name==='./HmsSpeechKit'){calls.push('loadSpeechKit');return Promise.resolve(current.beforeKitLoad?.()).then(()=>load(resolve(dirname(path),name+'.ets')));}
+        if(name.startsWith('.'))return load(resolve(dirname(path),name+'.ets'));
+        if(name==='@kit.CoreSpeechKit'&&current.kitFailure)throw Error('controlled unavailable Core Speech Kit');
+        assert(name in boundaries,'unadapted boundary '+name);return boundaries[name];}
+    },{filename:path}); } catch(error) {cache.delete(path);throw error;} return module.exports;
   }
   const Plugin=load(resolve(repo,'app/ohos/entry/src/main/ets/plugins/VoicePlugin.ets')).default;
   const Pcm=load(resolve(repo,'app/ohos/entry/src/main/ets/plugins/VoicePcm.ets')).VoicePcm;

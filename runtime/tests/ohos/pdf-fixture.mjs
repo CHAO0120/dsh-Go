@@ -66,22 +66,24 @@ export async function pdfFixture(t,options={}){
    if(opt.pack)await opt.pack(pixel);if(opt.invalidPng)return new ArrayBuffer(24);
    const bytes=await fsp.readFile(join(fixtures,`page-${pixel.width}x${pixel.height}.png`));return bytes.buffer.slice(bytes.byteOffset,bytes.byteOffset+bytes.length);},
   async release(){events.push('packer.release');if(opt.packerReleaseFailure)throw Error('packer release failed');this.released=true;}};packers.push(packer);return packer;}};
- const channels=[],warnings=[];let nativeLoads=0;
+ const channels=[],warnings=[];let nativeLoads=0,kitLoads=0;
  class Channel{constructor(_messenger,name){this.name=name;channels.push(this);}setMethodCallHandler(handler){this.handler=handler;}}
  function load(path){if(cache.has(path))return cache.get(path).exports;const module={exports:{}};cache.set(path,module);
   const compiled=ts.transpileModule(fs.readFileSync(path,'utf8'),{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS}}).outputText;
-  vm.runInNewContext(compiled,{module,exports:module.exports,Map,Set,ArrayBuffer,Uint8Array,DataView,Promise,Error,setTimeout,
+  try { vm.runInNewContext(compiled,{module,exports:module.exports,Map,Set,ArrayBuffer,Uint8Array,DataView,Promise,Error,setTimeout,
    require(name){
     if(name==='../runtime/NativeHost')return{async loadNativeHost(){nativeLoads++;if(opt.nativeLoad)await opt.nativeLoad();return{openUserFile(allowed,relative){const fd=native.openUserFile(allowed,relative);fds.add(fd);events.push('open-input');return fd;}};}};
     if(name==='../runtime/RuntimeController')return{RuntimeController:{get(actual){assert.equal(actual,context);const {RuntimePaths}=load(resolve(repo,'app/ohos/entry/src/main/ets/runtime/RuntimePaths.ets'));return{paths:new RuntimePaths(actual.filesDir)};}}};
+    if(name==='./HmsPdfKit'){kitLoads++;return Promise.resolve(opt.beforeKitLoad?.()).then(()=>load(resolve(dirname(path),name+'.ets')));}
     if(name.startsWith('.'))return load(resolve(dirname(path),name+'.ets'));
-    if(name==='@kit.PDFKit')return{pdfService:kit};if(name==='@ohos.file.fs')return{default:api};if(name==='@ohos.multimedia.image')return{default:image};
+    if(name==='@kit.PDFKit'){if(opt.kitFailure)throw Error('controlled unavailable PDF Kit');return{pdfService:kit};}
+    if(name==='@ohos.file.fs')return{default:api};if(name==='@ohos.multimedia.image')return{default:image};
     if(name==='@ohos/flutter_ohos')return{MethodChannel:Channel};
     if(name==='@ohos.util')return{default:{TextEncoder:class{encodeInto(text){return new TextEncoder().encode(text);}}}};
     if(name==='@ohos.hilog')return{default:{warn:(...args)=>warnings.push(args)}};
     if(['@ohos.file.picker','@ohos.file.fileuri','@ohos.file.photoAccessHelper','@ohos.app.ability.wantConstant','@ohos.security.cryptoFramework'].includes(name))return{default:{}};
     throw Error('unadapted import '+name);}
-  },{filename:path});return module.exports;}
+  },{filename:path}); } catch(error) {cache.delete(path);throw error;} return module.exports;}
  const Service=load(resolve(repo,'app/ohos/entry/src/main/ets/plugins/HmsPdfPages.ets')).HmsPdfPages;
  const service=opt.filesChannel?undefined:new Service(context,opener);
  function createFilesPlugin(abilityContext=context){
@@ -95,5 +97,5 @@ export async function pdfFixture(t,options={}){
   return{plugin,engine,binding,handler,call};
  }
  return{service,source,workspace,context,root,events,fds,docs,pages,pixels,packers,metadata,channels,warnings,createFilesPlugin,
-  newService:()=>new Service(context,opener),change:next=>{opt={...opt,...next};},stats:()=>({reads,writes,nativeLoads})};
+  newService:()=>new Service(context,opener),change:next=>{opt={...opt,...next};},stats:()=>({reads,writes,nativeLoads,kitLoads})};
 }

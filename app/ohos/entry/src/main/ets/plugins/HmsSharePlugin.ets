@@ -1,5 +1,6 @@
 // UNCOMPILED_HMS / 未编译、未在真机核实。HMS 签名依据共享 hms-contracts.md，非 SDK 编译结果。
-import { systemShare } from '@kit.ShareKit';
+import type { systemShare } from '@kit.ShareKit';
+import { ShareKit, loadShareKit } from './HmsKits';
 import fileUri from '@ohos.file.fileuri';
 import display from '@ohos.display';
 import {
@@ -130,6 +131,10 @@ export default class HmsSharePlugin implements FlutterPlugin, AbilityAware {
   }
 
   private async prepare(lease: ShareLease, request: ShareRequest): Promise<void> {
+    let kit: ShareKit;
+    try { kit = await loadShareKit(); }
+    catch (_) { throw new ShareError('unsupported', '系统分享在这台设备上不可用。'); }
+    this.check(lease);
     lease.batch = await lease.storage.outgoing(request, lease.ability.getAbility().context, (): void => this.check(lease));
     this.check(lease);
     const records: systemShare.SharedRecord[] = [];
@@ -150,9 +155,9 @@ export default class HmsSharePlugin implements FlutterPlugin, AbilityAware {
     }
     // 本地预算留出 Want 开销；平台 200KB 的最终判定仍由 show 的错误返回处理。
     if (utf8Size(JSON.stringify(records)) > SHARE_METADATA_BUDGET) throw new ShareError('too_large', '分享描述过长，请减少项目或文字。');
-    const data = new systemShare.SharedData(records[0]);
+    const data = kit.createData(records[0]);
     for (let i = 1; i < records.length; i++) data.addRecord(records[i]);
-    const controller = new systemShare.ShareController(data);
+    const controller = kit.createController(data);
     lease.controller = controller;
     lease.dismiss = (): void => {
       if (lease.closed) return;
@@ -168,8 +173,8 @@ export default class HmsSharePlugin implements FlutterPlugin, AbilityAware {
     controller.on('dismiss', lease.dismiss);
     controller.on('shareCompleted', lease.completed);
     const options: systemShare.ShareControllerOptions = {
-      selectionMode: records.length > 1 ? systemShare.SelectionMode.BATCH : systemShare.SelectionMode.SINGLE,
-      previewMode: systemShare.SharePreviewMode.DEFAULT
+      selectionMode: records.length > 1 ? kit.batch : kit.single,
+      previewMode: kit.preview
     };
     if (request.origin) {
       const density = display.getDefaultDisplaySync().densityPixels;

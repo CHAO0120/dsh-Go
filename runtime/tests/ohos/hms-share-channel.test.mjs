@@ -12,6 +12,33 @@ const send = (f, args) => f.call(f.outgoing, 'share', args);
 const ready = async f => assert.equal((await f.call(f.incoming, 'ready').done).value, true);
 const waitEvents = async (f, n) => until(() => f.delivered.length >= n, 'incoming delivery');
 
+test('missing Share module stays local to first use and can retry without breaking ordinary launch', async t => {
+  const f = await shareFixture(t, { kitFailure: true });
+  const entry = f.startEntry(); entry.onCreate({}, {}); entry.onNewWant({}, {});
+  assert.equal(f.kitLoads, 0); assert.equal(f.dataCalls.length, 0);
+  assert.equal((await send(f, { text: 'hello' }).done).error, 'unsupported');
+  assert.equal(f.kitLoads, 1); assert.equal(f.panels.length, 0); assert.equal(f.opens.length, 0);
+  await ready(f); f.receive([{ utd: 'general.plain-text', content: 'incoming' }]);
+  await waitEvents(f, 1); assert.equal(f.delivered[0].value.skipped[0].reason, 'unreadable');
+  assert.equal(f.dataCalls.length, 0); assert.equal(f.kitLoads, 2);
+  f.change({ kitFailure: false });
+  const next = send(f, { text: 'retry' }); await settle(f);
+  assert.equal(f.kitLoads, 3); f.panels[0].emit('dismiss'); assert.equal((await next.done).value, UNAVAILABLE);
+});
+
+test('pending Share module keeps synchronous busy admission and a detached request cannot show later', async t => {
+  const gate = deferred(); const f = await shareFixture(t, { beforeKitLoad: () => gate.promise });
+  const first = send(f, { text: 'first' });
+  assert.equal((await send(f, { text: 'second' }).done).error, 'busy');
+  await until(() => f.kitLoads === 1, 'Share module loading');
+  f.plugin.onDetachedFromEngine(f.engine);
+  assert.equal((await first.done).value, UNAVAILABLE);
+  gate.resolve(); await new Promise(resolve => setImmediate(resolve));
+  assert.equal(f.panels.length, 0); assert.equal(f.opens.length, 0); assert.equal(first.replies.length, 1);
+  const next = f.attach(); const retry = f.call(next.outgoing, 'share', { text: 'new owner' });
+  await settle(f); assert.equal(f.kitLoads, 1); f.panels[0].emit('dismiss'); await retry.done;
+});
+
 test('outgoing share waits for real lazy facade and detach prevents a late native open', async t => {
   const gate=deferred();let loads=0;
   const f=await shareFixture(t,{beforeNativeLoad:()=>{loads++;return gate.promise;}});
@@ -220,7 +247,9 @@ test('ordinary cold/warm launch never calls getSharedData; both real EntryAbilit
   ability.onCreate({}, {}); ability.onNewWant({}, {});
   assert.equal(f.dataCalls.length, 0); assert.deepEqual(f.history, ['superCreate', 'superNewWant']);
   ability.onNewWant({ records: [{ utd: 'general.plain-text', content: 'shared' }] }, { launchReasonMessage: 'ReasonMessage_SystemShare' });
-  assert.equal(f.dataCalls.length, 1); assert.deepEqual(f.history.slice(-2), ['getSharedData', 'superNewWant']);
+  assert.equal(f.dataCalls.length, 0); assert.equal(f.history.at(-1), 'superNewWant');
+  await until(() => f.dataCalls.length === 1, 'lazy Share Kit import');
+  assert(f.history.indexOf('getSharedData') > f.history.lastIndexOf('superNewWant'));
   await ready(f); await waitEvents(f, 1); assert.equal(f.delivered[0].value.text, 'shared');
 });
 
@@ -318,7 +347,9 @@ test('short read/write errors are bounded and close actual descriptors', async t
 test('copying, queue and overflow remain bounded before Dart readiness', async t => {
   const gates = []; const f = await shareFixture(t, { getSharedData: () => { const gate = deferred(); gates.push(gate); return gate.promise; } });
   for (let i = 0; i < 1000; i++) f.receive([]);
+  await until(() => f.dataCalls.length === 4, 'four admitted reads after lazy load');
   assert.equal(f.dataCalls.length, 4, 'only four platform reads may be in flight');
+  assert.equal(f.kitLoads, 1, 'concurrent admitted reads share one Kit load');
   for (const gate of gates) gate.resolve({ getRecords: () => [{ utd: 'general.plain-text', content: 'queued' }] });
   await ready(f); await waitEvents(f, 9);
   assert.equal(f.delivered.length, 9, 'eight accepted slots plus one coalesced overflow indication');

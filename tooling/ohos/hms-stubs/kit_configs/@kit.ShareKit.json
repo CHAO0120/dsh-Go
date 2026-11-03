@@ -1,7 +1,7 @@
 {
   "symbols": {
     "systemShare": {
-      "source": "@hms.share.systemShare.d.ts",
+      "source": "@hms.collaboration.systemShare.d.ts",
       "bindings": "default"
     }
   }

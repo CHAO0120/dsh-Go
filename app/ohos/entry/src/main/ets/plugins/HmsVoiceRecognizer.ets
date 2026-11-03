@@ -1,6 +1,7 @@
 // UNCOMPILED_HMS：仅此文件依赖用户 hms-contracts.md 的 CoreSpeechKit 合约。
 // 使用 short / zh-CN / offline；境外行为与 isFinal/isLast 的真机时序仍未核实。
-import { speechRecognizer } from '@kit.CoreSpeechKit';
+import type { speechRecognizer } from '@kit.CoreSpeechKit';
+import { loadSpeechKit } from './HmsKits';
 import { BusinessError } from '@ohos.base';
 import { VoiceFailure, VoiceNotice, VoiceResource, retiredVoice } from './VoiceTypes';
 
@@ -51,7 +52,8 @@ export class HmsVoiceRecognizer implements VoiceResource {
     const params: speechRecognizer.CreateEngineParams = {
       language: 'zh-CN', online: 1, extraParams: { locate: 'CN', recognizerMode: 'short' }
     };
-    const engine = await speechRecognizer.createEngine(params);
+    const kit = await loadSpeechKit();
+    const engine = await kit.createEngine(params);
     const listener: speechRecognizer.RecognitionListener = {
       onStart: (): void => {},
       onEvent: (): void => {},

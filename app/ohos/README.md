@@ -14,7 +14,7 @@ DSH_NODE_HEADERS=/path/to/node-v24.22.1/src \
 ## 现状
 
 - 本机引擎的通道和原生宿主都在仓库里（`docs/design/harmonyos/`），还没有在设备上跑过。没有 `dsh/runtime` 原生宿主的构建，「本机」入口全部转去远程（`LocalRuntimeState.available`）。
-- 权限只有联网、读网络状态和振动。文件走系统选择器，不申请 `READ_MEDIA`。
+- 权限包括联网、读网络状态、振动和麦克风（`ohos.permission.MICROPHONE`）。录音与语音识别在使用时检查麦克风授权；文件走系统选择器，不申请 `READ_MEDIA`。
 - 读剪贴板要 `READ_PASTEBOARD`（`user_grant`、`system_basic`，大概率要 ACL），还没有申请，所以粘贴多半拿不到内容，待真机确认。
 - 图标是 1024px 分层图，来自 `app/assets/brand/tile.svg`。
 

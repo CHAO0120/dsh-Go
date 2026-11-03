@@ -1,7 +1,7 @@
 {
   "symbols": {
     "pdfService": {
-      "source": "@hms.pdfservice.pdfService.d.ts",
+      "source": "@hms.officeservice.pdfservice.d.ts",
       "bindings": "default"
     }
   }

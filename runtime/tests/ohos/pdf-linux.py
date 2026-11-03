@@ -72,7 +72,7 @@ addon = out / 'user-file-access.node'
 native_source = repo / 'runtime/tests/ohos/user-file-access-addon.cc'
 assert run('native-build', [args.cxx, '-std=c++17', '-shared', '-fPIC', '-Wall', '-Wextra', '-Werror',
                             '-I', str(args.node_headers.resolve()), str(native_source), '-o', str(addon)]) == 0
-paths = [repo / 'app/ohos/entry/src/main/ets/plugins/HmsPdfPages.ets', repo / 'app/ohos/entry/src/main/ets/plugins/PdfInput.ets',
+paths = [repo / 'app/ohos/entry/src/main/ets/plugins/HmsPdfKit.ets', repo / 'app/ohos/entry/src/main/ets/plugins/HmsKits.ets', repo / 'app/ohos/entry/src/main/ets/plugins/HmsPdfPages.ets', repo / 'app/ohos/entry/src/main/ets/plugins/PdfInput.ets',
          repo / 'app/ohos/entry/src/main/ets/plugins/FilesMediaPlugin.ets', repo / 'runtime/tests/ohos/files-pdf-channel.test.mjs',
          native_source, repo / 'app/ohos/entry/src/main/cpp/file_access.h', *sorted((repo / 'runtime/tests/ohos').glob('pdf-*'))]
 for p in paths:

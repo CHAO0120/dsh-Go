@@ -8,6 +8,25 @@ const recognize=(f,id=1,language)=>f.call(f.methods,'startRecognizer',{sessionId
 const call=(f,method,args)=>f.call(f.methods,method,args).done;
 const ok=reply=>assert.equal(reply.error,undefined,JSON.stringify(reply));
 
+test('missing speech module never blocks permissions or public recorder and reports recognizer unavailable on use', async()=>{
+ const f=voiceFixture({kitFailure:true});assert(!f.calls.includes('loadSpeechKit'));
+ assert.equal((await call(f,'requestPermission')).value,'granted');
+ ok(await start(f).done);ok(await call(f,'cancel'));assert(!f.calls.includes('loadSpeechKit'));
+ const caps=(await call(f,'capabilities')).value;assert.equal(caps.recognizer,false);assert.equal(caps.recorder,true);
+ assert.equal(f.calls.filter(c=>c==='loadSpeechKit').length,1);assert.equal(f.engines.length,0);
+ assert.equal((await recognize(f,2).done).details.code,5);assert.equal(f.engines.length,0);
+ f.change({kitFailure:false});assert.equal((await call(f,'capabilities')).value.recognizer,true);
+ assert.equal(f.calls.filter(c=>c==='loadSpeechKit').length,3);f.plugin.onDetachedFromEngine(f.engine);
+});
+
+test('pending speech module holds recognition admission but cancelled creation cannot start listening', async()=>{
+ const gate=deferred(),f=voiceFixture({beforeKitLoad:()=>gate.promise});const pending=recognize(f);
+ await until(()=>f.calls.includes('loadSpeechKit'));const cancel=f.call(f.methods,'cancel');
+ assert.equal((await start(f,2).done).details.code,8);assert.equal(cancel.replies.length,0);
+ gate.resolve();ok(await cancel.done);assert.equal((await pending.done).error,'cancelled');
+ assert(f.engines.every(e=>e.started.length===0&&e.shutdowns===1));
+});
+
 test('actual channel contract; factory probe never requests permission or starts capture',async()=>{
  const f=voiceFixture();assert.deepEqual(f.channels.map(c=>c.name),['dsh/voice','dsh/voice/events']);
  const caps=await call(f,'capabilities');ok(caps);assert.equal(caps.value.recognizer,true);assert.equal(caps.value.recorder,true);
