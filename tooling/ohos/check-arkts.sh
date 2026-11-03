@@ -216,6 +216,8 @@ webview_flutter webview_flutter_ohos packages/webview_flutter/webview_flutter_oh
 FORK_MODULES=""
 if [ "$FORKS" = 1 ]; then
   command -v git >/dev/null || die "git not found"
+  PATCHED_FORKS="$(python3 -I -B "$REPO/tooling/ohos/prepare-forks.py" --list-packages)" ||
+    die "cannot read pinned fork manifest"
   while read -r key name dir class; do
     read -r url ref < <(python3 -I -c '
 import re, sys
@@ -231,8 +233,20 @@ print(re.search(r"url: (\S+)", block).group(1), re.search(r"ref: (\S+)", block).
     fi
     git -C "$clone" sparse-checkout add "$dir"
     [ -f "$clone/$dir/oh-package.json5" ] || die "$url $ref has no $dir"
+    fork_source="$clone/$dir"
+    case " $PATCHED_FORKS " in
+      *" $name "*)
+        # The input pin covers the complete Dart/native package, not only ohos/.
+        git -C "$clone" sparse-checkout add "$(dirname "$dir")"
+        prepared_fork="$RUN_ROOT/prepared-forks/$name"
+        python3 -I -B "$REPO/tooling/ohos/prepare-forks.py" --package "$name" \
+          --input "$(dirname "$fork_source")" --output "$prepared_fork" ||
+          die "pinned fork preparation failed: $name"
+        fork_source="$prepared_fork/package/ohos"
+        ;;
+    esac
     mkdir -p "$FORK_ROOT/$name"
-    (cd "$clone/$dir" && tar --exclude=./build --exclude=./oh_modules -cf - .) | tar -xf - -C "$FORK_ROOT/$name"
+    (cd "$fork_source" && tar --exclude=./build --exclude=./oh_modules -cf - .) | tar -xf - -C "$FORK_ROOT/$name"
     FORK_MODULES+="$name $class"$'\n'
   done <<< "$FORK_TABLE"
 fi

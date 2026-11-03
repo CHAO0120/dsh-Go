@@ -1,0 +1,31 @@
+--- a/ohos/src/main/ets/io.flutter.plugins/webview_flutter/OhosWebView.ets
++++ b/ohos/src/main/ets/io.flutter.plugins/webview_flutter/OhosWebView.ets
+@@ -69,7 +69,7 @@
+       case 2:
+         return MixedMode.None;
+       default:
+-        return MixedMode.All;
++        return MixedMode.None;
+     }
+   }
+ 
+@@ -129,7 +129,7 @@
+             event.handler.setWebController(newWebViewController);
+           })
+           .onSslErrorEventReceive((event) => {
+-            event.handler.handleConfirm();
++            event.handler.handleCancel();
+           })
+           .onHttpAuthRequest(this.webView.onHttpAuthRequest)
+           .onAlert(this.webView.onJsAlert)
+--- a/ohos/src/main/ets/io.flutter.plugins/webview_flutter/WebViewHostApiImpl.ets
++++ b/ohos/src/main/ets/io.flutter.plugins/webview_flutter/WebViewHostApiImpl.ets
+@@ -710,7 +710,7 @@
+   textZoomRatioCallback?: (ratio: number) => void;
+   isAllowFullScreenRotate: boolean = false;
+   paymentRequestEnabled: boolean = false;
+-  mixedMode: number = 0; // Default: MixedMode.All (allow all mixed content)
++  mixedMode: number = 2; // Default: MixedMode.None (deny mixed content)
+   overScrollMode: number = 0; // Default: OverScrollMode.NEVER
+ 
+   constructor(webView: WebViewPlatformView) {

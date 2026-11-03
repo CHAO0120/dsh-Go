@@ -1,0 +1,35 @@
+{
+  "schema": 1,
+  "packages": {
+    "webview_flutter_ohos": {
+      "upstream": {
+        "url": "https://atomgit.com/oh-flutter/flutter_packages.git",
+        "ref": "webview_flutter-v4.13.1-ohos-1.0.2",
+        "commit": "89476bb7432938a54e5b09b449d1d031e85f0e5c",
+        "subdir": "packages/webview_flutter/webview_flutter_ohos"
+      },
+      "inputTreeSha256": "0c440a901fa45ff34d46782ee86f6eba7ec64d40d3e7f10fb23c99f1badcd869",
+      "outputTreeSha256": "c81d4964cee1b15e2fc61fb19ced1fb8f1a87717954e8c42fd83589a33c928d3",
+      "patch": "webview-security.patch",
+      "patchSha256": "a787dcf2283824f5b8b9e97dede67b15b3a5121a576e10431d059aae81e07ee5",
+      "targets": {
+        "ohos/src/main/ets/io.flutter.plugins/webview_flutter/OhosWebView.ets": {
+          "beforeSha256": "7e467192e2b5a0b396ff0eb0b43c838926bdd9dc69907c0f594ab962e254292d",
+          "afterSha256": "be7adb6ae1cce12c0ab04a80edb83e48fc11562b51f8c0e7a46a7643adbf6e7e"
+        },
+        "ohos/src/main/ets/io.flutter.plugins/webview_flutter/WebViewHostApiImpl.ets": {
+          "beforeSha256": "728884e3d6580ca885aa410aa74ceeae8629d5e9047d81826a02162a4537e8ff",
+          "afterSha256": "d4504dbe2117af25f3c40593a97165f5f693d95ba85fdce901ba79c021b651b8"
+        }
+      },
+      "nativeSubdir": "ohos",
+      "nativePackage": "webview_flutter_ohos",
+      "buildOutputs": [
+        "ohos/build",
+        "ohos/oh_modules",
+        "ohos/.hvigor",
+        "ohos/oh-package-lock.json5"
+      ]
+    }
+  }
+}
