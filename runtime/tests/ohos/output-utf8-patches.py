@@ -8,6 +8,7 @@ import argparse
 import hashlib
 import json
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import sys
@@ -107,8 +108,12 @@ def main():
     assert inventory(ohos) == ohos_first
     run(args.candidate_repo, ohos, "android", "wrong-target-rejected", expected=1)
     assert inventory(ohos) == ohos_first
-    run(args.candidate_repo, android_candidate, "ohos", "android-to-ohos")
-    assert inventory(android_candidate) == ohos_first
+    # Android's set is no longer a subset of OHOS's, and real builds use fresh prefixes.
+    run(args.candidate_repo, android_candidate, "ohos", "android-to-ohos", expected=1)
+    refusal = (args.out / "android-to-ohos.stderr.log").read_text()
+    assert re.fullmatch(r"target ohos: node_modules/\S+ sha256 [0-9a-f]{64} differs from the vetted DSH "
+                        + re.escape(version) + r" patch chain\n", refusal), refusal
+    assert inventory(android_candidate) == android_after
     for path, row in originals.items():
         assert (args.pristine_prefix / path).stat().st_size == row["bytes"]
         assert digest(args.pristine_prefix / path) == row["sha256"]
@@ -125,7 +130,7 @@ def main():
         "ohosAfter": pins["after"],
         "ohosIdempotent": True,
         "wrongTargetRejectedWithoutMutation": True,
-        "androidToOhosMatchesFresh": True,
+        "androidToOhosRefusedWithoutMutation": True,
         "sharedInputUnchanged": True,
         "commands": commands,
     }
