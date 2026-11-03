@@ -8,6 +8,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../l10n/l10n.dart';
 import '../../state/access_state.dart';
+import '../../state/android_features.dart';
 import '../access/access_text.dart';
 import '../access/access_widgets.dart';
 import '../access/system_access_route.dart';
@@ -60,12 +61,13 @@ class _SystemAccessPageState extends ConsumerState<SystemAccessPage> {
     final l10n = context.l10n;
     final readings = ref.watch(accessReadingsProvider).value;
     final visited = ref.watch(accessVisitedProvider);
+    final os = ref.watch(operatingSystemProvider);
     return AppPage.list(
       title: l10n.accessPageTitle,
-      subtitle: Text(l10n.accessPageSubtitle),
+      subtitle: Text(os == 'ohos' ? l10n.harmonyAccessSubtitle : l10n.accessPageSubtitle),
       children: [
         if (readings != null)
-          for (final feature in AccessFeature.values)
+          for (final feature in accessFeaturesFor(os))
             if ([
               for (final item in accessItemsFor(feature, readings.vendor))
                 if (accessStateOf(item, readings, visited) case final state?)

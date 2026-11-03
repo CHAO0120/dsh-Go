@@ -11,7 +11,6 @@ import '../../diagnostics/diagnostics_publish.dart';
 import '../../runtime/runtime_bridge.dart';
 import '../../runtime/runtime_state.dart';
 import '../../share_code/guest_fs.dart';
-import '../../state/android_features.dart';
 import '../../state/engine_control.dart';
 import '../../state/hosts_state.dart';
 import '../../state/notify_state.dart';
@@ -174,7 +173,6 @@ class _RootGateState extends ConsumerState<RootGate> {
   }
 
   void _afterAppearance() {
-    if (!ref.read(androidSystemFeaturesProvider)) return _afterAccess();
     unawaited(_prefs.setSetupStep(SetupStep.access));
     _goTo(OnboardingStep.access);
   }
@@ -347,7 +345,6 @@ class _RootGateState extends ConsumerState<RootGate> {
           step: step,
           chooseRuntime: _chooseRuntime,
           beside: _beside,
-          access: ref.watch(androidSystemFeaturesProvider),
           onLocal: _chooseRuntime ? _chooseLocal : null,
           onAppearanceDone: _afterAppearance,
           onAccessDone: _afterAccess,

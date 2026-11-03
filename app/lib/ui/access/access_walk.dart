@@ -299,7 +299,7 @@ class _AccessWalkState extends ConsumerState<AccessWalk> {
           child: AccessHeader(
             icon: item.icon,
             title: item.title(l10n, vendor: widget.vendor ?? readings.vendor),
-            message: item.why(l10n),
+            message: item.why(l10n, os: ref.read(operatingSystemProvider)),
             counter: counter,
             done: done,
           ),

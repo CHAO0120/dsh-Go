@@ -1,0 +1,6 @@
+{
+  "@@locale": "en",
+  "harmonyAccessSubtitle": "What each feature needs from HarmonyOS",
+  "harmonyNotifyWhy": "While the app is running, tells you when a reply ends or needs you",
+  "harmonyKwSystemAccess": "permissions,grant,microphone,notification permission,reply alerts,voice input"
+}

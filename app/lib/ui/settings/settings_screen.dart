@@ -241,7 +241,7 @@ class SettingsScreen extends ConsumerWidget {
             const NotificationSettingsTile(tint: SettingsHues.general),
             const VoiceSettingsTile(tint: SettingsHues.general),
             const PerformanceSettingsTile(tint: SettingsHues.general),
-            if (android) ...[
+            if (android)
               SettingsTile(
                 icon: AppIcons.keepAlive,
                 tint: SettingsHues.general,
@@ -252,13 +252,12 @@ class SettingsScreen extends ConsumerWidget {
                 ),
                 onTap: () => _push(context, const BackgroundGuidePage()),
               ),
-              SettingsTile(
-                icon: AppIcons.systemAccess,
-                tint: SettingsHues.general,
-                spot: SettingsIndex.entry(SettingsPageId.systemAccess),
-                onTap: () => _push(context, const SystemAccessPage()),
-              ),
-            ],
+            SettingsTile(
+              icon: AppIcons.systemAccess,
+              tint: SettingsHues.general,
+              spot: SettingsIndex.entry(SettingsPageId.systemAccess),
+              onTap: () => _push(context, const SystemAccessPage()),
+            ),
             SettingsTile(
               icon: AppIcons.privacy,
               tint: SettingsHues.general,

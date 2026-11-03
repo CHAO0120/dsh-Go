@@ -102,6 +102,12 @@ class L10nEn extends L10n {
   String get accessFeatureVoiceNeeds => 'Needs the microphone';
 
   @override
+  String get accessFeatureAlerts => 'Reply alerts';
+
+  @override
+  String get accessFeatureAlertsNeeds => 'Needs notifications';
+
+  @override
   String accessVoiceModel(int size) {
     return 'Works offline; downloads a voice model of about $size MB';
   }
@@ -7271,6 +7277,15 @@ class L10nEn extends L10n {
 
   @override
   String get fileChatFallback => 'chat';
+
+  @override
+  String get harmonyAccessSubtitle => 'What each feature needs from HarmonyOS';
+
+  @override
+  String get harmonyNotifyWhy => 'While the app is running, tells you when a reply ends or needs you';
+
+  @override
+  String get harmonyKwSystemAccess => 'permissions,grant,microphone,notification permission,reply alerts,voice input';
 
   @override
   String get hubSessionDetails => 'Chat details';

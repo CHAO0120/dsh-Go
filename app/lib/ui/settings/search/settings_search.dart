@@ -105,7 +105,8 @@ const searchLimit = 20;
 /// 全部功能's cards ([features]), scored by how they matched plus how often
 /// people come for them, best first, [searchLimit] at most. Matches in [zh]
 /// and [en] alike. Without [androidFeatures], nothing that is Android's own
-/// ([SettingsIndex.androidOnly]).
+/// ([SettingsIndex.androidOnly]), nor a word for what is only there
+/// ([SettingSpot.ohosKeywords]).
 List<SearchHit> searchSettings(
   String query, {
   required Iterable<SettingSpot> spots,
@@ -122,7 +123,7 @@ List<SearchHit> searchSettings(
     final langs = [
       for (final l in [zh, en])
         _Words(spot.title(l), [
-          ..._split(spot.keywords?.call(l)),
+          ..._split((androidFeatures ? spot.keywords : spot.ohosKeywords ?? spot.keywords)?.call(l)),
           ?spot.altTitle?.call(l),
         ], SettingsIndex.path(spot, l).join(' ')),
     ];

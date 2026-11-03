@@ -1,0 +1,6 @@
+{
+  "@@locale": "zh",
+  "harmonyAccessSubtitle": "各项功能用到的系统权限",
+  "harmonyNotifyWhy": "应用在运行时，回复跑完、需要确认会提醒你",
+  "harmonyKwSystemAccess": "权限一览,授权,麦克风,通知权限,回复提醒,语音输入,补开权限"
+}

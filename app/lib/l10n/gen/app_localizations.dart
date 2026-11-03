@@ -272,6 +272,18 @@ abstract class L10n {
   /// **'需要麦克风权限'**
   String get accessFeatureVoiceNeeds;
 
+  /// No description provided for @accessFeatureAlerts.
+  ///
+  /// In zh, this message translates to:
+  /// **'回复提醒'**
+  String get accessFeatureAlerts;
+
+  /// No description provided for @accessFeatureAlertsNeeds.
+  ///
+  /// In zh, this message translates to:
+  /// **'需要通知权限'**
+  String get accessFeatureAlertsNeeds;
+
   /// No description provided for @accessVoiceModel.
   ///
   /// In zh, this message translates to:
@@ -12601,6 +12613,24 @@ abstract class L10n {
   /// In zh, this message translates to:
   /// **'对话'**
   String get fileChatFallback;
+
+  /// No description provided for @harmonyAccessSubtitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'各项功能用到的系统权限'**
+  String get harmonyAccessSubtitle;
+
+  /// No description provided for @harmonyNotifyWhy.
+  ///
+  /// In zh, this message translates to:
+  /// **'应用在运行时，回复跑完、需要确认会提醒你'**
+  String get harmonyNotifyWhy;
+
+  /// No description provided for @harmonyKwSystemAccess.
+  ///
+  /// In zh, this message translates to:
+  /// **'权限一览,授权,麦克风,通知权限,回复提醒,语音输入,补开权限'**
+  String get harmonyKwSystemAccess;
 
   /// No description provided for @hubSessionDetails.
   ///

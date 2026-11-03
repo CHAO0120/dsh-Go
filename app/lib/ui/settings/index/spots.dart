@@ -108,6 +108,7 @@ class SettingsPageMeta {
     this.parent = SettingsPageId.hub,
     this.group,
     this.keywords,
+    this.ohosKeywords,
     this.freq = Freq.low,
     this.links = const [],
     this.condition,
@@ -126,6 +127,9 @@ class SettingsPageMeta {
 
   /// Comma-separated synonyms and old names (search_{zh,en}.arb).
   final Label? keywords;
+
+  /// In place of [keywords] where they name what HarmonyOS doesn't have.
+  final Label? ohosKeywords;
   final Freq freq;
 
   /// `dshgo://open/<id>` names, old ones included.
@@ -147,6 +151,7 @@ class SettingsPageMeta {
     title: title,
     group: group,
     keywords: keywords,
+    ohosKeywords: ohosKeywords,
     freq: freq,
     opens: id,
     condition: condition,
@@ -162,6 +167,7 @@ class SettingSpot {
     required this.title,
     this.group,
     this.keywords,
+    this.ohosKeywords,
     this.freq = Freq.low,
     this.link,
     this.condition,
@@ -183,6 +189,9 @@ class SettingSpot {
 
   /// Comma-separated synonyms and old names (search_{zh,en}.arb).
   final Label? keywords;
+
+  /// In place of [keywords] where they name what HarmonyOS doesn't have.
+  final Label? ohosKeywords;
   final Freq freq;
 
   /// `dshgo://open/<link>` opens [page] at this row.
@@ -468,9 +477,9 @@ final _pages = <SettingsPageMeta>[
     title: (l) => l.accessPageTitle,
     group: _general,
     keywords: (l) => l.searchKwSystemAccess,
+    ohosKeywords: (l) => l.harmonyKwSystemAccess,
     freq: Freq.medium,
     links: const ['system-permissions'],
-    androidOnly: true,
   ),
   SettingsPageMeta(
     SettingsPageId.privacy,

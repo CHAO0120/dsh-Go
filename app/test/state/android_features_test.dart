@@ -41,6 +41,7 @@ import 'package:dsh_app/ui/settings/performance_page.dart';
 import 'package:dsh_app/ui/settings/search/settings_search.dart';
 import 'package:dsh_app/ui/settings/search/settings_search_page.dart';
 import 'package:dsh_app/ui/settings/settings_screen.dart';
+import 'package:dsh_app/ui/settings/system_access_page.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_riverpod/misc.dart' show Override;
@@ -59,7 +60,6 @@ const _pages = {
   'page:phoneDnd',
   'page:phoneUnlocks',
   'page:background',
-  'page:systemAccess',
 };
 const _rows = {
   'phone-a11y-restore',
@@ -85,7 +85,7 @@ final _zh = lookupL10n(AppLocale.zhCN);
 final _en = lookupL10n(AppLocale.en);
 
 List<Override> _on({required bool android, RuntimeStatus status = runningStatus}) => [
-  androidSystemFeaturesProvider.overrideWithValue(android),
+  operatingSystemProvider.overrideWithValue(android ? 'android' : 'ohos'),
   activeHostProvider.overrideWith(() => FixedActiveHost(HostRef.local)),
   hostsProvider.overrideWith(FixedHosts.new),
   localRuntimeProvider.overrideWith(() => FakeRuntime(LocalRuntimeState(loaded: true, status: status))),
@@ -136,17 +136,17 @@ void main() {
     });
 
     test('links to them are known by name', () {
-      for (final id in ['phone', 'phone-unlocks', 'phone-confirm', 'phone-files', 'background', 'system-permissions']) {
+      for (final id in ['phone', 'phone-unlocks', 'phone-confirm', 'phone-files', 'background']) {
         expect(SettingsIndex.androidOnlyLink(id), isTrue, reason: id);
       }
-      for (final id in ['engine', 'appearance', 'dark-mode', 'nope']) {
+      for (final id in ['engine', 'appearance', 'dark-mode', 'system-permissions', 'nope']) {
         expect(SettingsIndex.androidOnlyLink(id), isFalse, reason: id);
       }
     });
   });
 
   group('settings hub', () {
-    const tiles = ['page:phone', 'page:background', 'page:systemAccess'];
+    const tiles = ['page:phone', 'page:background'];
 
     testWidgets('on Android: phone control, background and system access', (tester) async {
       await _pump(tester, const SettingsScreen(), android: true);
@@ -161,7 +161,7 @@ void main() {
         expect(find.byKey(SpotKey(id)), findsNothing, reason: id);
       }
       expect(find.text('手机操控'), findsNothing);
-      expect(find.text('系统权限'), findsNothing);
+      expect(find.byKey(const SpotKey('page:systemAccess')), findsOneWidget);
       expect(find.byKey(const SpotKey('page:webSearch')), findsOneWidget);
       expect(find.byKey(const SpotKey('page:privacy')), findsOneWidget);
     });
@@ -246,10 +246,11 @@ void main() {
     });
 
     test('on HarmonyOS they are unknown; other pages still open', () {
-      for (final id in ['phone', 'phone-unlocks', 'phone-confirm', 'phone-files', 'background', 'system-permissions']) {
+      for (final id in ['phone', 'phone-unlocks', 'phone-confirm', 'phone-files', 'background']) {
         expect(resolve(id, android: false), isNull, reason: id);
       }
       expect(resolve('engine', android: false), isA<EngineScreen>());
+      expect(resolve('system-permissions', android: false), isA<SystemAccessPage>());
     });
 
     for (final android in [true, false]) {
@@ -404,7 +405,7 @@ void main() {
   });
 
   group('first run', () {
-    final harmony = [androidSystemFeaturesProvider.overrideWithValue(false)];
+    final harmony = [operatingSystemProvider.overrideWithValue('ohos')];
 
     testWidgets('on Android: 外观 → what DSH Go should do → 连接, four steps', (tester) async {
       final rig = await pumpGate(tester);
@@ -416,20 +417,28 @@ void main() {
       expect(rig.prefs.setupStep, SetupStep.access);
     });
 
-    testWidgets('on HarmonyOS: 外观 → 连接, three steps, the saved step goes with it', (tester) async {
+    testWidgets('on HarmonyOS: the same four steps, with what it has to offer', (tester) async {
       final rig = await pumpGate(tester, overrides: harmony);
-      expect(find.bySemanticsLabel('第 1 步，共 3 步'), findsOneWidget);
+      expect(find.bySemanticsLabel('第 1 步，共 4 步'), findsOneWidget);
       await chooseThisPhone(tester);
-      expect(find.bySemanticsLabel('第 2 步，共 3 步'), findsOneWidget);
+      expect(find.bySemanticsLabel('第 2 步，共 4 步'), findsOneWidget);
       await tester.tap(find.widgetWithText(FilledButton, '继续'));
       await frames(tester);
-      expect(find.byType(AccessStepPage), findsNothing);
+      expect(find.byType(AccessStepPage), findsOneWidget);
+      expect(find.bySemanticsLabel('第 3 步，共 4 步'), findsOneWidget);
+      expect(find.text(_zh.accessFeatureAlerts), findsOneWidget);
+      expect(find.text(_zh.accessFeatureVoice), findsOneWidget);
+      expect(find.text(_zh.accessFeaturePhone), findsNothing);
+      expect(rig.prefs.setupStep, SetupStep.access);
+
+      await tester.tap(find.widgetWithText(TextButton, _zh.accessSkip));
+      await frames(tester);
       expect(find.byType(ConnectPage), findsOneWidget);
-      expect(find.bySemanticsLabel('第 3 步，共 3 步'), findsOneWidget);
+      expect(find.bySemanticsLabel('第 4 步，共 4 步'), findsOneWidget);
       expect(rig.prefs.setupStep, SetupStep.connect);
     });
 
-    testWidgets('on HarmonyOS, connected already: 外观 → the waiting page', (tester) async {
+    testWidgets('on HarmonyOS, connected already: past the step, the waiting page', (tester) async {
       final rig = await pumpGate(
         tester,
         settings: const AppSettings(loaded: true, apiKey: 'sk-test'),
@@ -438,7 +447,8 @@ void main() {
       await chooseThisPhone(tester);
       await tester.tap(find.widgetWithText(FilledButton, '继续'));
       await frames(tester);
-      expect(find.byType(AccessStepPage), findsNothing);
+      await tester.tap(find.widgetWithText(TextButton, _zh.accessSkip));
+      await frames(tester);
       expect(find.byType(RuntimeSetupPage), findsOneWidget);
       expect(rig.prefs.setupStep, SetupStep.finishing);
     });

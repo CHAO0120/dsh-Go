@@ -100,6 +100,12 @@ class L10nZh extends L10n {
   String get accessFeatureVoiceNeeds => '需要麦克风权限';
 
   @override
+  String get accessFeatureAlerts => '回复提醒';
+
+  @override
+  String get accessFeatureAlertsNeeds => '需要通知权限';
+
+  @override
   String accessVoiceModel(int size) {
     return '离线识别，需下载约 $size MB 语音模型';
   }
@@ -6879,6 +6885,15 @@ class L10nZh extends L10n {
 
   @override
   String get fileChatFallback => '对话';
+
+  @override
+  String get harmonyAccessSubtitle => '各项功能用到的系统权限';
+
+  @override
+  String get harmonyNotifyWhy => '应用在运行时，回复跑完、需要确认会提醒你';
+
+  @override
+  String get harmonyKwSystemAccess => '权限一览,授权,麦克风,通知权限,回复提醒,语音输入,补开权限';
 
   @override
   String get hubSessionDetails => '对话详情';
