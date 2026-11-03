@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
-"""Android recipe suffix input, preserving the reviewed afb5cdd identity.
+"""Android recipe suffix input, preserving the reviewed baseline's identity.
 
-The compatibility table aliases only exact reviewed source digests. Unknown
+locks/android-recipe-compat.json names the baseline; merging a newer one means
+regenerating that table. It aliases only exact reviewed source digests. Unknown
 source changes use their actual digest; it is not a fixed runtime version.
 """
 import argparse
