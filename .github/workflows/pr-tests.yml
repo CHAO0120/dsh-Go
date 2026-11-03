@@ -249,6 +249,8 @@ jobs:
     if: needs.plan.outputs.mode == 'full'
     runs-on: ubuntu-24.04
     timeout-minutes: 45
+    env:
+      DSH_MAVEN_MIRRORS: '0'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:

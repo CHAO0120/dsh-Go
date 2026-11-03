@@ -46,6 +46,18 @@ test('CI toolchain pins match the build inputs and do not rely on an ignored wra
   assert.doesNotMatch(workflow, /--update-goldens|DSH_TEST_GOLDEN_OUT:|DSH_TEST_LANG:\s*en/);
 });
 
+test('cloud Android uses upstream repositories without changing local mirror defaults', () => {
+  const root = new URL('../../../', import.meta.url);
+  for (const file of ['settings.gradle.kts', 'build.gradle.kts']) {
+    const build = readFileSync(new URL(`app/android/${file}`, root), 'utf8');
+    assert.match(build, /if \(System\.getenv\("DSH_MAVEN_MIRRORS"\) != "0"\)/);
+    assert.match(build, /google\(\)/);
+    assert.match(build, /mavenCentral\(\)/);
+  }
+  const workflow = readFileSync(new URL('.github/workflows/pr-tests.yml', root), 'utf8');
+  assert.match(workflow, /DSH_MAVEN_MIRRORS: '0'/);
+});
+
 test('PR description edits cannot cancel and restart the full suite', () => {
   const workflow = readFileSync(new URL('../../workflows/pr-tests.yml', import.meta.url), 'utf8');
   assert.doesNotMatch(workflow, /types:.*\bedited\b/);
