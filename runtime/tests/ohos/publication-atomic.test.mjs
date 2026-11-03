@@ -181,3 +181,20 @@ test('a close failure after commit cannot delete the complete final or source', 
   assert.deepEqual(await fs.readFile(f.target), f.data);
   await sourceUnchanged(f); await noTemporary(f.directory);
 });
+
+// Control records opt out of the legacy partial-final fallback; default calls above retain it.
+test('requireAtomic uses real no-replace and refuses both native/fuse unsupported paths', async t => {
+  const f = await fixture(t);
+  assert.deepEqual(await publisher(f)(f.source, f.target, { requireAtomic: true }), { method: 'rename-noreplace' });
+  await assert.rejects(publisher(f)(f.source, f.target, { requireAtomic: true }), { code: 'EEXIST' });
+  assert.deepEqual(await fs.readFile(f.target), f.data);
+  for (const reason of ['unsupported', 'disabled-after-crash']) {
+    const target = join(f.directory, reason); let fallbacks = 0;
+    const publish = publisher(f, { atomicFuse: { async run() { return { atomic: false, reason }; } },
+      onFallback() { fallbacks++; } });
+    await assert.rejects(publish(f.source, target, { requireAtomic: true }),
+      { code: 'ERR_OHOS_PUBLICATION_ATOMIC_REQUIRED', reason });
+    assert.equal(fallbacks, 0); await absent(target);
+  }
+  await sourceUnchanged(f); await noTemporary(f.directory);
+});

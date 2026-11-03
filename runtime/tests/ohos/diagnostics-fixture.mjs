@@ -24,7 +24,8 @@ export async function until(check, description = 'condition') {
 export const manifestFixture = () => ({ schema:1, runtimeVersion:'fixture-runtime', dshVersion:'0.0.fixture', nodeVersion:'24.22.1',
   files: ['node_modules/@deepseek-ai/dsh/lib/bin.js', 'runtime/ohos/preload.mjs',
     'runtime/ohos/process/index.mjs', 'runtime/ohos/process/sandbox.mjs',
-    'runtime/ohos/lifecycle/index.mjs', 'runtime/ohos/capabilities/index.mjs'].map((path,i) => ({path,size:i+11,
+    'runtime/ohos/lifecycle/index.mjs', 'runtime/ohos/capabilities/index.mjs',
+    'runtime/bridge/dsh-go-bridge/lib/index.js'].map((path,i) => ({path,size:i+11,
       sha256:createHash('sha256').update(Buffer.alloc(i+11, i+1)).digest('hex')})) });
 function publicError(error) {
   if (typeof error.code === 'number') return error;

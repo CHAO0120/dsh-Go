@@ -147,3 +147,29 @@ python3 -B runtime/tests/ohos/publication-startup.py \
 OpenHarmony SDK 编译与 ABI、Node/Ark NAPI 符号归属、宿主 linked 注册、实际应用目录的 xattr / flock / RENAME_NOREPLACE 支持、正常宿主 teardown 与真机后台杀进程仍需目标证据。本轮只有 Linux 显式夹具，未将这些项目记为已测通过。
 
 文件 `fsync` 不单独证明目录项的断电耐久性。账本目录同步不能代替临时文件所在目录和最终提交目录的持久性论证；原 provider 的目录同步保留，但本轮没有断电、重挂载或存储故障测量。具体文件系统 flag 支持也不能从 Linux overlay 成功外推：已归档的官方 OpenHarmony 6.1 sharefs 源码对非零 rename flags 返回 EINVAL，真机目录实际挂载何种文件系统仍未知。相关原始来源与哈希保留在 30 的来源记录中。
+
+## ADD12：会话删除标记需要原子发布
+
+会话删除的 `deleted.json` 是持久提交点，不能使用可能留下部分最终文件的独占复制回退。协议 1 服务新增显式 `publishAtomic(source, target, options)`；它使用同一队列、账本和不覆盖提交，但在 `unsupported` / `disabled-after-crash` 分支进入复制或告警之前，抛出 `ERR_OHOS_PUBLICATION_ATOMIC_REQUIRED`。普通 `publish` 的既有回退语义保持。显式方法避免旧服务静默忽略新选项。
+
+OH 删除 seam 将缺少该方法或原子能力不支持映射为既有 `unavailable`（路由 HTTP 503）。第一次发布标记后仍依次同步标记目录、lifecycle 目录、会话根和根的父目录，成功后才删除已筛选的日志。有效标记重试在 OH 再次完成四级目录同步；即使此时不能创建新标记，仍允许完成旧标记的清理。非 OH 的共享 core、bridge 和 Android recipe 输入保持新基底原字节。OH composer 在普通 prepare receipt 核验之后，从已固定前像生成专用的 core 和 bridge 变体；prepared prefix 不被修改，两个变体的前像、变换和后像 SHA 分开记入组成记录。实际 payload 的导入、manifest 与归档检查消费生成后像。
+
+删除 GET 能力只读 `supported`：OH 仅接受新 core 明确返回 true，缺 getter 的旧版本不再被误报可用。缺方法、已知 `unsupported` / `disabled-after-crash` 为 false；`untried` / `trying` / `available` 表示没有已知拒绝，不是新的设备探测或永久保证。GET 不调用 syscall、不写磁盘。POST 仍由 seam 区分新提交与有效标记重试，不用 GET 的结果提前阻止重试。
+
+有限回归使用真实私有文件和固定 Linux publication linked 夹具。以下入口不启动 App 或 SDK；`NODE`、`LINKED_LIBRARY`、`SIM_PRELOAD`、`OH_DELETION_CORE`、私有 `APP_DATA`、`TRACE` 均须使用明确绝对路径。`OH_DELETION_CORE` 指本次 composer 输出的 `generated/ohos-deletion/core.mjs`；路由单元组使用 `DSH_SESSION_DELETION_ROUTE` 指向同目录的 `session-deletion.js`，不得以未修改的共享源冒充 OH 后像。目录同步用例的 hook 只替换 core 自身的 fs/promises 依赖，记录真实 open/fsync/rm；为单独比较旧重试顺序，其 legacy-link 接缝委托真实原子服务，不启用硬链接，也不称旧完整构建或设备重放。
+
+```sh
+LD_PRELOAD="$LINKED_LIBRARY" DSH_GO_OHOS_SIM_PLATFORM=openharmony \
+  DSH_SESSION_DELETION_CORE="$OH_DELETION_CORE" \
+  "$NODE" --jitless --import "$SIM_PRELOAD" --test --test-isolation=none \
+  runtime/tests/ohos/session-deletion-publication.test.mjs
+
+LD_PRELOAD="$LINKED_LIBRARY" DSH_GO_OHOS_SIM_PLATFORM=openharmony \
+  DSH_HOME="$APP_DATA" DSH_DELETION_SYNC_SOURCE="$OH_DELETION_CORE" \
+  DSH_DELETION_SYNC_TRACE="$TRACE" \
+  "$NODE" --jitless --import "$SIM_PRELOAD" \
+  --import ./runtime/ohos/publication/preload.mjs --test --test-isolation=none \
+  runtime/tests/ohos/session-deletion-sync/directory-sync.test.mjs
+```
+
+这证明的是明确故障返回与重试顺序；没有新增断电恢复、任意并发 writer、文件系统能力或真机结论。

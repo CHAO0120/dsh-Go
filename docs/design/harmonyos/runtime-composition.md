@@ -35,7 +35,7 @@ npm ci --ignore-scripts --omit=optional --include=dev \
 
 ## 二、宿主、清单和组成器的共同必需入口
 
-本基底实际 `host_core.cpp` 的 `File(options.runtime_root, "…")` 要求六个文件：
+本基底实际 `host_core.cpp` 的 `File(options.runtime_root, "…")` 要求七个文件：
 
 | 用途 | 安装根下的路径 |
 | --- | --- |
@@ -45,10 +45,11 @@ npm ci --ignore-scripts --omit=optional --include=dev \
 | 沙箱策略插件 | `runtime/ohos/process/sandbox.mjs` |
 | 生命周期工具边界插件 | `runtime/ohos/lifecycle/index.mjs` |
 | 能力协议插件 | `runtime/ohos/capabilities/index.mjs` |
+| App 路由桥 | `runtime/bridge/dsh-go-bridge/lib/index.js` |
 
 `RuntimeCore.validateManifest` 现在要求同一集合。组成器从真实 C++ 源中的固定字面量调用提取要求，并与实际 ETS 声明比较；不能识别的调用形式、集合漂移或最终载荷缺项都会拒绝。新增宿主入口时必须继续遵守并更新这一明确约定与测试，不能仅修改某一层的常量。
 
-`composition-required.test.mjs` 执行真实 ETS 校验函数的逻辑体，依次删除六个入口验证拒绝；旧基底在七项中五项失败，新定义七项通过。`composition-inputs.test.py` 另用真实文件检查新入口、清单漂移、调用语法漂移及输入收据边界。Node 类型擦除仅用于 Linux 逻辑验证，不能作为 ArkTS 编译通过的依据。
+`composition-required.test.mjs` 执行真实 ETS 校验函数的逻辑体，依次删除七个入口验证拒绝；旧基底在七项中五项失败，新定义七项通过。`composition-inputs.test.py` 另用真实文件检查新入口、清单漂移、调用语法漂移及输入收据边界。Node 类型擦除仅用于 Linux 逻辑验证，不能作为 ArkTS 编译通过的依据。
 
 `host-layout.py --assembled-payload` 读取实际 manifest，验证整个文件集合后直接把该树传给由原样 `host_core.cpp` 编译的驱动。驱动真正调用 `Host::Start`，完成所有文件预检和 profile 生成；runner 回调只负责捕获 argv/env。随后测试用这些原样参数启动真正 pinned DSH，并完成消费者检查、配置 dump 和原严格回合。此路径不复制 npm 开发前缀、不重建 process、不用开发目录顶替运行依赖，回合前后整树 SHA/size 集合必须一致。
 
@@ -150,3 +151,15 @@ Android验证为节约磁盘只复制所有pins涉及的vendor文件，用实际
 保留两类失败证据：静态导入门的初始真实失败与被修正的依赖/裁剪；夹具自身的路径排序、误把专用DSH preload用于非DSH测试入口等准备错误。后者没有通过放宽产品断言解决。此前独审确认的两个独立重定向打开同一路径截尾问题仍属于基底既有边界，本包没有扩大其语义承诺。
 
 后续验收包括：追加10单归档及流式安装的真实大树/中断/增量测量、root新增Ability生命周期控制合入后的重新组成与实际Host回合、目标ABI/HAP/设备验证。设备后台保活、受限时间内恢复和任意插件可用性均不能由本次Linux通过直接推出。
+
+## 合 main 时的 OH 删除变体
+
+`compose-runtime.py` 的 `deletion_variants` 钉了 `runtime/session-deletion/core.mjs` 和 `runtime/bridge/dsh-go-bridge/lib/session-deletion.js` 的前像、后像 SHA。main 改了其中任何一个，组成都会以 `OH deletion source changed` 拒绝，不会静默打错。
+
+遇到这个拒绝时：
+
+1. 读 main 的改动，确认 `session-deletion-ohos.diff` 的语义还成立；每个 hunk 的旧块必须在新源里唯一匹配，否则重切这份差分。
+2. 更新 `deletion_variants` 里两个文件的前像和后像 SHA。
+3. 重跑 `composition-inputs.test.py`、`session-deletion-publication.test.mjs`、`session-deletion-sync/directory-sync.test.mjs` 和 `host-layout.py --assembled-payload`。
+
+组成物里的 `dsh-session-persistence-jsonl/lib/index.js` 如果也变了，`dynamic-omissions.json` 里它的 `importerSha256` 要一起更新。Android 不走这条路径。

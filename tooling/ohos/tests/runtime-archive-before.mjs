@@ -27,6 +27,7 @@ const pack=await makeArchive(path.join(output,'runtime.hap'),{
   'node_modules/@deepseek-ai/dsh/lib/bin.js':'bin','runtime/ohos/preload.mjs':'preload',
   'runtime/ohos/process/index.mjs':'process','runtime/ohos/process/sandbox.mjs':'sandbox',
   'runtime/ohos/capabilities/index.mjs':'capabilities','runtime/ohos/lifecycle/index.mjs':'lifecycle',
+  'runtime/bridge/dsh-go-bridge/lib/index.js':'bridge',
 });
 const original=new old.RuntimeInstaller(new OriginalStorage(pack.resources,directory),directory+'/runtime');
 let failure;

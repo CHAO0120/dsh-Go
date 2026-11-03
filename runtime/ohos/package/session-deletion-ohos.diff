@@ -1,0 +1,80 @@
+# OH-only composition variants; shared Android inputs remain byte-identical.
+--- a/runtime/session-deletion/core.mjs
++++ b/runtime/session-deletion/core.mjs
+@@ -62,6 +62,12 @@
+     const handle = await open(path, 'r');
+     try { await handle.sync(); } finally { await handle.close(); }
+   };
++  const syncMarker = async (id) => {
++    await syncDir(slot(id));
++    await syncDir(control);
++    await syncDir(root);
++    await syncDir(dirname(root));
++  };
+   const writeMarker = async (id, dir) => {
+     await mkdir(slot(id), { recursive: true, mode: 0o700 });
+     const temporary = join(slot(id), `.${randomUUID()}.tmp`);
+@@ -71,12 +77,21 @@
+         await handle.writeFile(JSON.stringify({ version: 1, directory: relative(root, dir) }));
+         await handle.sync();
+       } finally { await handle.close(); }
+-      await link(temporary, marker(id));
++      if (process.platform === 'openharmony') {
++        const publication = globalThis[Symbol.for('dsh.go.ohos.publication')];
++        if (publication?.protocolVersion !== 1 || typeof publication.publishAtomic !== 'function') {
++          throw failure('unavailable', 'Atomic session deletion publication is unavailable.');
++        }
++        try { await publication.publishAtomic(temporary, marker(id)); }
++        catch (error) {
++          if (error?.code === 'ERR_OHOS_PUBLICATION_ATOMIC_REQUIRED') {
++            throw Object.assign(failure('unavailable', 'Atomic session deletion publication is unavailable.'), { cause: error });
++          }
++          throw error;
++        }
++      } else await link(temporary, marker(id));
+     } finally { await rm(temporary, { force: true }); }
+-    await syncDir(slot(id));
+-    await syncDir(control);
+-    await syncDir(root);
+-    await syncDir(dirname(root));
++    await syncMarker(id);
+   };
+   const savedDirectory = (id) => {
+     const record = JSON.parse(readFileSync(marker(id), 'utf8'));
+@@ -104,6 +119,12 @@
+   };
+   return {
+     version: 1, pending, deleted, assertAdmit, assertParent, withMutation: mutation,
++    get supported() {
++      if (process.platform !== 'openharmony') return true;
++      const publication = globalThis[Symbol.for('dsh.go.ohos.publication')];
++      return publication?.protocolVersion === 1 && typeof publication.publishAtomic === 'function'
++        && !['unsupported', 'disabled-after-crash'].includes(publication.atomic);
++    },
+     // Global identity lease closes the alternate-cwd create race; the original directory
+     // lease also excludes older runtime writers. Neither inode is ever unlinked.
+     async acquireWriter(id, dir, header) {
+@@ -176,6 +197,7 @@
+           }
+           const files = await logFiles(dir);
+           if (!retry) await writeMarker(id, dir); // Durable point of no return; retry completes cleanup.
++          else if (process.platform === 'openharmony') await syncMarker(id); // Retry a commit whose directory sync previously failed.
+           storage.coldLogMemo.delete(id);
+           storage.migrationPreparations.get(id)?.controller.abort();
+           storage.migrationPreparations.delete(id);
+--- a/runtime/bridge/dsh-go-bridge/lib/session-deletion.js
++++ b/runtime/bridge/dsh-go-bridge/lib/session-deletion.js
+@@ -32,7 +32,12 @@
+       if (path !== `${ROOT}/deletion` && path !== `${ROOT}/delete`) return false;
+       if (path === `${ROOT}/deletion`) {
+         if (req.method !== "GET") send(res, 405, errorBody("unavailable", "Use GET."));
+-        else send(res, 200, { supported: await seam() !== undefined, version: 1 });
++        else {
++          const services = await seam();
++          const supported = services !== undefined && (process.platform !== "openharmony"
++            || services.persistence.dshGoDeletion.supported === true);
++          send(res, 200, { supported, version: 1 });
++        }
+         return true;
+       }
+       if (req.method !== "POST") {

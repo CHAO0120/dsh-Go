@@ -5,6 +5,7 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import shutil
 import tempfile
 import unittest
 
@@ -115,6 +116,65 @@ class InputTests(unittest.TestCase):
             composition.checked_lock(prefix, expected)
 
 
+class DeletionVariantTests(unittest.TestCase):
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory(prefix='ohos-deletion-variant-')
+        self.addCleanup(temporary.cleanup)
+        self.root = Path(temporary.name)
+        self.prefix = self.root / 'prefix'
+        self.companion = self.prefix / 'node_modules/@deepseek-ai/dsh-session-persistence-jsonl/lib/dsh-go-deletion.mjs'
+        self.companion.parent.mkdir(parents=True)
+        shutil.copyfile(ROOT / 'runtime/session-deletion/core.mjs', self.companion)
+        self.output = self.root / 'generated'
+
+    def test_variants_are_generated_without_modifying_shared_or_prepared_inputs(self):
+        paths = [ROOT / 'runtime/session-deletion/core.mjs',
+                 ROOT / 'runtime/bridge/dsh-go-bridge/lib/session-deletion.js', self.companion]
+        before = [path.read_bytes() for path in paths]
+        report = composition.deletion_variants(ROOT, self.prefix, self.output)
+        self.assertEqual([path.read_bytes() for path in paths], before)
+        self.assertEqual(len(report['files']), 2)
+        for row in report['files']:
+            data = (self.output / row['file']).read_bytes()
+            self.assertEqual(len(data), row['size'])
+            self.assertEqual(hashlib.sha256(data).hexdigest(), row['sha256'])
+            self.assertNotEqual(row['sourceSha256'], row['sha256'])
+
+    def test_a_changed_prepared_companion_is_rejected_before_output(self):
+        self.companion.write_bytes(self.companion.read_bytes() + b'\n')
+        with self.assertRaisesRegex(ValueError, 'Prepared deletion companion differs'):
+            composition.deletion_variants(ROOT, self.prefix, self.output)
+        self.assertFalse(self.output.exists())
+
+    def private_repo(self):
+        repo = self.root / 'repo'
+        for name in ['runtime/session-deletion/core.mjs',
+                     'runtime/bridge/dsh-go-bridge/lib/session-deletion.js',
+                     'runtime/lib/rtbuild.py', 'runtime/ohos/package/session-deletion-ohos.diff']:
+            target = repo / name
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(ROOT / name, target)
+        return repo
+
+    def test_new_shared_source_requires_review_instead_of_silent_rebase(self):
+        repo = self.private_repo()
+        source = repo / 'runtime/session-deletion/core.mjs'
+        source.write_bytes(source.read_bytes() + b'\n')
+        with self.assertRaisesRegex(ValueError, 'OH deletion source changed'):
+            composition.deletion_variants(repo, self.prefix, self.output)
+        self.assertFalse(self.output.exists())
+
+    def test_changed_transform_cannot_replace_the_reviewed_output(self):
+        repo = self.private_repo()
+        patch = repo / 'runtime/ohos/package/session-deletion-ohos.diff'
+        text = patch.read_text()
+        self.assertIn('Atomic session deletion publication is unavailable.', text)
+        patch.write_text(text.replace('Atomic session deletion publication is unavailable.', 'Different output.'))
+        with self.assertRaisesRegex(ValueError, 'variant differs from its reviewed output'):
+            composition.deletion_variants(repo, self.prefix, self.output)
+        self.assertFalse(self.output.exists())
+
+
 class RequiredTests(unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory(prefix='ohos-required-gate-')
@@ -126,8 +186,10 @@ class RequiredTests(unittest.TestCase):
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_bytes((ROOT / target.relative_to(self.root)).read_bytes())
 
-    def test_actual_six_host_requirements_match_manifest(self):
-        self.assertEqual(len(composition.required_entries(self.root)), 6)
+    def test_actual_host_requirements_include_bridge_and_match_manifest(self):
+        entries = composition.required_entries(self.root)
+        self.assertEqual(len(entries), 7)
+        self.assertIn('runtime/bridge/dsh-go-bridge/lib/index.js', entries)
 
     def test_each_missing_manifest_entry_is_rejected(self):
         before = self.core.read_text()

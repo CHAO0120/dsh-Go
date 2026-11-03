@@ -40,7 +40,8 @@ def main():
         path.mkdir(parents=True)
     for name in ['runtime/ohos/preload.mjs', 'node_modules/@deepseek-ai/dsh/lib/bin.js',
                  'runtime/ohos/process/index.mjs', 'runtime/ohos/process/sandbox.mjs',
-                 'runtime/ohos/lifecycle/index.mjs', 'runtime/ohos/capabilities/index.mjs']:
+                 'runtime/ohos/lifecycle/index.mjs', 'runtime/ohos/capabilities/index.mjs',
+                 'runtime/bridge/dsh-go-bridge/lib/index.js']:
         path = runtime / name
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text('// Only a filesystem preflight fixture.\n')
@@ -48,9 +49,12 @@ def main():
         (native / name).write_text('Path fixture, not a native binary.\n')
     environment = {key: os.environ[key] for key in ['PATH', 'LANG', 'LC_ALL'] if key in os.environ}
     rows = []
-    for name in ['default-profile', 'missing-lifecycle', 'missing-capabilities']:
-        for module in ['lifecycle', 'capabilities']:
-            path = runtime / ('runtime/ohos/' + module + '/index.mjs')
+    services = [('lifecycle', 'ohos-lifecycle', 'runtime/ohos/lifecycle/index.mjs'),
+                ('capabilities', 'ohos-capabilities', 'runtime/ohos/capabilities/index.mjs'),
+                ('bridge', 'dsh-go-bridge', 'runtime/bridge/dsh-go-bridge/lib/index.js')]
+    for name in ['default-profile', 'missing-lifecycle', 'missing-capabilities', 'missing-bridge']:
+        for module, _identifier, relative in services:
+            path = runtime / relative
             if name == 'missing-' + module:
                 path.unlink()
             else:
@@ -63,10 +67,10 @@ def main():
         if name == 'default-profile':
             config = json.loads((dsh / 'ohos-host.patch.json').read_text())
             entries = [entry for item in config for entry in item.get('insert', [])
-                       if entry.get('id') in ['ohos-lifecycle', 'ohos-capabilities']]
+                       if entry.get('id') in [identifier for _, identifier, _ in services]]
             row['serviceEntries'] = entries
-            expected = [{'id': 'ohos-' + module, 'name': str(runtime / ('runtime/ohos/' + module + '/index.mjs'))}
-                        for module in ['lifecycle', 'capabilities']]
+            expected = [{'id': identifier, 'name': str(runtime / relative)}
+                        for _, identifier, relative in services]
             row['passed'] = result.returncode == 0 and entries == expected
             argv = json.loads(argv_path.read_text())
             row['singleImport'] = argv.count('--import') == 1 and len(argv) == 13

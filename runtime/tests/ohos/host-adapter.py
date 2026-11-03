@@ -55,7 +55,8 @@ for (const name of ['libdsh_flock.so','libdsh_require_builtin.so'])
   fs.writeFileSync(path.join(options.nativeLibraryDir,name),'path fixture, not an ELF library');
 for (const relative of ['runtime/ohos/preload.mjs','node_modules/@deepseek-ai/dsh/lib/bin.js',
   'runtime/ohos/process/index.mjs','runtime/ohos/process/sandbox.mjs',
-  'runtime/ohos/lifecycle/index.mjs','runtime/ohos/capabilities/index.mjs']) {
+  'runtime/ohos/lifecycle/index.mjs','runtime/ohos/capabilities/index.mjs',
+  'runtime/bridge/dsh-go-bridge/lib/index.js']) {
   const file=path.join(options.runtimeRoot,relative);fs.mkdirSync(path.dirname(file),{recursive:true});
   fs.writeFileSync(file,'// test substitute\n');
 }

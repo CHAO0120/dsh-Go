@@ -29,7 +29,7 @@
 | 单个文件 | 512 MiB |
 | 带 `files/` 前缀的成员名称 | 4096 个 UTF-8 字节 |
 
-这些是项目采用的有界格式，不是对通用 ZIP 最大能力的说明。路径、原生后缀、文件/目录冲突和六个入口先经过真实 `RuntimeCore.validateManifest`；组成时的文件头门继续拒绝 ELF/wasm/PE/Mach-O。`.node.js` 仍作为普通 JavaScript 名称保留。
+这些是项目采用的有界格式，不是对通用 ZIP 最大能力的说明。路径、原生后缀、文件/目录冲突和七个入口先经过真实 `RuntimeCore.validateManifest`；组成时的文件头门继续拒绝 ELF/wasm/PE/Mach-O。`.node.js` 仍作为普通 JavaScript 名称保留。
 
 写完后逐成员回读 SHA256、size 和 CRC，核对方法、顺序、名称集合和元数据，再生成外层 Stored 归档并回读其完整字节。完整组成在自己的临时目录完成，所有门通过才将该目录 rename 到新的输出名；已有输出拒绝覆盖。正常异常会清理本次 staging，进程被强制杀死后的未发布 staging 可能保留，不能把它当成可安装产物。
 

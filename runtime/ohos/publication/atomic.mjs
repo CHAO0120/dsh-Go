@@ -88,7 +88,7 @@ export function createAtomicPublisher({
   if (typeof selectTemporaryPath !== 'function') throw new TypeError('selectTemporaryPath must be a function');
   if (atomicFuse !== undefined && typeof atomicFuse?.run !== 'function') throw new TypeError('Invalid publication atomic fuse');
   const publications = new Map();
-  const publish = async function publish(source, target, { signal, fs: callFs } = {}) {
+  const publish = async function publish(source, target, { signal, fs: callFs, requireAtomic = false } = {}) {
     source = requirePath(source, 'source');
     target = requirePath(target, 'target');
     const activeFs = callFs ? { ...fs, ...callFs } : fs;
@@ -169,6 +169,9 @@ export function createAtomicPublisher({
         }
       }
       if (fallback) {
+        // Durable control records cannot safely use a partial final file.
+        if (requireAtomic) throw Object.assign(new Error('Atomic no-replace publication is required'),
+          { code: 'ERR_OHOS_PUBLICATION_ATOMIC_REQUIRED', reason: fallback.reason });
         await onFallback({ ...fallback,
           risk: 'partial final file remains possible after failure or process death' });
         await legacyExclusiveCopy(source, target, activeFs, signal);

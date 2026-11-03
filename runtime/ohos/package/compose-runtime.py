@@ -330,6 +330,51 @@ def check_patches(repo: Path, prefix: Path, target_report: Path):
     return identity
 
 
+def deletion_variants(repo: Path, prefix: Path, output: Path):
+    """Generate only the two OH deletion variants; never rewrite shared Android inputs."""
+    rows = [
+        ('runtime/session-deletion/core.mjs',
+         'node_modules/@deepseek-ai/dsh-session-persistence-jsonl/lib/dsh-go-deletion.mjs', 'core.mjs',
+         '0513530a6589c9fc3f64d865ad5750a7d53632861eac6fafd67c8d186279e937',
+         '0ebc2fcfc1b1390dffc66ad7a8d079d90edf5e5ee05cec4e4cadd9ac6d7a0952'),
+        ('runtime/bridge/dsh-go-bridge/lib/session-deletion.js',
+         'runtime/bridge/dsh-go-bridge/lib/session-deletion.js', 'session-deletion.js',
+         '89a6161ff3ad6370ea7f31b74e8a3e165d2365f745a3ae8134309eea6f18381f',
+         'ee683d815a8628e1af115742f502946039aa8aa2cc01940870484cb166958baf'),
+    ]
+    patch = repo / 'runtime/ohos/package/session-deletion-ohos.diff'
+    spec = importlib.util.spec_from_file_location('deletion_rtbuild', repo / 'runtime/lib/rtbuild.py')
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    parsed = module.parse_unified_diff(patch.read_text())
+    if [name for name, _ in parsed] != [row[0] for row in rows]:
+        raise ValueError('OH deletion diff must contain exactly the reviewed core and bridge sources')
+    generated = []
+    for (source, destination, name, before, after), (_, hunks) in zip(rows, parsed):
+        raw = (repo / source).read_bytes()
+        if digest(raw) != before:
+            raise ValueError(f'OH deletion source changed; review the new input: {source}')
+        if source == rows[0][0] and (prefix / destination).read_bytes() != raw:
+            raise ValueError('Prepared deletion companion differs from the shared source')
+        data = module.apply_hunks(raw.decode('utf-8'), hunks, source).encode('utf-8')
+        if digest(data) != after:
+            raise ValueError(f'OH deletion variant differs from its reviewed output: {source}')
+        generated.append((data, {'source': source, 'sourceSize': len(raw), 'sourceSha256': before,
+                                'destination': destination, 'file': name,
+                                'size': len(data), 'sha256': after}))
+    output.mkdir(parents=True)  # a prior result is not an input
+    for data, row in generated:
+        target = output / row['file']
+        target.write_bytes(data)
+        target.chmod(0o644)
+    report = {'schema': 1, 'scope': 'OH-only session deletion composition variants',
+              'patch': patch.relative_to(repo).as_posix(), 'patchSha256': digest(patch.read_bytes()),
+              'generatorSha256': digest(Path(__file__).read_bytes()),
+              'files': [row for _, row in generated]}
+    (output / 'sources.json').write_bytes(json_bytes(report))
+    return report
+
+
 def assemble(args):
     repo = Path(__file__).resolve().parents[3]
     required = required_entries(repo)
@@ -360,8 +405,13 @@ def assemble(args):
     try:
         raw = staging / 'rawfile/dsh-runtime'
         composer = Composer(raw / 'files')
+        deletion_root = staging / 'generated/ohos-deletion'
+        deletion = deletion_variants(repo, dsh, deletion_root)
+        deletion_paths = {row['destination'] for row in deletion['files']}
+        deletion_reason = 'OH 原子删除使用已核源差分生成的专用模块；共享 Android 输入保持原字节'
+        dsh_file_rules = {**config['dshRemoveFiles'], deletion['files'][0]['destination']: deletion_reason}
         # Only the npm prefix's node_modules, never a prior staged runtime subtree.
-        composer.dependencies(dsh, 'dsh', '', packages['dsh'], config['dshRemovePackages'], config['dshRemoveFiles'])
+        composer.dependencies(dsh, 'dsh', '', packages['dsh'], config['dshRemovePackages'], dsh_file_rules)
         composer.add(dsh / 'package.json', dsh, 'dsh', 'package.json')
         composer.dependencies(process, 'process-dependencies', 'runtime/ohos/process',
                               packages['process'], config['processRemovePackages'], config['processRemoveFiles'])
@@ -379,9 +429,13 @@ def assemble(args):
         composer.add(repo / 'LICENSE', repo, 'repository', 'node_modules/@dsh-go/ohos-native/LICENSE')
         bridge = repo / 'runtime/bridge/dsh-go-bridge'
         for source in records(bridge / 'lib'):
-            composer.add(source, repo, 'repository', source.relative_to(repo).as_posix())
+            destination = source.relative_to(repo).as_posix()
+            composer.add(source, repo, 'repository', destination,
+                         deletion_reason if destination in deletion_paths else None)
         for name in ('package.json', 'cordis.patch.yml'):
             composer.add(bridge / name, repo, 'repository', (bridge / name).relative_to(repo).as_posix())
+        for row in deletion['files']:
+            composer.add(deletion_root / row['file'], deletion_root, 'generated-ohos-deletion', row['destination'])
         for name in ('LICENSE', 'THIRD_PARTY_NOTICES.md'):
             composer.add(repo / name, repo, 'repository', name)
         for source in records(source_runtime / 'licenses/texts'):
@@ -454,6 +508,7 @@ def assemble(args):
                   'target': 'ohos', 'runtimeVersion': manifest['runtimeVersion'], 'payloadSha256': identity,
                   'compositionSha256': digest(config_path.read_bytes()), 'patchInputSha256': patch_identity,
                   'preparedInputsSha256': receipt_identity, 'installation': config['installation'],
+                  'deletionVariants': deletion,
                   'inputBytes': sum(row.get('size', 0) for row in composer.inputs if not row['source'].startswith('generated-')),
                   'payloadBytes': sum(row['size'] for row in payload), 'payloadFiles': len(payload),
                   'archiveBytes': archive.stat().st_size, 'archiveSha256': file_digest(archive),

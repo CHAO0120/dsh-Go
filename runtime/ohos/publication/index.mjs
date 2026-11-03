@@ -114,6 +114,9 @@ export async function installPublication() {
       systemBuildIdentity: build.identity,
       get pendingCount() { return publish.pendingCount; },
       publish,
+      publishAtomic(source, target, options = {}) {
+        return publish(source, target, { ...options, requireAtomic: true });
+      },
     });
     Object.defineProperty(globalThis, publicationSymbol, { value: service });
     installedOwnership = Object.freeze({

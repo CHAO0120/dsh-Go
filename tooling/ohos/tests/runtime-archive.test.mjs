@@ -19,6 +19,7 @@ const baseFiles = {
   'runtime/ohos/process/sandbox.mjs': 'export const sandbox = true;',
   'runtime/ohos/lifecycle/index.mjs': 'export const lifecycle = true;',
   'runtime/ohos/capabilities/index.mjs': 'export const capabilities = true;',
+  'runtime/bridge/dsh-go-bridge/lib/index.js': 'export function apply() {}',
   'runtime/ohos/.manifest.json': '{"dotfile":true}',
   'runtime/ohos/中文 空格/client.node.js': '导入 🐳 .node.js 是 JavaScript',
   'empty.txt': '',
