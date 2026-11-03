@@ -23,7 +23,7 @@ SDK 自带 clang 15.0.4 和它的 libc++ 实测在两处失败，均不是加参
 
 ## 执行
 
-先应用 O7a，其 `patch-undici.mjs` 修复保持请求体的重定向中 multipart 边界错配；本包引用该已独立交付的构建入口，不再复制一份生成器。
+内嵌 Undici 由 `tooling/ohos/prepare-node-fetch.mjs` 准备：它包含 `patch-undici.mjs` 的请求体重定向修复和响应体取消原因修复，只跑这一个入口。旧入口不认识新 bundle，第二次运行会拒绝。
 
 ```sh
 npm ci --ignore-scripts --no-audit --no-fund --prefix runtime/ohos/node/build-tools

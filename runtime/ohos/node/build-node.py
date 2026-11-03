@@ -18,6 +18,7 @@ import time
 
 HERE = Path(__file__).resolve().parent
 HOST = HERE.parent / 'host'
+PREPARE_FETCH = HERE.parents[2] / 'tooling/ohos/prepare-node-fetch.mjs'
 SOURCE_SHA256 = '4f5379796280cdaeb0c2f358fd04b6a16cc4fb7dfa83b5a8c91a9d963b435231'
 RUNNER_SOURCES = {'node_runner.cpp': 'node_runner.o', 'publication_binding.cc': 'publication_binding.o'}
 
@@ -145,9 +146,9 @@ def main():
     runtime_plan = json.loads((runtimes / 'runtimes.json').read_text())
     if digest(clang) != runtime_plan['compilerSha256']:
         parser.error('--clang is not the compiler --cxx-runtime was built with')
-    for file in [HERE / 'patch-undici.mjs', HERE / 'build-tools/node_modules/esbuild/package.json']:
+    for file in [PREPARE_FETCH, HERE / 'build-tools/node_modules/esbuild/package.json']:
         if not file.is_file():
-            parser.error(f'Missing O7a input: {file}; apply O7a and install its locked build tools first')
+            parser.error(f'Missing fetch input: {file}; install the locked build tools first')
     if work.exists() or output.exists():
         parser.error('--work and --output must be fresh; an interrupted build is kept for diagnosis')
     if subprocess.check_output([str(node), '--version'], text=True).strip() != 'v24.22.1':
@@ -172,8 +173,8 @@ def main():
     pins = apply_patches(source)
     subprocess.run([sys.executable, str(HERE / 'gen-napi-rename.py'), '--source', str(source), '--check'], check=True)
     with (work / 'undici-build.log').open('w') as log:
-        subprocess.run([str(node), str(HERE / 'patch-undici.mjs'), str(source)],
-                       stdout=log, stderr=subprocess.STDOUT, check=True)
+        subprocess.run([str(node), str(PREPARE_FETCH), '--target', 'ohos', '--build-tools', str(HERE / 'build-tools'),
+                        str(source)], stdout=log, stderr=subprocess.STDOUT, check=True)
 
     wrappers, runner = work / 'toolchain', work / 'host'
     wrappers.mkdir()
