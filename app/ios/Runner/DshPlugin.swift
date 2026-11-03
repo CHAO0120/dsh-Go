@@ -1,0 +1,532 @@
+import Flutter
+import PDFKit
+import Photos
+import QuickLook
+import UIKit
+import UserNotifications
+
+// The app's own platform channels on iOS. The Android side of each is under
+// android/app/src/main/kotlin/io/github/ccch1mneyyy/dsh_app/. A channel nobody
+// registers reaches Dart as MissingPluginException, which already means "not on
+// this platform": `dsh/runtime` (no local engine), `dsh/update`, `dsh/phone`,
+// `dsh/pet_overlay` and the rest stay that way until there is something to say.
+
+final class DshPlugin: NSObject, FlutterPlugin, FlutterSceneLifeCycleDelegate {
+  private static var instance: DshPlugin?
+
+  private let links: LinksChannel
+  private let keep: [AnyObject]
+
+  static func register(with registrar: any FlutterPluginRegistrar) {
+    let plugin = DshPlugin(messenger: registrar.messenger())
+    instance = plugin
+    registrar.addSceneDelegate(plugin)
+  }
+
+  private init(messenger: any FlutterBinaryMessenger) {
+    links = LinksChannel(messenger: messenger)
+    keep = [
+      AppChannel(messenger: messenger),
+      FilesChannel(messenger: messenger),
+      MediaChannel(messenger: messenger),
+      NotifyChannel(messenger: messenger),
+      // The runtime controller subscribes before it learns there is no engine, and
+      // activating a stream with no handler reports an error to Flutter.
+      SilentEvents(name: "dsh/runtime/events", messenger: messenger),
+    ]
+    super.init()
+  }
+
+  func scene(
+    _ scene: UIScene,
+    willConnectTo session: UISceneSession,
+    options connectionOptions: UIScene.ConnectionOptions?
+  ) -> Bool {
+    connectionOptions?.urlContexts.forEach { links.open($0.url) }
+    return false
+  }
+
+  func scene(_ scene: UIScene, openURLContexts URLContexts: Set<UIOpenURLContext>) -> Bool {
+    URLContexts.forEach { links.open($0.url) }
+    return !URLContexts.isEmpty
+  }
+}
+
+/// An event channel that never sends anything.
+private final class SilentEvents: NSObject, FlutterStreamHandler {
+  private let channel: FlutterEventChannel
+
+  init(name: String, messenger: any FlutterBinaryMessenger) {
+    channel = FlutterEventChannel(name: name, binaryMessenger: messenger)
+    super.init()
+    channel.setStreamHandler(self)
+  }
+
+  func onListen(withArguments arguments: Any?, eventSink events: @escaping FlutterEventSink) -> FlutterError? { nil }
+
+  func onCancel(withArguments arguments: Any?) -> FlutterError? { nil }
+}
+
+private func arguments(_ call: FlutterMethodCall) -> [String: Any] {
+  call.arguments as? [String: Any] ?? [:]
+}
+
+private func onMain(_ work: @escaping () -> Void) {
+  DispatchQueue.main.async(execute: work)
+}
+
+// MARK: - dsh/app
+
+private final class AppChannel {
+  private let channel: FlutterMethodChannel
+
+  init(messenger: any FlutterBinaryMessenger) {
+    channel = FlutterMethodChannel(name: "dsh/app", binaryMessenger: messenger)
+    channel.setMethodCallHandler { call, result in
+      switch call.method {
+      case "getTimeZoneId": result(TimeZone.current.identifier)
+      // iOS doesn't let an app bring itself forward.
+      case "bringToFront": result(nil)
+      default: result(FlutterMethodNotImplemented)
+      }
+    }
+  }
+}
+
+// MARK: - dsh/links
+
+/// Incoming `dshgo://` links and files opened with the app. Files are copied into
+/// the cache on one serial queue, so links reach Dart in the order they arrived even
+/// when a large file comes before a small one.
+private final class LinksChannel {
+  private let channel: FlutterMethodChannel
+  private let copies = DispatchQueue(label: "dsh.links")
+  private var ready = false
+  private var held: [[String: String]] = []
+
+  init(messenger: any FlutterBinaryMessenger) {
+    channel = FlutterMethodChannel(name: "dsh/links", binaryMessenger: messenger)
+    channel.setMethodCallHandler { [weak self] call, result in
+      guard call.method == "ready", let self else { return result(FlutterMethodNotImplemented) }
+      self.ready = true
+      self.held.forEach { self.channel.invokeMethod("link", arguments: $0) }
+      self.held.removeAll()
+      result(true)
+    }
+  }
+
+  func open(_ url: URL) {
+    copies.async { [weak self] in
+      let link = url.isFileURL ? Self.copied(url) : ["uri": url.absoluteString]
+      onMain {
+        guard let self else { return }
+        if self.ready {
+          self.channel.invokeMethod("link", arguments: link)
+        } else {
+          self.held.append(link)
+        }
+      }
+    }
+  }
+
+  /// Keeps the sender's file name in a folder of its own. The access granted for an
+  /// opened file ends with this call, so the copy is what Dart gets.
+  private static func copied(_ url: URL) -> [String: String] {
+    let name = url.lastPathComponent
+    let scoped = url.startAccessingSecurityScopedResource()
+    defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+    do {
+      let manager = FileManager.default
+      let folder = try manager.url(for: .cachesDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
+        .appendingPathComponent("links/\(UUID().uuidString)", isDirectory: true)
+      try manager.createDirectory(at: folder, withIntermediateDirectories: true)
+      let copy = folder.appendingPathComponent(name)
+      try manager.copyItem(at: url, to: copy)
+      return ["uri": copy.absoluteString]
+    } catch {
+      return ["error": "unreadable", "name": name]
+    }
+  }
+}
+
+// MARK: - dsh/files
+
+/// Opening, saving and previewing the files a turn produced. There is no local
+/// engine yet, so `resolveGuest` finds nothing and `listOutputs` is empty.
+private final class FilesChannel: NSObject, QLPreviewControllerDataSource {
+  private let channel: FlutterMethodChannel
+  private let pdfQueue = DispatchQueue(label: "dsh.pdf")
+  private var pdf: (path: String, document: PDFDocument)?
+  private var previewing: URL?
+
+  init(messenger: any FlutterBinaryMessenger) {
+    channel = FlutterMethodChannel(name: "dsh/files", binaryMessenger: messenger)
+    super.init()
+    channel.setMethodCallHandler { [weak self] call, result in
+      guard let self else { return result(FlutterMethodNotImplemented) }
+      let args = arguments(call)
+      let path = args["path"] as? String ?? ""
+      switch call.method {
+      case "resolveGuest": result(nil)
+      case "listOutputs": result([])
+      case "open":
+        self.open(path: path, name: args["name"] as? String, chooser: args["chooser"] as? Bool ?? false, result: result)
+      case "saveToDownloads": self.save(path: path, name: args["name"] as? String, result: result)
+      case "pdfInfo": self.pdfInfo(path: path, result: result)
+      case "pdfPage":
+        self.pdfPage(path: path, page: args["page"] as? Int ?? 0, width: args["width"] as? Int ?? 0, result: result)
+      case "pdfClose":
+        self.pdfQueue.async {
+          self.pdf = nil
+          onMain { result(nil) }
+        }
+      default: result(FlutterMethodNotImplemented)
+      }
+    }
+  }
+
+  // Open
+
+  private func open(path: String, name: String?, chooser: Bool, result: FlutterResult) {
+    guard FileManager.default.isReadableFile(atPath: path), let top = topViewController() else {
+      return result(FlutterError(code: "missing", message: "no such file", details: nil))
+    }
+    let url: URL
+    do {
+      url = try named(URL(fileURLWithPath: path), as: name)
+    } catch {
+      return result(FlutterError(code: "failed", message: error.localizedDescription, details: nil))
+    }
+    if !chooser && QLPreviewController.canPreview(url as NSURL) {
+      previewing = url
+      let preview = QLPreviewController()
+      preview.dataSource = self
+      top.present(preview, animated: true)
+    } else {
+      let share = UIActivityViewController(activityItems: [url], applicationActivities: nil)
+      if let popover = share.popoverPresentationController {
+        popover.sourceView = top.view
+        popover.sourceRect = CGRect(x: top.view.bounds.midX, y: top.view.bounds.midY, width: 0, height: 0)
+        popover.permittedArrowDirections = []
+      }
+      top.present(share, animated: true)
+    }
+    result(nil)
+  }
+
+  /// The preview and other apps go by the file's extension, and the cache may not
+  /// have it under the name the file should show.
+  private func named(_ url: URL, as name: String?) throws -> URL {
+    guard let name, !name.isEmpty, name != url.lastPathComponent else { return url }
+    let manager = FileManager.default
+    let folder = manager.temporaryDirectory.appendingPathComponent("open/\(UUID().uuidString)", isDirectory: true)
+    try manager.createDirectory(at: folder, withIntermediateDirectories: true)
+    let copy = folder.appendingPathComponent((name as NSString).lastPathComponent)
+    try manager.copyItem(at: url, to: copy)
+    return copy
+  }
+
+  func numberOfPreviewItems(in controller: QLPreviewController) -> Int {
+    previewing == nil ? 0 : 1
+  }
+
+  func previewController(_ controller: QLPreviewController, previewItemAt index: Int) -> any QLPreviewItem {
+    (previewing ?? URL(fileURLWithPath: "/")) as NSURL
+  }
+
+  // Save
+
+  /// Into the app's Documents, which the Files app shows under the app's name
+  /// (UIFileSharingEnabled, LSSupportsOpeningDocumentsInPlace). No dialog, like the
+  /// save on Android; returns where it landed.
+  private func save(path: String, name: String?, result: @escaping FlutterResult) {
+    DispatchQueue.global(qos: .userInitiated).async {
+      let manager = FileManager.default
+      guard manager.isReadableFile(atPath: path) else {
+        return onMain { result(FlutterError(code: "missing", message: "no such file", details: nil)) }
+      }
+      do {
+        let documents = try manager.url(for: .documentDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
+        let wanted = name?.isEmpty == false ? name! : URL(fileURLWithPath: path).lastPathComponent
+        let target = Self.free(in: documents, name: (wanted as NSString).lastPathComponent)
+        try manager.copyItem(at: URL(fileURLWithPath: path), to: target)
+        onMain { result("DSH Go/\(target.lastPathComponent)") }
+      } catch {
+        onMain { result(FlutterError(code: "failed", message: error.localizedDescription, details: nil)) }
+      }
+    }
+  }
+
+  /// `report.pdf`, then `report (1).pdf`, the first name not taken.
+  private static func free(in folder: URL, name: String) -> URL {
+    let manager = FileManager.default
+    let plain = folder.appendingPathComponent(name)
+    if !manager.fileExists(atPath: plain.path) { return plain }
+    let stem = (name as NSString).deletingPathExtension
+    let ext = (name as NSString).pathExtension
+    var number = 1
+    while true {
+      let candidate = folder.appendingPathComponent(ext.isEmpty ? "\(stem) (\(number))" : "\(stem) (\(number)).\(ext)")
+      if !manager.fileExists(atPath: candidate.path) { return candidate }
+      number += 1
+    }
+  }
+
+  // PDF preview
+
+  private func document(_ path: String) -> PDFDocument? {
+    if let pdf, pdf.path == path { return pdf.document }
+    guard let document = PDFDocument(url: URL(fileURLWithPath: path)) else { return nil }
+    pdf = (path, document)
+    return document
+  }
+
+  /// A page's size as it is shown: rotated pages swap width and height.
+  private static func size(of page: PDFPage) -> CGSize {
+    let box = page.bounds(for: .mediaBox).size
+    return page.rotation % 180 == 0 ? box : CGSize(width: box.height, height: box.width)
+  }
+
+  private func pdfInfo(path: String, result: @escaping FlutterResult) {
+    pdfQueue.async {
+      guard let document = self.document(path) else {
+        return onMain { result(FlutterError(code: "missing", message: "no such PDF", details: nil)) }
+      }
+      let pages: [[String: Int]] = (0..<document.pageCount).compactMap { index in
+        guard let page = document.page(at: index) else { return nil }
+        let size = Self.size(of: page)
+        return ["width": Int(size.width.rounded()), "height": Int(size.height.rounded())]
+      }
+      onMain { result(pages) }
+    }
+  }
+
+  private func pdfPage(path: String, page index: Int, width: Int, result: @escaping FlutterResult) {
+    pdfQueue.async {
+      guard width > 0, let page = self.document(path)?.page(at: index) else {
+        return onMain { result(FlutterError(code: "missing", message: "no such page", details: nil)) }
+      }
+      let size = Self.size(of: page)
+      guard size.width > 0, size.height > 0 else {
+        return onMain { result(FlutterError(code: "failed", message: "empty page", details: nil)) }
+      }
+      let scale = CGFloat(width) / size.width
+      let target = CGSize(width: CGFloat(width), height: (size.height * scale).rounded())
+      let format = UIGraphicsImageRendererFormat()
+      format.scale = 1
+      format.opaque = true
+      let png = UIGraphicsImageRenderer(size: target, format: format).pngData { context in
+        UIColor.white.setFill()
+        context.fill(CGRect(origin: .zero, size: target))
+        context.cgContext.translateBy(x: 0, y: target.height)
+        context.cgContext.scaleBy(x: scale, y: -scale)
+        page.draw(with: .mediaBox, to: context.cgContext)
+      }
+      onMain { result(FlutterStandardTypedData(bytes: png)) }
+    }
+  }
+}
+
+private func topViewController() -> UIViewController? {
+  let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+  let scene = scenes.first { $0.activationState == .foregroundActive } ?? scenes.first
+  var top = scene?.windows.first { $0.isKeyWindow }?.rootViewController
+  while let presented = top?.presentedViewController { top = presented }
+  return top
+}
+
+private func openAppSettings(_ address: String, result: @escaping FlutterResult) {
+  guard let url = URL(string: address) else { return result(false) }
+  UIApplication.shared.open(url) { result($0) }
+}
+
+// MARK: - dsh/media
+
+private final class MediaChannel {
+  private let channel: FlutterMethodChannel
+
+  init(messenger: any FlutterBinaryMessenger) {
+    channel = FlutterMethodChannel(name: "dsh/media", binaryMessenger: messenger)
+    channel.setMethodCallHandler { call, result in
+      switch call.method {
+      case "saveImage":
+        let args = arguments(call)
+        guard let bytes = args["bytes"] as? FlutterStandardTypedData, let name = args["name"] as? String else {
+          return result(FlutterError(code: "invalid", message: "no image", details: nil))
+        }
+        Self.save(bytes.data, name: name, result: result)
+      case "openSettings": openAppSettings(UIApplication.openSettingsURLString, result: result)
+      default: result(FlutterMethodNotImplemented)
+      }
+    }
+  }
+
+  /// Add-only access: saving doesn't need to read the rest of the library.
+  private static func save(_ data: Data, name: String, result: @escaping FlutterResult) {
+    PHPhotoLibrary.requestAuthorization(for: .addOnly) { status in
+      guard status == .authorized || status == .limited else {
+        return onMain { result(FlutterError(code: "permission", message: "photos refused", details: nil)) }
+      }
+      PHPhotoLibrary.shared().performChanges({
+        let options = PHAssetResourceCreationOptions()
+        options.originalFilename = name
+        PHAssetCreationRequest.forAsset().addResource(with: .photo, data: data, options: options)
+      }) { saved, error in
+        onMain {
+          if saved {
+            result("Photos/\(name)")
+          } else {
+            result(FlutterError(code: "failed", message: error?.localizedDescription, details: nil))
+          }
+        }
+      }
+    }
+  }
+}
+
+// MARK: - dsh/notify
+
+/// Notifications posted by the app itself. They only cover what happens while the
+/// app is running: once iOS suspends it nothing here runs, and telling the person a
+/// turn ended then takes a push from the host.
+///
+/// Approving from a notification isn't offered: the person opens the conversation and
+/// approves there, against what the host says now. Live activities come later.
+private final class NotifyChannel {
+  private let channel: FlutterMethodChannel
+  private let actions: SilentEvents
+  private let taps: FlutterEventChannel
+
+  init(messenger: any FlutterBinaryMessenger) {
+    channel = FlutterMethodChannel(name: "dsh/notify", binaryMessenger: messenger)
+    actions = SilentEvents(name: "dsh/notify/actions", messenger: messenger)
+    taps = FlutterEventChannel(name: "dsh/notify/taps", binaryMessenger: messenger)
+    taps.setStreamHandler(NotifyTaps.shared)
+    channel.setMethodCallHandler { call, result in
+      Self.handle(call, result: result)
+    }
+  }
+
+  private static func handle(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
+    let center = UNUserNotificationCenter.current()
+    let args = arguments(call)
+    switch call.method {
+    case "status": status(center, result: result)
+    case "show": show(center, args, result: result)
+    case "cancel":
+      let id = identifier(args)
+      center.removeDeliveredNotifications(withIdentifiers: [id])
+      center.removePendingNotificationRequests(withIdentifiers: [id])
+      result(nil)
+    case "cancelGroup":
+      let group = args["group"] as? String
+      center.getDeliveredNotifications { delivered in
+        let ids = delivered.filter { $0.request.content.threadIdentifier == group }.map(\.request.identifier)
+        center.removeDeliveredNotifications(withIdentifiers: ids)
+        onMain { result(nil) }
+      }
+    case "cancelAll":
+      center.removeAllDeliveredNotifications()
+      center.removeAllPendingNotificationRequests()
+      result(nil)
+    case "openSettings", "openLiveSettings":
+      if #available(iOS 16.0, *) {
+        openAppSettings(UIApplication.openNotificationSettingsURLString, result: result)
+      } else {
+        openAppSettings(UIApplication.openSettingsURLString, result: result)
+      }
+    case "live", "actionResult": result(nil)
+    case "liveStatus": result(["supported": false, "allowed": false])
+    default: result(FlutterMethodNotImplemented)
+    }
+  }
+
+  private static func identifier(_ args: [String: Any]) -> String {
+    "\(args["group"] as? String ?? "")|\(args["key"] as? String ?? "")"
+  }
+
+  /// Asks the first time, while the app is on screen to show the question.
+  private static func status(_ center: UNUserNotificationCenter, result: @escaping FlutterResult) {
+    center.getNotificationSettings { settings in
+      if settings.authorizationStatus == .notDetermined {
+        onMain {
+          guard UIApplication.shared.applicationState == .active else {
+            return result(["enabled": true, "done": true, "attention": true])
+          }
+          center.requestAuthorization(options: [.alert, .sound, .badge]) { granted, _ in
+            onMain { result(["enabled": granted, "done": true, "attention": true]) }
+          }
+        }
+      } else {
+        let on = settings.authorizationStatus != .denied
+        onMain { result(["enabled": on, "done": true, "attention": true]) }
+      }
+    }
+  }
+
+  private static func show(_ center: UNUserNotificationCenter, _ args: [String: Any], result: @escaping FlutterResult) {
+    let content = UNMutableNotificationContent()
+    content.title = args["title"] as? String ?? ""
+    content.body = args["text"] as? String ?? ""
+    content.threadIdentifier = args["group"] as? String ?? ""
+    content.sound = .default
+    content.userInfo = ["sessionId", "host", "kind", "eventId"].reduce(into: [String: String]()) { info, key in
+      if let value = args[key] as? String { info[key] = value }
+    }
+    center.add(UNNotificationRequest(identifier: identifier(args), content: content, trigger: nil)) { error in
+      onMain {
+        if let error {
+          result(FlutterError(code: "failed", message: error.localizedDescription, details: nil))
+        } else {
+          result(nil)
+        }
+      }
+    }
+  }
+}
+
+/// Set as the notification center's delegate at launch, before there is a Flutter
+/// engine, so the tap that launched the app is held until Dart listens.
+final class NotifyTaps: NSObject, UNUserNotificationCenterDelegate, FlutterStreamHandler {
+  static let shared = NotifyTaps()
+
+  private var sink: FlutterEventSink?
+  private var held: [[AnyHashable: Any]] = []
+
+  /// On screen, Dart shows its own banner.
+  func userNotificationCenter(
+    _ center: UNUserNotificationCenter,
+    willPresent notification: UNNotification,
+    withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
+  ) {
+    completionHandler([])
+  }
+
+  func userNotificationCenter(
+    _ center: UNUserNotificationCenter,
+    didReceive response: UNNotificationResponse,
+    withCompletionHandler completionHandler: @escaping () -> Void
+  ) {
+    let tap = response.notification.request.content.userInfo
+    onMain {
+      if let sink = self.sink {
+        sink(tap)
+      } else {
+        self.held.append(tap)
+      }
+      completionHandler()
+    }
+  }
+
+  func onListen(withArguments arguments: Any?, eventSink events: @escaping FlutterEventSink) -> FlutterError? {
+    sink = events
+    held.forEach { events($0) }
+    held.removeAll()
+    return nil
+  }
+
+  func onCancel(withArguments arguments: Any?) -> FlutterError? {
+    sink = nil
+    return nil
+  }
+}
