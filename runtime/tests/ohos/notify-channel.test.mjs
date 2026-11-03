@@ -56,7 +56,7 @@ function fixture(t, { directory, hooks = {}, launchWant = {} } = {}) {
     async cancel(id, label) { calls.push('cancel:' + label); active.delete(id + ':' + label); },
     async cancelGroup(group) { calls.push('cancelGroup:' + group); for (const [key, value] of active) if (value.groupName === group) active.delete(key); },
     async getActiveNotifications() { calls.push('getActive'); return [...active.values()]; },
-    async openNotificationSettings(context) { assert.equal(context, ability.context); calls.push('settings'); await hooks.settings?.(); },
+    async openNotificationSettingsWithResult(context) { assert.equal(context, ability.context); calls.push('settings'); await hooks.settings?.(); return { vibrationEnabled: true, soundEnabled: true }; },
     async requestEnableNotification(context) { assert.equal(context, ability.context); calls.push('request'); await hooks.request?.(); },
   };
   const symKey = bytes => ({ bytes: Buffer.from(bytes), getEncoded: () => ({ data: new Uint8Array(bytes) }) });
@@ -204,13 +204,18 @@ test('show and cancelAll serialize around actual pending publication; rejection 
   assert.deepEqual(await f.call('show', post), { value: null }); assert.equal(f.active.size, 1);
 });
 
-test('settings needs a live ability and its UI promise does not block other calls', async t => {
+test('settings needs a live ability, answers when its panel closes and blocks no other call', async t => {
   const entered = deferred(), release = deferred();
   const f = fixture(t, { hooks: { settings: () => { entered.resolve(); return release.promise; } } });
   assert.equal((await f.call('openSettings')).error, 'no_ability'); f.attach();
-  const settings = f.call('openLiveSettings'); await entered.promise;
+  let closed = false;
+  const settings = f.call('openLiveSettings').then(reply => { closed = true; return reply; });
+  await Promise.race([entered.promise, settings]);
   assert.equal((await f.call('status')).value.enabled, true);
+  assert.equal(closed, false);
   release.resolve(); assert.deepEqual(await settings, { value: true });
+  f.hooks.settings = undefined;
+  assert.deepEqual(await f.call('openSettings'), { value: true });
   f.hooks.settings = () => { throw new Error('window gone'); };
   assert.equal((await f.call('openSettings')).error, 'ohos_notify_failed');
 });

@@ -259,13 +259,14 @@ void main() {
       expect(find.text(_zh.searchNoResults), findsNothing);
     });
 
-    testWidgets('on HarmonyOS: 后台运行 is there, and 手机操控 finds nothing', (tester) async {
+    testWidgets('on HarmonyOS: 后台运行 is there, and 手机操控 says it isn\'t', (tester) async {
       await _pump(tester, const SettingsSearchPage(), android: false);
       expect(find.text(_zh.searchSuggestBackground), findsOneWidget);
       expect(find.text(_zh.searchSuggestDark), findsOneWidget);
       await tester.enterText(find.byType(TextField), '手机操控');
       await tester.pumpAndSettle();
-      expect(find.text(_zh.searchNoResults), findsOneWidget);
+      expect(find.text(_zh.harmonySearchUnavailable), findsOneWidget);
+      expect(find.text(_zh.searchNoResults), findsNothing);
     });
   });
 

@@ -17,5 +17,7 @@
   "harmonyAlertsRequirement": "提醒要应用在运行才发得出：离开屏幕几秒后系统会挂起应用，挂起期间没有提醒",
   "harmonyLiveUnavailable": "这个版本暂时没有实时活动",
   "harmonySchedulesLocal": "本机的任务只在应用运行时触发：应用被系统挂起时，到点不会运行",
-  "harmonyPageUnavailable": "鸿蒙版暂时没有这个页面"
+  "harmonyPageUnavailable": "鸿蒙版暂时没有这个页面",
+  "harmonyNotificationSettingsFailed": "没能打开系统设置。到「设置 → 通知和状态栏 → DSH Go」里开启",
+  "harmonySearchUnavailable": "鸿蒙版暂时没有这项功能"
 }

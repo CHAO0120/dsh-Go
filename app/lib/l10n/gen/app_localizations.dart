@@ -12722,6 +12722,18 @@ abstract class L10n {
   /// **'鸿蒙版暂时没有这个页面'**
   String get harmonyPageUnavailable;
 
+  /// No description provided for @harmonyNotificationSettingsFailed.
+  ///
+  /// In zh, this message translates to:
+  /// **'没能打开系统设置。到「设置 → 通知和状态栏 → DSH Go」里开启'**
+  String get harmonyNotificationSettingsFailed;
+
+  /// No description provided for @harmonySearchUnavailable.
+  ///
+  /// In zh, this message translates to:
+  /// **'鸿蒙版暂时没有这项功能'**
+  String get harmonySearchUnavailable;
+
   /// No description provided for @hubSessionDetails.
   ///
   /// In zh, this message translates to:

@@ -17,5 +17,7 @@
   "harmonyAlertsRequirement": "Alerts need the app running: the system suspends it seconds after it leaves the screen, and none go out then",
   "harmonyLiveUnavailable": "Live activities aren't available in this version yet",
   "harmonySchedulesLocal": "Tasks on this phone only fire while the app is running: they won't run on time while the system has it suspended",
-  "harmonyPageUnavailable": "This page isn't available on HarmonyOS yet"
+  "harmonyPageUnavailable": "This page isn't available on HarmonyOS yet",
+  "harmonyNotificationSettingsFailed": "Couldn’t open system settings. Turn on notifications in Settings → Notifications & status bar → DSH Go.",
+  "harmonySearchUnavailable": "This isn't available on HarmonyOS yet"
 }

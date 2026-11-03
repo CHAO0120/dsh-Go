@@ -88,11 +88,20 @@ class NotificationSettingsPage extends ConsumerStatefulWidget {
 
 class _NotificationSettingsPageState extends ConsumerState<NotificationSettingsPage>
     with _RefreshOnResume<NotificationSettingsPage> {
+  bool get _ohos => ref.read(operatingSystemProvider) == 'ohos';
+
+  void _settingsFailed() => ScaffoldMessenger.of(context).showSnackBar(
+    SnackBar(
+      content: Text(_ohos ? appL10n.harmonyNotificationSettingsFailed : appL10n.pluginsNotificationSettingsFailed),
+    ),
+  );
+
   Future<void> _openSystem({String? channel}) async {
     final opened = await ref.read(notifyChannelProvider).openSettings(channel: channel);
-    if (!opened && mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(appL10n.pluginsNotificationSettingsFailed)));
-    }
+    if (!mounted) return;
+    // On HarmonyOS a half-sheet over the app, closed by now: there may be no resume to read again on.
+    if (_ohos) ref.invalidate(notifySystemStatusProvider);
+    if (!opened) _settingsFailed();
   }
 
   Widget? _systemNote(NotifySystemStatus system) {
@@ -154,9 +163,7 @@ class _NotificationSettingsPageState extends ConsumerState<NotificationSettingsP
 
   Future<void> _openLive() async {
     final opened = await ref.read(notifyChannelProvider).openLiveSettings();
-    if (!opened && mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(appL10n.pluginsNotificationSettingsFailed)));
-    }
+    if (!opened && mounted) _settingsFailed();
   }
 
   @override

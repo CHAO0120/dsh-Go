@@ -293,7 +293,8 @@ export default class NotifyPlugin implements FlutterPlugin, AbilityAware, NewWan
       }
       case 'openSettings': case 'openLiveSettings': {
         if (!this.ability) throw new NotifyError('no_ability', '请先回到应用窗口再打开通知设置。');
-        await notificationManager.openNotificationSettings(this.ability.getAbility().context);
+        // Answers when the panel closes, so whoever reads the status next reads what was chosen there.
+        await notificationManager.openNotificationSettingsWithResult(this.ability.getAbility().context);
         return true;
       }
       case 'liveStatus': return new Map<string, Any>([['supported', false], ['allowed', false], ['settings', true], ['xiaomiFocus', false]]);

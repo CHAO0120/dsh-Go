@@ -6941,6 +6941,12 @@ class L10nZh extends L10n {
   String get harmonyPageUnavailable => '鸿蒙版暂时没有这个页面';
 
   @override
+  String get harmonyNotificationSettingsFailed => '没能打开系统设置。到「设置 → 通知和状态栏 → DSH Go」里开启';
+
+  @override
+  String get harmonySearchUnavailable => '鸿蒙版暂时没有这项功能';
+
+  @override
   String get hubSessionDetails => '对话详情';
 
   @override

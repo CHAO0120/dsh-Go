@@ -7336,6 +7336,13 @@ class L10nEn extends L10n {
   String get harmonyPageUnavailable => 'This page isn\'t available on HarmonyOS yet';
 
   @override
+  String get harmonyNotificationSettingsFailed =>
+      'Couldn’t open system settings. Turn on notifications in Settings → Notifications & status bar → DSH Go.';
+
+  @override
+  String get harmonySearchUnavailable => 'This isn\'t available on HarmonyOS yet';
+
+  @override
   String get hubSessionDetails => 'Chat details';
 
   @override
