@@ -12,7 +12,7 @@
 # (see app/ohos/README.md), plus hvigor and ohpm from HarmonyOS Command Line Tools.
 #
 # The Node-side native libraries come from runtime/ohos/native/build-hap-libs.py and are placed only for this run.
-# hvigor builds libdsh_host.so itself, against the placed libnode, through entry/src/main/cpp/CMakeLists.txt.
+# The runtime is one Stored dsh-runtime/runtime.zip, which the app streams from rawfile; it is never expanded here.
 set -euo pipefail
 
 APP="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../app" && pwd)"
@@ -47,8 +47,17 @@ trap restore EXIT
 mkdir -p "$LIBS"
 for lib in "${PREBUILT[@]}"; do cp "$NATIVE_LIBS/$lib" "$LIBS/$lib"; done
 mkdir -p "$RAWFILE"
-python3 -I -m zipfile -e "$RUNTIME" "$RAWFILE"
-[[ -f "$RAWFILE/dsh-runtime/manifest.json" ]] || { printf 'No dsh-runtime/manifest.json in %s\n' "$RUNTIME" >&2; exit 1; }
+python3 -I - "$RUNTIME" "$RAWFILE" <<'PY_RUNTIME_ARCHIVE'
+import pathlib, sys, zipfile
+transport, rawfile = pathlib.Path(sys.argv[1]), pathlib.Path(sys.argv[2])
+with zipfile.ZipFile(transport) as bundle:
+    entries = bundle.infolist()
+    if (len(entries) != 1 or entries[0].filename != "dsh-runtime/runtime.zip"
+            or entries[0].compress_type != zipfile.ZIP_STORED
+            or entries[0].flag_bits & 9):
+        sys.exit(f"{transport} must contain one unencrypted Stored dsh-runtime/runtime.zip")
+    bundle.extract(entries[0], rawfile)
+PY_RUNTIME_ARCHIVE
 export DSH_NODE_HEADERS
 cp ohos/pubspec_overrides.ohos.yaml pubspec_overrides.yaml
 "$FLUTTER" pub get

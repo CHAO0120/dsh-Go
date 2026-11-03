@@ -19,7 +19,8 @@
 #   --aot DIR         app.so and flutter_assets: the ohos-aot-<sha> Actions artifact
 #   --native DIR      libnode.so, libdsh_flock.so, libdsh_require_builtin.so
 #                     (runtime/ohos/native/build-hap-libs.py)
-#   --runtime ZIP     dsh-runtime-rawfile.zip (runtime/ohos/package/compose-runtime.py)
+#   --runtime ZIP     dsh-runtime-rawfile.zip, one Stored dsh-runtime/runtime.zip
+#                     (runtime/ohos/package/compose-runtime.py)
 #   --node-headers D  Node 24.22.1 src/ or include/node, for CMakeLists.txt's N-API gate
 #
 # Then tooling/ohos/audit-hap.py lists the HAP against those inputs.
