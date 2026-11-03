@@ -21,6 +21,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 import '../remote/secret_store.dart' show SecretStore;
+import '../secrets/secure_storage.dart';
 import '../state/account_state.dart' show accountBrowserProvider;
 import '../l10n/l10n.dart';
 import 'discourse_client.dart';
@@ -29,11 +30,11 @@ import 'forum_crypto.dart';
 import 'forum_models.dart';
 import 'forum_state.dart';
 
-/// Android Keystore-backed storage for the forum's key pair and API key.
+/// Platform secure storage for the forum's key pair and API key.
 class SecureForumStore implements SecretStore {
-  SecureForumStore([FlutterSecureStorage? storage]) : _storage = storage ?? const FlutterSecureStorage();
+  SecureForumStore([FlutterSecureStorage? storage]) : _storage = AppSecureStorage(storage);
 
-  final FlutterSecureStorage _storage;
+  final AppSecureStorage _storage;
 
   static String _k(String key) => 'forum.$key';
 

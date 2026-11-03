@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../l10n/l10n.dart';
 import '../performance/performance_state.dart';
+import '../secrets/secure_storage.dart';
 import 'provider_keys.dart';
 import 'read_list_epoch.dart';
 
@@ -125,7 +125,7 @@ class SettingsController extends Notifier<AppSettings> {
   static const _chatTextScaleKey = 'chat_text_scale';
   static const _foldTurnsKey = 'fold_completed_turns';
   static const _visualRepliesKey = 'visual_replies';
-  static const _secure = FlutterSecureStorage();
+  static const _secure = AppSecureStorage();
   late Future<void> _loaded;
 
   @override
