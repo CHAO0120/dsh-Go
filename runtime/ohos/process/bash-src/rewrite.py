@@ -339,6 +339,85 @@ def rewrite(inputs):
     # closed descriptor numbers as zero-valued historical map entries.
     change(index, 'function ohosLogicalSet(e,fd,role){ohosLogicalRoles(e).set(fd,role)}',
            'function ohosLogicalSet(e,fd,role){let m=ohosLogicalRoles(e);fd>=3&&role===0?m.delete(fd):m.set(fd,role)}')
+    # A readwrite entry is one open-description object, with raw bytes and a
+    # byte cursor. Dup, temporary redirection, and shallow subshell snapshots
+    # retain its identity; rebinding a descriptor creates a different object.
+    # The existing stdin interface remains decoded text, so hn converts its
+    # consumption once. Readwrite progress is already shared across subshells.
+    readwrite_helpers = r'''
+var ohosReadwriteDecoder=new TextDecoder("utf-8",{ignoreBOM:true});
+function ohosReadwriteText(e){let b=Ft(e.content.slice(e.position),"binary");return e.position===0?Mt(b):ohosReadwriteDecoder.decode(b)}
+function ohosReadwriteConsumed(e,n){
+ if(n<=0)return 0;
+ let b=e.content,p=e.position,units=0;
+ if(p===0&&b.charCodeAt(0)===239&&b.charCodeAt(1)===187&&b.charCodeAt(2)===191)p=3;
+ while(p<b.length&&units<n){
+  let first=b.charCodeAt(p++),need=1,low=128,high=191;
+  if(first>=194&&first<=223)need=2;
+  else if(first>=224&&first<=239){need=3;if(first===224)low=160;else if(first===237)high=159}
+  else if(first>=240&&first<=244){need=4;if(first===240)low=144;else if(first===244)high=143}
+  let accepted=1;
+  for(;accepted<need&&p<b.length;accepted++){
+   let next=b.charCodeAt(p),lower=accepted===1?low:128,upper=accepted===1?high:191;
+   if(next<lower||next>upper)break;
+   p++;
+  }
+  units+=need===4&&accepted===4?2:1;
+ }
+ return p-e.position;
+}
+function ohosReadCharEnd(s,count){let end=0,characters=0;while(end<s.length&&characters<count){end+=s.codePointAt(end)>65535?2:1;characters++}return{end,characters}}
+'''
+    change(index, 'function Ls(e,t){', readwrite_helpers + 'function Ls(e,t){')
+    change(index,
+           'let s=await e.fs.readFile(r);return n?{entry:{kind:"readwrite",path:r,position:0,content:s}}',
+           'let s=n?await In(e.fs,r):await e.fs.readFile(r);return n?{entry:{kind:"readwrite",path:r,position:0,content:s}}')
+    change(index, 'case"readwrite":return{content:n.content.slice(n.position)}',
+           'case"readwrite":return{content:ohosReadwriteText(n)}')
+    change(index, 'c=f.content.slice(f.position),u=0', 'c=ohosReadwriteText(f),u=0')
+    change(index, 'P.entry.content.slice(P.entry.position)', 'ohosReadwriteText(P.entry)')
+    change(index, 'c=P.content,u=-1', 'c=ohosReadwriteText(P),u=-1')
+    change(index,
+           'function Pp(e){if(e!==null&&typeof e==="object"&&(e.kind==="output"||e.kind==="dup-out"))return e;',
+           'function Pp(e){if(e!==null&&typeof e==="object"&&(e.kind==="output"||e.kind==="dup-out"||e.kind==="readwrite"))return e;')
+    change(index,
+           'case"readwrite":return`${wo}${e.path.length}:${e.path}:${e.position}:${e.content}`;',
+           'case"readwrite":return e;')
+    change(index,
+           'else if(r.kind==="readwrite")s={...r,position:r.position+n};else return;let i=Eo(s)',
+           'else if(r.kind==="readwrite"){r.position+=ohosReadwriteConsumed(r,n);return}else return;let i=Eo(s)')
+    change(index,
+           'u.kind==="input"&&f?.kind==="input"?u.content.length-f.content.length:u.kind==="readwrite"&&f?.kind==="readwrite"&&u.path===f.path?f.position-u.position:0',
+           'u.kind==="input"&&f?.kind==="input"?u.content.length-f.content.length:0')
+    change(index,
+           'let o=n.map(u=>nt(e,u)).find(u=>u?.kind==="readwrite")??t;if(o.kind!=="readwrite")return!1;let a=o.content.slice(0,o.position)+r+o.content.slice(o.position+r.length),l={...o,position:o.position+r.length,content:a};await e.fs.writeFile(o.path,a,s);let c=Eo(l);for(let u of n)Nn(e,u)&&So(e,u,c,!1);return!0}',
+           'if(t.kind!=="readwrite")return!1;let ohosBytes=s==="binary"?r:Ut(r),ohosAt=t.position;await e.fs.writeFile(t.path,ohosBytes,{encoding:"binary",ohosWritePosition:ohosAt});t.position=ohosAt+ohosBytes.length;t.content=await In(e.fs,t.path);return!0}')
+    change(index,
+           'let a=o.find(l=>n.has(l));a!==void 0&&bo(e,r,a)',
+           'let a=o.find(l=>n.has(l)&&(s?.kind!=="readwrite"||n.get(l)===s));a!==void 0&&bo(e,r,a)')
+    # Text units remain the existing interface to hn. For readwrite text only,
+    # -n/-N may not return one half of a supplementary scalar and then charge
+    # the complete four-byte span. Other descriptor input contracts are unchanged.
+    change(index, 'let b=i===""?"\\0":i,v="",k=0,A=I=>',
+           'let ohosReadChars=(g?y:nt(e,r>=0?r:(!n&&e.state.groupStdin!==void 0?e.state.groupStdinSourceFd??0:0))??nt(e,0))?.kind==="readwrite";let b=i===""?"\\0":i,v="",k=0,A=I=>')
+    change(index,
+           'if(l>=0){let I=Math.min(l,S.length);v=S.substring(0,I),P(v),N=I,x=I>=l,C(N);',
+           'if(l>=0){let ohosCut=ohosReadChars?ohosReadCharEnd(S,l):null,I=ohosCut?ohosCut.end:Math.min(l,S.length);v=S.substring(0,I),P(v),N=I,x=ohosCut?ohosCut.characters>=l:I>=l,C(N);')
+    old_read_n = r'''else if(a>=0){let I=0,_=0,B=!1;for(;_<S.length&&I<a;){let ne=S[_];if(ne===b){N=_+1,B=!0;break}if(!s&&ne==="\\"&&_+1<S.length){let Y=S[_+1];if(Y===b&&b===`
+`){_+=2,N=_;continue}if(Y===b){_+=2,I++,A(Y),N=_;continue}A(Y),_+=2,I++,N=_}else A(ne),_++,I++,N=_}x=I>=a||B,C(N)}'''
+    new_read_n = r'''else if(a>=0){let I=0,_=0,B=!1;for(;_<S.length&&I<a;){let ne=ohosReadChars?String.fromCodePoint(S.codePointAt(_)):S[_];if(ne===b){N=_+ne.length,B=!0;break}if(!s&&ne==="\\"&&_+1<S.length){let Y=ohosReadChars?String.fromCodePoint(S.codePointAt(_+1)):S[_+1],ohosStep=1+Y.length;if(Y===b&&b===`
+`){_+=ohosStep,N=_;continue}if(Y===b){_+=ohosStep,I++,A(Y),N=_;continue}A(Y),_+=ohosStep,I++,N=_}else A(ne),_+=ne.length,I++,N=_}x=I>=a||B,C(N)}'''
+    change(index, old_read_n, new_read_n)
+
+
+    # An explicit nonzero read -u of a readwrite description observes current
+    # authorized path bytes. Keep the open-description object and byte cursor;
+    # the subsequent text view and consumption use this one successful read.
+    # Existing -N precedence, zero-character reads and -t0 remain unchanged.
+    change(index, 'function ea(e,t,n,r=-1){', 'async function ea(e,t,n,r=-1){')
+    change(index, 'if(g){let I=Ls(e,u);',
+           'if(g){if(y?.kind==="readwrite"&&(l>=0?l:a)!==0){try{y.content=await In(e.fs,y.path)}catch(ohosError){return L("",`bash: read: ${u}: ${ohosError.message}\n`,1)}}let I=Ls(e,u);')
+
     notice = ('/* Modified for dsh-go OHOS: permission diagnostics, typed output and statement delivery.\n'
               ' * Derived from just-bash 3.6.0; Apache-2.0. See LICENSE and PROVENANCE.json. */\n')
     return {name: (notice + text).encode('utf-8') for name, text in texts.items()}
