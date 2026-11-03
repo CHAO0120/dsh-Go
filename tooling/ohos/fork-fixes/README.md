@@ -15,10 +15,16 @@
 | `onSslErrorEventReceive` | 无条件 `handleConfirm()` | 调用一次 `handleCancel()` |
 | 新 WebView 的 mixed mode | `0`，即 All | `2`，即 None |
 | mixed mode 未知值回退 | All | None |
+| Web 组件 `darkMode` | 未设置，恒为关闭 | `WebViewPlatformView` 保存开关，组件以 `@State` 跟随，运行时可切换；不设 `forceDarkAccess` |
+| Web 组件 `onRenderExited` | 未设置 | 转给 `WebViewPlatformView` 上的回调，`crashed` 只在 `ProcessCrashed` 时为真；已 dispose 的组件不再上报（公开文档把“多个页签同时关闭”列为异常退出的成因之一） |
 
 显式选择 `0/1/2` 仍分别得到 All/Compatible/None。应用当前没有显式设置 mixed content；未知值不会意外放行。OpenHarmony SDK 26.0.0.38 的 `ets/component/web.d.ts` 声明了这三个枚举值和 `SslErrorHandler.handleCancel()`。Android 应用 targetSdk 为 28；[Android WebSettings 文档](https://developer.android.com/reference/android/webkit/WebSettings#setMixedContentMode(int))说明 Lollipop 及以上目标默认拒绝混合内容，[WebViewClient 文档](https://developer.android.com/reference/android/webkit/WebViewClient#onReceivedSslError(android.webkit.WebView,android.webkit.SslErrorHandler,android.net.http.SslError))说明证书错误默认取消加载。
 
-这两个修补没有给用户增加绕过证书错误的开关，也没有实现新的 SSL 提示页面。页面具体显示、系统错误页和证书握手结果仍须在设备验证。
+证书和 mixed mode 这两个修补没有给用户增加绕过证书错误的开关，也没有实现新的 SSL 提示页面。页面具体显示、系统错误页和证书握手结果仍须在设备验证。
+
+后两项供 `dsh/islands`（`app/ohos/entry/src/main/ets/plugins/IslandsPlugin.ets`）使用，只因 `darkMode` 和 `onRenderExited` 是 Web 组件属性，没有 controller 接口。实例不需要 fork 暴露：插件从 `FlutterPluginBinding.getFlutterEngine().getPlugins().get('WebViewFlutterPlugin')` 取 fork 插件，其公开的 `getInstanceManager().getInstance(id)` 用的正是 Dart 的 `webViewIdentifier`。文字缩放走 fork 现成的 `WebSettings.setTextZoom`，未修改。
+
+`darkMode` 开启时 ArkWeb 应用网页 `@media (prefers-color-scheme: dark)`，不改写未适配的页面，对应 Android 的 `DARK_STRATEGY_WEB_THEME_DARKENING_ONLY`。依据是公开文档；运行时切换后页面是否收到 `change` 事件、渲染进程退出后恢复界面是否出现，均须在设备验证。
 
 ## 构建接缝
 
@@ -35,9 +41,11 @@ python3 -I -B tooling/ohos/prepare-forks.py \
   --package webview_flutter_ohos --input "$FORK" --output "$WORK/prepared"
 DSH_WEBVIEW_FORK="$WORK/prepared/package" node --test --test-isolation=none \
   tooling/ohos/tests/webview-security-contract.mjs
+DSH_WEBVIEW_FORK="$WORK/prepared/package" OHOS_TYPESCRIPT_PREFIX="$PWD/runtime/ohos/process" node --test --test-isolation=none \
+  tooling/ohos/tests/webview-parity-contract.mjs tooling/ohos/tests/islands-channel.test.mjs
 DSH_WEBVIEW_FORK="$FORK" python3 -I -B tooling/ohos/tests/prepare-forks-contract.py
 ```
 
-第一组检查执行真实 ETS 中提取的 SSL 回调和 mixed-mode 方法体，配合明确的 handler 替身；测试不会重写成另一份等价实现。第二组实际调用 CLI，检查未知源、错补丁/输出指纹、符号链接、覆盖保护、pub 选择、实际安装文件和失败时 overrides 保持。原始 fork 在第一组应失败，修补后通过。
+第一组检查执行真实 ETS 中提取的 SSL 回调和 mixed-mode 方法体，配合明确的 handler 替身；测试不会重写成另一份等价实现。第二组执行真实的组件回调、属性表达式、`WebViewPlatformView`、`InstanceManager` 和 `IslandsPlugin.ets`，ArkWeb 与系统 API 是替身。第三组实际调用 CLI，检查未知源、错补丁/输出指纹、符号链接、覆盖保护、pub 选择、实际安装文件和失败时 overrides 保持。原始 fork 在前两组应失败，修补后通过。
 
 这些是源码、宿主组件和构建准备合同。真实 Dart pub get 可以验证依赖解析；它们均不替代完整 HAP 构建、ArkWeb 渲染或真机证书测试。
