@@ -33,10 +33,13 @@ async function fixture(t) {
 }
 for (const expected of controlFlowCases) {
   test(`raw stdout through ${expected.name}`, { timeout: 15000 }, async t => {
-    const f = await fixture(t), runtime = new VirtualSubprocessRuntime({ workspaceRoots: [f.cwd], temporaryRoot: f.temporaryRoot });
+    let runtime;
+    t.after(() => runtime?.dispose());
+    const f = await fixture(t);
+    runtime = new VirtualSubprocessRuntime({ workspaceRoots: [f.cwd], temporaryRoot: f.temporaryRoot });
     try {
-      const argv = runtime.prepare(['bash', '-c', expected.command], { mode: 'workspace-write', workspaceRoot: f.cwd });
-      const handle = runtime.spawn({ argv, cwd: f.cwd, graceMs: 200,
+      const argv = runtime.prepare(['bash', '-c', expected.command], { mode: 'workspace-write', workspaceRoot: f.cwd }, t.signal);
+      const handle = runtime.spawn({ argv, cwd: f.cwd, graceMs: 200, signal: t.signal,
         stdio: { stdin: 'ignore', stdout: 'pipe', stderr: 'pipe' } });
       const [outcome, stdout, stderr] = await Promise.all([handle.done, collect(handle.stdout), collect(handle.stderr)]);
       assert.equal(await handle.waitForExit(), true);
