@@ -21,7 +21,7 @@
 
 Dart 的 `write(value: null)` 使用 `delete`，不会向原生发送空值。无效回包或原生错误是
 失败，不被适配器转换成空串或空 Map。错误消息不包含键名、凭据、密文或系统路径。
-插件支持 `secrets_invalid`、`secrets_unavailable`、`secrets_key_missing`、`secrets_unreadable`、`secrets_io`
+插件支持 `secrets_invalid`、`secrets_unavailable`、`secrets_key_missing`、`secrets_unreadable`、`secrets_io`、`secrets_recovery_failed`
 和 `cancelled`。
 
 ## 为什么使用 HUKS
@@ -101,13 +101,58 @@ Android 和显式注入存储不提供这个 OH 恢复入口，不调用原插�
 DeepSeek key 时，`apiKey` 变空会经 `clearProviderKey` 清掉引擎那份；启动时就读不出来则
 没有这一步。自定义 provider 的引擎副本同样保留。
 
-恢复只 unlink 固定 `dsh-secrets/vault-v1.bin`，不读/解密旧库，不递归删除目录，不触碰
-主机配置、工作区或其他文件。不删除仍可用的 HUKS alias；缺 alias 时下一次显式写入
-才生成新密钥。文件已经不存在时恢复也成功。恢复与读取和完整 load→modify→save
-共用同一个静态串行队列，排在恢复前的旧 RMW 先结束，不能在恢复后复活旧记录。
-删除失败返回 `secrets_io`，不会伪称成功；已排队但 engine 退役的恢复在 unlink 前取消。
-与保存一样，unlink 已完成后的目录持久性步骤只降级诊断。崩溃遗留的 staging 密文
-不再被加载，但此入口不承诺介质安全擦除。
+恢复只清除固定 `dsh-secrets/vault-v1.bin` 和本服务固定 CE alias
+`DSH.Go.Secrets.AES256.GCM.v1`，不读/解密旧库，不查询密钥是否可用，不递归删除目录，
+不触碰其他 alias、主机配置或工作区。目录或库文件已不存在时仍执行 alias 删除，
+所以「alias 存在但密钥不可用」也能恢复。公开 `huks.deleteKeyItem` 只传固定 alias 和
+`HUKS_TAG_AUTH_STORAGE_LEVEL_CE`；仅 `12000011`（明确不存在）视为已经完成，权限、
+IPC、硬件等错误不能吞掉。下一次显式写入才生成新的 AES256 密钥。
+
+删除密文与删除 HUKS 密钥不能合成原子事务。先 unlink 密文，成功后再删密钥，避免
+unlink 失败时先毁掉仍可解密旧库的密钥。unlink 的真实错误仍为 `secrets_io`，不开始删
+alias；密文已清但 HUKS 删除失败则返回 `secrets_recovery_failed`，提示恢复未完成、
+需要重试，不声称原数据完整保留或已完全恢复。重试即使库文件已无，也会继续清理 alias。
+目录同步仍只降级持久性并诊断；它不会拦住后续密钥清理。
+
+恢复与完整 load→modify→save 共用同一个静态串行队列，HUKS 删除 Promise 也在队列内。
+先排入的旧 RMW 完成后才恢复，后排入的新写等待 alias 删除结束后再生成新密钥。
+每个尚未派发的删除前核 engine 代际：已排队退役恢复不执行；unlink 已派发后退役可能
+只清了密文；HUKS 删除已派发后退役则不能撤销该 Promise，回包会报 cancelled，新实例
+可重试。两种部分完成都不能当成回滚。临时旧密文不再加载，本入口不承诺介质安全擦除。
+
+### 恢复时要对照的内存持有者
+
+`AppSecureStorage` 本身没有值缓存；`SecureSecretStore`、`SecureProviderKeyVault`、
+`SecureHostedLinkStore`、`SecureForumStore` 都是直接读写包装，重新创建这些包装不足以
+清除上层已持有的秘密。原生队列只串行化已经进入通道的操作，不能撤销稍后由旧 Dart
+状态构造的 `_save`、登录回调或远端请求。下表写于 `CredentialRecovery` 之前（基于
+718c06a），改恢复流程时逐项对照，现状见表后：
+
+| 持有者/入口 | 需要失效或重新读取的内容 |
+| --- | --- |
+| `settingsProvider` / `SettingsController`（`state/settings_state.dart`） | `state.apiKey`、`customProviderIds`；新生命周期通过 `_load()` 从空库读回。既有 `_load` 私有，没有公开的恢复重载方法；不能把旧 state 再调用 `setApiKey` 保存。 |
+| `hostedLinksProvider` / `HostedLinksController`（`share_hosted/hosted_links_state.dart`） | `links` 含分享解密 key 和删除 token；取消原实例 timers，并收束已有 `_load`、`_save`、`_commit`，新实例从空库加载。只改 loaded 标志或重建 store 不够；旧删除回调不能再把旧列表保存回来。 |
+| `forumAuthProvider` / `ForumAuthController`（`forum/forum_auth.dart`） | `state.credentials` 以及私有 `_keys` RSA 对；当前 `build()` 未清 `_keys`，不能假定一次 invalidate 就清空。需要明确清字段或保证新控制器实例，同时使旧 `_restore`/授权回调失效。不要用会远端revoke的 `signOut` 冒充纯本地清理。 |
+| `relayBackendProvider` / `relayAccountProvider`（`state/hosts_state.dart`、`packages/dsh_remote/.../remote_account.dart`） | 后端有 `_identity`、`_credentials`、`_pins` 与 `_credentialWrites`；关闭连接并重新创建实例，收束旧异步凭据写入。现有 `close()` 仅关闭连接/API，不证明上述写队列已停止或所有缓存已擦除。 |
+| `hostLinkProvider(host)`、`remoteConnectionProvider(host)`（`state/connection_state.dart`） | 已建SSH/relay连接及正在认证的连接持有旧凭据；须关闭/失效，再从SecureSecretStore读取。SSH配置仍由 `HostsController` 的SharedPreferences加载，不能删除主机地址、用户名与配置。 |
+| `readListCredentialEpochProvider.notifier.advance()`（`state/read_list_epoch.dart`） | 现有凭据变化失效入口；恢复完成需推进此代际以失效相关读取身份，但这一步不会清空上面那些独立缓存。 |
+
+特别注意 `LocalConnectionController` 对 `settingsProvider.apiKey` 的监听：从非空变空
+会调用 `client.clearProviderKey()`，同步删除引擎自己的密钥。若恢复合同只清App凭据库，
+主线应先关闭/隔离这条同步链，再更新缓存，不能把本地缓存刷新意外变成引擎凭据删除。
+`healProviderKeys()` 同样可能已捕获旧副本并异步回推，要收束这些在途任务。
+
+建议入口先阻止新的凭据相关操作、关闭旧连接并等待/使旧异步任务代际失效，再执行
+显式恢复；成功后保证上述持有者为新实例或有经过验证的清字段/重载路径，再开放操作。
+`secrets_recovery_failed` 或迟到 `cancelled` 也可能已经清掉密文，仍需保持旧写入隔离，
+不能自动重放旧提交。单纯 `ref.invalidate` 的实例复用/在途回调行为必须逐处验证；
+若主线选择重新启动应用或替换整个ProviderContainer，同样要先收束旧实例的异步写入。
+这些是恢复流程的验收条件，Dart 没有全局缓存清理 API。
+
+表后现状：`CredentialRecovery` 在恢复前后都推进代际并失效 hosted links、relay 和论坛，
+`ForumAuthController.build()` 已清 `_keys`，`settingsProvider` 用公开的
+`reloadCredentials` 重读；SSH 和本地连接没有在恢复时关闭。`apiKey` 变空会清引擎那份，
+这是上一节写明的现行选择，对话框也说了会清哪些内容。
 
 公开文档核查（2026-11-03）：[官方 fs API 入口](https://developer.huawei.com/consumer/cn/doc/harmonyos-references/js-apis-file-fs)
 经允许的 web 入口仅取得导航壳；OpenHarmony 官方 raw 文档抓取被拒。现有材料不足以

@@ -254,25 +254,176 @@ def dispatch_methods(tokens):
     return sorted(names)
 
 def acceptance_guards(tokens):
-    """Recognize the explicit rejecting list guard; other lists stay unknown."""
-    matching=pairs(tokens); result=[]
+    """Only rejecting method tests constrain admission; routing lists do not."""
+    matching=pairs(tokens); result=[]; classified=set()
     for i, token in enumerate(tokens):
-        if token.value!='includes' or i+1 not in matching: continue
-        end=matching[i+1]
-        if expression(tokens[i+2:end]) not in ('call . method','methodCall . method'): continue
-        opening=matching.get(i-2) if i>=2 and tokens[i-2].value==']' else None
+        if token.value!='if' or i+1 not in matching: continue
+        end=matching[i+1]; cond=tokens[i+2:end]; values=[t.value for t in cond]
+        if not any(has_sequence(values,[name,'.','method']) for name in ('call','methodCall')): continue
+        body_start=end+1; body_end=matching.get(body_start)
+        body=tokens[body_start+1:body_end] if body_end is not None else []
+        includes=[j for j in range(i+2,end) if tokens[j].value=='includes']
+        negative=(values[:1]==['!'] and 'includes' in values)
+        unequal=(len(cond)==5 and values[0] in ('call','methodCall') and values[1:3]==['.','method'] and values[3] in ('!=','!==') and cond[4].kind=='string')
+        if not negative and not unequal:
+            if 'includes' not in values:continue
+            if not any(t.value=='notImplemented' for t in body):
+                if values[:1]==['[']:classified.update(includes)
+                continue
+        classified.update(includes)
         names=None
-        if opening is not None and expression(tokens[opening-3:opening])=='if ( !':
-            body_start=end+2
-            body_end=matching.get(body_start)
-            if end+1<len(tokens) and tokens[end+1].value==')' and body_end is not None:
-                body=tokens[body_start+1:body_end]
-                values=args(tokens,opening,matching)
-                if (has_sequence([t.value for t in body],['result','.','notImplemented','(',')',';','return',';'])
-                        and all(literal(value) is not None for value in values)):
-                    names=sorted({literal(value) for value in values})
+        if rejecting_body(body):
+            if unequal: names=[cond[4].value]
+            elif negative:
+                cm=pairs(cond)
+                if len(cond)>3 and values[1]=='[' and 1 in cm:
+                    close=cm[1]; entries=args(cond,1,cm)
+                    tail=values[close+1:]
+                    if tail in (['.','includes','(','call','.','method',')'],['.','includes','(','methodCall','.','method',')']) and all(literal(part) is not None for part in entries):
+                        names=sorted({literal(part) for part in entries})
         result.append({'line':token.line,'methods':names})
+    for i,token in enumerate(tokens):
+        if token.value!='includes' or i in classified or i+1 not in matching:continue
+        end=matching[i+1]
+        if expression(tokens[i+2:end]) not in ('call . method','methodCall . method'):continue
+        if routing_membership(tokens,i,matching):continue
+        result.append({'line':token.line,'methods':None})
     return result
+
+def routing_membership(tokens, includes, matching):
+    """A const literal group used once to route the same call via two paths."""
+    opening=matching.get(includes-2) if includes>=2 and tokens[includes-2].value==']' else None
+    if opening is None or opening<3:return False
+    prefix=tokens[opening-3:opening]
+    if prefix[0].value!='const' or prefix[1].kind!='id' or prefix[2].value!='=':return False
+    if not all(literal(part) is not None for part in args(tokens,opening,matching)):return False
+    variable=prefix[1].value; uses=[i for i,t in enumerate(tokens) if t.kind=='id' and t.value==variable]
+    if len(uses)!=2 or uses[0]!=opening-2:return False
+    pos=uses[1]
+    if pos+1>=len(tokens) or tokens[pos+1].value!='?':return False
+    end=statement_end(tokens,pos,matching); j=pos+2
+    while j<end and tokens[j].value!=':':j=matching[j]+1 if j in matching and tokens[j].value in ('(','[','{') else j+1
+    if j>=end:return False
+    def calls(part):
+        pm=pairs(part);found=set()
+        for i in range(len(part)-4):
+            if ([t.value for t in part[i:i+2]]==['this','.'] and part[i+3].value=='(' and i+3 in pm
+                    and part[i+4].value in ('call','methodCall')):found.add(expression(part[i:pm[i+3]+1]))
+        return found
+    return bool(calls(tokens[pos+2:j]) & calls(tokens[j+1:end]))
+
+def rejecting_body(tokens):
+    values=[t.value for t in tokens]
+    reply=['result','.','notImplemented','(',')',';']
+    if values==reply+['return',';']: return True
+    return (len(values)==17 and values[:2]==['try','{'] and values[2:8]==reply
+            and values[8:11]==['}','catch','('] and tokens[11].kind=='id'
+            and values[12:]==[')','{','}','return',';'])
+
+def statement_end(tokens, start, matching):
+    """Bounded statement boundaries, used only for the fall-through forms below."""
+    if start>=len(tokens): return start
+    word=tokens[start].value
+    if word=='{': return matching.get(start,len(tokens)-1)+1
+    if word in ('if','for','while','switch') and start+1 in matching:
+        end=statement_end(tokens,matching[start+1]+1,matching)
+        if word=='if' and end<len(tokens) and tokens[end].value=='else':
+            end=statement_end(tokens,end+1,matching)
+        return end
+    if word=='try':
+        end=statement_end(tokens,start+1,matching)
+        if end<len(tokens) and tokens[end].value=='catch' and end+1 in matching:
+            end=statement_end(tokens,matching[end+1]+1,matching)
+        if end<len(tokens) and tokens[end].value=='finally':end=statement_end(tokens,end+1,matching)
+        return end
+    i=start
+    while i<len(tokens):
+        if tokens[i].value==';':return i+1
+        i=matching[i]+1 if i in matching and tokens[i].value in ('(','[','{') else i+1
+    return i
+
+def straight_statements(tokens):
+    matching=pairs(tokens); i=0
+    while i<len(tokens):
+        end=statement_end(tokens,i,matching)
+        if tokens[i].value=='try' and i+1 in matching:
+            nested=list(straight_statements(tokens[i+2:matching[i+1]]))
+            yield from nested
+            if nested and nested[-1] and nested[-1][0].value in ('return','throw'):return
+        elif tokens[i].value not in ('if','for','while','switch'):
+            yield tokens[i:end]
+            if tokens[i].value in ('return','throw'):return
+        i=max(i+1,end)
+
+def callback_body(tokens):
+    if tokens and tokens[0].value=='{':
+        return arrow_body(tokens) or tokens
+    return tokens
+
+def arrow_body(tokens):
+    matching=pairs(tokens)
+    for i in range(len(tokens)-1):
+        if tokens[i].value=='=>' and tokens[i+1].value=='{' and i+1 in matching:
+            return tokens[i+2:matching[i+1]]
+    return []
+
+def replies_from_then(statements, variable):
+    for part in statements:
+        if [t.value for t in part[:4]]!=[variable,'.','then','(']:continue
+        argv=args(part,3,pairs(part))
+        if argv and any([t.value for t in item[:4]]==['result','.','success','(']
+                        for item in straight_statements(arrow_body(argv[0]))):return True
+    return False
+
+def fallback_dispatch(seed, methods):
+    """Recognize a single remaining route, never count a whitelist by itself."""
+    body=callback_body(seed); matching=pairs(body); guards=[]; offset=0
+    while offset<len(body):
+        end=statement_end(body,offset,matching)
+        if body[offset].value=='if':guards.extend(acceptance_guards(body[offset:end]))
+        offset=max(offset+1,end)
+    known=[g['methods'] for g in guards if g['methods'] is not None]
+    if len(known)!=1 or any(g['methods'] is None for g in guards):return []
+    allowed=set(known[0]); found=set(); values=[t.value for t in body]
+    if len(allowed)==1:
+        if any([t.value for t in part[:4]]==['result','.','success','('] for part in straight_statements(body)):
+            found.update(allowed)
+    # Exactly two admitted names and two explicit call expressions. A third
+    # whitelist entry cannot acquire a route from the ternary's default arm.
+    if len(allowed)==2:
+        statements=list(straight_statements(body))
+        for statement in statements:
+            sv=[t.value for t in statement]
+            for i in ([2] if len(statement)>7 and statement[0].kind=='id' else []):
+                if (sv[i-1]=='=' and sv[i] in ('call','methodCall') and sv[i+1:i+3]==['.','method']
+                        and sv[i+3] in ('==','===') and statement[i+4].kind=='string' and sv[i+5]=='?'
+                        and statement[i+4].value in allowed):
+                    parts=statement[i+6:-1]; pm=pairs(parts); j=0
+                    while j<len(parts) and parts[j].value!=':':j=pm[j]+1 if j in pm and parts[j].value in ('(','[','{') else j+1
+                    if (j<len(parts) and any(t.value=='(' for t in parts[:j]) and any(t.value=='(' for t in parts[j+1:])
+                            and replies_from_then(statements,sv[i-2])):found.update(allowed)
+    # A uniquely resolved call carrying this MethodCall may handle the one
+    # admitted name left after its early, returning named branches.
+    for statement in straight_statements(body):
+        sv=[t.value for t in statement]
+        if '=>' in sv:continue
+        for i in range(len(statement)-5):
+            if sv[i:i+2]!=['this','.'] or sv[i+3:i+6] not in (['(','call',')'],['(','methodCall',')']):continue
+            targets=methods.get(sv[i+2],[])
+            if len(targets)!=1:continue
+            target=targets[0]; tm=pairs(target); offset=0; named=set()
+            while offset+1<len(target) and target[offset].value=='if' and offset+1 in tm:
+                end=tm[offset+1]; cond=target[offset+2:end]; cv=[t.value for t in cond]
+                finish=statement_end(target,end+1,tm); branch=target[end+1:finish]
+                if not (len(cond)==5 and cv[0] in ('call','methodCall') and cv[1:3]==['.','method'] and cv[3] in ('==','===') and cond[4].kind=='string' and branch and branch[0].value=='return'):break
+                named.add(cond[4].value);offset=finish
+            tail=target[offset:]; tv=[t.value for t in tail]
+            if not named or len(allowed-named)!=1 or any(has_sequence(tv,[name,'.','method']) for name in ('call','methodCall')):continue
+            parts=list(straight_statements(tail))
+            if (any(part and part[0].value=='return' and len(part)>2 for part in parts)
+                    and any(t.value=='await' for part in parts for t in part)):
+                found.update(allowed-named)
+    return sorted(found)
 
 def accepts(handler, method):
     return all(guard['methods'] is not None and method in guard['methods']
@@ -307,7 +458,8 @@ def native_class_inventory(tokens, label, registered, class_name):
             reached, chain=reached_bodies(seed,methods)
             rows.append({'channel':channel['channel'],'kind':channel['kind'],'source':label,
                          'line':token.line,'class':class_name,'registration':'EXPLICIT_ENTRY' if class_name in registered else 'UNCONFIRMED_REGISTRATION',
-                         'methods':dispatch_methods(reached),'acceptanceGuards':acceptance_guards(reached),'handlerChain':chain,
+                         'methods':sorted(set(dispatch_methods(reached)+fallback_dispatch(seed,methods))),
+                         'acceptanceGuards':acceptance_guards(reached),'handlerChain':chain,
                          'handlerResolved':bool(seed),'scope':'source dispatch recognition; not success/capability/device behavior'})
     return rows
 

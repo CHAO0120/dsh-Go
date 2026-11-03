@@ -289,11 +289,25 @@ export class SecretVault {
   recover(current: () => void): Promise<void> {
     return this.queue(async (): Promise<void> => {
       current();
-      if (!await this.directoryExists()) return;
+      if (await this.directoryExists()) {
+        current();
+        let removed = false;
+        try { await fs.unlink(this.path); removed = true; }
+        catch (error) { if ((error as BusinessError).code !== 13900002) throw error as Error; }
+        if (removed) await this.syncDirectory();
+      }
+      // Clear ciphertext first: a failed unlink must not destroy its usable key.
+      // Do not query key existence: an existing but unusable alias also needs deletion.
       current();
-      try { await fs.unlink(this.path); }
-      catch (error) { if ((error as BusinessError).code === 13900002) return; throw error as Error; }
-      await this.syncDirectory();
+      const options: huks.HuksOptions = { properties: [
+        { tag: huks.HuksTag.HUKS_TAG_AUTH_STORAGE_LEVEL, value: huks.HuksAuthStorageLevel.HUKS_AUTH_STORAGE_LEVEL_CE }
+      ] };
+      try { await huks.deleteKeyItem(SecretVault.alias, options); }
+      catch (error) {
+        if ((error as BusinessError).code !== 12000011) {
+          throw new SecretStorageError('secrets_recovery_failed', '凭据恢复未完成，请重试以清理本应用的系统密钥。');
+        }
+      }
     });
   }
 

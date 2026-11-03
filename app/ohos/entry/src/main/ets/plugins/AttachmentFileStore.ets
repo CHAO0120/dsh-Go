@@ -1,4 +1,5 @@
 import fs from '@ohos.file.fs';
+import { BusinessError } from '@ohos.base';
 import fileUri from '@ohos.file.fileuri';
 
 const CHUNK_BYTES = 256 * 1024;
@@ -192,14 +193,16 @@ export class AttachmentFileBatch {
   private async remove(path: string): Promise<void> {
     const index = this.paths.indexOf(path);
     if (index < 0) return;
-    await fs.unlink(path);
+    try { await fs.unlink(path); }
+    catch (error) { if ((error as BusinessError).code !== 13900002) throw error as Error; }
     this.paths.splice(index, 1);
   }
 
   async release(): Promise<void> {
     for (const path of this.paths.slice()) await this.remove(path);
     if (this.directory !== null) {
-      await fs.rmdir(this.directory);
+      try { await fs.rmdir(this.directory); }
+      catch (error) { if ((error as BusinessError).code !== 13900002) throw error as Error; }
       this.directory = null;
     }
   }

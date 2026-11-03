@@ -23,6 +23,7 @@ export async function secretsFixture(t, initial = {}) {
   const app = { filesDir: join(root, 'files') };
   await fsp.mkdir(app.filesDir);
   let options = initial, nextHandle = 0, pending = 0;
+  const unusableKeys = new Set();
   const fds = new Map(), keys = new Map(), sessions = new Map(), events = [], channels = [], modules = new Map();
   const fileError = error => { if (error.code === 'ENOENT') error.code = 13900002; if (error.code === 'EEXIST') error.code = 13900015; throw error; };
   const fdOf = value => typeof value === 'number' ? value : value.fd;
@@ -74,7 +75,16 @@ export async function secretsFixture(t, initial = {}) {
       if (keys.has(alias)) throw nativeError(12000017);
       keys.set(alias, randomBytes(32)); events.push({ op: 'generate', alias });
     },
+    async deleteKeyItem(alias, supplied) {
+      assert.deepEqual([...values(supplied)], [['AUTH_STORAGE_LEVEL', 1]]);
+      events.push({ op: 'deleteKey', alias });
+      if (options.beforeDeleteKey) await options.beforeDeleteKey(alias);
+      if (options.deleteKeyError) throw nativeError(options.deleteKeyError);
+      if (!keys.has(alias)) throw nativeError(12000011);
+      keys.delete(alias); unusableKeys.delete(alias);
+    },
     async initSession(alias, supplied) {
+      if (unusableKeys.has(alias)) throw nativeError(12000006);
       const p = values(supplied), key = keys.get(alias);
       assert(key); assert.equal(p.get('KEY_SIZE'), 256); assert.equal(p.get('BLOCK_MODE'), 32);
       assert.equal(p.get('PADDING'), 0); assert.equal(p.get('AUTH_STORAGE_LEVEL'), 1);
@@ -156,7 +166,7 @@ export async function secretsFixture(t, initial = {}) {
     try { assert.equal(pending, 0); assert.equal(fds.size, 0); assert.equal(sessions.size, 0); }
     finally { for (const fd of fds.keys()) { try { fs.closeSync(fd); } catch {} } await fsp.rm(root, { recursive: true, force: true }); }
   });
-  return { root, app, vaultPath, ...first, attach, call, events, keys, sessions, fds,
+  return { root, app, vaultPath, ...first, attach, call, events, keys, unusableKeys, sessions, fds,
     change(next) { options = { ...options, ...next }; },
     request(method, args = {}, channel = first.channel) { return call(channel, method, args).done; },
   };

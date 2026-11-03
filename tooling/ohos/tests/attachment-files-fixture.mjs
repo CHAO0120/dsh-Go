@@ -92,6 +92,8 @@ export async function attachmentFixture(t, initial = {}) {
       try { await fsp.unlink(mapped(path)); } catch (error) { throw business(error); }
     },
     async rmdir(path) {
+      operations.push({ op: 'rmdir', path });
+      await options.rmdir?.(path);
       try { await fsp.rmdir(mapped(path)); } catch (error) { throw business(error); }
     },
   };

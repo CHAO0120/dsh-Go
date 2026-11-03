@@ -73,6 +73,90 @@ class BridgeInventoryTest(unittest.TestCase):
         self.assertEqual(report['gateStatus'],'FAIL')
         self.assertTrue(any(row['status']=='UNKNOWN_ACCEPTANCE' for row in report['dartCalls']))
 
+    def actual_plugin(self, name, channel, methods):
+        source=HERE.parents[2]/'app/ohos/entry/src/main/ets/plugins'/f'{name}.ets'
+        self.native.write_text(source.read_text())
+        self.entry.write_text(f"engine.getPlugins()?.add(new {name}());")
+        self.dart.write_text("const bridge = MethodChannel('"+channel+"'); void run() {"+
+                             ''.join(f"bridge.invokeMethod('{method}');" for method in methods)+'}')
+        return lambda: self.report((channel,))
+
+    def test_negative_reject_guard_requires_return_and_real_continuation(self):
+        for name,channel,method in [('AppLinksPlugin','dsh/links','ready'),
+                                    ('PerformancePlugin','dsh/performance','snapshot')]:
+            with self.subTest(plugin=name):
+                report=self.actual_plugin(name,channel,[method])
+                original=self.native.read_text()
+                self.assertEqual(report()['gateStatus'],'PASS_SCOPED')
+                # An unterminated rejection is not a proof of the allowed path.
+                self.native.write_text(original.replace('result.notImplemented(); return;', 'result.notImplemented();'))
+                if name=='AppLinksPlugin':self.assertEqual(report()['gateStatus'],'FAIL')
+                self.native.write_text(original.replace('result.success(true);', '').replace('result.success(this.snapshot());',''))
+                self.assertEqual(report()['gateStatus'],'FAIL')
+
+    def test_try_catch_rejection_and_non_guard_list_do_not_make_acceptance_unknown(self):
+        for name,channel,methods in [
+            ('VoicePlugin','dsh/voice',['permission','capabilities','cancel']),
+            ('NotifyPlugin','dsh/notify',['status','show','requestPermission']),
+            ('NativeMediaPlugin','dsh/native-media',['capabilities'])]:
+            with self.subTest(plugin=name):
+                report=self.actual_plugin(name,channel,methods)
+                self.assertEqual(report()['gateStatus'],'PASS_SCOPED')
+        self.native.write_text(self.native.read_text().replace("try { result.notImplemented(); } catch (_) {} return;", "try { result.notImplemented(); return; } catch (_) {}"))
+        self.assertEqual(report()['gateStatus'],'FAIL')
+
+    def test_allowed_method_falls_through_unique_forwarded_handler(self):
+        report=self.actual_plugin('FilesMediaPlugin','dsh/media',['saveImage','openSettings'])
+        self.assertEqual(report()['gateStatus'],'PASS_SCOPED')
+        original=self.native.read_text()
+        start=original.index('  private async mediaCall(')
+        self.native.write_text(original[:start]+"  private async mediaCall(call: MethodCall): Promise<Any> { if (call.method === 'openSettings') return false; } }\n")
+        self.assertEqual(report()['gateStatus'],'FAIL')
+        self.native.write_text(original.replace('this.mediaCall(call)', 'this.missingHandler(call)'))
+        self.assertEqual(report()['gateStatus'],'FAIL')
+        self.native.write_text(original.replace('this.reply(this.mediaCall(call), result);',
+                                               'if (false) { this.reply(this.mediaCall(call), result); }'))
+        self.assertEqual(report()['gateStatus'],'FAIL')
+
+    def test_binary_ternary_fallback_does_not_certify_a_third_allowed_method(self):
+        report=self.actual_plugin('DiagnosticsPlugin','dsh/diagnostics',['info','engineLog'])
+        self.assertEqual(report()['gateStatus'],'PASS_SCOPED')
+        original=self.native.read_text()
+        self.native.write_text(original.replace("['info', 'engineLog']", "['info', 'engineLog', 'other']"))
+        self.dart.write_text(self.dart.read_text().replace("bridge.invokeMethod('engineLog');", "bridge.invokeMethod('other');"))
+        self.assertEqual(report()['gateStatus'],'FAIL')
+        self.native.write_text(original.replace('logs.tail(limit)', 'undefined'))
+        self.dart.write_text(self.dart.read_text().replace("bridge.invokeMethod('other');", "bridge.invokeMethod('engineLog');"))
+        self.assertEqual(report()['gateStatus'],'FAIL')
+        self.native.write_text(original.replace('result.success(value);',''))
+        self.assertEqual(report()['gateStatus'],'FAIL')
+
+    def test_unreachable_ternary_and_reply_are_not_dispatch_evidence(self):
+        report=self.actual_plugin('DiagnosticsPlugin','dsh/diagnostics',['engineLog'])
+        original=self.native.read_text()
+        assignment="work = call.method === 'info' ? this.info(context, logs) : logs.tail(limit);"
+        self.native.write_text(original.replace(assignment, 'if (false) { '+assignment+' }'))
+        self.assertEqual(report()['gateStatus'],'FAIL')
+        self.native.write_text(original.replace(assignment, 'const neverCalled = (): void => { '+assignment+' };'))
+        self.assertEqual(report()['gateStatus'],'FAIL')
+        self.native.write_text(original.replace('result.success(value);','if (false) { result.success(value); }'))
+        self.assertEqual(report()['gateStatus'],'FAIL')
+
+    def test_unconditional_return_stops_later_reply_recognition(self):
+        report=self.actual_plugin('AppLinksPlugin','dsh/links',['ready'])
+        self.native.write_text(self.native.read_text().replace('result.success(true);','return; result.success(true);'))
+        self.assertEqual(report()['gateStatus'],'FAIL')
+
+    def test_indirect_rejecting_membership_stays_unknown(self):
+        original=self.native.read_text()
+        guard="if (!['read', 'readAll'].includes(call.method))"
+        for declaration in ["const accepted = ['read'].includes(call.method);", "const allowedMethods = ['read']; const accepted = allowedMethods.includes(call.method);"]:
+            with self.subTest(declaration=declaration):
+                self.native.write_text(original.replace(guard, declaration+' if (!accepted)'))
+                report=self.report()
+                self.assertEqual(report['gateStatus'],'FAIL')
+                self.assertTrue(any(row['status']=='UNKNOWN_ACCEPTANCE' for row in report['dartCalls']))
+
     def test_a_whitelist_is_not_required_for_a_switch_only_handler(self):
         report=self.report(('dsh/second',))
         self.assertEqual(report['gateStatus'],'PASS_SCOPED')

@@ -24,6 +24,24 @@ class AttachmentPickPending {
 // admission without claiming that DocumentViewPicker or in-flight I/O stopped.
 let activePick: AttachmentPickPending | null = null;
 
+// Keep only batches, not old Dart results or Ability bindings. A retry takes
+// one snapshot and runs serially; repeated picks neither await it nor fan out I/O.
+const deferredCleanup: Set<AttachmentFileBatch> = new Set<AttachmentFileBatch>();
+let cleanupRetry: Promise<void> | null = null;
+
+function cleanupWarning(): void {
+  // No URI, filename, file contents or private key is logged.
+  hilog.warn(0, 'DshAttachmentFiles', 'Attachment cache cleanup failed');
+}
+
+async function retryCleanup(batches: AttachmentFileBatch[]): Promise<void> {
+  for (const batch of batches) {
+    deferredCleanup.delete(batch);
+    try { await batch.release(); }
+    catch (_) { deferredCleanup.add(batch); cleanupWarning(); }
+  }
+}
+
 export default class AttachmentFilesPlugin implements FlutterPlugin, AbilityAware {
   private engine: FlutterPluginBinding | null = null;
   private ability: AbilityPluginBinding | null = null;
@@ -37,7 +55,7 @@ export default class AttachmentFilesPlugin implements FlutterPlugin, AbilityAwar
     this.retire(); this.channel?.setMethodCallHandler(null);
     this.engine = binding; this.ability = null;
     this.ready = AttachmentFileBatch.initialize(binding.getApplicationContext().cacheDir)
-      .catch((): void => this.cleanupWarning());
+      .catch((): void => cleanupWarning());
     this.channel = new MethodChannel(binding.getBinaryMessenger(), 'dsh/attachment-files');
     this.channel.setMethodCallHandler({ onMethodCall: (call: MethodCall, result: MethodResult): void => {
       if (this.engine !== binding) { result.error('ohos_attachment_detached', 'Attachment picker detached', null); return; }
@@ -50,7 +68,7 @@ export default class AttachmentFilesPlugin implements FlutterPlugin, AbilityAwar
         this.cancel(request);
         if (!request.workDone) { result.success(null); return; }
         this.cleanup(request).then((): void => result.success(null), (): void => {
-          this.cleanupWarning();
+          cleanupWarning();
           result.error('ohos_attachment_cleanup', 'Unable to release attachment cache', null);
         });
       } else result.notImplemented();
@@ -79,12 +97,7 @@ export default class AttachmentFilesPlugin implements FlutterPlugin, AbilityAwar
     this.cancel(request);
     this.pending = null;
     if (activePick === request) activePick = null;
-    if (request.workDone) this.cleanup(request).catch((): void => this.cleanupWarning());
-  }
-
-  private cleanupWarning(): void {
-    // No URI, filename, file contents or private key is logged.
-    hilog.warn(0, 'DshAttachmentFiles', 'Attachment cache cleanup failed');
+    if (request.workDone) this.cleanup(request).catch((): void => cleanupWarning());
   }
 
   private cleanup(request: AttachmentPickPending): Promise<void> {
@@ -93,8 +106,11 @@ export default class AttachmentFilesPlugin implements FlutterPlugin, AbilityAwar
       if (this.pending === request) this.pending = null;
       if (activePick === request) activePick = null;
     }, (error: Error): void => {
-      // Retain the owned paths and busy slot on failure, but allow an explicit
-      // release or later retirement to retry the remaining cleanup.
+      // Dart has already released ownership and may never return this owner.
+      // Retain only the unfinished batch; cleanup failure cannot strand admission.
+      deferredCleanup.add(request.batch);
+      if (this.pending === request) this.pending = null;
+      if (activePick === request) activePick = null;
       request.cleanup = null;
       throw error;
     });
@@ -108,9 +124,12 @@ export default class AttachmentFilesPlugin implements FlutterPlugin, AbilityAwar
     if (options === null) { result.error('ohos_attachment_arguments', 'Invalid attachment selection', null); return; }
     if (ability === null || engine === null) { result.error('ohos_attachment_detached', 'Attachment picker unavailable', null); return; }
     if (activePick !== null) { result.error('ohos_attachment_busy', 'Another attachment selection is still active', null); return; }
+    if (cleanupRetry === null && deferredCleanup.size !== 0) {
+      cleanupRetry = retryCleanup(Array.from(deferredCleanup)).finally((): void => { cleanupRetry = null; });
+    }
     const pending = new AttachmentPickPending(options, result, engine.getApplicationContext().cacheDir);
     activePick = pending; this.pending = pending;
-    this.run(pending, ability).catch((): void => this.cleanupWarning());
+    this.run(pending, ability).catch((): void => cleanupWarning());
   }
 
   private async run(pending: AttachmentPickPending, ability: AbilityPluginBinding): Promise<void> {

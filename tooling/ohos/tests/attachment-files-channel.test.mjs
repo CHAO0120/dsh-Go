@@ -139,17 +139,135 @@ test('text mode permits empty files, honors a smaller byte limit and does not tr
   assert.equal(entries[0].problem, 'file_too_large'); await release(f);
 });
 
-test('failed cache release keeps ownership and busy state, while an explicit retry cleans the remainder', async t => {
+test('release failure loses no cleanup work and the next pick retries without the old Dart owner', async t => {
   let once = true;
   const f = await attachmentFixture(t, { unlink: () => {
-    if (once) { once = false; throw new Error('controlled cache cleanup failure'); }
+    if (once) { once = false; throw new Error('controlled cleanup failure'); }
   } });
-  const entries = await pick(f, [await f.file('owned', 'abc')]);
+  const [entry] = await pick(f, [await f.file('old', 'abc')]);
   assert.equal((await f.invoke('release', { owner: 'test-1' }).done).error, 'ohos_attachment_cleanup');
-  assert.equal(await fsp.readFile(entries[0].path, 'utf8'), 'abc');
-  assert.equal((await f.invoke('pick', request('next')).done).error, 'ohos_attachment_busy');
-  await release(f);
-  assert.deepEqual(await pick(f, [], {}, 'next'), []);
+  assert.equal(await fsp.readFile(entry.path, 'utf8'), 'abc');
+  const next = f.invoke('pick', request('new'));
+  await until(() => f.pickers.length === 2 || next.replies.length > 0);
+  assert.equal(next.replies.length, 0, 'cleanup failure must not strand the live Ability busy');
+  f.pickers[1].wait.resolve([]);
+  assert.deepEqual(await next.done, { value: [] });
+  await until(async () => (await f.cached()).length === 0);
+  assert.equal(f.operations.filter(v => v.op === 'unlink' && v.path === entry.path).length, 2);
+});
+
+test('retry failure permits consecutive picks, then a later retry cleans only the abandoned batch', async t => {
+  let denied = true, oldPath;
+  const f = await attachmentFixture(t, { unlink: path => {
+    if (denied && path === oldPath) throw new Error('persistent cleanup denial');
+  } });
+  const [old] = await pick(f, [await f.file('old', 'old')]); oldPath = old.path;
+  assert.equal((await f.invoke('release', { owner: 'test-1' }).done).error, 'ohos_attachment_cleanup');
+  for (const owner of ['second', 'third']) {
+    const next = f.invoke('pick', request(owner));
+    await until(() => f.pickers.length >= (owner === 'second' ? 2 : 3) || next.replies.length > 0);
+    assert.equal(next.replies.length, 0);
+    f.pickers.at(-1).wait.resolve([]);
+    assert.deepEqual(await next.done, { value: [] });
+    await new Promise(resolve => setImmediate(resolve));
+  }
+  assert.equal(await fsp.readFile(oldPath, 'utf8'), 'old');
+  denied = false;
+  const [fresh] = await pick(f, [await f.file('fresh', 'new')], {}, 'fourth');
+  await until(() => f.operations.filter(v => v.op === 'unlink' && v.path === oldPath).length === 4);
+  await f.invoke('release', { owner: 'test-1' }).done;
+  assert.equal(await fsp.readFile(fresh.path, 'utf8'), 'new');
+  assert.equal((await f.invoke('pick', request('busy')).done).error, 'ohos_attachment_busy');
+  await release(f, 'fourth');
+});
+
+test('hung retry does not block new picker or duplicate cleanup; late completion cannot clear new admission', async t => {
+  const gate = deferred(); let calls = 0, oldPath;
+  const f = await attachmentFixture(t, { unlink: async path => {
+    if (path !== oldPath) return;
+    if (++calls === 1) throw new Error('first cleanup failure');
+    await gate.promise;
+  } });
+  const [old] = await pick(f, [await f.file('old', 'old')]); oldPath = old.path;
+  assert.equal((await f.invoke('release', { owner: 'test-1' }).done).error, 'ohos_attachment_cleanup');
+  const next = f.invoke('pick', request('new'));
+  await until(() => f.pickers.length === 2 || next.replies.length > 0);
+  assert.equal(next.replies.length, 0);
+  f.pickers[1].wait.resolve([await f.file('fresh', 'fresh')]);
+  const fresh = (await next.done).value[0];
+  assert.equal((await f.invoke('pick', request('busy')).done).error, 'ohos_attachment_busy');
+  assert.equal(calls, 2, 'one in-flight retry per abandoned batch');
+  gate.resolve();
+  await until(async () => { try { await fsp.stat(oldPath); return false; } catch (e) { if (e.code === 'ENOENT') return true; throw e; } });
+  await f.invoke('release', { owner: 'test-1' }).done;
+  await f.invoke('release', { owner: 'test-1' }).done;
+  assert.equal(await fsp.readFile(fresh.path, 'utf8'), 'fresh');
+  assert.equal((await f.invoke('pick', request('still-busy')).done).error, 'ohos_attachment_busy');
+  await release(f, 'new');
+});
+
+for (const wholeDirectory of [false, true]) {
+  test(`cache removed externally before release is already clean (directory=${wholeDirectory})`, async t => {
+    const f = await attachmentFixture(t);
+    const [entry] = await pick(f, [await f.file('external-removal', 'bytes')]);
+    if (wholeDirectory) await fsp.rm(entry.path.slice(0, entry.path.lastIndexOf('/')), { recursive: true });
+    else await fsp.unlink(entry.path);
+    await release(f);
+    assert.deepEqual(await pick(f, [], {}, 'next'), []);
+  });
+}
+
+test('directory permission failure remains a release error, then next pick retries the empty directory', async t => {
+  let denied = true;
+  const f = await attachmentFixture(t, { rmdir: () => {
+    if (denied) throw Object.assign(new Error('permission denied'), { code: 13900012 });
+  } });
+  const [entry] = await pick(f, [await f.file('old', 'old')]);
+  assert.equal((await f.invoke('release', { owner: 'test-1' }).done).error, 'ohos_attachment_cleanup');
+  assert.deepEqual(await fsp.readdir(entry.path.slice(0, entry.path.lastIndexOf('/'))), []);
+  denied = false;
+  assert.deepEqual(await pick(f, [], {}, 'new'), []);
+  await until(async () => (await f.cached()).length === 0);
+});
+
+test('late failed retry cannot retire the new batch and stays retryable on another pick', async t => {
+  const gate = deferred(); let calls = 0, oldPath;
+  const f = await attachmentFixture(t, { unlink: async path => {
+    if (path !== oldPath) return;
+    if (++calls === 1) throw new Error('initial failure');
+    await gate.promise;
+  } });
+  const [old] = await pick(f, [await f.file('old', 'old')]); oldPath = old.path;
+  assert.equal((await f.invoke('release', { owner: 'test-1' }).done).error, 'ohos_attachment_cleanup');
+  const [fresh] = await pick(f, [await f.file('new', 'new')], {}, 'new');
+  gate.reject(new Error('late cleanup failure'));
+  await until(() => f.operations.filter(v => v.op === 'cleanup-warning').length === 2);
+  assert.equal(await fsp.readFile(fresh.path, 'utf8'), 'new');
+  assert.equal((await f.invoke('pick', request('busy')).done).error, 'ohos_attachment_busy');
+  f.change({ unlink: undefined });
+  assert.deepEqual(await f.invoke('release', { owner: 'new' }).done, { value: null });
+  assert.deepEqual(await pick(f, [], {}, 'third'), []);
+  await until(async () => (await f.cached()).length === 0);
+});
+
+test('real read failure plus failed cleanup remains an I/O error, while a later valid pick is usable', async t => {
+  let oldPath;
+  const f = await attachmentFixture(t, {
+    read: () => { throw new Error('read failed'); },
+    unlink: path => { oldPath ??= path; if (path === oldPath) throw new Error('cleanup failed'); },
+  });
+  const selected = f.invoke('pick', request()); f.select([await f.file('failed', 'private')]);
+  assert.equal((await selected.done).error, 'ohos_attachment_io');
+  await until(() => f.operations.some(v => v.op === 'cleanup-warning'));
+  assert.equal(f.descriptors.size, 0);
+  f.change({ read: undefined });
+  const [fresh] = await pick(f, [await f.file('good', 'real data')], {}, 'new');
+  assert.equal(await fsp.readFile(fresh.path, 'utf8'), 'real data');
+  assert.equal(fresh.problem, null);
+  f.change({ unlink: undefined });
+  assert.deepEqual(await f.invoke('release', { owner: 'new' }).done, { value: null });
+  assert.deepEqual(await pick(f, [], {}, 'third'), []);
+  await until(async () => (await f.cached()).length === 0);
 });
 
 test('invalid budgets do not launch a picker; returned excess selection is bounded and empty cancel creates no cache', async t => {

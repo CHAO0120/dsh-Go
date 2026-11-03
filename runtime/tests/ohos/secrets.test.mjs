@@ -157,7 +157,7 @@ test('recovery requires literal confirmation, clears only credentials and works 
   assert.deepEqual(await f.request('readAll'), { value: {} });
   assert.deepEqual(await f.request('recover', { confirmed: true }), { value: null });
   assert.deepEqual(await f.request('write', { key: 'replacement', value: 'new' }), { value: null });
-  assert.equal(f.events.filter(row => row.op === 'generate').length, 1);
+  assert.equal(f.events.filter(row => row.op === 'generate').length, 2);
 });
 
 test('missing-key recovery deletes only ciphertext and permits new key creation on the next write', async t => {
@@ -258,4 +258,94 @@ test('ordinary file sync, close and rename failures remain errors and retain the
       assert.equal(f.fds.size, 0);
     });
   }
+});
+
+
+const ownAlias = 'DSH.Go.Secrets.AES256.GCM.v1';
+test('explicit recovery replaces an existing unusable key and touches only its fixed alias', async t => {
+  const f = await secretsFixture(t);
+  await f.request('write', { key: 'old', value: 'old-secret' });
+  const oldKey = Buffer.from(f.keys.get(ownAlias));
+  const otherAlias = 'another-service-key', otherKey = Buffer.alloc(32, 8);
+  f.keys.set(otherAlias, otherKey); f.unusableKeys.add(ownAlias);
+  const config = f.app.filesDir + '/hosts.json'; await fs.writeFile(config, 'keep host configuration');
+  assert.equal((await f.request('write', { key: 'new', value: 'before-recovery' })).error, 'secrets_unreadable');
+  assert.deepEqual(await f.request('recover', { confirmed: true }), { value: null });
+  assert.equal(f.keys.has(ownAlias), false); assert.deepEqual(f.keys.get(otherAlias), otherKey);
+  assert.deepEqual(await f.request('write', { key: 'new', value: 'after-recovery' }), { value: null });
+  assert.notDeepEqual(f.keys.get(ownAlias), oldKey);
+  assert.deepEqual(await f.request('readAll'), { value: { new: 'after-recovery' } });
+  assert.equal(await fs.readFile(config, 'utf8'), 'keep host configuration');
+  assert.deepEqual(f.events.filter(e => e.op === 'deleteKey').map(e => e.alias), [ownAlias]);
+});
+
+for (const missing of ['directory', 'vault']) test(`recovery deletes the stale fixed alias even with missing ${missing}`, async t => {
+  const f = await secretsFixture(t);
+  await f.request('write', { key: 'old', value: 'old' }); f.unusableKeys.add(ownAlias);
+  if (missing === 'directory') await fs.rm(f.app.filesDir + '/dsh-secrets', { recursive: true });
+  else await fs.unlink(f.vaultPath);
+  f.change({ keyQueryError: 12000005 });
+  assert.deepEqual(await f.request('recover', { confirmed: true }), { value: null });
+  assert.equal(f.keys.has(ownAlias), false, 'recovery must not use the possibly broken existence query');
+  f.change({ keyQueryError: undefined });
+  assert.deepEqual(await f.request('write', { key: 'new', value: 'new' }), { value: null });
+});
+
+for (const code of [201, 12000004, 12000005, 12000012]) test(`key deletion error ${code} is explicit and retryable after ciphertext removal`, async t => {
+  const f = await secretsFixture(t);
+  await f.request('write', { key: 'old', value: 'old' });
+  f.change({ deleteKeyError: code });
+  const failed = await f.request('recover', { confirmed: true });
+  assert.equal(failed.error, 'secrets_recovery_failed');
+  assert(!failed.message.includes('已保留'));
+  await assert.rejects(fs.access(f.vaultPath), { code: 'ENOENT' });
+  assert.equal(f.keys.has(ownAlias), true);
+  f.change({ deleteKeyError: undefined });
+  assert.deepEqual(await f.request('recover', { confirmed: true }), { value: null });
+  assert.equal(f.keys.has(ownAlias), false);
+  assert.deepEqual(await f.request('write', { key: 'fresh', value: 'new' }), { value: null });
+});
+
+test('key deletion remains within the cross-engine vault queue before the next write', async t => {
+  const f = await secretsFixture(t), entered = deferred(), release = deferred();
+  await f.request('write', { key: 'old', value: 'old' });
+  f.change({ beforeDeleteKey: async () => { entered.resolve(); await release.promise; } });
+  const recovering = f.request('recover', { confirmed: true }); await entered.promise;
+  const next = f.attach(); let written = false;
+  const writing = f.request('write', { key: 'new', value: 'new' }, next.channel).then(value => { written = true; return value; });
+  await Promise.resolve(); assert.equal(written, false);
+  release.resolve(); assert.deepEqual(await recovering, { value: null });
+  assert.deepEqual(await writing, { value: null });
+  assert.deepEqual(await f.request('readAll', {}, next.channel), { value: { new: 'new' } });
+  assert.equal(f.events.filter(e => e.op === 'generate').length, 2);
+});
+
+test('retirement after unlink stops undispatched key deletion and a new engine can finish recovery', async t => {
+  const f = await secretsFixture(t), entered = deferred(), release = deferred();
+  await f.request('write', { key: 'old', value: 'old' });
+  f.change({ beforeUnlink: async () => { entered.resolve(); await release.promise; } });
+  const recovering = f.request('recover', { confirmed: true }); await entered.promise;
+  f.plugin.onDetachedFromEngine(f.engine); const next = f.attach();
+  release.resolve(); assert.equal((await recovering).error, 'cancelled');
+  assert.equal(f.events.filter(e => e.op === 'deleteKey').length, 0);
+  assert.equal(f.keys.has(ownAlias), true);
+  await assert.rejects(fs.access(f.vaultPath), { code: 'ENOENT' });
+  f.change({ beforeUnlink: undefined });
+  assert.deepEqual(await f.request('recover', { confirmed: true }, next.channel), { value: null });
+  assert.equal(f.keys.has(ownAlias), false);
+  next.plugin.onDetachedFromEngine(next.engine);
+});
+
+test('retirement during dispatched HUKS deletion cannot delete a new engine key after its queued write', async t => {
+  const f = await secretsFixture(t), entered = deferred(), release = deferred();
+  await f.request('write', { key: 'old', value: 'old' });
+  f.change({ beforeDeleteKey: async () => { entered.resolve(); await release.promise; } });
+  const recovering = f.request('recover', { confirmed: true }); await entered.promise;
+  f.plugin.onDetachedFromEngine(f.engine); const next = f.attach();
+  const writing = f.request('write', { key: 'new', value: 'retained' }, next.channel);
+  release.resolve(); assert.equal((await recovering).error, 'cancelled');
+  assert.deepEqual(await writing, { value: null });
+  assert.deepEqual(await f.request('readAll', {}, next.channel), { value: { new: 'retained' } });
+  assert.equal(f.events.filter(e => e.op === 'generate').length, 2);
+  next.plugin.onDetachedFromEngine(next.engine);
 });
