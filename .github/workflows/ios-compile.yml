@@ -9,6 +9,7 @@ on:
     paths:
       - 'app/**'
       - 'packages/**'
+      - 'tooling/ios/**'
       - '.github/workflows/ios-compile.yml'
   workflow_dispatch:
 
@@ -57,8 +58,8 @@ jobs:
 
       - name: Compile for the simulator
         working-directory: app
-        run: flutter build ios --simulator --debug
+        run: bash ../tooling/ios/build.sh --simulator --debug
 
       - name: Compile for a device, unsigned
         working-directory: app
-        run: flutter build ios --release --no-codesign
+        run: bash ../tooling/ios/build.sh --release --no-codesign

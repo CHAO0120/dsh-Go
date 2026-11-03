@@ -42,6 +42,9 @@ final class DshPlugin: NSObject, FlutterPlugin, FlutterSceneLifeCycleDelegate {
     super.init()
   }
 
+  // Optional requirements, called by selector: spelled out, since a Swift name that
+  // missed one would compile and simply never be called.
+  @objc(scene:willConnectToSession:options:)
   func scene(
     _ scene: UIScene,
     willConnectTo session: UISceneSession,
@@ -52,16 +55,19 @@ final class DshPlugin: NSObject, FlutterPlugin, FlutterSceneLifeCycleDelegate {
     return false
   }
 
+  @objc(scene:openURLContexts:)
   func scene(_ scene: UIScene, openURLContexts URLContexts: Set<UIOpenURLContext>) -> Bool {
     URLContexts.forEach { open($0.url) }
     return !URLContexts.isEmpty
   }
 
   /// A share left while the app was away; the wake-up address isn't always what brought it back.
+  @objc(sceneWillEnterForeground:)
   func sceneWillEnterForeground(_ scene: UIScene) {
     shares.drain()
   }
 
+  @objc(windowScene:performActionForShortcutItem:completionHandler:)
   func windowScene(
     _ windowScene: UIWindowScene,
     performActionFor shortcutItem: UIApplicationShortcutItem,
