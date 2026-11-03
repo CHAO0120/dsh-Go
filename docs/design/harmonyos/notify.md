@@ -10,6 +10,7 @@
 | `show` | 再查实际允许状态；用 `publicText` 发布普通文字提醒，固定标题「DSH Go」。同一 group/key 使用稳定的 SHA256 标签更新同一通知。返回成功只表示系统 publish Promise 完成，不证明系统实际展示。 |
 | `cancel` / `cancelGroup` | 与发送操作串行，使用相同的稳定标签/分组，防止后到的发送复活已取消项。 |
 | `cancelAll` | 只取消本插件 id=0 且带 `dsh-chat:` 标签的普通会话提醒，不调用全应用 cancelAll。 |
+| `requestPermission` | 调用 `requestEnableNotification` 弹一次系统授权窗口，之后返回 `isNotificationEnabled`；用户拒绝（1600004）返回 false，其余错误走错误通道。需要活着的 Ability。拒绝后窗口不会再弹，只能走 `openSettings`。该窗口 Promise 同样不阻塞发通知的队列。 |
 | `openSettings` | 仅调用时打开真实 UIAbility 对应的应用通知设置；返回 true 表示 API 完成，不能解释为用户已开启权限。该窗口 Promise 不阻塞发通知的队列。 |
 | taps | 系统 WantAgent 点击后，校验本次安装的 HMAC，再发 Dart 现有 Map：host、sessionId、kind、可选 eventId。冷启动等待订阅；同 Android 当前协议，尚未订阅时保留最后一次点击。 |
 | actions / `actionResult` | 明确 `ohos_unsupported`。`canApprove` 的通知只有「打开应用处理」按钮；点击导航后在应用内看完整操作并批准，没有通知外批准/拒绝。 |
@@ -37,9 +38,10 @@ Want 固定指向当前 Ability 的 bundleName/name，不接受 Dart 给定的�
 
 ## 已运行验证
 
-`runtime/tests/ohos/notify-channel.test.mjs` 执行产品 ETS，系统通知/WantAgent/Flutter 是显式替身，HMAC/SHA256、随机密钥与私有目录 JSON 持久化使用真实 Node/Linux。共 **14 项通过**，覆盖：
+`runtime/tests/ohos/notify-channel.test.mjs` 执行产品 ETS，系统通知/WantAgent/Flutter 是显式替身，HMAC/SHA256、随机密钥与私有目录 JSON 持久化使用真实 Node/Linux。共 **16 项通过**，覆盖：
 
 - 精确三通道、未知方法、unsupported 边界、设置窗口错误及非阻塞性；
+- 授权窗口需要活着的 Ability、用系统状态作答、拒绝不算失败、其余错误走错误通道、等待时不阻塞其他调用；
 - 应用总开关/槽位关闭/最低级别/未知/查询失败、缺槽位创建、发送再次检查；
 - 固定目标、不可变 Want、公开文字限定、真实持久密钥与 HMAC，不泄露私有正文/密钥；
 - 标签的分组/键边界、更新、单项/组取消、本插件范围内 cancelAll；

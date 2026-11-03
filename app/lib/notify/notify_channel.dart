@@ -292,6 +292,18 @@ class NotifyChannel {
 
   Future<void> cancelAll() => _call('cancelAll');
 
+  /// HarmonyOS's permission dialog; true when notifications are on afterwards.
+  /// It comes up once: after a refusal only [openSettings] can turn them on.
+  Future<bool> requestPermission() async {
+    try {
+      return await _methods.invokeMethod<bool>('requestPermission') ?? false;
+    } on MissingPluginException {
+      return false;
+    } on PlatformException {
+      return false;
+    }
+  }
+
   /// Opens the system notification settings; [channel] (`done` / `attention`)
   /// goes straight to that channel when the app-level switch is on.
   Future<bool> openSettings({String? channel}) async {

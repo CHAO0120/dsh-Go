@@ -9,6 +9,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../l10n/l10n.dart';
 import '../../state/access_state.dart';
+import '../../state/android_features.dart';
 import '../../state/phone_state.dart';
 import '../onboarding/onboarding_scaffold.dart';
 import '../phone/phone_disclosure_sheet.dart';
@@ -190,7 +191,7 @@ class _AccessWalkState extends ConsumerState<AccessWalk> {
       return;
     }
     // A system dialog answers when the call returns.
-    if (item.dialog) await _onResume();
+    if (item.dialogOn(ref.read(operatingSystemProvider))) await _onResume();
   }
 
   Future<void> _confirmVendor(AccessItem item) async {

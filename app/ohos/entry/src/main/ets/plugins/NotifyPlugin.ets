@@ -5,6 +5,7 @@ import Want from '@ohos.app.ability.Want';
 import AbilityConstant from '@ohos.app.ability.AbilityConstant';
 import UIAbility from '@ohos.app.ability.UIAbility';
 import common from '@ohos.app.ability.common';
+import { BusinessError } from '@ohos.base';
 import preferences from '@ohos.data.preferences';
 import cryptoFramework from '@ohos.security.cryptoFramework';
 import util from '@ohos.util';
@@ -17,6 +18,8 @@ import {
 const ACTION = 'io.github.ccch1mneyyy.dsh_app.NOTIFICATION';
 const LABEL = 'dsh-chat:';
 const SLOT = notificationManager.SlotType.SERVICE_INFORMATION;
+// requestEnableNotification's refusal, now or from an earlier dialog.
+const REFUSED = 1600004;
 
 interface NotifyRoute {
   sessionId: string;
@@ -114,7 +117,7 @@ export default class NotifyPlugin implements FlutterPlugin, AbilityAware, NewWan
     this.taps = new EventChannel(messenger, 'dsh/notify/taps');
     this.actions = new EventChannel(messenger, 'dsh/notify/actions');
     this.methods.setMethodCallHandler({ onMethodCall: (call: MethodCall, result: MethodResult): void => {
-      if (!['status', 'show', 'cancel', 'cancelGroup', 'cancelAll', 'openSettings', 'actionResult', 'live', 'liveStatus', 'openLiveSettings'].includes(call.method)) {
+      if (!['status', 'show', 'cancel', 'cancelGroup', 'cancelAll', 'requestPermission', 'openSettings', 'actionResult', 'live', 'liveStatus', 'openLiveSettings'].includes(call.method)) {
         result.notImplemented(); return;
       }
       const mutate = ['show', 'cancel', 'cancelGroup', 'cancelAll'].includes(call.method);
@@ -276,6 +279,17 @@ export default class NotifyPlugin implements FlutterPlugin, AbilityAware, NewWan
           await notificationManager.cancel(0, item.label);
         }
         return null;
+      }
+      case 'requestPermission': {
+        if (!this.ability) throw new NotifyError('no_ability', '请先回到应用窗口再打开通知设置。');
+        try {
+          await notificationManager.requestEnableNotification(this.ability.getAbility().context);
+        } catch (error) {
+          // The dialog comes up once: after a refusal only openSettings can turn them on.
+          if ((error as BusinessError).code === REFUSED) return false;
+          throw error as Error;
+        }
+        return await notificationManager.isNotificationEnabled();
       }
       case 'openSettings': case 'openLiveSettings': {
         if (!this.ability) throw new NotifyError('no_ability', '请先回到应用窗口再打开通知设置。');

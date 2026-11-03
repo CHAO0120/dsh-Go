@@ -28,6 +28,7 @@ import '../runtime/background_net.dart' show backgroundSettingsProvider;
 import '../runtime/runtime_bridge.dart' show RuntimePhase;
 import '../runtime/runtime_state.dart';
 import '../ui/chat/voice/voice_bridge.dart' show VoicePermission;
+import 'android_features.dart';
 import 'engine_control.dart';
 import 'notify_state.dart';
 import 'phone_state.dart';
@@ -74,8 +75,11 @@ enum AccessItem {
     _ => null,
   };
 
-  /// Asked for with a system dialog: the answer is back when the call returns.
-  bool get dialog => this == mic || this == storage || this == battery;
+  /// Asked for on [os] with a system dialog: the answer is back when the call
+  /// returns. HarmonyOS asks for notifications that way; Android's come with
+  /// their channels, and this opens their settings page.
+  bool dialogOn(String os) =>
+      this == mic || this == storage || this == battery || (this == notifications && os == 'ohos');
 }
 
 /// Where an item stands.
@@ -327,7 +331,12 @@ class SystemAccessDriver implements AccessDriver {
           if (again) return ref.read(phoneProvider.notifier).openAppDetails();
           return true;
         case AccessItem.notifications:
-          return ref.read(notifyChannelProvider).openSettings();
+          final notify = ref.read(notifyChannelProvider);
+          if (again || ref.read(operatingSystemProvider) != 'ohos') return notify.openSettings();
+          // The system's dialog; refused, the step says so and 重试 comes back
+          // here with [again], for the settings a dialog can no longer reach.
+          await notify.requestPermission();
+          return true;
         case AccessItem.battery:
           return await bridge.requestBatteryExempt() ?? false;
         case AccessItem.vendorBackground || AccessItem.autostart || AccessItem.popup:

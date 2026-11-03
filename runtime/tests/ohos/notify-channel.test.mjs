@@ -57,6 +57,7 @@ function fixture(t, { directory, hooks = {}, launchWant = {} } = {}) {
     async cancelGroup(group) { calls.push('cancelGroup:' + group); for (const [key, value] of active) if (value.groupName === group) active.delete(key); },
     async getActiveNotifications() { calls.push('getActive'); return [...active.values()]; },
     async openNotificationSettings(context) { assert.equal(context, ability.context); calls.push('settings'); await hooks.settings?.(); },
+    async requestEnableNotification(context) { assert.equal(context, ability.context); calls.push('request'); await hooks.request?.(); },
   };
   const symKey = bytes => ({ bytes: Buffer.from(bytes), getEncoded: () => ({ data: new Uint8Array(bytes) }) });
   const crypto = {
@@ -212,6 +213,33 @@ test('settings needs a live ability and its UI promise does not block other call
   release.resolve(); assert.deepEqual(await settings, { value: true });
   f.hooks.settings = () => { throw new Error('window gone'); };
   assert.equal((await f.call('openSettings')).error, 'ohos_notify_failed');
+});
+
+test('the permission dialog needs a live ability, answers from the system and blocks no other call', async t => {
+  const entered = deferred(), release = deferred();
+  const f = fixture(t, { hooks: { request: () => { entered.resolve(); return release.promise; } } });
+  f.state.enabled = false;
+  assert.equal((await f.call('requestPermission')).error, 'no_ability');
+  assert.deepEqual(f.calls, [], 'no dialog without a window');
+  f.attach();
+  const asked = f.call('requestPermission'); await entered.promise;
+  assert.equal((await f.call('status')).value.enabled, false);
+  f.state.enabled = true; release.resolve();
+  assert.deepEqual(await asked, { value: true });
+  // Dismissed without an answer: the call resolved, the switch is still off.
+  f.hooks.request = undefined; f.state.enabled = false;
+  assert.deepEqual(await f.call('requestPermission'), { value: false });
+});
+
+test('a refusal is an answer, not a failure; anything else takes the error path', async t => {
+  const f = fixture(t); f.state.enabled = false; f.attach();
+  const code = value => Object.assign(new Error('rejected'), { code: value });
+  f.hooks.request = () => { throw code(1600004); };
+  assert.deepEqual(await f.call('requestPermission'), { value: false });
+  f.hooks.request = () => { throw code(1600013); };
+  assert.equal((await f.call('requestPermission')).error, 'ohos_notify_failed');
+  f.hooks.request = () => { throw new Error('window gone'); };
+  assert.equal((await f.call('requestPermission')).error, 'ohos_notify_failed');
 });
 
 test('cold restart verifies persisted key, delivers one pending tap and does not replay launch on reattach', async t => {
