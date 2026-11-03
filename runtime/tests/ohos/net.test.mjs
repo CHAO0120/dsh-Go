@@ -128,7 +128,7 @@ for (const [status, method, expectedMethod] of [[301, 'POST', 'GET'], [301, 'PUT
   });
 }
 
-for (const status of [307, 308]) test(`${status} preserves multipart bytes and boundary`, { todo: 'Node 24.22.1 native Fetch also changes the multipart body boundary but retains the old Content-Type; O5 remains blocked for this case' }, async (t) => {
+for (const status of [307, 308]) test(`${status} preserves multipart bytes and boundary`, async (t) => {
   let first;
   const { url } = await serve(t, async (q, r) => {
     const seen = { body: (await bytes(q)).toString(), contentType: q.headers['content-type'] };
@@ -140,7 +140,7 @@ for (const status of [307, 308]) test(`${status} preserves multipart bytes and b
   body.set('field', '中文');
   const response = await fetch(`${url}/start`, { method: 'POST', body });
   const second = await response.json();
-  // Native Fetch may generate a new boundary while re-extracting FormData.
+  // The OHOS Node build snapshots multipart bytes before a redirect replay.
   for (const item of [first, second]) {
     assert.ok(item.contentType.startsWith('multipart/form-data; boundary='));
     assert.ok(item.body.includes('中文'));
@@ -231,7 +231,7 @@ test('abort after headers errors the web stream rather than returning EOF', asyn
 });
 
 for (const reason of [null, 0, false]) {
-  test(`body abort preserves falsy reason ${JSON.stringify(reason)}`, { todo: 'Node 24.22.1 native Fetch substitutes AbortError at the response-body stage; normative regression retained' }, async (t) => {
+  test(`body abort preserves falsy reason ${JSON.stringify(reason)}`, async (t) => {
     const { url } = await serve(t, (_q, r) => { r.writeHead(200); r.write('first'); });
     const { fetch } = client(t);
     const controller = new AbortController();
