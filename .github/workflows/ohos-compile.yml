@@ -60,11 +60,13 @@ jobs:
       - name: Compile to libapp.so
         working-directory: app
         run: |
+          # dDartDefines is ENABLE_FLEX_OVERFLOW=false in base64, see tooling/ohos/build-hap.sh.
           flutter assemble \
             -dTargetPlatform=ohos-arm64 \
             -dBuildMode=release \
             -dTargetFile=lib/main.dart \
             -dTreeShakeIcons=false \
+            -dDartDefines=RU5BQkxFX0ZMRVhfT1ZFUkZMT1c9ZmFsc2U= \
             --output=build/ohos-aot \
             ohos_aot_bundle_release_ohos-arm64
 

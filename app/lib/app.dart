@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io' show Platform;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
@@ -13,6 +14,7 @@ import 'state/locale_state.dart';
 import 'state/star_prompt.dart' show starPromptGateProvider, starPromptProvider;
 import 'state/tile_style_state.dart';
 import 'ui/chat/dsh_ui/dsh_ui_model.dart' show DshUiAppAccent;
+import 'ui/common/keyboard_motion.dart';
 import 'ui/common/side_insets.dart';
 import 'ui/launch/launch_overlay.dart';
 import 'ui/shell/root_gate.dart';
@@ -157,7 +159,10 @@ class _DshAppState extends ConsumerState<DshApp> with WidgetsBindingObserver {
           child: Stack(
             fit: StackFit.expand,
             children: [
-              MirroredSideInsets(child: child!),
+              if (Platform.operatingSystem == 'ohos')
+                EasedKeyboardInset(child: MirroredSideInsets(child: child!))
+              else
+                MirroredSideInsets(child: child!),
               const LaunchLayer(),
             ],
           ),

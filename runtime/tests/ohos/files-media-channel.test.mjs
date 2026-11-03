@@ -289,13 +289,14 @@ test('picker cancellation and ability loss do not modify the chosen destination'
   assert.equal(f.fds.size, 0);
 });
 
-test('system open grants read only access to the copied cache; force chooser and OS rejection stay explicit', async t => {
+test('system open grants read only access to the copied cache; 打开方式 is the same Want; OS rejection stays explicit', async t => {
   const f = await fixture(t); const path = await f.file();
   assert.deepEqual(await f.call('dsh/files', 'open', { path, mime: 'text/plain' }), { value: null });
   assert.equal(f.starts[0].action, 'ohos.want.action.viewData');
   assert.equal(f.starts[0].flags, 1); assert.equal(f.starts[0].type, 'text/plain');
   assert(f.starts[0].uri.startsWith(pathToFileURL(f.context.cacheDir).href + '/'));
-  assert.equal((await f.call('dsh/files', 'open', { path, chooser: true })).error, 'ohos_unsupported');
+  assert.deepEqual(await f.call('dsh/files', 'open', { path, mime: 'text/plain', chooser: true }), { value: null });
+  assert.equal(f.starts[1].action, f.starts[0].action); assert.equal(f.starts[1].flags, 1);
   const denied = await fixture(t, { start: () => { throw new Error('No handler'); } });
   const other = await denied.file();
   assert.equal((await denied.call('dsh/files', 'open', { path: other })).error, 'failed');

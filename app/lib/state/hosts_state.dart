@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io' show Platform;
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -399,6 +400,8 @@ typedef UrlOpener = Future<bool> Function(Uri url);
 
 final urlOpenerProvider = Provider<UrlOpener>(
   (ref) => (url) async {
+    // HarmonyOS's url_launcher answers the in-app mode with a developer's toast.
+    if (Platform.operatingSystem == 'ohos') return launchUrl(url, mode: LaunchMode.externalApplication);
     try {
       return await launchUrl(url, mode: LaunchMode.inAppBrowserView);
     } catch (_) {

@@ -1,5 +1,7 @@
 // Portions derived from PiPilot (https://github.com/CikeSeven/pi_pilot), MIT, Copyright (c) 2026 CikeSeven. See THIRD_PARTY_NOTICES.md.
 
+import 'dart:io' show Platform;
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -57,6 +59,12 @@ SystemUiOverlayStyle dshSystemOverlay(Brightness brightness) {
   );
 }
 
+/// What Material should behave as on [os]. HarmonyOS is meant to feel like the
+/// Android app: page transitions, ink, dialogs and text limits all read this.
+/// Written as the Android value because stock Flutter has no `TargetPlatform.ohos`.
+@visibleForTesting
+TargetPlatform? themePlatformFor(String os) => os == 'ohos' ? TargetPlatform.android : null;
+
 /// 雾蓝玻璃主题。三条铁律:
 ///
 /// 1. **层次靠材质,不靠阴影。** 页面是渐变,浮在内容上的(顶栏、输入条、
@@ -98,6 +106,7 @@ ThemeData _build(ColorScheme scheme, DshColors colors, DshSurfaces surfaces, App
 
   return ThemeData(
     useMaterial3: true,
+    platform: themePlatformFor(Platform.operatingSystem),
     colorScheme: scheme,
     scaffoldBackgroundColor: scheme.surface,
     canvasColor: scheme.surface,

@@ -239,7 +239,7 @@ export default class FilesMediaPlugin implements FlutterPlugin, AbilityAware {
         return bytes;
       }
       case 'open': {
-        if (call.argument('chooser') === true) throw new FileChannelError('ohos_unsupported', '强制选择打开应用尚未接入，可先保存后在系统文件应用中打开。');
+        // No public way to force a chooser: viewData shows the system's when several apps match.
         const context = this.ui();
         const copy = await this.snapshot(path, name, generation);
         this.active(generation);
