@@ -40,7 +40,7 @@
 | `shell.commands` | 字符串数组或 null | 当前后端可路由的命令名；null 表示清单未知，空数组表示确定没有可用命令 |
 | `shell.pty` | Support | 是否能创建实际可用的交互终端；虚拟 shell 不暗示 pty |
 | `processSpawn` | Support | 是否能创建任意 OS 子进程；worker 线程不等于子进程 |
-| `nodeScripts` | `worker | process | none | unknown` | `node <脚本>` 的实际后端 |
+| `nodeScripts` | `worker | worker-rebased | process | none | unknown` | `node <脚本>` 的实际后端；worker-rebased 的专属 Worker 会重定位公开 cwd/fs 路径，仍不是 OS 进程 |
 | `python` | Support | 当前可调用的 Python 运行时；just-bash 可选 wasm Python 未加载时为 unsupported |
 | `wasm` | Support | 此实例是否有可用 WebAssembly；jitless 的本次实测为 unsupported |
 | `plugins.bundled` | Support | 随包插件是否可由当前 profile 正常发现和加载 |
@@ -81,7 +81,7 @@
     "pty": "unsupported"
   },
   "processSpawn": "unsupported",
-  "nodeScripts": "worker",
+  "nodeScripts": "worker-rebased",
   "python": "unsupported",
   "wasm": "unsupported",
   "plugins": {"bundled": "supported", "marketInstall": "unsupported"},
@@ -133,7 +133,7 @@
 | 字段 | 当前实现的依据与边界 |
 | --- | --- |
 | shell | 先检查实际 `ctx.shell`，再读实际 `ctx.subprocess.capabilities`；命令数组与执行器、bash 工具说明使用同一个 commands.mjs。没有 shell 时是 none/空数组；存在 shell 但没有后端声明时是 unknown/null。 |
-| processSpawn / nodeScripts / python | 后端声明来自当前已安装的虚拟进程服务。此基底是 unsupported/none/unsupported；工作线程存在不代表 `node <脚本>` 已实现。O4 后继启用 node 时须同时更新同一能力表。 |
+| processSpawn / nodeScripts / python | 后端声明来自当前已安装的虚拟进程服务。O4 Worker 后继在存在可继承的产品预加载器时为 unsupported/worker-rebased/unsupported；缺预加载器时 nodeScripts 为 none、命令表移除 node。仅有普通工作线程不代表 Node 脚本入口可用。 |
 | wasm | 当前实例没有 WebAssembly 时是 unsupported；仅存在对象不证明能编译，保留 unknown。读取不运行任何 wasm 探测。 |
 | plugins.bundled | 当前 profile 已组合 bundle，且 loader 存在至少一个未禁用、fiber active 的官方包条目，才报告 supported；证明本 profile 的发现/加载机制已经运行，不保证每个插件功能均兼容。证据不足为 unknown。 |
 | plugins.marketInstall | 当前 OHOS 第一阶段策略为 unsupported。O1/O2 的显式安装拒绝另交；能力读取自身不安装包、不修改市场策略。 |
@@ -151,3 +151,11 @@ HTTP 读取复用该连接已注入的 HttpClient、代理/TLS 策略、Host 和
 实际 Linux 验证：真实锁定 DSH/Cordis/connection 的四场景 HTTP 集成通过（含真实 SIGKILL 后熔断恢复）；真实 Cordis 平台门控4项、服务快照3项通过；装入此插件后严格 OHOS 仿真五工具完整回合通过。固定官方 Dart 3.11.0 上新增模型/真实HTTP测试及现有相关HTTP回归实际执行，结果与精确补丁哈希由交付报告记录；没有以 JavaScript 替身冒充 Dart。
 
 Android 的选中 DSH diff、pins 和 companion 字节输入与基底一致，构建脚本及版本输入规则未改。真机后台、原生模块装载、SDK/HAP 与手机网络仍未验证；本协议的 unknown 保留这些限制，不用桌面证据消除它们。
+
+## 9. `worker-rebased` 的兼容含义
+
+此值是 v1 的新增枚举项。旧客户端将它读成 unknown，不能当作 none；新客户端的 `RuntimeNodeScripts.workerRebased` 只接受线值 `worker-rebased`，不接受 Dart 拼写 `workerRebased`。原有 worker、process、none 的解析不变。
+
+该后端只执行本地 `.js` / `.cjs` / `.mjs` 文件。专属 Worker 中的 `process.cwd/chdir` 及固定清单里的公开 `fs` / `fs/promises` 路径参数使用调用的工作区；主线程与普通 Worker 不变。原生 addon、`process.binding` 仍看到进程 cwd，交互 stdin、PTY 和 `child_process` 不可用，不能由这个值推导出 OS 子进程或完整安全沙箱。实际语义、测试及已知差异见 [O4-Node-Worker.md](../../../runtime/ohos/process/O4-Node-Worker.md)。
+
+主线 Flutter 界面负责消费新增枚举。本包只交协议与纯 Dart 模型：`app/lib/ui/engine/engine_capabilities.dart` 的穷尽 switch 必须在合入模型时同步增加 workerRebased 分支。精确衔接片段见 O4 文档；模型测试通过不表示尚未更新的整个 App 可编译。

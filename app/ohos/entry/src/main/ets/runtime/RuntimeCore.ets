@@ -48,7 +48,9 @@ export function validateManifest(manifest: RuntimeManifest): RuntimeManifest {
       if (paths.has(parent)) throw new RuntimeChannelError('ohos_manifest_invalid', '运行时清单的文件与目录路径冲突。');
     }
   }
-  for (const entry of ['node_modules/@deepseek-ai/dsh/lib/bin.js', 'runtime/ohos/preload.mjs']) {
+  for (const entry of ['node_modules/@deepseek-ai/dsh/lib/bin.js', 'runtime/ohos/preload.mjs',
+    'runtime/ohos/process/index.mjs', 'runtime/ohos/process/sandbox.mjs',
+    'runtime/ohos/lifecycle/index.mjs', 'runtime/ohos/capabilities/index.mjs']) {
     if (!paths.has(entry)) throw new RuntimeChannelError('ohos_manifest_invalid', '运行时缺少固定启动入口。');
   }
   return manifest;

@@ -73,6 +73,19 @@ export function registerLifecycleRoutes(ctx, coordinator, transport) {
       }
       if (url.search) throw fail('ERR_OHOS_LIFECYCLE_REQUEST', 'Control arguments belong in the JSON body', 400);
       const body = await readJson(req);
+      if (body.operation === 'host') {
+        if (Object.keys(body).some(key => !['operation', 'revision', 'foreground', 'computePermission'].includes(key)) ||
+            !Number.isSafeInteger(body.revision) || body.revision < 1 || typeof body.foreground !== 'boolean' ||
+            !['granted', 'denied', 'unknown'].includes(body.computePermission)) {
+          throw fail('ERR_OHOS_LIFECYCLE_REQUEST', 'Invalid host observation', 400);
+        }
+        const state = await coordinator.observeHost({ revision: body.revision, foreground: body.foreground,
+          computePermission: body.computePermission });
+        // Host acknowledgements stay bounded even after thousands of calls.
+        const { v, host, closed, blocked, paused, confirmedPause, controlVersion } = state;
+        reply(200, { v, host, closed, blocked, paused, confirmedPause, controlVersion });
+        return;
+      }
       if (Object.keys(body).some(key => !['operation', 'sessionId'].includes(key))) throw fail('ERR_OHOS_LIFECYCLE_REQUEST', 'Unknown control field', 400);
       let status;
       if (['pause', 'resume'].includes(body.operation)) {

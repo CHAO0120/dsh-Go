@@ -11,7 +11,7 @@
 | `for` / `while`、函数调用、花括号组、source/eval、嵌套 shell | 整个外层复合语句完成后交付；内部仍缓冲。 |
 | `value=$(...)`、`> file`、`2>&1`、持续 fd | 捕获与重定向完成后，只交付实际应到达调用方 stdout/stderr 的结果。 |
 | 已观察到前缀后取消 | 原 Worker terminate / exit 屏障保留；已经交付的前缀保留，未交付的复合语句内部输出可能丢失。已经完成的文件写入保留。 |
-| 二进制及中文 | stdout 按现有 typed-output 标记分别用 Latin-1 字节或 UTF-8 编码；stderr 沿现有文本契约。每个语句保持自己的字节形态。 |
+| 二进制及中文 | stdout 按现有 typed-output 标记分别用 Latin-1 字节或 UTF-8 编码；后继 [Node Worker v2](O4-Node-Worker.md) 为 stderr 补上独立 bytes 类型与路由，避免脚本的非 UTF-8 错误输出被解码损坏。每个语句保持自己的字节形态。 |
 
 `streamingOutput: true` 在本后端中的含义就是上表的外层语句粒度。该字段来自执行器同一份 `commands.mjs`，OHOS 工具说明依据它显示精确边界。O6 的 v1 数据模型没有额外扩展流式字段；其命令清单仍读取同一个实际后端。`nodeScripts` 仍为 `none`（由独立 O6 补丁声明），未将 node 命令加入执行清单。
 

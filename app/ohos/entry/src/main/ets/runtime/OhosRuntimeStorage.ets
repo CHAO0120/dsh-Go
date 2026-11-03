@@ -4,16 +4,47 @@ import fileHash from '@ohos.file.hash';
 import resourceManager from '@ohos.resourceManager';
 import util from '@ohos.util';
 import { BusinessError } from '@ohos.base';
-import { RuntimeChannelError, RuntimeFile, RuntimeStorage } from './RuntimeCore';
+import { RuntimeChannelError, RuntimeFile, RuntimeManifest, RuntimeStorage } from './RuntimeCore';
+import { OhosRuntimeArchive } from './OhosRuntimeArchive';
 
 export class OhosRuntimeStorage implements RuntimeStorage {
   private static textWrites: Promise<void> = Promise.resolve();
-  private resources: resourceManager.ResourceManager;
+  private static retiredFiles: fs.File[] = [];
+  private static closes: Promise<void> = Promise.resolve();
   private filesDir: string;
+  private archive: OhosRuntimeArchive;
 
   constructor(resources: resourceManager.ResourceManager, filesDir: string) {
-    this.resources = resources;
     this.filesDir = filesDir;
+    this.archive = new OhosRuntimeArchive(resources);
+  }
+
+  readBundledManifest(): Promise<RuntimeManifest> {
+    return this.archive.readManifest();
+  }
+
+  withBundledRuntime(work: () => Promise<void>): Promise<void> {
+    return this.archive.withBundledRuntime(work);
+  }
+
+  private static closeRetiredFiles(): Promise<void> {
+    const closing = OhosRuntimeStorage.closes.then(async () => {
+      while (OhosRuntimeStorage.retiredFiles.length > 0) {
+        const file = OhosRuntimeStorage.retiredFiles[0];
+        await fs.close(file);
+        OhosRuntimeStorage.retiredFiles.shift();
+      }
+    });
+    OhosRuntimeStorage.closes = closing.catch(() => {});
+    return closing;
+  }
+
+  private static closeOwned(file: fs.File): Promise<void> {
+    // A rejected close must not erase the only owner of a real descriptor.
+    // A later storage instance retries the retired file before opening a new
+    // writable file; repeated failure stays explicit and keeps ownership.
+    OhosRuntimeStorage.retiredFiles.push(file);
+    return OhosRuntimeStorage.closeRetiredFiles();
   }
 
   private async present(path: string): Promise<boolean> {
@@ -85,6 +116,7 @@ export class OhosRuntimeStorage implements RuntimeStorage {
   }
 
   private async replaceText(path: string, content: string): Promise<void> {
+    await OhosRuntimeStorage.closeRetiredFiles();
     await this.checkParents(path);
     const temp = path + '.tmp';
     const file = await fs.open(temp, fs.OpenMode.CREATE | fs.OpenMode.READ_WRITE | fs.OpenMode.TRUNC | fs.OpenMode.NOFOLLOW);
@@ -100,7 +132,7 @@ export class OhosRuntimeStorage implements RuntimeStorage {
       }
       await fs.fsync(file.fd);
     } finally {
-      await fs.close(file);
+      await OhosRuntimeStorage.closeOwned(file);
     }
     await this.rename(temp, path);
   }
@@ -116,40 +148,29 @@ export class OhosRuntimeStorage implements RuntimeStorage {
   }
 
   async copyRawFile(asset: string, target: string, file: RuntimeFile): Promise<void> {
+    if (asset !== 'dsh-runtime/files/' + file.path) {
+      throw new RuntimeChannelError('ohos_archive_invalid', '运行时归档成员与清单路径不一致。');
+    }
+    await OhosRuntimeStorage.closeRetiredFiles();
     await this.checkParents(target);
-    const descriptor = await this.resources.getRawFd(asset);
+    const output = await fs.open(target, fs.OpenMode.CREATE | fs.OpenMode.READ_WRITE | fs.OpenMode.TRUNC | fs.OpenMode.NOFOLLOW);
     try {
-      if (descriptor.length !== file.size) throw new RuntimeChannelError('ohos_size_mismatch', '随包运行时文件长度不符。');
-      const output = await fs.open(target, fs.OpenMode.CREATE | fs.OpenMode.READ_WRITE | fs.OpenMode.TRUNC | fs.OpenMode.NOFOLLOW);
-      try {
-        const buffer = new ArrayBuffer(256 * 1024);
-        const magic = new Uint8Array(4);
-        let offset = 0;
-        while (offset < descriptor.length) {
-          const count = await fs.read(descriptor.fd, buffer, {
-            offset: descriptor.offset + offset, length: Math.min(buffer.byteLength, descriptor.length - offset)
-          });
-          if (count === 0) throw new RuntimeChannelError('ohos_read_failed', '随包运行时文件提前结束。');
-          if (offset < 4) {
-            magic.set(new Uint8Array(buffer, 0, Math.min(count, 4 - offset)), offset);
-            if (offset + count >= 4 && magic[0] === 127 && magic[1] === 69 && magic[2] === 76 && magic[3] === 70) {
-              throw new RuntimeChannelError('ohos_native_payload', '原生 ELF 必须随 HAP 的 libs 交付，不能落地到可写目录。');
-            }
+      let offset = 0;
+      await this.archive.extract(file, async (buffer: ArrayBuffer, count: number): Promise<void> => {
+        let written = 0;
+        while (written < count) {
+          const n = await fs.write(output.fd, buffer.slice(written, count), {offset: offset + written});
+          if (!Number.isSafeInteger(n) || n <= 0 || n > count - written) {
+            throw new RuntimeChannelError('ohos_write_failed', '运行时文件写入未完成。');
           }
-          let written = 0;
-          while (written < count) {
-            const n = await fs.write(output.fd, buffer.slice(written, count), {offset: offset + written});
-            if (n === 0) throw new RuntimeChannelError('ohos_write_failed', '运行时文件写入未完成。');
-            written += n;
-          }
-          offset += count;
+          written += n;
         }
-        await fs.fsync(output.fd);
-      } finally {
-        await fs.close(output);
-      }
+        offset += count;
+      });
+      if (offset !== file.size) throw new RuntimeChannelError('ohos_size_mismatch', '运行时解压长度与清单不符。');
+      await fs.fsync(output.fd);
     } finally {
-      await this.resources.closeRawFd(asset);
+      await OhosRuntimeStorage.closeOwned(output);
     }
   }
 
@@ -172,11 +193,12 @@ export class OhosRuntimeStorage implements RuntimeStorage {
   }
 
   private async syncParent(path: string): Promise<void> {
+    await OhosRuntimeStorage.closeRetiredFiles();
     const parent = await fs.open(path.substring(0, path.lastIndexOf('/')), fs.OpenMode.READ_ONLY | fs.OpenMode.DIR);
     try {
       await fs.fsync(parent.fd);
     } finally {
-      await fs.close(parent);
+      await OhosRuntimeStorage.closeOwned(parent);
     }
   }
 

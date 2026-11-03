@@ -37,3 +37,31 @@ export class EventChannel {
   constructor(messenger, name) { this.messenger = messenger; this.name = name; }
   setStreamHandler(handler) { this.handler = handler; }
 }
+
+// Actual Ark dynamic import exposes Native exports under default.
+export default { start, stop, getState, drainEvents };
+
+export let nativeModuleLoads = 0;
+export function markNativeLoad() { nativeModuleLoads++; }
+
+export const nativeModuleControl = { beforeLoad: null };
+
+// The runtime-channel regression retains the actual lifecycle model. Its
+// platform HTTP/permission boundary records calls without contacting a server;
+// lifecycle-host-http.test.mjs separately exercises the real authenticated route.
+export const lifecycleControl = { sends: [], queries: 0, cancels: 0, failure: null };
+export class OhosLifecycleTransport {
+  async send(baseUrl, token, observation) {
+    lifecycleControl.sends.push({ baseUrl, token, observation });
+    if (lifecycleControl.failure) throw lifecycleControl.failure;
+  }
+  cancel() { lifecycleControl.cancels++; }
+}
+export function backgroundComputePermission() { lifecycleControl.queries++; return 'denied'; }
+export class FlutterAbility {
+  superCalls = [];
+  onForeground() { this.superCalls.push('foreground'); }
+  onBackground() { this.superCalls.push('background'); }
+  onDestroy() { this.superCalls.push('destroy'); }
+  configureFlutterEngine() {}
+}

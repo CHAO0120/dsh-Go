@@ -6,7 +6,7 @@ import { mkdir, readFile, realpath, stat, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { isAbsolute, join, resolve } from 'node:path';
 import { performance } from 'node:perf_hooks';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
 import { startFakeModel } from './fake-model.mjs';
 
@@ -21,6 +21,7 @@ const { values } = parseArgs({ options: {
   'expose-internals': { type: 'boolean', default: false },
   'native-library-dir': { type: 'string' },
   'compile-cache-dir': { type: 'string' },
+  'model-fixture': { type: 'string' },
 } });
 if (!values.prefix || !values.out || !['jit', 'jitless', 'sim'].includes(values.mode)) {
   throw new Error('usage: node round.mjs --prefix <locked patched DSH prefix> --out <new case directory> --mode jit|jitless|sim');
@@ -75,7 +76,9 @@ await mkdir(workspace);
 await mkdir(join(out, 'home'), { mode: 0o700 });
 const require = createRequire(join(prefix, 'package.json'));
 const { WebSocket } = require('ws'); // Already in the locked DSH dependency tree.
-const model = await startFakeModel(workspace);
+const modelFactory = values['model-fixture']
+  ? (await import(pathToFileURL(resolve(values['model-fixture'])))).startFakeModel : startFakeModel;
+const model = await modelFactory(workspace);
 const overlay = join(out, 'model.patch.yml');
 await writeFile(overlay, JSON.stringify([
   { id: 'llm-pi-ai', config: { providers: { 'ohos-fake': {
@@ -136,6 +139,10 @@ const profilePatches = [...values.patch, ...(values.mode === 'sim' ? values['sim
 for (const name of [...profilePatches, overlay]) args.push('--patch', resolve(name));
 args.push('--host', '127.0.0.1', '--port', '0', '--no-open');
 const report = { mode: values.mode, platformOverride: values.platform, node: process.version, status: 'BLOCKED', stage: 'startup', approvals: 0, events: [], modelRequests: model.requests };
+if (values['model-fixture']) {
+  const fixturePath = resolve(values['model-fixture']);
+  report.modelFixture = { path: fixturePath, sha256: createHash('sha256').update(await readFile(fixturePath)).digest('hex') };
+}
 report.loader = {
   configured: { exposeInternals: values['expose-internals'],
     strictAddonAllowlistApplied: values.mode === 'sim', allowedAddons,

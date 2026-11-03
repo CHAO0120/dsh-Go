@@ -62,10 +62,11 @@ try {
   const work = join(base, 'workspace');
   await mkdir(work);
   runtime = new VirtualSubprocessRuntime({ workspaceRoots: [work] });
-  async function run(command) {
-    const handle = runtime.spawn({ argv: ['bash', '-c', command], cwd: work, graceMs: 200,
+  async function run(command, cwd = work, env = {}) {
+    const handle = runtime.spawn({ argv: ['bash', '-c', command], cwd, env, graceMs: 200,
       stdio: { stdin: 'ignore', stdout: { maxBytes: 65536 }, stderr: { maxBytes: 65536 } } });
     const outcome = await handle.done;
+    assert.equal(await handle.waitForExit(), true);
     return { ...outcome, stdout: handle.collected.stdout.readFrom(0).text,
       stderr: handle.collected.stderr.readFrom(0).text };
   }
@@ -74,6 +75,42 @@ try {
     assert.equal(result.exitCode, 0);
     assert.equal(result.stdout, '乙\n');
     assert.equal(await readFile(join(work, '中文 文件.txt'), 'utf8'), '甲\n乙\n');
+  });
+  await check('real Node Worker executes a relative module and preserves arbitrary stderr bytes', async () => {
+    await writeFile(join(work, '相对依赖.mjs'), 'export default "relative-module";\n');
+    await writeFile(join(work, '脚本.mjs'), `import { readFileSync } from 'node:fs';
+import value from './相对依赖.mjs';
+console.log(JSON.stringify({ value, cwd: process.cwd(), args: process.argv.slice(2),
+  main: import.meta.main, content: readFileSync('中文 文件.txt', 'utf8'), env: process.env.ONLY_FIXTURE }));
+process.stderr.write(Buffer.from([0, 255, 195, 169, 10]));\n`);
+    const result = await run("ONLY_FIXTURE='环境值' node '脚本.mjs' '中文 参数' 2> bytes.bin");
+    assert.equal(result.exitCode, 0, result.stderr);
+    assert.deepEqual(JSON.parse(result.stdout), { value: 'relative-module', cwd: work,
+      args: ['中文 参数'], main: true, content: '甲\n乙\n', env: '环境值' });
+    assert.deepEqual(await readFile(join(work, 'bytes.bin')), Buffer.from([0, 255, 195, 169, 10]));
+  });
+  await check('real virtual Git uses its Worker and publication owner after pruning', async () => {
+    const directory = join(work, '真实 Git');
+    await mkdir(directory);
+    const author = { GIT_AUTHOR_NAME: '本地测试', GIT_AUTHOR_EMAIL: 'fixture@example.invalid',
+      GIT_COMMITTER_NAME: '本地测试', GIT_COMMITTER_EMAIL: 'fixture@example.invalid',
+      GIT_AUTHOR_DATE: '1700000000 +0000', GIT_COMMITTER_DATE: '1700000000 +0000' };
+    const git = async command => {
+      const result = await run(command, directory, author);
+      assert.equal(result.exitCode, 0, result.stderr);
+      return result;
+    };
+    await git('git init');
+    await writeFile(join(directory, 'tracked.txt'), 'before\n');
+    await git('git add --all');
+    await git('git commit -m "首次提交"');
+    assert.match((await git('git log --oneline -1')).stdout, /首次提交/);
+    await writeFile(join(directory, 'tracked.txt'), 'after\n');
+    assert.equal((await git('git status --porcelain -z')).stdout, ' M tracked.txt\0');
+    assert.equal((await git('git diff --numstat')).stdout, '1\t1\ttracked.txt\n');
+    await git('git add -u');
+    assert.match((await git('git diff --cached')).stdout, /\+after/);
+    assert.equal(runtime.live.size, 0);
   });
   await check('Python/SQLite/QuickJS commands refuse without missing-module errors', async () => {
     for (const command of ['python3 --version', 'sqlite3 --version', 'js-exec --help']) {

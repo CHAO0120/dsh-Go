@@ -31,6 +31,20 @@ const _sample = {
 };
 
 void main() {
+  test('Worker路径重定位是独立协议值，不把Dart枚举拼写当作合法wire值', () {
+    final cases = {
+      'worker': RuntimeNodeScripts.worker,
+      'worker-rebased': RuntimeNodeScripts.workerRebased,
+      'process': RuntimeNodeScripts.process,
+      'none': RuntimeNodeScripts.none,
+      'workerRebased': RuntimeNodeScripts.unknown,
+      'future': RuntimeNodeScripts.unknown,
+    };
+    for (final entry in cases.entries) {
+      expect(RuntimeCapabilities.fromJson({'v': 1, 'nodeScripts': entry.key})!.nodeScripts, entry.value);
+    }
+  });
+
   test('完整v1、发布熔断和未来可选字段', () {
     final value = RuntimeCapabilities.fromJson(_sample)!;
     expect(

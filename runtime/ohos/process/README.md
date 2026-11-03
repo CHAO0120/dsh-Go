@@ -1,6 +1,6 @@
 # O4a：鸿蒙批量虚拟进程后端
 
-**本项是 O4 的可复核子集，不代表 O4 全部完成。未在真机核实。** 历史 O4a 固定基底 `afb5cdd`、DSH `0.2.1-rc.4`、Node `24.22.1`。**历史 v3 完整替代 v1/v2，不叠加应用。** 第二波 `c818155` 后续增加了 [外层语句分段输出](O4-statement-output.md)：`bash` / `sh` 完成一个外层语句即交付该语句的输出，单个命令、管道和复合语句内部仍有缓冲。stdin 仍为批量；`node` 脚本和交互字节通道尚未启用，不能在 O6 中报为可用。后续 O4b 增加受限 Git Worker、父线程临时文件归属和真实工作区快照，具体子命令、停止语义与证据见 [GIT.md](GIT.md)。
+**本项是 O4 的可复核子集，不代表 O4 全部完成。未在真机核实。** 历史 O4a 固定基底 `afb5cdd`、DSH `0.2.1-rc.4`、Node `24.22.1`。**历史 v3 完整替代 v1/v2，不叠加应用。** 第二波 `c818155` 后续增加了 [外层语句分段输出](O4-statement-output.md)：`bash` / `sh` 完成一个外层语句即交付该语句的输出，单个命令、管道和复合语句内部仍有缓冲。`2c2e799` 后继按追加2提供 [Node 专属 Worker](O4-Node-Worker.md)，可用时 O6 报 worker-rebased。stdin 仍为批量，交互字节通道不可用；基底已包含 O4b 的受限 Git Worker、父线程临时文件归属和真实工作区快照，具体范围见 [GIT.md](GIT.md)。本次实际组合同时保留 Git 异步清理门与 Node 输出排空门。
 
 M4-1 v2 在此基线上恢复 DSH JSON grep 的正向 `include` 和 Unicode 常用字符类/词边界，具体构建链、差分与边界见 [M4-1.md](M4-1.md)。本组合版本已包含 [M4-2](M4-2.md) 的搜索与执行双队列，以及后继 [M4-3](M4-3.md)、[M4-4a](M4-4a.md)、[M4-4b](M4-4b.md)、[M6-1](M6-1.md)、[M6-2](M6-2.md)，各自范围与仍存在的差异见对应说明。
 
@@ -21,7 +21,9 @@ Cordis 的 `subprocess` 提供者改为本目录的 `index.mjs`，`sandbox` 提�
 
 `sandbox.confine()` 发放随机、单次的 argv 票据。策略留在宿主 Map 中，不放进可伪造的环境变量；prepare 与 spawn 解封后的实际 argv 共用无 NUL / 非空命令校验；票据不能把非法脚本藏在外壳后绕过原子进程限制。spawn 在进入队列前消费票据，重复使用、任意猜测和取消后的票据均被拒绝。`read-only` 拒绝所有受限 FS 写方法；`workspace-write` 将可见的工作区收窄到该调用的会话根。原工具层获准的 `danger-full-access` 也只能访问宿主启动时授权的根。
 
-每个任务在独立 `worker_threads` 中运行已固定的 just-bash 解释器。同一服务使用两个 FIFO 队列：直接 `rg` 独占一个搜索槽，其余命令共享一个执行槽，总共最多两个 worker。写操作仍串行；长 bash 不再阻塞直接搜索。bash 内部调用 rg 仍在执行槽，因为同一脚本可能同时写文件。搜索可能观察到同时执行任务或外部编辑器正在修改的文件，不宣称快照一致性。没有改写 `child_process`、`fs`、`process.cwd`、Request/Response 或其他 Node 全局。`python:false`、`javascript:false`，命令注册表排除了 SQLite、Python、JS 执行及网络命令。`defenseInDepth:false` 防止 just-bash 全局改写宿主内建入口；因此这里依赖受限解释器、命令表与 FS 边界，不宣称是能运行不可信任意 JS 的安全容器。
+shell 任务在独立 `worker_threads` 中运行已固定的 just-bash 解释器；直接 node 任务使用其自身脚本 Worker。同一服务使用两个 FIFO 队列：直接 `rg` 独占一个搜索槽，其余命令共享一个执行槽，最多两个顶层任务。bash 的 node 命令和脚本创建的后代 Worker 可增加线程数，不能继续把两槽写成整个进程最多两个线程。写任务仍串行；长 bash 不再阻塞直接搜索。bash 内部调用 rg 仍在执行槽，因为同一脚本可能同时写文件。搜索可能观察到同时执行任务或外部编辑器正在修改的文件，不宣称快照一致性。
+
+宿主主线程与普通 Worker 不由 Node 脚本适配器改写；只有专属脚本 Worker 按追加2重定位 `process.cwd/chdir` 与固定公开 fs 路径表，并明确拒绝 child_process。`python:false`、`javascript:false` 禁用 just-bash 自带可选运行时；node 是单独的受控入口。`defenseInDepth:false` 防止 just-bash 改写宿主内建入口。公开 JS 路径检查不能控制原生 addon、process.binding 或未重定位的后代 Worker，不宣称能安全承载不可信任意 JS。
 
 `ReadWriteFs` 的路径和符号链接检查能拒绝已存在的越界链接；检查与后续宿主文件操作之间不是原子的，不能对抗另一个宿主调用同时替换路径的竞态。因此返回的 `sandbox.enforcement` 是 `partial`。这不是完整 OS 沙箱，真机验证也不能把这一结构边界消掉。
 
@@ -36,7 +38,7 @@ Cordis 的 `subprocess` 提供者改为本目录的 `index.mjs`，`sandbox` 提�
 | 尾部 / spill | 直接复用纯 JS 的 `dsh-subprocess-local/output` 导出；独立偏移读取、尾部截断、spill 上限及超限后不提供不完整 spill 文件沿用原行为。 |
 | 输出时机 | OHOS 私有构建在外层 shell 语句完成后交付 stdout/stderr；取消保留已经交付的前缀。单个命令、管道、循环、函数、嵌套 shell 等复合语句内部继续缓冲，取消时其中尚未交付的输出可能丢失。raw pipe 及原 OutputCollector 的字节、尾部与 spill 语义保留，具体测试见 [外层语句分段输出](O4-statement-output.md)。 |
 | stdin / control | 仅 ignore 和一次性 `{data}` 输入；交互 pipe / control 明确抛 `ERR_OHOS_STREAM_UNAVAILABLE`。没有 PTY。 |
-| 内存和文件规模 | 受限 FS 单文件读取及复制上限 64 MiB，解释器输出上限 64 MiB，worker JS old-generation 上限 256 MiB；这些不是总 RSS 上限，也不意味着同时读写多个大文件都在上述内存内。 |
+| 内存和文件规模 | just-bash 受限 FS 单文件读取及复制上限 64 MiB、解释器输出上限 64 MiB。Node 的公开 fs 并未套用该文件大小上限；批量 stdin 与 bash 内 Node 命令输出各限 64 MiB。各顶层脚本 Worker 的 JS old-generation 上限 256 MiB，不限制 Buffer/native 分配或整个进程 RSS。 |
 
 ## rg 范围与真实差分
 

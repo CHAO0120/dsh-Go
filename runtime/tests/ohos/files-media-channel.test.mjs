@@ -124,8 +124,11 @@ async function fixture(t, options = {}) {
         TextEncoder: class { encodeInto(text) { return new TextEncoder().encode(text); } },
       } };
       if (name === '@ohos.hilog') return { default: { warn: (...args) => warnings.push(args) } };
-      if (name === 'libdsh_host.so') return { openUserFile(root, relative) {
-        const fd = native.openUserFile(root, relative); fds.add(fd); return fd;
+      if (name === '../runtime/NativeHost') return { async loadNativeHost() {
+        if (options.beforeNativeLoad) await options.beforeNativeLoad();
+        return { openUserFile(root, relative) {
+          const fd = native.openUserFile(root, relative); fds.add(fd); return fd;
+        } };
       } };
       if (name === '@ohos/flutter_ohos') return { MethodChannel: Channel };
       // The controller's path derivation is actual product code. Its native
@@ -384,5 +387,46 @@ test('UTF-8 filename truncation preserves complete code points within the filesy
   const result = await f.call('dsh/files', 'resolveGuest', { path, name: '文😀'.repeat(100) });
   const name = result.value.substring(result.value.lastIndexOf('/') + 1);
   assert(Buffer.byteLength(name) <= 240); assert(!name.includes('\uFFFD'));
+  assert.equal(await fsp.readFile(result.value, 'utf8'), 'hello');
+});
+
+
+test('detach while native import is pending cannot open a source or display a picker', async t => {
+  const entered = deferred(), release = deferred();
+  const f = await fixture(t, { beforeNativeLoad: () => { entered.resolve(); return release.promise; } });
+  const path = await f.file();
+  const pending = f.call('dsh/files', 'saveToDownloads', { path });
+  await entered.promise;
+  f.plugin.onDetachedFromAbility();
+  release.resolve();
+  assert.equal((await pending).error, 'cancelled');
+  assert.equal(f.fds.size, 0); assert.equal(f.opened.length, 0); assert.equal(f.dialogs.length, 0);
+});
+
+
+function invokeSaved(handler, method, args = {}) {
+  return new Promise(resolve => handler.onMethodCall({ method, argument: key => args[key] }, {
+    success: value => resolve({ value: plain(value) }), error: (error, message) => resolve({ error, message }),
+    notImplemented: () => resolve({ missing: true }),
+  }));
+}
+
+test('retired engine handler cannot copy through a newly attached engine', async t => {
+  const f = await fixture(t); const path = await f.file();
+  const oldHandler = f.channels.find(c => c.name === 'dsh/files').handler;
+  const next = { getApplicationContext: () => f.context, getBinaryMessenger: () => ({}) };
+  f.plugin.onAttachedToEngine(next);
+  assert.equal((await invokeSaved(oldHandler, 'resolveGuest', { path })).error, 'cancelled');
+  assert.equal(f.opened.length, 0); assert.equal(f.fds.size, 0);
+});
+
+test('late old engine detach cannot remove the current file channel owner', async t => {
+  const f = await fixture(t); const path = await f.file();
+  const next = { getApplicationContext: () => f.context, getBinaryMessenger: () => ({}) };
+  f.plugin.onAttachedToEngine(next); f.plugin.onAttachedToAbility(f.binding);
+  const handler = f.channels.filter(c => c.name === 'dsh/files').at(-1).handler;
+  f.plugin.onDetachedFromEngine(f.engine);
+  const result = await invokeSaved(handler, 'resolveGuest', { path });
+  assert.equal(typeof result.value, 'string');
   assert.equal(await fsp.readFile(result.value, 'utf8'), 'hello');
 });

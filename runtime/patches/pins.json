@@ -409,6 +409,22 @@
           "after": "02c489f249c5a8ac4a43f526daa800d0e3a7d49d96d30a33829bc7426e21c1ee"
         }
       }
+    },
+    "zzzzzzzzzzzzzz-ohos-composition-imports.diff": {
+      "0.2.1-rc.4": {
+        "node_modules/openai/providers/bedrock/aws.mjs": {
+          "before": "635cfbbc0fbc24ef9b776bfacbc626089d8e472530aba75a44bf254ba8ac799a",
+          "after": "f4334a997fd108e44d0b0281b5a4cbed8fbaba9db748dad4e47e35acc2c41c04"
+        },
+        "node_modules/openai/providers/bedrock/aws.js": {
+          "before": "1db40e808c3b48a83b159f4237ba21f86f6b328226034e3623b9466a25c52a71",
+          "after": "25ddac1d081f1e5ea264301f888c96c1950b26eb3be3c063f3a23c3da19b2a66"
+        },
+        "node_modules/proxy-agent-negotiate/dist/index.js": {
+          "before": "56f33d231c16933054a0dddc665abdc8514d952c84fa96b245e841875d05f5e5",
+          "after": "d5317cfa41996c379958f5fbb9d90a282edc30bf9f8d67981f1b06d37e2131f6"
+        }
+      }
     }
   },
   "schema": 2,
@@ -452,7 +468,8 @@
       "zzzzzzzzzzz-ohos-search-ignore-description.diff",
       "zzzzzzzzzzzz-ohos-composition.diff",
       "zzzzzzzzzzzz-ohos-runtime-capabilities.diff",
-      "zzzzzzzzzzzzz-ohos-lifecycle.diff"
+      "zzzzzzzzzzzzz-ohos-lifecycle.diff",
+      "zzzzzzzzzzzzzz-ohos-composition-imports.diff"
     ]
   }
 }

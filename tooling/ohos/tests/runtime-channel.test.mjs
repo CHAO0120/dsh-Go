@@ -1,4 +1,4 @@
-import test, { after, afterEach } from 'node:test';
+import test, { after, afterEach, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import os from 'node:os';
@@ -6,8 +6,8 @@ import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
-import { makePack, fileIo } from './runtime-storage-fixture.mjs';
-import { native, MethodCall } from './runtime-host-fixture.mjs';
+import { makePack, fileIo, inflateActivity, activeInflaters, RUNTIME_ARCHIVE_ASSET } from './runtime-storage-fixture.mjs';
+import { native, MethodCall, nativeModuleLoads, nativeModuleControl, lifecycleControl } from './runtime-host-fixture.mjs';
 import { prepareManagedSkillModules } from './managed-skill-loader.mjs';
 import { managedSkillIo } from './managed-skill-fixture.mjs';
 
@@ -20,8 +20,28 @@ after(async () => { await fs.rm(temp, { recursive: true, force: true }); });
 const corePath = path.join(temp, 'RuntimeCore.mts');
 await fs.copyFile(path.join(source, 'RuntimeCore.ets'), corePath);
 await fs.copyFile(path.join(source, 'RuntimePaths.ets'), path.join(temp, 'RuntimePaths.mts'));
+await fs.copyFile(path.join(source, 'RuntimeLifecycle.ets'), path.join(temp, 'RuntimeLifecycle.mts'));
 await prepareManagedSkillModules({ source, directory: temp });
 const fixtureUrl = new URL('./runtime-storage-fixture.mjs', import.meta.url).href;
+// All three archive modules share the same actual RuntimeCore identity used by
+// the Controller and installer. Only unavailable platform imports and type-only
+// bindings are adapted; the product method bodies are executed unchanged.
+let zipText = await fs.readFile(path.join(source, 'RuntimeZip.ets'), 'utf8');
+zipText = zipText.replace("import util from '@ohos.util';", `import { util } from '${fixtureUrl}';`)
+  .replace('RuntimeChannelError, RuntimeFile, RuntimeManifest, validateManifest',
+    'RuntimeChannelError, type RuntimeFile, type RuntimeManifest, validateManifest')
+  .replace("from './RuntimeCore'", "from './RuntimeCore.mts'");
+await fs.writeFile(path.join(temp, 'RuntimeZip.mts'), zipText);
+let archiveText = await fs.readFile(path.join(source, 'OhosRuntimeArchive.ets'), 'utf8');
+archiveText = archiveText.replace("import fs from '@ohos.file.fs';", `import { fileIo as fs } from '${fixtureUrl}';`)
+  .replace("import resourceManager from '@ohos.resourceManager';", '')
+  .replace("import zlib from '@ohos.zlib';", `import { nativeZlib as zlib } from '${fixtureUrl}';`)
+  .replace('RuntimeChannelError, RuntimeFile, RuntimeManifest',
+    'RuntimeChannelError, type RuntimeFile, type RuntimeManifest')
+  .replace('RuntimeArchiveSource, RuntimeZip, RuntimeZipEntry', 'type RuntimeArchiveSource, RuntimeZip, RuntimeZipEntry')
+  .replace("from './RuntimeCore'", "from './RuntimeCore.mts'")
+  .replace("from './RuntimeZip'", "from './RuntimeZip.mts'");
+await fs.writeFile(path.join(temp, 'OhosRuntimeArchive.mts'), archiveText);
 let adapterText = await fs.readFile(path.join(source, 'OhosRuntimeStorage.ets'), 'utf8');
 adapterText = adapterText.replace("import fs from '@ohos.file.fs';", `import { fileIo as fs } from '${fixtureUrl}';`)
   .replace("import fileHash from '@ohos.file.hash';", `import { fileHash } from '${fixtureUrl}';`)
@@ -29,27 +49,73 @@ adapterText = adapterText.replace("import fs from '@ohos.file.fs';", `import { f
   .replace("import { BusinessError } from '@ohos.base';", '')
   .replace("import util from '@ohos.util';", `import { util } from '${fixtureUrl}';`)
   .replace("from './RuntimeCore'", "from './RuntimeCore.mts'")
-  .replace('RuntimeChannelError, RuntimeFile, RuntimeStorage', 'RuntimeChannelError, type RuntimeFile, type RuntimeStorage');
+  .replace("from './OhosRuntimeArchive'", "from './OhosRuntimeArchive.mts'")
+  .replace('RuntimeChannelError, RuntimeFile, RuntimeManifest, RuntimeStorage',
+    'RuntimeChannelError, type RuntimeFile, type RuntimeManifest, type RuntimeStorage');
 const adapterPath = path.join(temp, 'OhosRuntimeStorage.mts');
 await fs.writeFile(adapterPath, adapterText);
 const core = await import(pathToFileURL(corePath));
 const { OhosRuntimeStorage } = await import(pathToFileURL(adapterPath));
-const hostFixtureUrl = new URL('./runtime-host-fixture.mjs', import.meta.url).href;
+
 let controllerText = await fs.readFile(path.join(source, 'RuntimeController.ets'), 'utf8');
+// Persistence is a separate product patch. Test the actual dependency graph of
+// either declared composition; do not add a runtime/product feature switch.
+const usesPersistedRuntimeLog = controllerText.includes("from './PersistedRuntimeLog'");
+let PersistedRuntimeLog;
+if (usesPersistedRuntimeLog) {
+  let persistedText = await fs.readFile(path.join(source, 'PersistedRuntimeLog.ets'), 'utf8');
+  persistedText = persistedText.replace("import fs from '@ohos.file.fs';", `import { fileIo as fs } from '${fixtureUrl}';`)
+    .replace("import util from '@ohos.util';", `import { util } from '${fixtureUrl}';`)
+    .replace("import { BusinessError } from '@ohos.base';", '')
+    .replace("import { Any } from '@ohos/flutter_ohos';", '')
+    .replace("from './RuntimeCore'", "from './RuntimeCore.mts'");
+  await fs.writeFile(path.join(temp, 'PersistedRuntimeLog.mts'), persistedText);
+  ({ PersistedRuntimeLog } = await import(pathToFileURL(path.join(temp, 'PersistedRuntimeLog.mts'))));
+}
+beforeEach(() => { if (usesPersistedRuntimeLog) PersistedRuntimeLog.shared = null; });
+
+const hostFixtureUrl = new URL('./runtime-host-fixture.mjs', import.meta.url).href;
+const nativeBoundary = path.join(temp, 'native-boundary.mjs');
+await fs.writeFile(nativeBoundary, `import host, { markNativeLoad, nativeModuleControl } from '${hostFixtureUrl}';
+await nativeModuleControl.beforeLoad?.();
+markNativeLoad();
+export default host;
+`);
+
+// Native loading stays in the production helper; only the unavailable .so boundary
+// is redirected to the explicit host fixture. Its default export matches Ark import.
+let nativeHostText = await fs.readFile(path.join(source, 'NativeHost.ets'), 'utf8');
+nativeHostText = nativeHostText.replace("from 'libdsh_host.so'", `from '${hostFixtureUrl}'`)
+  .replace("import('libdsh_host.so')", `import('${pathToFileURL(nativeBoundary).href}')`)
+  .replace("from './RuntimeCore'", "from './RuntimeCore.mts'");
+await fs.writeFile(path.join(temp, 'NativeHost.mts'), nativeHostText);
 controllerText = controllerText.replace("import common from '@ohos.app.ability.common';", '')
+  .replace("import UIAbility from '@ohos.app.ability.UIAbility';", '')
   .replace("import util from '@ohos.util';", `import { util } from '${fixtureUrl}';`)
   .replace("import connection from '@ohos.net.connection';", `import { connection } from '${hostFixtureUrl}';`)
   .replace("from 'libdsh_host.so'", `from '${hostFixtureUrl}'`)
-  .replace('HostState, HostEvent, HostOptions', 'type HostState, type HostEvent, type HostOptions')
   .replace('RuntimeChannelError, RuntimeManifest, RuntimeFile, RuntimeInstaller', 'RuntimeChannelError, type RuntimeManifest, type RuntimeFile, RuntimeInstaller')
   .replace('  InstallProgress,', '  type InstallProgress,')
   .replace("from './RuntimeCore'", "from './RuntimeCore.mts'")
+  .replace("from './NativeHost'", "from './NativeHost.mts'")
+  .replace("from './PersistedRuntimeLog'", "from './PersistedRuntimeLog.mts'")
   .replace("from './RuntimePaths'", "from './RuntimePaths.mts'")
+  .replace("from './RuntimeLifecycle'", "from './RuntimeLifecycle.mts'")
+  .replace("from './OhosLifecycleTransport'", `from '${hostFixtureUrl}'`)
+  .replace("from './BackgroundCompute'", `from '${hostFixtureUrl}'`)
   .replace("from './ManagedSkillService'", "from './ManagedSkillService.mts'")
   .replace("from './OhosRuntimeStorage'", "from './OhosRuntimeStorage.mts'");
 const controllerPath = path.join(temp, 'RuntimeController.mts');
 await fs.writeFile(controllerPath, controllerText);
 const { RuntimeController } = await import(pathToFileURL(controllerPath));
+let entryText = await fs.readFile(path.join(source, '../entryability/EntryAbility.ets'), 'utf8');
+entryText = entryText.replace(/^import .*;\n/gm, '');
+await fs.writeFile(path.join(temp, 'EntryAbility.mts'),
+  `import { RuntimeController } from './RuntimeController.mts';\nimport { FlutterAbility } from '${hostFixtureUrl}';\n` +
+  `const VoicePlugin = { onForeground() {}, onBackground() {} };\n` +
+  `const NativeFilesPlugin = { onForeground() {}, onBackground() {} };\n` +
+  `const NativeMediaPlugin = { onForeground() {}, onBackground() {} };\n` + entryText);
+const { default: EntryAbility } = await import(pathToFileURL(path.join(temp, 'EntryAbility.mts')));
 let pluginText = await fs.readFile(path.join(source, 'RuntimePlugin.ets'), 'utf8');
 pluginText = pluginText.replace(/^import .* from '@ohos\/flutter_ohos[^\n]+\n/gm, '')
   .replace("import { BusinessError } from '@ohos.base';", '')
@@ -61,31 +127,46 @@ const pluginPath = path.join(temp, 'RuntimePlugin.mts');
 await fs.writeFile(pluginPath, pluginText);
 const { RuntimePlugin } = await import(pathToFileURL(pluginPath));
 const controllers = [];
-afterEach(() => { native.state.phase = 'idle'; for (const controller of controllers) controller.collect(); });
+afterEach(async () => {
+  native.state.phase = 'idle';
+  for (const controller of controllers) {
+    controller.collect();
+    if (usesPersistedRuntimeLog) await controller.persistedLogs.flush();
+  }
+  RuntimeController.foreground = false; RuntimeController.ability = null;
+});
 const files = {
   'node_modules/@deepseek-ai/dsh/lib/bin.js': 'console.log("fixture entry");',
   'runtime/ohos/preload.mjs': 'export const fixture = true;',
+  'runtime/ohos/process/index.mjs': 'export function apply() {}',
+  'runtime/ohos/process/sandbox.mjs': 'export function apply() {}',
+  'runtime/ohos/lifecycle/index.mjs': 'export function apply() {}',
+  'runtime/ohos/capabilities/index.mjs': 'export function apply() {}',
   'runtime/ohos/中文 空格.txt': '中文与 emoji 🐳\n',
 };
 
-async function makeCase(name, payload = files, version = 'v1') {
+async function makeCase(name, payload = files, version = 'v1', adjustManifest) {
   const dir = path.join(temp, name);
   await fs.mkdir(dir);
-  const pack = await makePack(path.join(dir, 'payload.hap'), payload, version);
+  const pack = await makePack(path.join(dir, 'payload.hap'), payload, version, adjustManifest);
   const storage = new OhosRuntimeStorage(pack.resources, dir);
   const installer = new core.RuntimeInstaller(storage, dir + '/runtime');
   return { dir, ...pack, storage, installer };
 }
 
-test('首次落地严格使用rawfile offset/length，中文字节、摘要及完成标记一致', async () => {
+test('首次落地严格使用单归档rawfile offset/length，真实inflate、中文字节、摘要及完成标记一致', async () => {
   const c = await makeCase('first');
   assert.equal(await c.installer.installed(), null);
   const progress = [];
-  await c.installer.install(c.manifest, e => progress.push(e));
+  const inflatedBefore = inflateActivity.initialized;
+  await c.storage.withBundledRuntime(() => c.installer.install(c.manifest, e => progress.push(e)));
   assert.equal((await c.installer.installed()).runtimeVersion, 'v1');
   for (const [name, text] of Object.entries(files)) assert.equal(await fs.readFile(c.installer.root + '/' + name, 'utf8'), text);
   assert.equal(c.resources.opened.size, 0);
-  assert.equal(c.resources.reads.length, 3);
+  assert.deepEqual(c.resources.reads, [RUNTIME_ARCHIVE_ASSET]);
+  assert(c.resources.entries[RUNTIME_ARCHIVE_ASSET].offset > 0);
+  assert.equal(inflateActivity.initialized - inflatedBefore, Object.keys(files).length);
+  assert.equal(activeInflaters(), 0);
   assert.deepEqual(progress.at(-1), { step: 'configure', done: 1, total: 1 });
 });
 
@@ -94,22 +175,26 @@ test('重复安装不读HAP文件；升级只复制实际变更文件并删除�
   await c.installer.install(c.manifest, () => {});
   const before = await fs.stat(c.installer.root + '/runtime/ohos/preload.mjs');
   c.resources.reads.length = 0;
+  const unchangedInflated = inflateActivity.initialized;
   await c.installer.install(c.manifest, () => {});
   assert.deepEqual(c.resources.reads, []);
+  assert.equal(inflateActivity.initialized, unchangedInflated);
   const nextFiles = { ...files, 'runtime/ohos/new.txt': '新增' };
   delete nextFiles['runtime/ohos/中文 空格.txt'];
   const next = await makePack(path.join(c.dir, 'payload2.hap'), nextFiles, 'v2');
   const nextInstaller = new core.RuntimeInstaller(new OhosRuntimeStorage(next.resources, c.dir), c.dir + '/runtime');
   await nextInstaller.install(next.manifest, () => {});
-  assert.deepEqual(next.resources.reads, ['dsh-runtime/files/runtime/ohos/new.txt']);
+  assert.deepEqual(next.resources.reads, [RUNTIME_ARCHIVE_ASSET]);
+  assert.equal(inflateActivity.initialized - unchangedInflated, 1);
   assert.equal((await fs.stat(c.installer.root + '/runtime/ohos/preload.mjs')).ino, before.ino);
   await assert.rejects(fs.access(c.installer.root + '/runtime/ohos/中文 空格.txt'));
   assert.equal((await nextInstaller.installed()).runtimeVersion, 'v2');
 });
 
 test('复制校验失败保留安装中断标记，不能把半树报告成已安装', async () => {
-  const c = await makeCase('corrupt');
-  c.manifest.files[0].sha256 = '0'.repeat(64);
+  // Corrupt the manifest inside the ZIP as well as the installer input. The
+  // ZIP/CRC is valid, so the original content SHA gate must detect the failure.
+  const c = await makeCase('corrupt', files, 'v1', manifest => { manifest.files[0].sha256 = '0'.repeat(64); });
   await assert.rejects(c.installer.install(c.manifest, () => {}), { code: 'ohos_checksum_failed' });
   assert.equal(await c.installer.installed(), null);
   assert.equal(c.resources.opened.size, 0);
@@ -126,16 +211,17 @@ test('升级把旧多层目录换为文件时，只清理登记过的空祖先�
 });
 
 test('安装中断后换新HAP，不残留未提交版本已写的新文件或已登记临时文件', async () => {
-  const c = await makeCase('interrupted-upgrade', { 'uncommitted/new.txt': 'old', ...files }, 'failed-v1');
+  // The owned new file remains first in the canonical sorted archive manifest.
+  const c = await makeCase('interrupted-upgrade', { '000-uncommitted/new.txt': 'old', ...files }, 'failed-v1');
   await assert.rejects(c.installer.install(c.manifest, e => {
     if (e.step === 'extract' && e.done > 0) throw new Error('injected interruption after first commit');
   }), /injected interruption/);
   assert.equal(await c.installer.installed(), null);
-  await fs.access(c.installer.root + '/uncommitted/new.txt');
+  await fs.access(c.installer.root + '/000-uncommitted/new.txt');
   const next = await makePack(path.join(c.dir, 'next.hap'), files, 'v2');
   const installer = new core.RuntimeInstaller(new OhosRuntimeStorage(next.resources, c.dir), c.dir + '/runtime');
   await installer.install(next.manifest, () => {});
-  await assert.rejects(fs.access(installer.root + '/uncommitted/new.txt'));
+  await assert.rejects(fs.access(installer.root + '/000-uncommitted/new.txt'));
   assert.equal((await installer.installed()).runtimeVersion, 'v2');
   assert.deepEqual(await fs.readdir(c.dir + '/runtime/staging'), []);
 });
@@ -182,8 +268,12 @@ test('真实SIGKILL发生在首文件提交后：重开拒绝混合树，续装�
   assert.equal(signal, 'SIGKILL');
   assert.equal(await c.installer.installed(), null);
   assert.equal(await fs.readFile(c.installer.root + '/' + c.manifest.files[0].path, 'utf8'), files[c.manifest.files[0].path]);
+  const inflatedBefore = inflateActivity.initialized;
   await c.installer.install(c.manifest, () => {});
-  assert.equal(c.resources.reads.length, 2);
+  assert(c.resources.reads.every(asset => asset === RUNTIME_ARCHIVE_ASSET));
+  assert.equal(inflateActivity.initialized - inflatedBefore, Object.keys(files).length - 1);
+  assert.equal(c.resources.opened.size, 0);
+  assert.equal(activeInflaters(), 0);
   assert.equal((await c.installer.installed()).runtimeVersion, 'v1');
 });
 
@@ -328,16 +418,128 @@ async function controllerCase(name) {
   native.reset();
   const c = await makeCase(name);
   const cacheDir = path.join(c.dir, 'cache'); await fs.mkdir(cacheDir);
-  c.resources.getRawFileContent = async asset => {
-    assert.equal(asset, 'dsh-runtime/manifest.json');
-    return new TextEncoder().encode(JSON.stringify(c.manifest));
-  };
   const context = { filesDir: c.dir, cacheDir, resourceManager: c.resources,
     bundleCodeDir: '/private/安装包', applicationInfo: { nativeLibraryPath: 'libs/arm64/' } };
   const controller = new RuntimeController(context); controllers.push(controller);
   await controller.initialize();
   return { ...c, context, controller };
 }
+
+
+
+test('初始化raw close瞬时失败后，同一Controller的安装可重试且并发安装被拒绝', async () => {
+  native.reset();
+  const c = await makeCase('initial-close-retry');
+  const cacheDir = path.join(c.dir, 'cache'); await fs.mkdir(cacheDir);
+  const context = { filesDir: c.dir, cacheDir, resourceManager: c.resources,
+    applicationInfo: { accessTokenId: 1 } };
+  const close = c.resources.closeRawFd.bind(c.resources);
+  let calls = 0, enter, release;
+  const entered = new Promise(resolve => { enter = resolve; });
+  const released = new Promise(resolve => { release = resolve; });
+  c.resources.closeRawFd = async asset => {
+    calls++;
+    if (calls === 1) throw new Error('injected first close failure');
+    if (calls === 2) { enter(); await released; }
+    return close(asset);
+  };
+  const controller = new RuntimeController(context); controllers.push(controller);
+  await controller.initialize();
+  assert.equal(controller.snapshot().get('bundledVersion'), null);
+  assert.equal(c.resources.opened.size, 1);
+  const installing = controller.install(false);
+  try {
+    await Promise.race([entered, installing.then(() => { throw new Error('retired close not reached'); })]);
+    await assert.rejects(controller.install(false), { code: 'install_busy' });
+    await Promise.all([controller.initialize(), controller.initialize()]);
+    assert.equal(c.resources.reads.length, 1);
+    release(); await installing;
+    assert.equal(controller.snapshot().get('phase'), 'installed');
+    assert.equal(controller.snapshot().get('error'), null);
+    assert.equal(c.resources.opened.size, 0);
+    assert.equal(activeInflaters(), 0);
+    assert.equal(c.resources.reads.length, 2);
+    assert.equal(native.starts.length, 0);
+  } finally {
+    release(); await Promise.allSettled([installing]);
+    await c.storage.withBundledRuntime(async () => {});
+  }
+});
+
+test('随包初读持续失败时每次显式安装重试有界，之后恢复不需新Controller', async () => {
+  native.reset();
+  const c = await makeCase('initial-open-retry');
+  const cacheDir = path.join(c.dir, 'cache'); await fs.mkdir(cacheDir);
+  const open = c.resources.getRawFd.bind(c.resources);
+  let unavailable = true, attempts = 0;
+  c.resources.getRawFd = async asset => {
+    attempts++;
+    if (unavailable) throw new Error('injected unavailable raw resource');
+    return open(asset);
+  };
+  const controller = new RuntimeController({ filesDir: c.dir, cacheDir,
+    resourceManager: c.resources, applicationInfo: { accessTokenId: 1 } });
+  controllers.push(controller);
+  await controller.initialize();
+  assert.equal(attempts, 1);
+  await assert.rejects(controller.install(false), { code: 'ohos_payload_missing' });
+  assert.equal(attempts, 2);
+  await controller.initialize();
+  assert.equal(attempts, 2);
+  unavailable = false;
+  await controller.install(false);
+  assert.equal(controller.snapshot().get('phase'), 'installed');
+  assert.equal(controller.snapshot().get('error'), null);
+  assert.equal(attempts, 4);
+  assert.equal(c.resources.opened.size, 0);
+  assert.equal(activeInflaters(), 0);
+  assert.equal(native.starts.length, 0);
+});
+
+test('懒加载：构造、状态、日志、路径、安装、诊断与未启动stop不加载Native', async () => {
+  assert.equal(nativeModuleLoads, 0);
+  const c = await controllerCase('lazy-remote-only');
+  const previous = RuntimeController.shared; RuntimeController.shared = c.controller;
+  const plugin = new RuntimePlugin();
+  const binding = { getApplicationContext: () => c.context, getBinaryMessenger: () => ({ setMessageHandler() {} }) };
+  plugin.onAttachedToEngine(binding);
+  const invoke = method => new Promise(resolve => plugin.onMethodCall(new MethodCall(method, null), {
+    success: value => resolve(value), error: (code, message) => resolve({ code, message }), notImplemented: () => resolve('missing'),
+  }));
+  try {
+    assert.equal(await invoke('guestRoot'), c.dir + '/runtime/rootfs');
+    assert.equal((await invoke('getStatus')).get('phase'), 'notInstalled');
+    await invoke('getLogs'); await invoke('getLogSnapshot'); await invoke('failureLog');
+    const sink = () => {}; c.controller.subscribe(sink); await Promise.resolve(); c.controller.unsubscribe(sink);
+    await c.controller.install(false);
+    await c.controller.publishDiagnostics('# fixture');
+    c.controller.stop(); c.controller.collect(); c.controller.clearFailure();
+    assert.equal(nativeModuleLoads, 0);
+    assert.equal(native.starts.length, 0);
+  } finally { plugin.onDetachedFromEngine(binding); RuntimeController.shared = previous; }
+});
+
+test('懒加载：等待动态import期间stop仍取消启动，并发start不重复进入', async () => {
+  assert.equal(nativeModuleLoads, 0);
+  const c = await controllerCase('lazy-cancel-loading'); await c.controller.install(false);
+  let enter, release;
+  const entered = new Promise(resolve => { enter = resolve; });
+  const paused = new Promise(resolve => { release = resolve; });
+  nativeModuleControl.beforeLoad = () => { enter(); return paused; };
+  const starting = c.controller.start(null, false, null, false);
+  const rejected = assert.rejects(starting, { code: 'ohos_start_cancelled' });
+  try {
+    await entered;
+    await c.controller.start(null, false, null, false);
+    assert.equal(c.controller.snapshot().get('phase'), 'starting');
+    assert.equal(native.starts.length, 0);
+    c.controller.stop(); release(); await rejected;
+    assert.equal(native.starts.length, 0); assert.equal(native.state.consumed, false);
+    assert.equal(nativeModuleLoads, 1);
+    await c.controller.start(null, false, null, false);
+    assert.equal(native.starts.length, 1); assert.equal(nativeModuleLoads, 1);
+  } finally { release(); nativeModuleControl.beforeLoad = null; }
+});
 
 test('Context原生库路径无效时明确报错且不消耗本进程唯一Node启动机会', async () => {
   const c = await controllerCase('native-path-reject');
@@ -509,7 +711,8 @@ test('P2 v6: guestRoot在未安装且清单读取失败时仍同步返回且不�
   RuntimeController.shared = null;
   let reads = 0, answer;
   const context = { filesDir: '/private/中文 应用/files', cacheDir: '/private/cache', resourceManager: {
-    async getRawFileContent() { reads++; throw new Error('no rawfile fixture'); },
+    async getRawFd() { reads++; throw new Error('no runtime archive fixture'); },
+    async getRawFileContent() { throw new Error('bare manifest reads are forbidden'); },
   } };
   const binding = { getApplicationContext: () => context, getBinaryMessenger: () => ({ setMessageHandler() {} }) };
   const plugin = new RuntimePlugin();
@@ -705,4 +908,70 @@ test('P2 v6: 未轮询的宿主终态也阻止迟到技能提交和成功回报'
     assert.equal(managedSkillIo.opened.size, 0);
     assert.equal(c.replies.filter(([method]) => method === 'installManagedSkill').length, 1);
   } finally { release.resolve(); if (work) await work; c.close(); }
+});
+
+test('真实Entry回调在无本机引擎时只更新内存，迟到的旧Ability后台不得覆盖新前台', async () => {
+  const previous = RuntimeController.shared; RuntimeController.shared = null; native.reset();
+  const old = new EntryAbility(), current = new EntryAbility();
+  const before = { sends: lifecycleControl.sends.length, queries: lifecycleControl.queries, loads: nativeModuleLoads };
+  old.onForeground(); old.onBackground(); current.onForeground(); old.onBackground(); old.onDestroy();
+  assert.equal(RuntimeController.foreground, true); assert.equal(RuntimeController.ability, current);
+  const c = await controllerCase('lifecycle-remote-callbacks'); RuntimeController.shared = c.controller;
+  try {
+    assert.equal(c.controller.snapshot().get('lifecycle').get('foreground'), true);
+    assert.equal(lifecycleControl.sends.length, before.sends); assert.equal(lifecycleControl.queries, before.queries);
+    assert.equal(nativeModuleLoads, before.loads);
+    current.onBackground(); assert.equal(c.controller.snapshot().get('lifecycle').get('foreground'), false);
+    assert.deepEqual(current.superCalls, ['foreground', 'background']);
+  } finally { current.onDestroy(); RuntimeController.shared = previous; }
+});
+
+test('真实Controller收集已就绪host后才同步当前前后台，stop后不再发晚到控制', async () => {
+  const c = await controllerCase('lifecycle-ready-order');
+  const previous = RuntimeController.shared; RuntimeController.shared = c.controller;
+  const ability = new EntryAbility(); const before = lifecycleControl.sends.length;
+  try {
+    ability.onForeground();
+    assert.equal(lifecycleControl.sends.length, before);
+    native.state.phase = 'running'; native.state.baseUrl = 'http://127.0.0.1:3080'; native.state.token = 'lifecycle-fixture-token';
+    c.controller.collect(); await Promise.resolve();
+    assert.equal(lifecycleControl.sends.length, before + 1);
+    assert.equal(lifecycleControl.sends.at(-1).observation.foreground, true);
+    ability.onBackground(); await Promise.resolve();
+    assert.equal(lifecycleControl.sends.at(-1).observation.foreground, false);
+    const count = lifecycleControl.sends.length;
+    c.controller.stop(); ability.onForeground(); c.controller.collect(); await Promise.resolve();
+    assert.equal(lifecycleControl.sends.length, count);
+  } finally { ability.onDestroy(); RuntimeController.shared = previous; }
+});
+
+test('生命周期同步失败通过现有Dart可读error和notice事件暴露，同类重试不反复弹提示且恢复会清除', async () => {
+  const c = await controllerCase('lifecycle-visible-error');
+  const previous = RuntimeController.shared; RuntimeController.shared = c.controller;
+  const ability = new EntryAbility(), events = [];
+  const sink = event => events.push(event);
+  const settle = async () => { for (let i = 0; i < 6; i++) await Promise.resolve(); };
+  c.controller.subscribe(sink); await settle(); events.length = 0;
+  try {
+    lifecycleControl.failure = new Error('fixture-raw-error-never-display'); ability.onForeground();
+    native.state.phase = 'running'; native.state.baseUrl = 'http://127.0.0.1:3080'; native.state.token = 'lifecycle-fixture-token';
+    c.controller.collect(); await settle();
+    const failed = c.controller.snapshot();
+    assert.equal(failed.get('phase'), 'running', 'synchronization failure does not invent a Node exit');
+    assert.equal(failed.get('lifecycle').get('error'), 'ohos_lifecycle_unavailable');
+    assert.match(failed.get('error'), /前后台状态尚未同步/);
+    assert.equal(events.filter(e => e.get('type') === 'notice').length, 1);
+    assert(events.some(e => e.get('type') === 'status' && e.get('status').get('error') === failed.get('error')));
+    ability.onForeground(); await settle(); assert.equal(events.filter(e => e.get('type') === 'notice').length, 1);
+    lifecycleControl.failure = null; ability.onForeground(); await settle();
+    const recovered = c.controller.snapshot(); assert.equal(recovered.get('error'), null);
+    assert(events.some(e => e.get('type') === 'status' && e.get('status').get('error') === null));
+    if (process.env.DSH_LIFECYCLE_DART_WIRE) {
+      const plain = value => value instanceof Map ? Object.fromEntries([...value].map(([k, v]) => [k, plain(v)]))
+        : Array.isArray(value) ? value.map(plain) : value;
+      await fs.writeFile(process.env.DSH_LIFECYCLE_DART_WIRE, JSON.stringify({ failed: plain(failed), recovered: plain(recovered), events: events.map(plain) }));
+    }
+  } finally {
+    lifecycleControl.failure = null; c.controller.unsubscribe(sink); c.controller.stop(); ability.onDestroy(); RuntimeController.shared = previous;
+  }
 });

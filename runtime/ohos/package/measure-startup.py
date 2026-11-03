@@ -22,6 +22,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     for name in ('before', 'after', 'node', 'native-library-dir', 'publication-fixture', 'out'):
         parser.add_argument('--' + name, type=Path, required=True)
+    parser.add_argument('--before-runtime-root', type=Path,
+                        help='Explicit same-source runtime/ohos directory for an unpruned development reference')
     parser.add_argument('--samples', type=int, default=5)
     args = parser.parse_args()
     if args.samples < 1:
@@ -29,6 +31,20 @@ def main():
     repo = Path(__file__).resolve().parents[3]
     args.out = args.out.absolute()
     args.out.mkdir(parents=True, exist_ok=False)
+    variants = {}
+    for name in ('before', 'after'):
+        prefix = getattr(args, name).resolve(strict=True)
+        runtime = (args.before_runtime_root.resolve(strict=True) if name == 'before' and args.before_runtime_root
+                   else prefix / 'runtime/ohos')
+        variants[name] = {'prefix': str(prefix), 'runtimeRoot': str(runtime),
+            'layout': 'unpruned fixed npm prefix with explicitly separate same-source runtime' if
+                name == 'before' and args.before_runtime_root else 'materialized runtime tree'}
+    # The after side must be the actual assembled payload, not another npm prefix.
+    after_manifest = args.after.resolve(strict=True).parent / 'manifest.json'
+    if not after_manifest.is_file():
+        raise ValueError('The after variant requires its real assembled manifest')
+    variants['after']['runtimeVersion'] = json.loads(after_manifest.read_text())['runtimeVersion']
+    (args.out / 'variants.json').write_text(json.dumps(variants, indent=2) + '\n')
     rows = []
     for index in range(args.samples):
         # Alternate which variant runs first, while retaining cold→warm order.
@@ -38,17 +54,20 @@ def main():
             for temperature in ['cold', 'warm']:
                 case = args.out / f'{name}-{index + 1}-{temperature}'
                 profile = args.out / f'{case.name}-profile.json'
-                process = prefix / 'runtime/ohos/process'
+                runtime = Path(variants[name]['runtimeRoot'])
+                process = runtime / 'process'
                 profile.write_text(json.dumps([
                     {'id': 'subprocess', 'disabled': True}, {'id': 'sandbox', 'disabled': True},
                     {'insert': [
                         {'id': 'ohos-subprocess', 'name': str(process / 'index.mjs'),
                          'config': {'workspaceRoots': [str(case / 'workspace')]}},
-                        {'id': 'ohos-sandbox', 'name': str(process / 'sandbox.mjs')}]}], indent=2) + '\n')
+                        {'id': 'ohos-sandbox', 'name': str(process / 'sandbox.mjs')},
+                        {'id': 'ohos-runtime-capabilities', 'name': str(runtime / 'capabilities/index.mjs')},
+                        {'id': 'ohos-lifecycle', 'name': str(runtime / 'lifecycle/index.mjs')}]}], indent=2) + '\n')
                 native = args.native_library_dir.resolve(strict=True)
                 command = [str(args.node), str(repo / 'runtime/ohos/sim/round.mjs'),
                     '--prefix', str(prefix), '--out', str(case), '--mode', 'sim', '--platform',
-                    '--patch', str(profile), '--import', str(prefix / 'runtime/ohos/preload.mjs'),
+                    '--patch', str(profile), '--import', str(runtime / 'preload.mjs'),
                     '--linked-publication-fixture', str(args.publication_fixture.resolve(strict=True)),
                     '--allow-addon', str(native / 'libdsh_flock.so'),
                     '--allow-addon', str(native / 'libdsh_require_builtin.so'),
@@ -84,7 +103,9 @@ def main():
         'scope': 'Linux Node24.22.1 --jitless strict simulation; real DSH and local fake-model fixtures',
         'coldDefinition': 'empty V8 compile-cache directory; OS page cache was not flushed',
         'warmDefinition': 'new process/home/workspace reuses immediately preceding compile cache',
-        'host': platform.platform(), 'summary': summary, 'samples': rows}, indent=2) + '\n')
+        'host': platform.platform(), 'variants': variants,
+        'layoutCaveat': 'A separate development runtime root changes file layout and module resolution. These samples compare the stated end-to-end layouts, not a controlled proof of the isolated pruning effect.',
+        'summary': summary, 'samples': rows}, indent=2) + '\n')
 
 
 if __name__ == '__main__':

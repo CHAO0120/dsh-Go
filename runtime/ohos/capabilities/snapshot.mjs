@@ -5,13 +5,18 @@ const choice = (value, allowed) => allowed.includes(value) ? value : 'unknown';
 
 // A registered, live boundary owner is required. A GET only reads its state;
 // it never opens a journal, acknowledges an unknown, or resumes any work.
-function lifecycleResume(ctx) {
+function lifecycleCapabilities(ctx) {
   try {
     const owner = ctx.get('ohosLifecycle');
-    if (owner?.protocolVersion !== 1 || typeof owner.status !== 'function') return 'none';
-    const state = owner.status();
-    return state?.v === 1 && state.closed === false && state.blocked === false ? 'reconcile' : 'none';
-  } catch { return 'none'; }
+    if (owner?.protocolVersion === 1 && typeof owner.status === 'function') {
+      const state = owner.status();
+      if (state?.v === 1 && state.closed === false) return {
+        computePermission: choice(state.host?.computePermission, ['granted', 'denied']),
+        resume: state.blocked === false ? 'reconcile' : 'none',
+      };
+    }
+  } catch {}
+  return { computePermission: 'unknown', resume: 'none' };
 }
 
 // Read installed services only. This must not load an addon, probe a command,
@@ -35,7 +40,7 @@ export function runtimeCapabilities(ctx, bootId) {
       pty: shell === undefined ? 'unsupported' : support(subprocess?.pty),
     },
     processSpawn: support(subprocess?.processSpawn),
-    nodeScripts: choice(subprocess?.nodeScripts, ['worker', 'process', 'none']),
+    nodeScripts: choice(subprocess?.nodeScripts, ['worker', 'worker-rebased', 'process', 'none']),
     python: support(subprocess?.python),
     // Presence alone does not prove that code generation is permitted.
     wasm: typeof globalThis.WebAssembly === 'undefined' ? 'unsupported' : 'unknown',
@@ -44,7 +49,7 @@ export function runtimeCapabilities(ctx, bootId) {
     // not yet supplied by the host. Do not turn a package name into "loaded".
     nativeModules: null,
     storage: { sessionLock: choice(storage?.sessionLock, ['kernel', 'main-thread', 'none']) },
-    background: { policy: 'may-freeze', computePermission: 'unknown', resume: lifecycleResume(ctx) },
+    background: { policy: 'may-freeze', ...lifecycleCapabilities(ctx) },
     ...readPublicationCapabilities(),
   };
 }

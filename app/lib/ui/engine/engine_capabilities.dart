@@ -15,7 +15,7 @@ List<Widget> engineCapabilityRows(L10n l10n, RuntimeCapabilities? caps) {
     RuntimeShellKind.unknown => null,
   };
   final nodeScripts = switch (caps.nodeScripts) {
-    RuntimeNodeScripts.worker || RuntimeNodeScripts.process => l10n.engineCapYes,
+    RuntimeNodeScripts.worker || RuntimeNodeScripts.workerRebased || RuntimeNodeScripts.process => l10n.engineCapYes,
     RuntimeNodeScripts.none => l10n.engineCapNone,
     RuntimeNodeScripts.unknown => null,
   };

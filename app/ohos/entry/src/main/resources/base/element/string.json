@@ -11,6 +11,10 @@
     {
       "name": "EntryAbility_label",
       "value": "DSH Go"
+    },
+    {
+      "name": "mic_reason",
+      "value": "用于您主动开始的语音输入和录音。"
     }
   ]
 }

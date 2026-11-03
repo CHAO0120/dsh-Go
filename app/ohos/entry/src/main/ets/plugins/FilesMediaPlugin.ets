@@ -1,4 +1,4 @@
-// 未编译、未在真机核实。只使用公开文件/选择器/媒体接口；依赖 P1B 的安全 openUserFile。
+// UNCOMPILED_HMS、未在真机核实。PDFKit 独立于公开文件/选择器/媒体接口；使用安全 openUserFile。
 import fs from '@ohos.file.fs';
 import picker from '@ohos.file.picker';
 import fileUri from '@ohos.file.fileuri';
@@ -9,9 +9,11 @@ import cryptoFramework from '@ohos.security.cryptoFramework';
 import util from '@ohos.util';
 import hilog from '@ohos.hilog';
 import { BusinessError } from '@ohos.base';
-import { openUserFile } from 'libdsh_host.so';
+import { loadNativeHost } from '../runtime/NativeHost';
 import { RuntimeController } from '../runtime/RuntimeController';
 import { RuntimePaths } from '../runtime/RuntimePaths';
+import { HmsPdfPages } from './HmsPdfPages';
+import { PdfChannelError } from './PdfInput';
 import {
   AbilityAware, AbilityPluginBinding, Any, FlutterPlugin, FlutterPluginBinding,
   MethodCall, MethodChannel, MethodResult
@@ -23,6 +25,7 @@ class FileChannelError extends Error {
 }
 
 export default class FilesMediaPlugin implements FlutterPlugin, AbilityAware {
+  private engineBinding?: FlutterPluginBinding;
   private context?: common.Context;
   private paths?: RuntimePaths;
   private ability?: AbilityPluginBinding;
@@ -30,39 +33,52 @@ export default class FilesMediaPlugin implements FlutterPlugin, AbilityAware {
   private media?: MethodChannel;
   private generation: number = 0;
   private picking: boolean = false;
+  private pdf?: HmsPdfPages;
 
   getUniqueClassName(): string { return 'DshFilesMediaPlugin'; }
 
   onAttachedToEngine(binding: FlutterPluginBinding): void {
+    if (this.engineBinding) this.onDetachedFromEngine(this.engineBinding);
+    this.engineBinding = binding;
     this.context = binding.getApplicationContext();
     this.paths = RuntimeController.get(this.context).paths;
     this.files = new MethodChannel(binding.getBinaryMessenger(), 'dsh/files');
     this.media = new MethodChannel(binding.getBinaryMessenger(), 'dsh/media');
     this.files.setMethodCallHandler({ onMethodCall: (call: MethodCall, result: MethodResult): void => {
+      if (this.engineBinding !== binding) { result.error('cancelled', '窗口已关闭，操作已取消。', null); return; }
       if (!['resolveGuest', 'listOutputs', 'open', 'saveToDownloads', 'pdfInfo', 'pdfPage', 'pdfClose'].includes(call.method)) {
         result.notImplemented(); return;
       }
       this.reply(this.fileCall(call), result);
     } });
     this.media.setMethodCallHandler({ onMethodCall: (call: MethodCall, result: MethodResult): void => {
+      if (this.engineBinding !== binding) { result.error('cancelled', '窗口已关闭，操作已取消。', null); return; }
       if (!['saveImage', 'openSettings'].includes(call.method)) { result.notImplemented(); return; }
       this.reply(this.mediaCall(call), result);
     } });
   }
 
-  onDetachedFromEngine(_binding: FlutterPluginBinding): void {
+  onDetachedFromEngine(binding: FlutterPluginBinding): void {
+    if (this.engineBinding !== binding) return;
     this.onDetachedFromAbility();
     this.files?.setMethodCallHandler(null);
     this.media?.setMethodCallHandler(null);
-    this.files = undefined; this.media = undefined; this.context = undefined; this.paths = undefined;
+    this.files = undefined; this.media = undefined; this.context = undefined; this.paths = undefined; this.engineBinding = undefined;
   }
 
-  onAttachedToAbility(binding: AbilityPluginBinding): void { this.ability = binding; }
-  onDetachedFromAbility(): void { this.generation++; this.ability = undefined; }
+  onAttachedToAbility(binding: AbilityPluginBinding): void {
+    if (this.ability && this.ability !== binding) this.onDetachedFromAbility();
+    this.ability = binding;
+  }
+  onDetachedFromAbility(): void {
+    this.generation++; this.ability = undefined;
+    const pdf = this.pdf; this.pdf = undefined;
+    if (pdf) pdf.retire().catch((): void => { hilog.warn(0xD003F00, 'DshFiles', 'PDF资源清理尚未完成'); });
+  }
 
   private reply(work: Promise<Any>, result: MethodResult): void {
     work.then((value: Any) => result.success(value)).catch((error: Error) => {
-      if (error instanceof FileChannelError) result.error(error.code, error.message, null);
+      if (error instanceof FileChannelError || error instanceof PdfChannelError) result.error(error.code, error.message, null);
       else result.error('failed', '文件操作未完成，请重试或使用已连接的电脑。', null);
     });
   }
@@ -76,11 +92,19 @@ export default class FilesMediaPlugin implements FlutterPlugin, AbilityAware {
     return this.ability.getAbility().context;
   }
 
-  private openLocal(path: string): number {
+  private async openLocal(path: string, generation: number): Promise<number> {
     const context = this.context!;
     const roots = [this.paths!.workspace, context.cacheDir, context.tempDir];
+    if (this.ability) {
+      const uiContext = this.ability.getAbility().context;
+      roots.push(uiContext.cacheDir, uiContext.tempDir);
+    }
     for (const root of roots) {
-      if (path.startsWith(root + '/')) return openUserFile(root, path.substring(root.length + 1));
+      if (path.startsWith(root + '/')) {
+        const host = await loadNativeHost();
+        this.active(generation);
+        return host.openUserFile(root, path.substring(root.length + 1));
+      }
     }
     throw new FileChannelError('outside_workspace', '请将文件放入本机工作区，或从已连接的电脑下载后再操作。');
   }
@@ -154,7 +178,7 @@ export default class FilesMediaPlugin implements FlutterPlugin, AbilityAware {
   }
 
   private async snapshot(path: string, name: string, generation: number): Promise<string> {
-    const input = this.openLocal(path);
+    const input = await this.openLocal(path, generation);
     let staging: string | undefined;
     let temporary: string | undefined;
     try {
@@ -178,6 +202,13 @@ export default class FilesMediaPlugin implements FlutterPlugin, AbilityAware {
     }
   }
 
+  private pdfFor(generation: number): HmsPdfPages {
+    const context = this.ui();
+    this.active(generation);
+    if (!this.pdf) this.pdf = new HmsPdfPages(context, (path: string): Promise<number> => this.openLocal(path, generation));
+    return this.pdf;
+  }
+
   private async fileCall(call: MethodCall): Promise<Any> {
     const generation = this.generation;
     const path = (call.argument('path') ?? '') as string;
@@ -190,9 +221,23 @@ export default class FilesMediaPlugin implements FlutterPlugin, AbilityAware {
           return null;
         }
       case 'listOutputs': return await this.outputs((call.argument('depth') ?? 3) as number, generation);
-      case 'pdfClose': return null;
-      case 'pdfInfo': case 'pdfPage':
-        throw new FileChannelError('ohos_unsupported', '当前可使用“打开”交给系统 PDF 应用；内嵌 PDF 预览尚未接入。');
+      case 'pdfClose': {
+        const pdf = this.pdf;
+        if (pdf) await pdf.close();
+        this.active(generation);
+        return null;
+      }
+      case 'pdfInfo': {
+        const pages: Map<string, Any>[] = await this.pdfFor(generation).info(path);
+        this.active(generation);
+        return pages;
+      }
+      case 'pdfPage': {
+        const bytes = await this.pdfFor(generation).render(path, (call.argument('page') ?? 0) as number,
+          (call.argument('width') ?? 1080) as number);
+        this.active(generation);
+        return bytes;
+      }
       case 'open': {
         if (call.argument('chooser') === true) throw new FileChannelError('ohos_unsupported', '强制选择打开应用尚未接入，可先保存后在系统文件应用中打开。');
         const context = this.ui();
@@ -208,12 +253,12 @@ export default class FilesMediaPlugin implements FlutterPlugin, AbilityAware {
         if (this.picking) throw new FileChannelError('busy', '已有文件选择窗口，请先完成或取消。');
         this.picking = true;
         try {
-          const check = this.openLocal(path); await fs.close(check);
+          const check = await this.openLocal(path, generation); await fs.close(check);
           this.active(generation);
           const selected = await new picker.DocumentViewPicker(context).save({ newFileNames: [name] });
           this.active(generation);
           if (selected.length !== 1) throw new FileChannelError('cancelled', '保存已取消。');
-          const input = this.openLocal(path);
+          const input = await this.openLocal(path, generation);
           try {
             const output = await fs.open(selected[0], fs.OpenMode.READ_WRITE | fs.OpenMode.TRUNC);
             try { await this.copy(input, output.fd, generation); }
@@ -246,7 +291,7 @@ export default class FilesMediaPlugin implements FlutterPlugin, AbilityAware {
         if (stat.isDirectory()) {
           if (level < depth) await walk(path, level + 1);
         } else if (stat.isFile()) {
-          const input = this.openLocal(path);
+          const input = await this.openLocal(path, generation);
           try {
             const actual = await fs.stat(input);
             result.push(new Map<string, Any>([['path', path], ['bytes', actual.size], ['modified', actual.mtime * 1000]]));
@@ -302,7 +347,7 @@ export default class FilesMediaPlugin implements FlutterPlugin, AbilityAware {
         [{ title: title, fileNameExtension: extension, photoType: photoAccessHelper.PhotoType.IMAGE }]);
       this.active(generation);
       if (uris.length !== 1) throw new FileChannelError('cancelled', '保存图片已取消。');
-      const input = this.openLocal(path);
+      const input = await this.openLocal(path, generation);
       try {
         const output = await fs.open(uris[0], fs.OpenMode.READ_WRITE | fs.OpenMode.TRUNC);
         try { await this.copy(input, output.fd, generation); }

@@ -29,7 +29,7 @@ test('实际安装服务的同源命令表、锁范围与卸载状态逐次读�
   assert.deepEqual(first.shell.commands, shellCommands);
   assert.equal(first.shell.pty, 'unsupported');
   assert.equal(first.processSpawn, 'unsupported');
-  assert.equal(first.nodeScripts, 'none');
+  assert.equal(first.nodeScripts, capabilities.nodeScripts);
   assert.equal(first.python, 'unsupported');
   assert.equal(first.storage.sessionLock, 'main-thread');
   assert.equal(first.plugins.bundled, 'supported');
@@ -40,6 +40,16 @@ test('实际安装服务的同源命令表、锁范围与卸载状态逐次读�
   assert.equal(after.bootId, first.bootId);
   assert.equal(after.shell.kind, 'none');
   assert.equal(after.storage.sessionLock, 'unknown');
+});
+
+test('Node Worker协议值逐次读取，未知或未装配入口不冒报可用', () => {
+  let nodeScripts = 'worker-rebased';
+  const ctx = { get: name => name === 'subprocess' ? { capabilities: { nodeScripts } } : undefined };
+  assert.equal(runtimeCapabilities(ctx, 'test-boot').nodeScripts, 'worker-rebased');
+  nodeScripts = 'none';
+  assert.equal(runtimeCapabilities(ctx, 'test-boot').nodeScripts, 'none');
+  nodeScripts = 'workerRebased';
+  assert.equal(runtimeCapabilities(ctx, 'test-boot').nodeScripts, 'unknown');
 });
 
 test('publication.atomic实时读取，读接口不调用publish或猜测死亡原因', t => {

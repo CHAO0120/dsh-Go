@@ -9,6 +9,7 @@
 #   --source DIR  the ohos project to check (default app/ohos of this checkout)
 #   --debug       debug embedding and buildMode (default release, as build-hap.sh)
 #   --with-forks  also compile the plugin forks of pubspec_overrides.ohos.yaml
+#   --hms-stubs   NONOFFICIAL minimal declarations; HMS remains uncompiled
 #   --werror      warnings in the project's own files also fail the check
 #   --clean       delete --work first, downloads included
 #
@@ -55,6 +56,7 @@ WORK="${XDG_CACHE_HOME:-$HOME/.cache}/dsh-ohos-arkts-check"
 SOURCE="$REPO/app/ohos"
 MODE=release
 FORKS=0
+HMS_STUBS=0
 WERROR=0
 CLEAN=0
 FULL=0
@@ -69,6 +71,7 @@ while [ $# -gt 0 ]; do
     --source) SOURCE="${2:?--source needs a directory}"; shift 2 ;;
     --debug) MODE=debug; shift ;;
     --with-forks) FORKS=1; shift ;;
+    --hms-stubs) HMS_STUBS=1; shift ;;
     --werror) WERROR=1; shift ;;
     --clean) CLEAN=1; shift ;;
     --full) FULL=1; shift ;;
@@ -115,6 +118,8 @@ fi
 [ "$CLEAN" = 0 ] || rm -rf "$WORK"
 mkdir -p "$WORK/dl"
 WORK="$(cd "$WORK" && pwd)"
+# Clear stale success metadata before any preparation or build.
+rm -f "$WORK/diagnostics.txt" "$WORK/hvigor.log" "$WORK/hms-stubs.json" "$WORK/build-identity.json" "$WORK/diagnostic-source-paths.json"
 
 # Downloads are checked against the pins on every run, cached or not.
 fetch() { # url file algorithm hash
@@ -147,18 +152,31 @@ if [ ! -f "$HAR/flutter/package/oh-package.json5" ]; then
   tar -xzf "$HAR/arm64_v8a_$MODE.har" -C "$HAR/native"
 fi
 
-# --- SDK: hvigor looks in <root>/<api>/ and also wants a previewer; symlinks, no copy.
-SDK_ROOT="$WORK/sdk"
-rm -rf "$SDK_ROOT"; mkdir -p "$SDK_ROOT/26.0.0/previewer"
-for part in ets js native toolchains; do ln -s "$SDK/$part" "$SDK_ROOT/26.0.0/$part"; done
-sed 's/"Ets"/"Previewer"/; s/"path": "ets"/"path": "previewer"/' "$SDK/ets/oh-uni-package.json" \
-  > "$SDK_ROOT/26.0.0/previewer/oh-uni-package.json"
+# --- SDK: normal checks use symlinks; HMS checks use a private prepared ETS copy.
+if [ "$HMS_STUBS" = 1 ]; then
+  SDK_ROOT="$(python3 -I "$REPO/tooling/ohos/hms-stubs/prepare-sdk.py"     "$SDK" "$WORK" "$REPO/tooling/ohos/hms-stubs")"
+  echo "check-arkts: UNCOMPILED_HMS — 非官方，只为检查调用方逻辑；原 SDK 未修改" >&2
+else
+  SDK_ROOT="$WORK/sdk-public"
+  mkdir -p "$SDK_ROOT/26.0.0/previewer"
+  for part in ets js native toolchains; do
+    ln -sfn "$SDK/$part" "$SDK_ROOT/26.0.0/$part"
+  done
+  sed 's/"Ets"/"Previewer"/; s/"path": "ets"/"path": "previewer"/' "$SDK/ets/oh-uni-package.json"     > "$SDK_ROOT/26.0.0/previewer/oh-uni-package.json"
+fi
 
-# --- the copy. CMakeLists.txt finds the N-API gate from its own place in the repository.
-if [ "$FULL" = 1 ]; then PROJECT="$WORK/repo/app/ohos"; else PROJECT="$WORK/project"; fi
+# --- the copy. Every run has a unique source/output tree, also in full mode.
+RUN_ROOT="$(mktemp -d "$WORK/check-XXXXXXXX")"
+echo "check-arkts: run-root $RUN_ROOT"
+if [ "$HMS_STUBS" = 1 ]; then cp "$WORK/hms-stubs.json" "$RUN_ROOT/hms-stubs.json"; fi
+if [ "$FULL" = 1 ]; then
+  PROJECT="$RUN_ROOT/app/ohos"
+  ln -s "$REPO/runtime" "$RUN_ROOT/runtime"
+else
+  PROJECT="$RUN_ROOT"
+fi
 FORK_ROOT="$(dirname "$PROJECT")/forks"
-rm -rf "$WORK/project" "$WORK/repo" "$WORK/forks" "$WORK/home"; mkdir -p "$PROJECT" "$FORK_ROOT" "$WORK/home"
-[ "$FULL" = 0 ] || ln -s "$REPO/runtime" "$WORK/repo/runtime"
+rm -rf "$WORK/forks" "$WORK/home"; mkdir -p "$PROJECT" "$FORK_ROOT" "$WORK/home"
 tar -C "$SOURCE" --exclude=./node_modules --exclude=./oh_modules --exclude=./entry/oh_modules \
   --exclude=./build --exclude=./entry/build --exclude=./.hvigor --exclude=./entry/.cxx --exclude=./.vendor \
   --exclude=./entry/libs --exclude=./local.properties --exclude=./entry/src/main/resources/rawfile/flutter_assets \
@@ -310,8 +328,18 @@ if [ "$FULL" = 1 ]; then
   done
   # libdsh_host.so is hvigor's to build; libc++_shared.so is its to add.
   cp "$NATIVE/libnode.so" "$NATIVE/libdsh_flock.so" "$NATIVE/libdsh_require_builtin.so" "$LIBS/"
-  python3 -I -m zipfile -e "$RUNTIME" "$RAWFILE"
-  [ -f "$RAWFILE/dsh-runtime/manifest.json" ] || die "$RUNTIME has no dsh-runtime/manifest.json"
+  # The transport contains exactly one Stored asset; never expand its members.
+  python3 -I - "$RUNTIME" "$RAWFILE" <<'PY_RUNTIME_ARCHIVE'
+import pathlib, sys, zipfile
+transport, rawfile = pathlib.Path(sys.argv[1]), pathlib.Path(sys.argv[2])
+with zipfile.ZipFile(transport) as bundle:
+    entries = bundle.infolist()
+    if (len(entries) != 1 or entries[0].filename != "dsh-runtime/runtime.zip"
+            or entries[0].compress_type != zipfile.ZIP_STORED
+            or entries[0].flag_bits & 9):
+        sys.exit("check-arkts: runtime input must contain one unencrypted Stored dsh-runtime/runtime.zip")
+    bundle.extract(entries[0], rawfile)
+PY_RUNTIME_ARCHIVE
   # The plugin takes the version from pubspec.yaml through local.properties.
   python3 -I - "$REPO/app/pubspec.yaml" "$PROJECT/AppScope/app.json5" <<'PY'
 import re, sys
@@ -325,9 +353,28 @@ open(sys.argv[2], "w").write(text)
 PY
 fi
 
+# Capture the exact copied code, including native declarations. The only ETS
+# rewrite performed by this checker is the explicit generated plugin registry.
+python3 -I - "$SOURCE" "$PROJECT" <<'PY_INPUT'
+import hashlib, json, pathlib, sys
+source, project = map(pathlib.Path, sys.argv[1:])
+files = {}
+for path in sorted((source / "entry/src/main").rglob("*")):
+    if not path.is_file() or not (path.name.endswith(".ets") or path.name.endswith(".d.ts")):
+        continue
+    rel = str(path.relative_to(source))
+    if rel == "entry/src/main/ets/plugins/GeneratedPluginRegistrant.ets":
+        continue
+    digest = hashlib.sha256(path.read_bytes()).hexdigest()
+    if hashlib.sha256((project / rel).read_bytes()).hexdigest() != digest:
+        raise RuntimeError(f"Copied compilation source differs: {rel}")
+    files[rel] = digest
+(project / "check-inputs.json").write_text(json.dumps(files, indent=2) + "\n")
+PY_INPUT
+
 # --- the build
-LOG="$WORK/hvigor.log"
-echo "check-arkts: hvigor $HVIGOR_VERSION, SDK $version, embedding $EMBEDDING_VERSION ($MODE), forks: $FORKS"
+LOG="$RUN_ROOT/hvigor.log"
+echo "check-arkts: hvigor $HVIGOR_VERSION, SDK $version, embedding $EMBEDDING_VERSION ($MODE), forks: $FORKS, NONOFFICIAL HMS stubs: $HMS_STUBS"
 rc=0
 (cd "$PROJECT" && env -u DEVECO_SDK_HOME HVIGOR_USER_HOME="$WORK/home" OHOS_BASE_SDK_HOME="$SDK_ROOT" \
   DSH_NODE_HEADERS="$NODE_HEADERS" \
@@ -337,21 +384,57 @@ rc=0
   --no-daemon --no-parallel --no-incremental) > "$LOG" 2>&1 || rc=$?
 
 HAP="$PROJECT/entry/build/default/outputs/default/entry-default-unsigned.hap"
-ABC_TEXT="$WORK/modules.abc.txt"
+ABC_TEXT="$PROJECT/modules.abc.txt"
+ABC_ROOT="$PROJECT/bytecode"
 rm -f "$ABC_TEXT"
 if [ "$rc" = 0 ] && [ -f "$HAP" ]; then
   python3 -I -c '
 import sys, zipfile
-zipfile.ZipFile(sys.argv[1]).extract("ets/modules.abc", sys.argv[2])' "$HAP" "$WORK/abc"
-  "$SDK/toolchains/ark_disasm" "$WORK/abc/ets/modules.abc" "$ABC_TEXT" >/dev/null || rm -f "$ABC_TEXT"
+zipfile.ZipFile(sys.argv[1]).extract("ets/modules.abc", sys.argv[2])' "$HAP" "$ABC_ROOT"
+  "$SDK/toolchains/ark_disasm" "$ABC_ROOT/ets/modules.abc" "$ABC_TEXT" >/dev/null || rm -f "$ABC_TEXT"
 fi
+
+IDENTITY_RC=0
+python3 -I - "$SOURCE" "$PROJECT" "$RUN_ROOT" "$HAP" "$ABC_ROOT" <<'PY_IDENTITY' || IDENTITY_RC=$?
+import hashlib, json, pathlib, sys, zipfile
+source, project, work, hap, abc_root = map(pathlib.Path, sys.argv[1:])
+expected = json.loads((project / "check-inputs.json").read_text())
+changed = []
+for rel, digest in expected.items():
+    for label, base in (("input", source), ("compiled", project)):
+        path = base / rel
+        if not path.is_file() or hashlib.sha256(path.read_bytes()).hexdigest() != digest:
+            changed.append(label + ":" + rel)
+extra = sorted(str(path.relative_to(project)) for path in (project / "entry/src/main/ets").rglob("*.ets")
+               if str(path.relative_to(project)) not in expected
+               and path.name != "GeneratedPluginRegistrant.ets")
+result = {"source": str(source), "project": str(project), "sourceFiles": expected,
+          "changedSources": changed, "extraSources": extra, "artifacts": {}}
+same_abc = True
+if hap.is_file():
+    with zipfile.ZipFile(hap) as archive:
+        inside = archive.read("ets/modules.abc")
+    extracted = (abc_root / "ets/modules.abc").read_bytes()
+    same_abc = inside == extracted
+    result["hapABCMatchesExtracted"] = same_abc
+    for label, data in (("HAP", hap.read_bytes()), ("HAP_modules.abc", inside),
+                        ("extracted_modules.abc", extracted), ("disassembly", (project / "modules.abc.txt").read_bytes())):
+        result["artifacts"][label] = {"bytes": len(data), "sha256": hashlib.sha256(data).hexdigest()}
+result["verified"] = not changed and not extra and same_abc
+text = json.dumps(result, ensure_ascii=False, indent=2) + "\n"
+(project / "build-identity.json").write_text(text)
+(work / "build-identity.json").write_text(text)
+if not result["verified"]:
+    print("check-arkts: source or HAP identity mismatch; see " + str(work / "build-identity.json"), file=sys.stderr)
+sys.exit(0 if result["verified"] else 1)
+PY_IDENTITY
 
 # --- diagnostics: every one, grouped by file; a file that never reached the bytecode counts.
 status=0
-python3 -I - "$LOG" "$PROJECT" "$WORK" "$rc" "$HAP" "$ABC_TEXT" "$WERROR" "hvigor $HVIGOR_VERSION; SDK $version; embedding $EMBEDDING_VERSION ($MODE); forks $FORKS; full $FULL" <<'PY' || status=$?
+python3 -I - "$LOG" "$PROJECT" "$RUN_ROOT" "$rc" "$HAP" "$ABC_TEXT" "$WERROR" "hvigor $HVIGOR_VERSION; SDK $version; embedding $EMBEDDING_VERSION ($MODE); forks $FORKS; full $FULL; NONOFFICIAL HMS stubs $HMS_STUBS" "$IDENTITY_RC" <<'PY' || status=$?
 import collections, json, os, re, sys, zipfile
 
-log, project, work, rc, hap, abc_text, werror, tools = sys.argv[1:9]
+log, project, work, rc, hap, abc_text, werror, tools, identity_rc = sys.argv[1:10]
 rc = int(rc)
 with open(log, errors="replace") as f:
     text = re.sub(r"\x1b\[[0-9;]*m", "", f.read())
@@ -362,6 +445,18 @@ def short(path):
     return re.sub(r"oh_modules/\.ohpm/[^/]+/oh_modules/@ohos/", "", path)
 
 errors, tool_errors = set(), []
+if identity_rc != "0":
+    tool_errors.append(("CHECK_IDENTITY", "Compilation source or HAP identity mismatch; see build-identity.json"))
+# A zero-exit compiler can still have reported diagnostics from a previous tree.
+# Reject that observed stale-project case instead of relabelling it as dependency noise.
+observed = sorted(set(re.findall(r"(?:WARN File:|At File:) ([^\n]+?):\d+:\d+", text)))
+foreign = [path for path in observed
+           if "/entry/src/main/" in path and not path.startswith(project + "/entry/src/main/")]
+with open(os.path.join(work, "diagnostic-source-paths.json"), "w") as f:
+    json.dump({"project": project, "observed": observed, "foreignOwnSources": foreign,
+               "verified": not foreign}, f, indent=2)
+if foreign:
+    tool_errors.append(("CHECK_DIAGNOSTIC_SOURCE", "Diagnostics refer to another project; see diagnostic-source-paths.json"))
 for code, msg in re.findall(r"^(?:\d+ |> hvigor )?ERROR: (\d{8}) [^\n]*\nError Message: ([^\n]*)", text, re.M):
     m = re.match(r"(.*?) At File: (.+?):(\d+):(\d+)\s*$", msg)
     if m:
@@ -395,7 +490,7 @@ if os.path.exists(abc_text):
 own = lambda d: d[0].startswith("entry/")
 own_warnings = sorted(w for w in warnings if own(w))
 dep_warnings = sorted(w for w in warnings if not own(w))
-ok = rc == 0 and os.path.exists(hap) and os.path.exists(abc_text) and not errors and not tool_errors and not missing
+ok = rc == 0 and os.path.exists(hap) and os.path.exists(abc_text) and not errors and not tool_errors and not missing and not failed
 if ok and werror == "1" and own_warnings:
     ok = False
 
@@ -436,6 +531,10 @@ PY
 
 if [ "$FULL" = 1 ] && [ -f "$HAP" ]; then
   python3 -I -B "$REPO/tooling/ohos/audit-hap.py" --hap "$HAP" --sdk "$SDK" --aot "$AOT" --native "$NATIVE" \
-    --runtime "$RUNTIME" --node-headers "$NODE_HEADERS" --report "$WORK/hap-audit.json" || status=1
+    --runtime "$RUNTIME" --node-headers "$NODE_HEADERS" --report "$RUN_ROOT/hap-audit.json" || status=1
 fi
+# Stable paths remain convenience copies; the unique run directory is authoritative.
+for file in hvigor.log diagnostics.txt build-identity.json diagnostic-source-paths.json hms-stubs.json hap-audit.json; do
+  if [ -f "$RUN_ROOT/$file" ]; then cp "$RUN_ROOT/$file" "$WORK/$file"; fi
+done
 exit "$status"

@@ -11,6 +11,7 @@ import { MAX_TIMER_DELAY_MS } from '@deepseek-ai/dsh-timeout';
 import { capabilities, subprocessCommands, unavailableMessage } from './commands.mjs';
 import { distinctRoots, isInside } from './filesystem.mjs';
 import { createOwnedGitServer } from './owned-server.mjs';
+import { createNodeScriptWorker, nodeScriptAvailable } from './node-script.mjs';
 
 const confinedProgram = '/dsh-go/ohos/confined';
 const validateArgv = argv => {
@@ -23,7 +24,9 @@ const commandName = command => {
 };
 
 export class VirtualSubprocessRuntime {
-  capabilities = capabilities;
+  capabilities = Object.freeze({ ...capabilities,
+    commands: nodeScriptAvailable() ? capabilities.commands : Object.freeze(capabilities.commands.filter(name => name !== 'node')),
+    nodeScripts: nodeScriptAvailable() ? 'worker-rebased' : 'none' });
   live = new Set();
   lanes = { search: { queue: [] }, execution: { queue: [] } };
   closed = false;
@@ -81,7 +84,7 @@ export class VirtualSubprocessRuntime {
     signal?.throwIfAborted();
     if (!command || (!isAbsolute(command) && command.includes('/'))) throw new Error('必须使用虚拟命令名或绝对路径');
     const name = commandName(command);
-    if (!name) throw new SubprocessExecutableNotFoundError(unavailableMessage);
+    if (!name || (name === 'node' && !nodeScriptAvailable())) throw new SubprocessExecutableNotFoundError(unavailableMessage);
     return `/dsh-go/ohos/bin/${name}`;
   }
 
@@ -170,7 +173,7 @@ export class VirtualSubprocessRuntime {
       if (state.settled || state.finishing) return;
       state.finishing = true;
       state.resources?.stop();
-      // Worker exit is only the first barrier. Drain accepted parent I/O and
+      // Worker exit plus stdout/stderr drain is the first barrier. Drain parent I/O and
       // replies, then exact cleanup/FD close/ledger release, before any lifetime
       // promise settles or this lane can start its following job.
       Promise.resolve().then(() => state.resources?.finish({ cancelled: state.stopped })).then(() => settle(), settle);
@@ -229,37 +232,77 @@ export class VirtualSubprocessRuntime {
           if (globalThis[Symbol.for('dsh.go.ohos.sim')] === true && process.env.DSH_GO_OHOS_SIM_PLATFORM) {
             workerEnv.DSH_GO_OHOS_SIM_PLATFORM = process.env.DSH_GO_OHOS_SIM_PLATFORM;
           }
-          state.resources = this.#createOwnedGitServer({
-            roots, policy,
-            send: message => state.worker.postMessage(message),
-            onFailure: error => { state.providerFailure ??= error; handle.terminate(); },
-          });
-          const worker = state.worker = new Worker(new URL('./worker.mjs', import.meta.url), {
-            workerData: {
-              argv: [name, ...argv.slice(1)], cwd, policy,
-              roots,
-              env, stdin: typeof spec.stdio.stdin === 'object' ? spec.stdio.stdin.data : '',
-            },
-            env: workerEnv, stdout: true, stderr: true,
-            resourceLimits: { maxOldGenerationSizeMb: 256 },
-          });
+          const nodeTask = name === 'node';
+          let worker;
+          if (nodeTask) {
+            try {
+              worker = createNodeScriptWorker({ args: argv.slice(1), cwd, roots,
+                workspaceRoots: [policy?.workspaceRoot ?? cwd], readOnly: policy?.mode === 'read-only', env: workerEnv,
+                stdin: typeof spec.stdio.stdin === 'object' ? spec.stdio.stdin.data : '' });
+            } catch (error) {
+              if (['ENOENT', 'ENOTDIR', 'ERR_OHOS_NODE_SCRIPT_ARGUMENTS', 'ERR_OHOS_NODE_PRELOAD_REQUIRED'].includes(error.code)) {
+                write('stderr', Buffer.from(`${error.code}: ${error.message}\n`));
+                state.outcome = { exitCode: error.code === 'ERR_OHOS_NODE_SCRIPT_ARGUMENTS' ? 2 : error.code === 'ERR_OHOS_NODE_PRELOAD_REQUIRED' ? 127 : 1, signal: null };
+                finish(); return;
+              }
+              throw error;
+            }
+          } else {
+            state.resources = this.#createOwnedGitServer({
+              roots, policy,
+              send: message => state.worker.postMessage(message),
+              onFailure: error => { state.providerFailure ??= error; handle.terminate(); },
+            });
+            worker = new Worker(new URL('./worker.mjs', import.meta.url), {
+              workerData: {
+                argv: [name, ...argv.slice(1)], cwd, policy,
+                roots,
+                env, stdin: typeof spec.stdio.stdin === 'object' ? spec.stdio.stdin.data : '',
+              },
+              env: workerEnv, stdout: true, stderr: true,
+              resourceLimits: { maxOldGenerationSizeMb: 256 },
+            });
+          }
+          state.worker = worker;
+          let workerExited = false;
+          const ended = new Set();
+          const finishWorker = () => {
+            if (workerExited && ended.size === 2) finish();
+          };
+          const drainListeners = [];
           for (const label of ['stdout', 'stderr']) {
+            const resume = () => worker[label].resume();
+            const sink = output[label] ?? process[label];
+            drainListeners.push([sink, resume]);
+            const end = () => { ended.add(label); finishWorker(); };
+            worker[label].once('end', end);
+            worker[label].once('close', end);
             worker[label].on('data', bytes => {
-              if (!write(label, bytes)) {
+              if (!write(label, bytes) && !workerExited && !state.stopped) {
                 worker[label].pause();
-                (output[label] ?? process[label]).once('drain', () => worker[label].resume());
+                sink.once('drain', resume);
               }
             });
           }
-          worker.on('message', message => {
+          if (!nodeTask) worker.on('message', message => {
             if (state.resources.handle(message)) return;
             if (message.failure) state.failure = Object.assign(new Error(message.failure.message), message.failure);
             else state.outcome = { exitCode: message.exitCode, signal: null };
           });
-          worker.once('error', error => { state.failure = error; });
+          worker.once('error', error => {
+            if (nodeTask) write('stderr', Buffer.from((error.stack ?? `${error.name}: ${error.message}`) + '\n'));
+            else state.failure = error;
+          });
           worker.once('exit', exitCode => {
+            if (nodeTask) state.outcome = { exitCode, signal: null };
             if (!state.outcome && !state.failure && !state.stopped) state.failure = new Error(`虚拟进程 worker 未报告结果，退出码 ${exitCode}`);
-            finish();
+            workerExited = true;
+            // A paused Worker readable can still contain bytes after its exit
+            // event. Drain that finite tail before sealing the public streams.
+            // Once execution is gone, pending consumer backpressure must not
+            // hold cancellation/join open indefinitely.
+            for (const [sink, resume] of drainListeners) { sink.removeListener('drain', resume); resume(); }
+            finishWorker();
           });
         } catch (error) {
           state.failure = error;

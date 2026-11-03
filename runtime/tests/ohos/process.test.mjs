@@ -177,7 +177,7 @@ test('伪造绝对可执行文件路径不会按basename执行', async () => {
 });
 
 test('未知命令返回127与中文替代路径；不加载Python/SQLite/WASM', async () => {
-  for (const command of ['apt-get', 'python', 'sqlite3', 'node']) {
+  for (const command of ['apt-get', 'python', 'sqlite3']) {
     const direct = await run([command, '--help']);
     assert.equal(direct.exitCode, 127);
     assert.match(direct.stderr, /这个命令在鸿蒙本机不可用，可以连接电脑执行/);

@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Build HostCore's profile driver and replay its exact layout in actual DSH.
 
-The prefix and dependency cache are read-only inputs. Output owns a full private
-runtime tree. Local HTTP/WS is used by the existing strict five-tool test peer.
+The prefix and dependency cache are read-only inputs. Development mode copies a
+private runtime; --assembled-payload uses the exact manifest tree without a copy
+or rebuild. Local HTTP/WS is used by the existing strict five-tool test peer.
 This is Linux host evidence, not an Ark/SDK/HAP run or a startup benchmark.
 """
 import argparse
@@ -39,11 +40,16 @@ def inventory(root):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    for name in ['prefix', 'process-dependencies', 'esbuild-prefix', 'node', 'native-library-dir', 'publication-fixture', 'out']:
+    for name in ['node', 'native-library-dir', 'publication-fixture', 'out']:
         parser.add_argument('--' + name, type=Path, required=True)
+    for name in ['prefix', 'process-dependencies', 'esbuild-prefix', 'assembled-payload', 'model-fixture']:
+        parser.add_argument('--' + name, type=Path)
     args = parser.parse_args()
-    for name in vars(args):
-        setattr(args, name, getattr(args, name).resolve())
+    for name, value in vars(args).items():
+        if value is not None:
+            setattr(args, name, value.resolve())
+    if not args.assembled_payload and not all([args.prefix, args.process_dependencies, args.esbuild_prefix]):
+        parser.error('Use --assembled-payload, or all three development prefix/dependency/build inputs')
     out = args.out
     out.mkdir(parents=True, exist_ok=False)
     base_env = {key: os.environ[key] for key in ['PATH', 'LANG', 'LC_ALL'] if key in os.environ}
@@ -63,26 +69,34 @@ def main():
         process.check_returncode()
         return process
 
-    source_process = ROOT / 'runtime/ohos/process'
-    assert sha(source_process / 'package-lock.json') == sha(args.process_dependencies.parent / 'package-lock.json')
-    assert sha(source_process / 'package.json') == sha(args.process_dependencies.parent / 'package.json')
-    write_json(out / 'prefix-input.json', inventory(args.prefix))
-    write_json(out / 'process-dependencies-input.json', inventory(args.process_dependencies))
-    runtime = out / 'runtime'
-    shutil.copytree(args.prefix, runtime, symlinks=True)
-    runtime_ohos = runtime / 'runtime/ohos'
-    shutil.copytree(ROOT / 'runtime/ohos', runtime_ohos,
-                    ignore=shutil.ignore_patterns('node', 'node_modules', 'build', '__pycache__'))
-    process = runtime_ohos / 'process'
-    shutil.copytree(args.process_dependencies, process / 'node_modules', symlinks=True)
-    inherited = process / 'node_modules/@deepseek-ai'
-    if inherited.is_symlink():
-        inherited.unlink()
-    elif inherited.exists():
-        raise AssertionError('Dependency cache unexpectedly owns concrete DSH packages')
-    run('link-dsh', [args.node, process / 'link-dsh.mjs', runtime])
-    run('build-just-bash', [sys.executable, process / 'build-just-bash.py'])
-    run('build-re2js', [args.node, process / 'build-rg-regex.mjs', args.esbuild_prefix])
+    if args.assembled_payload:
+        runtime = args.assembled_payload
+        payload_before = inventory(runtime)
+        manifest = json.loads((runtime.parent / 'manifest.json').read_text())
+        expected = {row['path']: {'bytes': row['size'], 'sha256': row['sha256']} for row in manifest['files']}
+        assert payload_before == expected, 'Use the actual exact manifest payload, never a development prefix'
+        write_json(out / 'prefix-input.json', payload_before)
+    else:
+        source_process = ROOT / 'runtime/ohos/process'
+        assert sha(source_process / 'package-lock.json') == sha(args.process_dependencies.parent / 'package-lock.json')
+        assert sha(source_process / 'package.json') == sha(args.process_dependencies.parent / 'package.json')
+        write_json(out / 'prefix-input.json', inventory(args.prefix))
+        write_json(out / 'process-dependencies-input.json', inventory(args.process_dependencies))
+        runtime = out / 'runtime'
+        shutil.copytree(args.prefix, runtime, symlinks=True)
+        runtime_ohos = runtime / 'runtime/ohos'
+        shutil.copytree(ROOT / 'runtime/ohos', runtime_ohos,
+                        ignore=shutil.ignore_patterns('node', 'node_modules', 'build', '__pycache__'))
+        process = runtime_ohos / 'process'
+        shutil.copytree(args.process_dependencies, process / 'node_modules', symlinks=True)
+        inherited = process / 'node_modules/@deepseek-ai'
+        if inherited.is_symlink():
+            inherited.unlink()
+        elif inherited.exists():
+            raise AssertionError('Dependency cache unexpectedly owns concrete DSH packages')
+        run('link-dsh', [args.node, process / 'link-dsh.mjs', runtime])
+        run('build-just-bash', [sys.executable, process / 'build-just-bash.py'])
+        run('build-re2js', [args.node, process / 'build-rg-regex.mjs', args.esbuild_prefix])
 
     guest = out / '中文应用目录/runtime/rootfs'
     dsh = guest / 'root/.dsh'
@@ -148,15 +162,20 @@ def main():
         '--native-library-dir', args.native_library_dir, '--linked-publication-fixture', args.publication_fixture]
     for name in ['libdsh_flock.so', 'libdsh_require_builtin.so']:
         command += ['--allow-addon', args.native_library_dir / name]
+    if args.model_fixture:
+        command += ['--model-fixture', args.model_fixture]
     run('actual-round', command)
     report = json.loads((out / 'round/report.json').read_text())
     assert report['status'] == 'PASS' and report['approvals'] == 2 and report['loader']['observedRoute'] == 'native-addon'
     assert sha(profile) == before_profile
+    if args.assembled_payload:
+        assert inventory(runtime) == payload_before, 'Host/round must not mutate the installed runtime payload'
     write_json(out / 'report.json', {'scope': 'Linux actual pinned DSH, strict simulation; no SDK/Ark/HAP/device claim',
         'assertionsPassed': True, 'tools': 5, 'approvals': report['approvals'], 'profileUnchanged': True,
         'profileSha256': before_profile, 'roundSourceSha256': sha(source_round), 'roundDriverSha256': sha(round_driver),
         'prefixInputManifestSha256': sha(out / 'prefix-input.json'),
-        'processDependencyManifestSha256': sha(out / 'process-dependencies-input.json'),
+        'runtimeInput': 'exact assembled payload' if args.assembled_payload else 'development-prefix copy',
+        'processDependencyManifestSha256': sha(out / 'process-dependencies-input.json') if not args.assembled_payload else None,
         'inputs': {str(path): sha(path) for path in [core / 'host_core.cpp', core / 'host_core.h', HERE / 'host-profile.cc',
             HERE / 'host-layout-consumers.mjs', Path(__file__), args.publication_fixture,
             args.native_library_dir / 'libdsh_flock.so', args.native_library_dir / 'libdsh_require_builtin.so']}})

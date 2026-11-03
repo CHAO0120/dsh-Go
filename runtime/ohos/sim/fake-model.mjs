@@ -4,14 +4,14 @@ import { setImmediate as nextTurn } from 'node:timers/promises';
 import { join } from 'node:path';
 
 // A deterministic OpenAI Chat Completions peer. No model credentials or internet.
-export async function startFakeModel(workspace) {
+export async function startFakeModel(workspace, { bashCommand = "printf 'shell-ok\\n'" } = {}) {
   const file = join(workspace, '中文 测试.txt');
   const script = [
     ['write', { file_path: file, content: '初始内容\n', sandbox_permissions: 'danger-full-access', justification: 'O0 临时工作区审批验证' }],
     ['edit', { file_path: file, old_string: '初始内容', new_string: '修改后内容' }],
     ['read', { file_path: file }],
     ['grep', { pattern: '修改后内容', path: workspace }],
-    ['bash', { description: 'Print a local simulation test marker', command: "printf 'shell-ok\\n'", sandbox_permissions: 'danger-full-access', justification: 'O0 无副作用命令审批验证' }],
+    ['bash', { description: 'Print a local simulation test marker', command: bashCommand, sandbox_permissions: 'danger-full-access', justification: 'O0 临时工作区命令审批验证' }],
   ];
   const requests = [];
   const server = http.createServer(async (req, res) => {

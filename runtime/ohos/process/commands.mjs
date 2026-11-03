@@ -8,10 +8,10 @@ export const shellCommands = Object.freeze([
   'printenv', 'alias', 'unalias', 'history', 'xargs', 'true', 'false', 'yes',
   'clear', 'bash', 'sh', 'jq', 'base64', 'diff', 'date', 'sleep', 'timeout',
   'seq', 'expr', 'md5sum', 'sha1sum', 'sha256sum', 'file', 'help', 'which',
-  'tac', 'hostname', 'od', 'gzip', 'gunzip', 'zcat', 'time', 'whoami',
+  'tac', 'hostname', 'od', 'gzip', 'gunzip', 'zcat', 'time', 'whoami', 'node',
 ]);
 
-export const subprocessCommands = Object.freeze(['bash', 'sh', 'rg', 'git']);
+export const subprocessCommands = Object.freeze(['bash', 'sh', 'rg', 'git', 'node']);
 export const unavailableMessage = '这个命令在鸿蒙本机不可用，可以连接电脑执行';
 
 export const capabilities = Object.freeze({
@@ -22,7 +22,8 @@ export const capabilities = Object.freeze({
   stdin: 'batch',
   pty: false,
   processSpawn: false,
-  nodeScripts: 'none',
+  // Runtime instances additionally require the inherited product preload.
+  nodeScripts: 'worker-rebased',
   python: false,
   wasm: false,
 });

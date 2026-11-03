@@ -13,7 +13,7 @@ enum RuntimeSupport { supported, unsupported, unknown }
 
 enum RuntimeShellKind { virtual, system, none, unknown }
 
-enum RuntimeNodeScripts { worker, process, none, unknown }
+enum RuntimeNodeScripts { worker, workerRebased, process, none, unknown }
 
 enum RuntimeNativeModuleState { loaded, packaged, unavailable, unknown }
 
@@ -199,7 +199,13 @@ class RuntimeCapabilities {
       simulated: asBool(map['simulated']),
       shell: RuntimeShellCapabilities.fromJson(map['shell']),
       processSpawn: _support(map['processSpawn']),
-      nodeScripts: _enum(map['nodeScripts'], RuntimeNodeScripts.values, RuntimeNodeScripts.unknown),
+      nodeScripts: switch (map['nodeScripts']) {
+        'worker' => RuntimeNodeScripts.worker,
+        'worker-rebased' => RuntimeNodeScripts.workerRebased,
+        'process' => RuntimeNodeScripts.process,
+        'none' => RuntimeNodeScripts.none,
+        _ => RuntimeNodeScripts.unknown,
+      },
       python: _support(map['python']),
       wasm: _support(map['wasm']),
       plugins: RuntimePluginCapabilities.fromJson(map['plugins']),

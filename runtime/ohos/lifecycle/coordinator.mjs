@@ -40,12 +40,16 @@ export class BoundaryCoordinator {
   #gate;
   #controlTail = Promise.resolve();
   #controlVersion = 0;
+  #host;
+  #hostControl;
   #closing = false;
   #fault;
   #cancelled = new Set();
   #cancelling = new Set();
   #onStage;
   #lastPause = false;
+  #manualPaused = false;
+  #lastManualPaused = false;
   constructor({ journal, bootId, flushSession, readEvents, resolveAgent = () => undefined,
     revalidateTransport = async () => {}, onStage = () => {} }) {
     if (!journal || !knownString(bootId) || typeof flushSession !== 'function' || typeof readEvents !== 'function') throw new TypeError('Lifecycle requires durable session adapters and boot identity');
@@ -59,12 +63,19 @@ export class BoundaryCoordinator {
     this.#onStage = onStage;
     try { for (const record of journal.records) this.#fold(record.body); }
     catch (error) { this.#fault = error; }
+    this.#manualPaused = this.#lastManualPaused;
     if (this.#lastPause) { this.#gate = Promise.withResolvers(); this.clock.pause(); }
   }
   get protocolVersion() { return 1; }
   #fold(body) {
     if (body.kind === 'header') return;
-    if (body.kind === 'pause' || body.kind === 'resume') { this.#lastPause = body.kind === 'pause'; return; }
+    if (body.kind === 'pause' || body.kind === 'resume') {
+      if (body.manualPaused !== undefined && typeof body.manualPaused !== 'boolean') throw fail('ERR_OHOS_LIFECYCLE_SEQUENCE', 'Invalid durable pause reason');
+      this.#lastPause = body.kind === 'pause';
+      // Old records predate host callbacks: preserve an explicit old pause.
+      this.#lastManualPaused = body.manualPaused ?? this.#lastPause;
+      return;
+    }
     if (body.kind === 'cancel') {
       if (!knownString(body.sessionId)) throw fail('ERR_OHOS_LIFECYCLE_IDENTITY', 'Cancel has no session identity');
       this.#cancelled.add(body.sessionId); return;
@@ -320,12 +331,33 @@ export class BoundaryCoordinator {
     this.#recoveries.delete(sessionId);
     return this.status(sessionId);
   }
+  observeHost(observation) {
+    this.#check();
+    // A cancelled HTTP request may already be executing. An older foreground
+    // observation cannot reopen the gate after a newer background observation.
+    if (this.#host && observation.revision <= this.#host.revision) return this.#hostControl.then(() => this.status());
+    this.#host = { ...observation };
+    this.#hostControl = observation.foreground && !this.#manualPaused ? this.#resume() : this.#pause();
+    return this.#hostControl.then(() => this.status());
+  }
   pause() {
     this.#check();
+    this.#manualPaused = true;
+    return this.#pause();
+  }
+  resume() {
+    this.#check();
+    this.#manualPaused = false;
+    // An explicit resume releases only its own cause. Background still owns
+    // admission, and this durable pause records the released manual cause.
+    return this.#host?.foreground === false ? this.#pause() : this.#resume();
+  }
+  #pause() {
     const version = ++this.#controlVersion;
+    const manualPaused = this.#manualPaused;
     this.#gate ??= Promise.withResolvers();
     const work = this.#controlTail.then(async () => {
-      await this.#record({ kind: 'pause', bootId: this.bootId });
+      await this.#record({ kind: 'pause', bootId: this.bootId, manualPaused });
       this.clock.pause();
       await this.#journal.flush();
       return { ...this.status(), acknowledgedControlVersion: version };
@@ -333,15 +365,15 @@ export class BoundaryCoordinator {
     this.#controlTail = work.catch(error => { this.#fault ??= error; });
     return work;
   }
-  resume() {
-    this.#check();
+  #resume() {
     const version = ++this.#controlVersion;
+    const manualPaused = this.#manualPaused;
     const work = this.#controlTail.then(async () => {
       // Process already queued completion/close callbacks before reporting a
       // recovery view. Pending calls still own their original handles.
       await nextIoTurn();
       await this.revalidateTransport();
-      await this.#record({ kind: 'resume', bootId: this.bootId });
+      await this.#record({ kind: 'resume', bootId: this.bootId, manualPaused });
       if (version === this.#controlVersion) {
         this.clock.resume(); const gate = this.#gate; this.#gate = undefined; gate?.resolve();
       }
@@ -399,8 +431,10 @@ export class BoundaryCoordinator {
       : cancelled ? this.#cancelling.has(sessionId) || calls.some(row => row.active) ? 'cancelling' : 'terminated'
         : this.#gate ? 'paused' : calls.some(row => row.active) || (sessionId !== undefined && this.resolveAgent(sessionId)?.status === 'running') ? 'running' : calls.length ? 'completed' : 'running';
     return { v: 1, bootId: this.bootId, state, closed: this.#closing, paused: !!this.#gate, confirmedPause: this.clock.paused,
+      manualPaused: this.#manualPaused,
       blocked: !!blocked, corruption: this.#journal.corruption, controlVersion: this.#controlVersion,
-      activeBudgetCount: this.clock.pendingCount, calls };
+      activeBudgetCount: this.clock.pendingCount, calls,
+      ...(this.#host === undefined ? {} : { host: { ...this.#host } }) };
   }
   async result(sessionId, callSeq) {
     const row = this.#rows.get(keyOf({ sessionId, callSeq }));

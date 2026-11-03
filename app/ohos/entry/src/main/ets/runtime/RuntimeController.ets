@@ -2,23 +2,35 @@
 import common from '@ohos.app.ability.common';
 import util from '@ohos.util';
 import connection from '@ohos.net.connection';
-import { start as startNative, stop as stopNative, getState, drainEvents, HostState, HostEvent, HostOptions } from 'libdsh_host.so';
+import UIAbility from '@ohos.app.ability.UIAbility';
+import type { HostState, HostEvent, HostOptions } from 'libdsh_host.so';
+import { loadNativeHost, peekNativeHost, nativeHostState } from './NativeHost';
 import { RuntimeChannelError, RuntimeManifest, RuntimeFile, RuntimeInstaller, RuntimeLogs, RuntimeLogEntry,
-  InstallProgress, validateManifest, validateEnvironment, validateStartOptions, resolveNativeLibraryDir } from './RuntimeCore';
+  InstallProgress, validateEnvironment, validateStartOptions, resolveNativeLibraryDir } from './RuntimeCore';
 import { OhosRuntimeStorage } from './OhosRuntimeStorage';
 import { RuntimePaths } from './RuntimePaths';
 import { ManagedSkillService, ManagedSkillScope } from './ManagedSkillService';
+import { PersistedRuntimeLog } from './PersistedRuntimeLog';
+import { RuntimeLifecycle } from './RuntimeLifecycle';
+import { OhosLifecycleTransport } from './OhosLifecycleTransport';
+import { backgroundComputePermission } from './BackgroundCompute';
 
 type RuntimeSink = (event: Map<string, Object | null>) => void;
+const LIFECYCLE_NOTICE = '前后台状态尚未同步，本机任务可能仍在暂停或运行；正在重试。';
 
 export class RuntimeController {
   private static shared: RuntimeController | null = null;
+  private static foreground: boolean = false;
+  private static ability: UIAbility | null = null;
   readonly paths: RuntimePaths;
   readonly managedSkills: ManagedSkillService;
   private context: common.Context;
   private storage: OhosRuntimeStorage;
   private installer: RuntimeInstaller;
   private logs: RuntimeLogs = new RuntimeLogs();
+  private persistedLogs: PersistedRuntimeLog;
+  private lifecycle: RuntimeLifecycle;
+  private lastLifecycleError: string | null = null;
   private sinks: RuntimeSink[] = [];
   private initialized: Promise<void> | null = null;
   private manifest: RuntimeManifest | null = null;
@@ -38,12 +50,33 @@ export class RuntimeController {
     return RuntimeController.shared;
   }
 
+  static onForeground(ability: UIAbility): void {
+    RuntimeController.ability = ability; RuntimeController.foreground = true;
+    RuntimeController.shared?.lifecycle.observe(true);
+  }
+
+  static onBackground(ability: UIAbility): void {
+    if (RuntimeController.ability !== ability) return;
+    RuntimeController.foreground = false;
+    RuntimeController.shared?.lifecycle.observe(false);
+  }
+
+  static onDestroy(ability: UIAbility): void {
+    RuntimeController.onBackground(ability);
+    if (RuntimeController.ability === ability) RuntimeController.ability = null;
+  }
+
   constructor(context: common.Context) {
     this.context = context;
+    this.persistedLogs = PersistedRuntimeLog.get(context.filesDir);
+    this.lifecycle = new RuntimeLifecycle(new OhosLifecycleTransport(),
+      (): string => backgroundComputePermission(context.applicationInfo.accessTokenId),
+      (): void => this.lifecycleChanged());
+    this.lifecycle.observe(RuntimeController.foreground);
     this.paths = new RuntimePaths(context.filesDir);
-    this.runtimeGeneration = getState().consumed ? 1 : 0;
+    this.runtimeGeneration = nativeHostState().consumed ? 1 : 0;
     this.managedSkills = new ManagedSkillService(this.paths.guestRoot, (scope: ManagedSkillScope): boolean => {
-      const state = getState();
+      const state = nativeHostState();
       return !this.requestedStop && this.pending === null && state.phase === 'running' &&
         scope.runtimeGeneration === this.runtimeGeneration && scope.token === state.token;
     });
@@ -59,8 +92,7 @@ export class RuntimeController {
 
   private async readInstallation(): Promise<void> {
     try {
-      const bytes = await this.context.resourceManager.getRawFileContent('dsh-runtime/manifest.json');
-      this.manifest = validateManifest(JSON.parse(util.TextDecoder.create('utf-8', {fatal: true}).decodeToString(bytes)) as RuntimeManifest);
+      this.manifest = await this.storage.readBundledManifest();
       this.installed = await this.installer.installed();
       if (await this.storage.exists(this.installer.base + '/installing.json')) this.setupError = '上次运行时安装未完成，请重新安装以继续。';
     } catch (error) {
@@ -83,7 +115,7 @@ export class RuntimeController {
   }
 
   snapshot(): Map<string, Object | null> {
-    const native = getState();
+    const native = nativeHostState();
     this.syncManagedSkills(native);
     let phase = this.current() ? 'installed' : 'notInstalled';
     if (this.pending === 'install') phase = 'installing';
@@ -100,14 +132,24 @@ export class RuntimeController {
       ['baseUrl', active ? native.baseUrl : null], ['token', active ? native.token : null],
       ['managedSkillGeneration', active ? this.managedSkills.generationFor(native.token) : null],
       ['error', this.lastError ?? this.setupError ?? native.errorMessage ??
-        (native.phase === 'exited' && !this.requestedStop ? '本机引擎已退出；请关闭并重新打开 App 后再启动。' : null)],
+        (native.phase === 'exited' && !this.requestedStop ? '本机引擎已退出；请关闭并重新打开 App 后再启动。' :
+          this.lifecycle.failureCode() !== null ? LIFECYCLE_NOTICE : null)],
       ['mode', 'normal'], ['safeState', 'off'], ['safeReason', null], ['strikes', 0], ['autoSafe', false],
       ['failure', null], ['mainFailure', null], ['healthyAt', null], ['networkBlocked', false], ['networkBlockedAt', null],
       ['directEngineEnabled', false], ['directEngineAvailable', false], ['directEngineActive', false],
       ['directEngineFallbackReason', null], ['currentExecutionMode', active ? 'ohos-embedded' : null],
       ['launchSelectedMode', native.consumed ? 'ohos-embedded' : null], ['launchSpawned', native.consumed],
-      ['launchFailureReason', failure], ['tidyingFiles', false]
+      ['launchFailureReason', failure], ['tidyingFiles', false], ['lifecycle', this.lifecycle.status()]
     ]);
+  }
+
+  private lifecycleChanged(): void {
+    const error = this.lifecycle.failureCode();
+    if (error !== null && error !== this.lastLifecycleError) {
+      this.emit(new Map<string, Object | null>([['type', 'notice'], ['text', LIFECYCLE_NOTICE]]));
+    }
+    this.lastLifecycleError = error;
+    this.emitStatus();
   }
 
   subscribe(sink: RuntimeSink): void {
@@ -130,18 +172,21 @@ export class RuntimeController {
   }
 
   private startPolling(): void {
-    const state = getState();
+    const state = nativeHostState();
     if (this.timer === null && ['starting', 'running', 'stopping'].includes(state.phase)) {
       this.timer = setInterval(() => this.collect(), 100);
     }
   }
 
   collect(): void {
-    const state = getState();
+    const state = nativeHostState();
+    const finished = (state.phase === 'exited' || state.phase === 'error') && this.lastNative?.phase !== state.phase;
+    this.lifecycle.runtime(state.phase === 'running' && !this.requestedStop ? state.baseUrl : null,
+      state.phase === 'running' && !this.requestedStop ? state.token : null);
     this.syncManagedSkills(state);
     if (state.token !== null) this.logs.rememberSecret(state.token);
     const batch: RuntimeLogEntry[] = [];
-    const events: HostEvent[] = drainEvents();
+    const events: HostEvent[] = peekNativeHost()?.drainEvents() ?? [];
     for (const event of events) {
       if (event.kind === 'ready' && event.token !== undefined) this.logs.rememberSecret(event.token);
       if (event.kind === 'log' && event.line !== undefined && event.stream !== undefined) {
@@ -150,9 +195,15 @@ export class RuntimeController {
       if (event.kind === 'exit') batch.push(this.logs.append(`Node 已退出（code=${event.exitCode}）；再次启动需要关闭并重新打开 App。`, 'system'));
       if (event.kind === 'error') this.lastError = (event.errorCode ?? 'ohos_native_error') + ': ' + (event.message ?? '本机引擎出错，请重新打开 App。');
     }
-    if (batch.length > 0) this.emit(new Map<string, Object | null>([
-      ['type', 'logs'], ['entries', batch.map((entry: RuntimeLogEntry) => entry.toMap())]
-    ]));
+    if (batch.length > 0) {
+      this.persistedLogs.append(batch);
+      this.emit(new Map<string, Object | null>([
+        ['type', 'logs'], ['entries', batch.map((entry: RuntimeLogEntry) => entry.toMap())]
+      ]));
+    }
+    if (finished) this.persistedLogs.flush().catch((): void => {
+      console.warn('运行时诊断日志尚未完整落盘，请查看诊断中的持久化状态。');
+    });
     if (this.lastNative === null || state.phase !== this.lastNative.phase || state.exitCode !== this.lastNative.exitCode ||
         state.errorCode !== this.lastNative.errorCode || state.token !== this.lastNative.token) {
       if (state.phase === 'error' || (state.phase === 'exited' && !this.requestedStop)) this.failureLines = this.recentLogs(300);
@@ -168,16 +219,23 @@ export class RuntimeController {
   async install(dropKept: boolean): Promise<void> {
     if (dropKept) throw new RuntimeChannelError('ohos_unsupported', '鸿蒙没有 Android 的保留数据恢复事务。');
     if (this.pending !== null) throw new RuntimeChannelError('install_busy', '运行时正在安装或启动。');
-    if (getState().consumed) throw new RuntimeChannelError('ohos_restart_required', '本进程已经启动过 Node，请关闭并重新打开 App 后安装。');
+    if (nativeHostState().consumed) throw new RuntimeChannelError('ohos_restart_required', '本进程已经启动过 Node，请关闭并重新打开 App 后安装。');
     this.pending = 'install'; this.lastError = null;
     this.emitStatus();
     try {
       await this.initialize();
+      if (this.manifest === null) {
+        this.initialized = this.readInstallation();
+        await this.initialized;
+      }
       if (this.manifest === null) throw new RuntimeChannelError('ohos_payload_missing', this.setupError ?? 'HAP 中没有运行时载荷。');
       this.installed = null;
-      await this.installer.install(this.manifest, (progress: InstallProgress) => this.emit(new Map<string, Object | null>([
-        ['type', 'progress'], ['step', progress.step], ['done', progress.done], ['total', progress.total]
-      ])));
+      const manifest: RuntimeManifest = this.manifest;
+      await this.storage.withBundledRuntime(async (): Promise<void> => {
+        await this.installer.install(manifest, (progress: InstallProgress) => this.emit(new Map<string, Object | null>([
+          ['type', 'progress'], ['step', progress.step], ['done', progress.done], ['total', progress.total]
+        ])));
+      });
       this.installed = await this.installer.installed();
       this.setupError = null;
     } catch (error) {
@@ -191,7 +249,7 @@ export class RuntimeController {
   async start(env: Map<string, Object> | null, phoneStorage: boolean, mode: string | null, visualReplies: boolean): Promise<void> {
     validateStartOptions(phoneStorage, mode);
     const environment = validateEnvironment(env);
-    const native = getState();
+    const native = nativeHostState();
     if (native.phase === 'starting' || native.phase === 'running' || this.pending === 'start') return;
     if (native.consumed) throw new RuntimeChannelError('ohos_restart_required', '一个 App 进程只启动一次 Node，请关闭并重新打开 App。');
     if (this.pending !== null) throw new RuntimeChannelError('start_busy', '运行时正在安装。');
@@ -216,7 +274,9 @@ export class RuntimeController {
         workspaceRoots: [workspace], cacheDir: cache, nativeLibraryDir: nativeLibraryDir, env: environment };
       this.requestedStop = false;
       this.runtimeGeneration++;
-      startNative(options);
+      const host = await loadNativeHost();
+      if (this.startCancelled) throw new RuntimeChannelError('ohos_start_cancelled', '启动已取消。');
+      host.start(options);
       this.startPolling();
     } catch (error) {
       if (!(error instanceof RuntimeChannelError && error.code === 'ohos_start_cancelled')) {
@@ -231,10 +291,11 @@ export class RuntimeController {
   stop(): void {
     if (this.pending === 'start') this.startCancelled = true;
     this.requestedStop = true;
+    this.lifecycle.runtime(null, null);
     this.managedSkills.stop(this.runtimeGeneration);
-    const state = getState();
+    const state = nativeHostState();
     if (['starting', 'running', 'stopping'].includes(state.phase)) {
-      stopNative();
+      peekNativeHost()?.stop();
       this.startPolling();
       this.emitStatus();
     }

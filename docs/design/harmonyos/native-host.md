@@ -1,10 +1,10 @@
 # P1 原生宿主与启动契约
 
-本实现位于 `app/ohos/entry/src/main/cpp/`。平台无关的线程、参数、输出、状态和文件访问部分已在 Linux 运行；Ark N-API 适配层也通过桌面 Node N-API 替身执行。**尚未用 OpenHarmony SDK 完整编译，尚未在 HAP 或真机运行。** 正式构建依赖 P1A 的进程内 runner、P1C 的 N-API 改名配方、主线生成的改名头和 libnode。
+本实现位于 `app/ohos/entry/src/main/cpp/`。平台无关的线程、参数、输出、状态和文件访问部分已在 Linux 运行；Ark N-API 适配层也通过桌面 Node N-API 替身执行。**本懒加载增量不改 C++；主线追加7报告的真实交叉编译与本轮 ArkTS 检查分开记录，尚未在真机运行。** 正式构建依赖 P1A 的进程内 runner、P1C 的 N-API 改名配方、主线生成的改名头和 libnode。
 
 ## 调用面与所有权
 
-`types/libdsh_host/index.d.ts` 是 P2/P3 使用的唯一类型入口，全部为 named exports：
+`types/libdsh_host/index.d.ts` 是 P2/P3 使用的唯一类型入口，声明各 named export；ArkTS 运行时由 NativeHost 的动态 import 取得 native 模块 default 对象，类型导入不装载库。见 `native-host-lazy.md`。
 
 | 调用 | 行为 |
 |---|---|
@@ -68,7 +68,7 @@ stdout/stderr 使用管道读取。fd 1/2 属于整个进程，捕获期间其�
 
 P2 的 rawfile manifest 按文件哈希描述 JS/JSON 等普通资源，安装到固定 `filesDir/dsh-runtime/tree`；已有文件 hash 一致时保留，变动文件写私有临时文件再 rename。持久 installing 标记阻止中断后的半成品启动；重新执行安装续完后才清除。已经消耗 Node 实例的进程不更新活动树。home/workspace 不随运行时替换，缓存可重建。这一过程不是全量解压几百 MB 的归档。
 
-`libdsh_host.so` 由 App CMake 构建；主线提供的 `libnode.so` 在 `entry/libs/arm64-v8a/`，runner 已编入其中。Ark target 不包含 Node 头、不强制改名，只经 C ABI 进入 libnode。Linux 测试中的独立 runner DSO 是测量夹具。详见 `napi-isolation.md`。
+`libdsh_host.so` 由 App CMake 构建；主线提供的 `libnode.so` 在 `entry/libs/arm64-v8a/`，runner 和 linked publication 已编入其中，产品不再依赖 `libdsh_node_runner.so`。相关 CMake、改名门与 libnode 工具链由主线负责，本补丁不修改。Ark target 不包含 Node 头、不强制改名，只以 `dsh_node_start` / `dsh_node_stop` 的 C ABI 进入 libnode。Linux 测试的独立 runner DSO 仅是测量夹具。详见 `napi-isolation.md`。
 
 P1B v2 要求 P2 v5 从自己的可信 Context 生成 `nativeLibraryDir`：普通自有 Context 的 `bundleCodeDir` 加上 `applicationInfo.nativeLibraryPath` 的相对路径组件。公开 6.1 源码中后者不是绝对路径。Ark 必须拒绝空值、绝对 nativeLibraryPath、NUL、空组件、`.` 和 `..`，不接受 Dart 或配置传入的覆盖，也不硬编码安装路径。entry 模块固定 `extractNativeLibs: true`、`libIsolation: false`；这些 Ark 和模块字段由 P2 v5 提供。
 

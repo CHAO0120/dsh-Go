@@ -37,7 +37,7 @@
 | `simulated` | 是否存在显式仿真 Symbol |
 | `publication.atomic` | 当前 `untried`、`trying`、`available`、`unsupported`、`disabled-after-crash`；服务缺失、未知协议或未知状态为 `unknown` |
 | `publication.systemVersion` | 经验证的系统版本元组身份；缺失/非法为 null；不是 Node 版本，也不暴露原始四字段或设备标识 |
-| `shell` / `processSpawn` / `nodeScripts` / `python` | 实际 shell/subprocess 服务，命令表与执行器和工具说明同源；此基底 nodeScripts 是 none |
+| `shell` / `processSpawn` / `nodeScripts` / `python` | 实际 shell/subprocess 服务，命令表与执行器和工具说明同源；具有可继承预加载器的 Node 脚本后端报 worker-rebased，缺该入口报 none |
 | `wasm` | 当前实例缺 WebAssembly 为 unsupported，存在对象但未经执行验证为 unknown |
 | `plugins` | bundle 已实际装配的证据，以及 OHOS 第一阶段禁止市场安装的策略；不在 GET 中发现/安装插件 |
 | `nativeModules` | null，宿主尚无已签名清单及逐模块实际加载观测 |

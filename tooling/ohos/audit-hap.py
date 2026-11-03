@@ -182,31 +182,15 @@ def main():
         problems.append('rawfile/buildinfo.json5 is missing; FlutterLoader reads enable_impeller from it')
     report['buildinfo'] = json.loads(read(f'{RAWFILE}buildinfo.json5')) if f'{RAWFILE}buildinfo.json5' in entries else None
 
-    # The runtime: RuntimeInstaller copies each manifest file out of rawfile and checks its hash,
-    # so one file restool dropped would fail the install on the device.
-    with zipfile.ZipFile(args.runtime) as source:
-        manifest_bytes = source.read('dsh-runtime/manifest.json')
-    manifest = json.loads(manifest_bytes)
-    prefix = f'{RAWFILE}dsh-runtime/files/'
-    missing, wrong = [], []
-    for item in manifest['files']:
-        name = prefix + item['path']
-        if name not in entries:
-            missing.append(item['path'])
-        elif entries[name].file_size != item['size'] or sha256(read(name)) != item['sha256']:
-            wrong.append(item['path'])
-    extra = sorted({name[len(prefix):] for name in entries if name.startswith(prefix)}
-                   - {item['path'] for item in manifest['files']})
-    if read(f'{RAWFILE}dsh-runtime/manifest.json') != manifest_bytes:
-        problems.append('rawfile/dsh-runtime/manifest.json differs from the runtime zip')
-    if missing or wrong or extra:
-        problems.append(f'runtime files: missing {missing[:10]} ({len(missing)}), wrong {wrong[:10]} ({len(wrong)}), '
-                        f'extra {extra[:10]} ({len(extra)})')
+    # One Stored rawfile contains a bounded ZIP32 runtime. Audit the exact nested
+    # bytes and every manifest member, including dotfiles hidden from restool.
+    spec = importlib.util.spec_from_file_location('runtime_archive_audit', ROOT / 'tooling/ohos/runtime_archive_audit.py')
+    runtime_audit = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(runtime_audit)
+    report['runtime'], runtime_problems = runtime_audit.audit_runtime(zipped, args.runtime)
+    problems += runtime_problems
     rawfile = [info for info in zipped.infolist() if info.filename.startswith(RAWFILE)]
     deflated = [info.filename for info in rawfile if info.compress_type != zipfile.ZIP_STORED]
-    report['runtime'] = {'runtimeVersion': manifest['runtimeVersion'], 'files': len(manifest['files']),
-                         'bytes': sum(item['size'] for item in manifest['files']),
-                         'missing': len(missing), 'wrong': len(wrong), 'extra': len(extra)}
     report['rawfile'] = {'entries': len(rawfile), 'bytes': sum(info.file_size for info in rawfile), 'deflated': len(deflated)}
     if deflated:
         problems.append(f'{len(deflated)} rawfile entries are compressed; getRawFd serves them by offset')
