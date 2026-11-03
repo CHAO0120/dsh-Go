@@ -40,9 +40,23 @@ Use one PR for one independently reviewable problem. Explain the old behavior, i
 - Edit generator inputs, then regenerate their outputs.
 - For new or adapted third-party content, record the project, version or commit, source files and license. Keep required attribution, license text and modification notices. Check compatibility with the destination directory's license. Moving a file does not change its license.
 
+## Automated PR tests and documentation exemptions
+
+Prefer focused regression tests while developing on a phone. Before merging, [PR Tests](.github/workflows/pr-tests.yml) runs the standard automated suites; the phone does not need to repeat the full run.
+
+- **Code, configuration or mixed changes:** run the complete default Flutter suite (including existing goldens), both Dart packages, the plugin SDK including TypeScript, unit and host bridge integration tests against an isolated, hash-verified patched DSH, Python tooling/asset tests, and Android JVM unit tests for both debug flavors. A failed, cancelled, unexpectedly skipped or missing required job fails the aggregate gate.
+- **Documentation-only changes:** only explicitly allowlisted paths and ordinary non-executable files in the [classification policy](.github/scripts/pr-tests/policy.mjs) qualify for a heavy-test exemption: the root project/contribution/security/license files, specified SDK READMEs, the PR template, Markdown and PNG/JPEG/WebP under `docs/`, and corresponding bundled guide help pages. Classification regressions, localization-input validation, guide synchronization/validation and SDK skill synchronization/loading tests remain required. An exemption is not a full-test pass.
+- **No exemption:** UI ARB files, dependencies and lockfiles, CI/build configuration, runtime patches, agent instructions and skill entry points (including the guide's `SKILL.md`), other runtime assets, and unknown paths. Any mixed-in non-documentation change requires full tests. Both old and new rename paths are checked; symlinks and executable-bit changes cannot qualify as documentation. Titles, labels and line counts do not decide exemptions.
+
+An empty or unreadable complete diff never grants an exemption. Main-branch pushes, manual runs and merge-queue runs always use the full plan. The stable aggregate check is **PR test gate**; the workflow itself has no path filters, so documentation PRs also produce that check.
+
+For initial deployment, merge the workflow and confirm the check actually runs before an administrator makes **PR test gate** required for `main` in branch protection/rulesets and requires the latest revision to pass. Adding a workflow alone does not prevent merges. Maintainers must still review CI/policy changes: an ordinary required check name is not an independent trust boundary against malicious workflow edits. The existing external-PR intake gate continues to run default-branch code only, never PR-head code.
+
+"Full" means the default automated suites above. It does not include live tests requiring real credentials, opt-in previews without baselines, complete rootfs/PRoot/direct release acceptance, or Android device tests. Record these skips honestly. CI does not replace installing a new build and verifying touch, keyboard, permissions, phone control, installation or startup behavior on a device.
+
 ## Common checks
 
-Run these commands from the repository root. Select checks relevant to your change and record the commands and actual results in the PR. If a device, asset or dependency is unavailable, say what was not run and why.
+Run these commands from the repository root for local reproduction and focused regressions; PR CI coverage follows the policy above. Record actual commands, CI links and results in the PR. If a device, asset or dependency is unavailable, say what was not run and why.
 
 **Flutter app:**
 

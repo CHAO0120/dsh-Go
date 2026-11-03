@@ -19,7 +19,7 @@ docs/                        架构、发布、路线图、用户指南
 
 ## 命令
 
-按改动面选择验证，在 PR/报告里写实际执行的命令和结果。完整说明见 [CONTRIBUTING.md](CONTRIBUTING.md)。
+本地按改动面跑定向回归；代码/配置 PR 合并前要求 `PR test gate` 的标准全量自动化套件通过。纯文档只能由文件白名单自动豁免重测，轻量检查仍必需，不用标签或“改动简单”人工跳过。在 PR/报告里区分实际测试通过、获豁免和未运行，并写明 CI 链接及真机验证范围。完整说明及门禁启用步骤见 [CONTRIBUTING.md](CONTRIBUTING.md)。
 
 ```bash
 (cd app && flutter pub get && flutter analyze && flutter test)   # Flutter 应用
