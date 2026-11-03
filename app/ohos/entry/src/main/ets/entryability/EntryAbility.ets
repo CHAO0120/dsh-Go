@@ -19,6 +19,7 @@ import HmsSharePlugin from '../plugins/HmsSharePlugin';
 import { HmsShareInbox } from '../plugins/HmsShareInbox';
 import ShortcutsPlugin from '../plugins/ShortcutsPlugin';
 import LauncherIconPlugin from '../plugins/LauncherIconPlugin';
+import LaunchPlugin from '../plugins/LaunchPlugin';
 import VoicePlugin from '../plugins/VoicePlugin';
 import Want from '@ohos.app.ability.Want';
 import AbilityConstant from '@ohos.app.ability.AbilityConstant';
@@ -80,5 +81,6 @@ export default class EntryAbility extends FlutterAbility {
     flutterEngine.getPlugins()?.add(new VoicePlugin())
     flutterEngine.getPlugins()?.add(new ShortcutsPlugin())
     flutterEngine.getPlugins()?.add(new LauncherIconPlugin())
+    flutterEngine.getPlugins()?.add(new LaunchPlugin())
   }
 }

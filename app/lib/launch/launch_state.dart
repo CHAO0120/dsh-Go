@@ -1,7 +1,8 @@
 // 启动画面：系统的启动窗口（Android 12+ 的启动画面，或 8–11 的启动窗口背景）交给
 // App 自己的启动画面，中间看不出切换；再在界面可用时收起，不为动画多等一刻。
 //
-// 原生侧：android/.../launch/LaunchScreen.kt（MethodChannel `dsh/launch`）。
+// 原生侧：android/.../launch/LaunchScreen.kt（MethodChannel `dsh/launch`）；鸿蒙是
+// ohos/.../LaunchPlugin.ets，只有默认动画，系统启动页自己淡出（systemSplash 为 false）。
 //
 //   main()             begin：系统画了什么（图标像素、方块大小、底色）→ 首帧原样画出
 //   首帧               Android 12+：系统启动画面盖在首帧上，原生量出它的图标位置送来

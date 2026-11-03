@@ -19,6 +19,7 @@ DSH_NODE_HEADERS=/path/to/node-v24.22.1/src \
 - 图标是 1024px 分层图，来自 `app/assets/brand/tile.svg`；三个备用图标和两个快捷方式图标由 `tooling/ohos/make-launcher-icons.py` 生成。
 - 长按桌面图标有新对话和语音输入。最近对话发不到桌面，公开的 `shortcutManager` 没有发布接口。语音输入只在系统说明是桌面快捷方式拉起时才开麦克风，其他应用带同样参数只会开新对话。
 - 设置 › 主题可以换桌面图标（`bundleManager.setAlternateIcon`）。文档没有提到确认弹窗，切换后的表现待真机确认；图片快捷方式没有公开接口，仍然隐藏。
+- 冷启动有默认启动动画（`dsh/launch`）。系统启动页的图标不能跟着备用图标换，所以动画里总是默认图标；自定义启动画面仍然隐藏。
 
 ## 依赖
 
