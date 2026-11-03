@@ -37,6 +37,8 @@
 #   `libdsh_host.so` is checked against its .d.ts and the HAP doesn't run
 # - no flutter-hvigor-plugin and no Dart: oh_modules is laid out by hand (ohpm isn't
 #   public) and GeneratedPluginRegistrant.ets is written here
+# - in release, the embedding is prepare-pasteboard.py's output, as in build-hap.sh;
+#   the debug embedding has no pinned fix and stays upstream, with a note on stderr
 set -euo pipefail
 
 HVIGOR_VERSION=6.26.9
@@ -46,6 +48,7 @@ PLUGIN_SHA512=54b84b5f857fd53376fbaabe358ba8bb0fafac786813306de25e391da048bddc94
 EMBEDDING_BASE=https://atomgit.com/oh-flutter/flutter_flutter/releases/download/3.47.9-ohos-1.0.0
 EMBEDDING_DEBUG_SHA256=90ebf7067ad3c91a53d564a38b1ee1130df8a34a01797bb4fcf8bd26bf9397ef
 EMBEDDING_RELEASE_SHA256=20903e3b9197004b0181e3a2acc9243d04e5b10fa63d19453969dfc97dc87e42
+PASTEBOARD_HAR_SHA256=44f0653e205bec3f75e5cc53a32724d6282a03cc1ea5002bea7d86f8b45f7ac0
 SDK_API=26
 SDK_TESTED=26.0.0.38
 
@@ -152,6 +155,21 @@ if [ ! -f "$HAR/flutter/package/oh-package.json5" ]; then
   tar -xzf "$HAR/flutter_embedding_$MODE.har" -C "$HAR/flutter"
   tar -xzf "$HAR/arm64_v8a_$MODE.har" -C "$HAR/native"
 fi
+# Release compiles the prepared embedding; the upstream HAR above stays untouched.
+EMBEDDING_HAR="$HAR/flutter_embedding_$MODE.har"
+EMBEDDING_PACKAGE="$HAR/flutter/package"
+if [ "$MODE" = release ]; then
+  PREPARED="$WORK/embedding/release-pasteboard"
+  rm -rf "$PREPARED"
+  python3 -I -B "$REPO/tooling/ohos/prepare-pasteboard.py" --input-har "$EMBEDDING_HAR" --output "$PREPARED" >/dev/null ||
+    die "prepare-pasteboard.py refused $EMBEDDING_HAR"
+  echo "$PASTEBOARD_HAR_SHA256  $PREPARED/flutter_embedding_release.har" | sha256sum -c --status ||
+    die "the prepared embedding HAR isn't $PASTEBOARD_HAR_SHA256"
+  EMBEDDING_HAR="$PREPARED/flutter_embedding_release.har"
+  EMBEDDING_PACKAGE="$PREPARED/package"
+else
+  echo "check-arkts: debug embedding: no pinned paste fix, PasteboardUtils stays upstream" >&2
+fi
 
 # --- SDK: normal checks use symlinks; HMS checks use a private prepared ETS copy.
 if [ "$HMS_STUBS" = 1 ]; then
@@ -219,10 +237,10 @@ print(re.search(r"url: (\S+)", block).group(1), re.search(r"ref: (\S+)", block).
   done <<< "$FORK_TABLE"
 fi
 
-EMBEDDING_VERSION="$(python3 -I - "$PROJECT" "$HAR" "$MODE" "$FORK_MODULES" "$FULL" <<'PY'
+EMBEDDING_VERSION="$(python3 -I - "$PROJECT" "$HAR" "$MODE" "$FORK_MODULES" "$FULL" "$EMBEDDING_HAR" "$EMBEDDING_PACKAGE" <<'PY'
 import json, os, re, shutil, sys
 
-project, har, mode, fork_lines, full = sys.argv[1:6]
+project, har, mode, fork_lines, full, embedding_har, embedding_package = sys.argv[1:8]
 forks = [line.split() for line in fork_lines.splitlines() if line.strip()]
 work = os.path.dirname(project)
 
@@ -263,7 +281,7 @@ write("hvigorconfig.ts",
       "}\n")
 
 # Same layout as ohpm: a store under the root, links from the module that depends on it.
-with open(os.path.join(har, "flutter/package/oh-package.json5")) as f:
+with open(os.path.join(embedding_package, "oh-package.json5")) as f:
     version = json.load(f)["version"]
 def store(name, src):
     path = os.path.join(project, "oh_modules/.ohpm", f"{name.replace('/', '+')}@{version}/oh_modules", name)
@@ -272,13 +290,13 @@ def store(name, src):
 def link(path, target):
     os.makedirs(os.path.dirname(path), exist_ok=True)
     os.symlink(target, path)
-embedding = store("@ohos/flutter_ohos", os.path.join(har, "flutter/package"))
+embedding = store("@ohos/flutter_ohos", embedding_package)
 native = store("flutter_native_arm64_v8a", os.path.join(har, "native/package"))
 oh_modules = os.path.join(project, "entry/oh_modules")
 link(os.path.join(oh_modules, "@ohos/flutter_ohos"), embedding)
 link(os.path.join(oh_modules, "flutter_native_arm64_v8a"), native)
 link(os.path.join(oh_modules, "libdsh_host.so"), "../src/main/cpp/types/libdsh_host")
-deps = [f'"@ohos/flutter_ohos": "file:{har}/flutter_embedding_{mode}.har"',
+deps = [f'"@ohos/flutter_ohos": "file:{embedding_har}"',
         f'"flutter_native_arm64_v8a": "file:{har}/arm64_v8a_{mode}.har"']
 for name, _ in forks:
     link(os.path.join(oh_modules, name), os.path.join(work, "forks", name))
@@ -429,6 +447,17 @@ if not result["verified"]:
     print("check-arkts: source or HAP identity mismatch; see " + str(work / "build-identity.json"), file=sys.stderr)
 sys.exit(0 if result["verified"] else 1)
 PY_IDENTITY
+# The three settled exits of PasteboardUtils, in the bytecode that was packaged: resolve('').
+if [ "$MODE" = release ] && [ -f "$ABC_TEXT" ]; then
+  python3 -I - "$ABC_TEXT" <<'PY_PASTEBOARD' || IDENTITY_RC=$?
+import re, sys
+text = open(sys.argv[1], errors="replace").read()
+functions = re.findall(r'^\.function [^\n]*\.util\.PasteboardUtils\.[^\n]*\{\n.*?^\}\n', text, re.M | re.S)
+settled = sum(len(re.findall(r'lda\.str ""\n\s*sta (v\d+)\n\s*lda v\d+\n\s*callarg1 0x[0-9a-f]+, \1\n', body)) for body in functions)
+if settled != 3:
+    sys.exit(f"check-arkts: PasteboardUtils has {settled} resolve('') exits in the HAP's bytecode, not the prepared 3")
+PY_PASTEBOARD
+fi
 
 # --- diagnostics: every one, grouped by file; a file that never reached the bytecode counts.
 status=0

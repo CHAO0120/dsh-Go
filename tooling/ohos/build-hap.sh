@@ -13,6 +13,9 @@
 #
 # The Node-side native libraries come from runtime/ohos/native/build-hap-libs.py and are placed only for this run.
 # The runtime is one Stored dsh-runtime/runtime.zip, which the app streams from rawfile; it is never expanded here.
+# A release build uses the embedding from tooling/ohos/prepare-pasteboard.py: it stands in for the SDK's HAR for
+# this run, since flutter_tools and flutter-hvigor-plugin both read that one path, and goes back on exit.
+# hvigor builds libdsh_host.so itself, against the placed libnode, through entry/src/main/cpp/CMakeLists.txt.
 set -euo pipefail
 
 APP="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../app" && pwd)"
@@ -23,6 +26,8 @@ NATIVE_LIBS="${DSH_OHOS_NATIVE_LIBS:?Set DSH_OHOS_NATIVE_LIBS to the arm64-v8a d
 RUNTIME="${DSH_OHOS_RUNTIME:?Set DSH_OHOS_RUNTIME to the zip from runtime/ohos/package/compose-runtime.py}"
 RUNTIME="$(cd "$(dirname "$RUNTIME")" && pwd)/$(basename "$RUNTIME")"
 [[ -f "$RUNTIME" ]] || { printf 'Missing runtime zip: %s\n' "$RUNTIME" >&2; exit 1; }
+PASTEBOARD_HAR_SHA256=44f0653e205bec3f75e5cc53a32724d6282a03cc1ea5002bea7d86f8b45f7ac0
+PASTEBOARD_HELPER_SHA256=4f16b6fa39cfc6d668895ce6e01a6faeec250c845feeeac700ba5d3263a84803
 PREBUILT=(libnode.so libdsh_flock.so libdsh_require_builtin.so)
 for lib in "${PREBUILT[@]}"; do
   [[ -f "$NATIVE_LIBS/$lib" ]] || { printf 'Missing native library: %s\n' "$NATIVE_LIBS/$lib" >&2; exit 1; }
@@ -33,7 +38,12 @@ LIBS=ohos/entry/libs/arm64-v8a
 RAWFILE=ohos/entry/src/main/resources/rawfile
 LOCK="$(mktemp)"
 cp pubspec.lock "$LOCK"
+ENGINE_HAR=""
+ENGINE_KEPT=""
+PREPARED=""
 restore() {
+  if [[ -n "$ENGINE_KEPT" ]]; then mv -f "$ENGINE_KEPT" "$ENGINE_HAR"; fi
+  if [[ -n "$PREPARED" ]]; then rm -rf "$PREPARED"; fi
   rm -rf pubspec_overrides.yaml ohos/.vendor
   for lib in "${PREBUILT[@]}"; do rm -f "$LIBS/$lib"; done
   rmdir "$LIBS" ohos/entry/libs 2>/dev/null || true
@@ -58,6 +68,27 @@ with zipfile.ZipFile(transport) as bundle:
         sys.exit(f"{transport} must contain one unencrypted Stored dsh-runtime/runtime.zip")
     bundle.extract(entries[0], rawfile)
 PY_RUNTIME_ARCHIVE
+if [[ "$MODE" == --release ]]; then
+  FLUTTER_ROOT="$(dirname "$(dirname "$(readlink -f "$(command -v "$FLUTTER")")")")"
+  ENGINE_HAR="$FLUTTER_ROOT/bin/cache/artifacts/engine/ohos-arm64-release/flutter_embedding_release.har"
+  [[ -f "$ENGINE_HAR" ]] || "$FLUTTER" precache --ohos
+  PREPARED="$(mktemp -d)"
+  python3 -I -B "$APP/../tooling/ohos/prepare-pasteboard.py" --input-har "$ENGINE_HAR" --output "$PREPARED/out" >/dev/null || {
+    printf '%s is not the pinned release embedding; run "flutter precache --ohos --force" if an interrupted build left it replaced\n' "$ENGINE_HAR" >&2
+    exit 1
+  }
+  echo "$PASTEBOARD_HAR_SHA256  $PREPARED/out/flutter_embedding_release.har" | sha256sum -c --status || {
+    printf 'The prepared embedding HAR is not %s\n' "$PASTEBOARD_HAR_SHA256" >&2
+    exit 1
+  }
+  ENGINE_KEPT="$ENGINE_HAR.dsh-upstream"
+  mv "$ENGINE_HAR" "$ENGINE_KEPT"
+  cp "$PREPARED/out/flutter_embedding_release.har" "$ENGINE_HAR"
+  # ohpm keeps a file dependency by path and version, so an older install would hide the swap.
+  rm -rf ohos/oh_modules ohos/entry/oh_modules ohos/oh-package-lock.json5
+else
+  printf 'build-hap: %s has no pinned paste fix, PasteboardUtils stays upstream\n' "$MODE" >&2
+fi
 export DSH_NODE_HEADERS
 cp ohos/pubspec_overrides.ohos.yaml pubspec_overrides.yaml
 "$FLUTTER" pub get
@@ -65,3 +96,14 @@ python3 "$APP/../tooling/ohos/vendor_platform_switches.py"
 "$FLUTTER" pub get
 # No icon tree shaking: oh-flutter's const_finder fails on its own Dart ("Invalid SDK hash").
 "$FLUTTER" build hap "$MODE" --target-platform ohos-arm64 --no-tree-shake-icons
+if [[ "$MODE" == --release ]]; then
+  # What ohpm installed is what hvigor compiled.
+  helpers="$(find ohos/oh_modules -path '*/@ohos/flutter_ohos/src/main/ets/util/PasteboardUtils.ets')"
+  [[ -n "$helpers" ]] || { printf 'No installed PasteboardUtils.ets under ohos/oh_modules\n' >&2; exit 1; }
+  while IFS= read -r helper; do
+    echo "$PASTEBOARD_HELPER_SHA256  $helper" | sha256sum -c --status || {
+      printf 'The installed helper is not the settled one: %s\n' "$helper" >&2
+      exit 1
+    }
+  done <<< "$helpers"
+fi
