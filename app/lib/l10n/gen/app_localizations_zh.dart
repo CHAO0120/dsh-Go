@@ -6902,7 +6902,7 @@ class L10nZh extends L10n {
   String get harmonyBackgroundAway => '离开屏幕后';
 
   @override
-  String get harmonyBackgroundLocal => '系统几秒内就会挂起应用，正在跑的对话跟着暂停，回到应用后继续';
+  String get harmonyBackgroundLocal => '系统几秒内就会挂起应用，正在跑的对话跟着暂停，回到应用后会尽量接着跑';
 
   @override
   String get harmonyBackgroundRemoteTitle => '已连接的远程主机';
@@ -6926,7 +6926,7 @@ class L10nZh extends L10n {
   String get harmonyKwBackground => '后台,保活,挂起,暂停,被杀,杀后台';
 
   @override
-  String get harmonyPausedInBackground => '对话在后台暂停了，现在继续';
+  String get harmonyPausedInBackground => '对话在后台暂停过';
 
   @override
   String get harmonyAlertsRequirement => '提醒要应用在运行才发得出：离开屏幕几秒后系统会挂起应用，挂起期间没有提醒';

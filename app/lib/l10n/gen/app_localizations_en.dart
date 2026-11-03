@@ -7295,7 +7295,7 @@ class L10nEn extends L10n {
 
   @override
   String get harmonyBackgroundLocal =>
-      'The system suspends the app within seconds. A running turn pauses with it and continues when you come back';
+      'The system suspends the app within seconds, and a running conversation pauses with it. It tries to pick up when you come back';
 
   @override
   String get harmonyBackgroundRemoteTitle => 'Connected remote host';
@@ -7319,7 +7319,7 @@ class L10nEn extends L10n {
   String get harmonyKwBackground => 'background activity,keep alive,suspended,paused,killed';
 
   @override
-  String get harmonyPausedInBackground => 'Paused in the background, continuing now';
+  String get harmonyPausedInBackground => 'Paused while in the background';
 
   @override
   String get harmonyAlertsRequirement =>

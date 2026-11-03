@@ -12647,7 +12647,7 @@ abstract class L10n {
   /// No description provided for @harmonyBackgroundLocal.
   ///
   /// In zh, this message translates to:
-  /// **'系统几秒内就会挂起应用，正在跑的对话跟着暂停，回到应用后继续'**
+  /// **'系统几秒内就会挂起应用，正在跑的对话跟着暂停，回到应用后会尽量接着跑'**
   String get harmonyBackgroundLocal;
 
   /// No description provided for @harmonyBackgroundRemoteTitle.
@@ -12695,7 +12695,7 @@ abstract class L10n {
   /// No description provided for @harmonyPausedInBackground.
   ///
   /// In zh, this message translates to:
-  /// **'对话在后台暂停了，现在继续'**
+  /// **'对话在后台暂停过'**
   String get harmonyPausedInBackground;
 
   /// No description provided for @harmonyAlertsRequirement.

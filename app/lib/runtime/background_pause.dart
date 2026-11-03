@@ -1,8 +1,8 @@
 // HarmonyOS suspends an app within seconds of it leaving the screen, and the
-// on-device engine runs as this app: a turn left running stops where it is and
-// picks up when the app comes back, with nothing to say it did. This decides
-// when to say so: one quiet line in the chat on the way back
-// (ui/notify/background_pause_host.dart draws it). Android's own line, about a
+// on-device engine runs as this app: a turn left running stops where it is, with
+// nothing to say it did. Whether it can pick up afterwards takes a device to
+// know, so this says only that it paused: one quiet line in the chat on the way
+// back (ui/notify/background_pause_host.dart draws it). Android's own line, about a
 // phone cutting the network, is runtime/background_net.dart.
 
 import 'dart:async';
@@ -36,7 +36,7 @@ abstract final class BackgroundPausePolicy {
 /// Whether the line shows. It follows the app on and off screen by itself; a
 /// tap dismisses it and it goes by itself while the turn may well have moved on.
 class BackgroundPauseController extends Notifier<bool> {
-  /// How long the line stays: 「现在继续」 is only news for a moment.
+  /// How long the line stays: the pause is only news for a moment.
   @visibleForTesting
   static Duration shownFor = const Duration(seconds: 8);
 
