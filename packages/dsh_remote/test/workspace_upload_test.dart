@@ -126,6 +126,27 @@ void main() {
       expect(f.traces, isEmpty, reason: 'file bytes and names must not enter carrier tracing');
     });
 
+    for (final chunkBytes in [32 * 1024, 1]) {
+      test('respects Host negotiated $chunkBytes-byte chunks and cumulative offsets', () async {
+        await f.connect();
+        f.rpc.chunkBytes = chunkBytes;
+        final bytes = Uint8List.fromList(List.generate(2 * chunkBytes + 1, (i) => i % 256));
+        final result = await f.carrier.uploadWorkspaceFile('session-1', bytes, name: 'file.bin');
+        final chunks = f.rpc.calls.where((c) => c.$1 == 'workspace.upload.chunk').map((c) => c.$2).toList();
+        expect(chunks.map((p) => p['offset']), [0, chunkBytes, 2 * chunkBytes]);
+        expect(chunks.map((p) => base64Decode(p['data']! as String).length), [chunkBytes, chunkBytes, 1]);
+        expect(chunks.expand((p) => base64Decode(p['data']! as String)).toList(), bytes);
+        expect(result.bytes, bytes.length);
+        expect(f.rpc.methods, [
+          'workspace.upload.open',
+          'workspace.upload.chunk',
+          'workspace.upload.chunk',
+          'workspace.upload.chunk',
+          'workspace.upload.commit',
+        ]);
+      });
+    }
+
     test('zero-byte file is open then commit, with no chunk', () async {
       await f.connect();
       final result = await f.carrier.uploadWorkspaceFile('session-1', const [], name: 'empty.txt');
@@ -209,8 +230,8 @@ void main() {
       (_) => null,
       (_) => <Object?>[],
       (p) => {'uploadId': 'wrong', 'chunkBytes': _chunkBytes},
-      (p) => {'uploadId': p['uploadId'], 'chunkBytes': 32 * 1024},
-      (p) => {'uploadId': p['uploadId'], 'chunkBytes': 65536.0},
+      for (final chunkBytes in [0, -1, _chunkBytes + 1, 1.5, 65536.0, '65536', null])
+        (p) => {'uploadId': p['uploadId'], 'chunkBytes': chunkBytes},
       (p) => {'uploadId': p['uploadId']},
     ];
     for (var index = 0; index < badOpens.length; index++) {
@@ -445,6 +466,7 @@ class _UploadRpc implements RemoteRpcClient {
   final calls = <(String, Map<String, Object?>)>[];
   FutureOr<Object?> Function(String, Map<String, Object?>)? handler;
   String? finalName;
+  int chunkBytes = _chunkBytes;
   String? _sessionId;
   String? _uploadId;
   String? _name;
@@ -479,7 +501,7 @@ class _UploadRpc implements RemoteRpcClient {
       _uploadId = params['uploadId']! as String;
       _name = params['name']! as String;
       _totalBytes = params['totalBytes']! as int;
-      return {'uploadId': _uploadId, 'chunkBytes': _chunkBytes};
+      return {'uploadId': _uploadId, 'chunkBytes': chunkBytes};
     }
     expect(params['sessionId'], _sessionId);
     expect(params['uploadId'], _uploadId);
@@ -489,7 +511,7 @@ class _UploadRpc implements RemoteRpcClient {
       final data = params['data']! as String;
       final decoded = base64Decode(data);
       expect(base64Encode(decoded), data);
-      expect(decoded.length, inInclusiveRange(1, _chunkBytes));
+      expect(decoded.length, inInclusiveRange(1, chunkBytes));
       _receivedBytes += decoded.length;
       expect(_receivedBytes, lessThanOrEqualTo(_totalBytes));
       return {'uploadId': _uploadId, 'receivedBytes': _receivedBytes};

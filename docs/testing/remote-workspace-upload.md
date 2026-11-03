@@ -10,7 +10,7 @@
 
 None found in reviewed scope。五轴核对：
 
-- A 行为：上传固定在一条认证连接，顺序确认 64 KiB 块；校验提交路径和长度，失败不发送问题，不自动重放变更。上传返回工作区路径，不伪造附件 receipt；文本模型拒绝图片时复用同一 prompt ID，改为上传文件路径。
+- A 行为：上传固定在一条认证连接，按 Host 协商的大小顺序确认分块（最多 64 KiB）；校验提交路径和长度，失败不发送问题，不自动重放变更。上传返回工作区路径，不伪造附件 receipt；文本模型拒绝图片时复用同一 prompt ID，改为上传文件路径。
 - B 契约：只使用实时 `workspace.upload.v1`；不放宽 Harness endpoint 白名单。本机/SSH 保留原附件上传；中英文输入与指南已生成同步。
 - C 安全：校验 basename、确认偏移和 `./name` 返回路径，不记录上传数据；失败 best-effort abort。是否可写、同名文件发布及路径/版本限制仍由 Host 决定。
 - D 流程：限定修改范围，按维护者要求提交分支和内部 PR；不合并、发布或安装，依赖锁与生成配置最终无差异。
@@ -53,8 +53,14 @@ None found in reviewed scope。五轴核对：
 - 上游依据：[ds-harness-remote 0.6.2 / 479b943 协议](<https://github.com/liguobao/ds-harness-remote/blob/479b94341c0d0de63846f21d0fcca26997d158d1/docs/protocol.md#L1529-L1648>) 和 [Host 实现](<https://github.com/liguobao/ds-harness-remote/blob/479b94341c0d0de63846f21d0fcca26997d158d1/packages/plugin/src/workspace-upload.ts>)，MIT；来源已补入[第三方声明](<../../THIRD_PARTY_NOTICES.md#L120-L148>)。
 - App 沿用普通附件单文件 200 MiB 和单消息总预算；远程传输层只保留协议绝对上限 1 GiB。Relay/TURN、未知路径或旧插件通常仍被 Host 限到 20 MiB，不能通过改 App 绕过。
 - 协议回归覆盖大于 20 MiB 的声明能进入 Host open、Host 拒绝前不读取文件数据；拒绝保留原错误码。另覆盖畸形确认、危险文件名、同名改名、超时、连接退休、失败清理及真实 Noise 通道的精确 RPC 参数。
-- 原生 UI 新测试和旧截图尚未运行。抽屉及网络详情的布局变化需要在可用 Flutter 测试环境重新检查/生成 golden，不应删除或跳过断言来掩盖变化。
+- 初始本机阶段没有运行原生 UI 测试；随后 [CI 41691203233](<https://github.com/ccch1mneyyy/dsh-Go/actions/runs/41691203233>) 实际执行全部 Flutter 分片。其他检查通过，Flutter 1 有 6 个失败：3 个新测试把 Tooltip 当作 label 查询、1 个旧几何测试取到了拆分后的图标而非主机控件组、2 张网络详情 golden。已按 Flutter 3.47 的 tooltip 语义和控件组边界修正断言，保留原点击/尺寸/间距要求，不删除或跳过测试。
 - 提交超时可能已经落盘；abort 成功也不代表已提交文件被删除。没有宣称可恢复跨连接上传或隔离恶意本地主机进程。
+
+## CI follow-up
+
+- 浅色和深色网络详情基线取自上述 CI 的 `golden-failures-1`（artifact `13257104145`），不是手工绘图。替换前逐一核对 artifact master 与仓库原图字节一致，并人工查看实际渲染：只有新增主机/方式/状态所需的内容和弹层高度变化，没有溢出或遮挡。
+- 核验上游协议后，按 open 返回的整数 `chunkBytes`（1–65536）切片，不再把当前默认 65536 当作固定 v1 约束。新增 32 KiB / 1 byte 正向及非法值回归；隔离分支 `dart analyze && dart test` 再验为 313 通过、4 项凭据环境跳过。
+- 修复后的完整远程 CI 结果以 PR 最新提交的检查为准；不能把首轮失败写成通过。本机仍未构建 APK 或执行真实远程 Host 上传。
 
 ## Merge Conditions
 

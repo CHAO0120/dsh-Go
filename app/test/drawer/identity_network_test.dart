@@ -229,7 +229,8 @@ void main() {
       await _pump(tester, scale: scale);
       expect(tester.takeException(), isNull);
       expect(tester.getSize(find.byKey(_detailsKey)), const Size.square(44));
-      expect(find.bySemanticsLabel('网络详情'), findsOneWidget);
+      expect(find.byTooltip('网络详情'), findsOneWidget);
+      expect(tester.getSemantics(find.byKey(_detailsKey)).getSemanticsData().tooltip, '网络详情');
       expect(
         tester.getSemantics(find.byKey(_switcherKey)),
         isSemantics(isButton: true, hasTapAction: true, label: appL10n.shellCurrentHostLabel(_name, '已连接')),

@@ -980,6 +980,7 @@ class IdentityBar extends ConsumerWidget {
         children: [
           Expanded(
             child: Row(
+              key: const ValueKey('identity-host-controls'),
               children: [
                 const SizedBox(width: 6),
                 IconButton(

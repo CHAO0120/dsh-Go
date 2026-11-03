@@ -641,8 +641,8 @@ class RemoteTunnelCarrier extends DshCarrier implements WorkspaceUploadCarrier {
           'totalBytes': totalBytes,
         }),
       );
-      const chunkBytes = 64 * 1024;
-      if (opened?['uploadId'] != uploadId || opened?['chunkBytes'] != chunkBytes || opened?['chunkBytes'] is! int) {
+      final chunkBytes = opened?['chunkBytes'];
+      if (opened?['uploadId'] != uploadId || chunkBytes is! int || chunkBytes < 1 || chunkBytes > 64 * 1024) {
         throw const DshRemoteException('INVALID_MESSAGE', 'Invalid workspace upload open acknowledgement.');
       }
       for (var offset = 0; offset < totalBytes;) {
