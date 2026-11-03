@@ -169,7 +169,7 @@
 DSH Go combines a chat interface, an on-device runtime and remote connections. It is a third-party project built on [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness). The DSH engine runs on your phone; model requests are still handled by the model provider you configure.
 
 - **On-device runtime:** install Ubuntu, Node.js and DSH from the app without Root or a separate Termux installation.
-- **Remote connections:** use DSH on a computer or server through SSH or [DSHarness Remote](https://github.com/liguobao/ds-harness-remote).
+- **Remote connections:** use DSH on a computer or server through SSH or [DSHarness Remote](https://github.com/liguobao/ds-harness-remote), developed by Li Guobao (liguobao).
 - **Chat and tools:** switch models, send images, use voice input, and respond to tool approvals and questions. Chat and web interfaces are available.
 - **Plugin interfaces:** use native tool cards, forms and panels from plugins adapted for DSH Go. This repository includes an SDK, guides and examples.
 - **Phone control:** after you enable the required permissions, let the local engine read the screen, tap and type. You can stop it at any time.
@@ -243,7 +243,7 @@ Android 8 or later. On a phone, download the package on the Releases page; the x
 <summary><b>Is it open source?</b></summary>
 <br>
 
-Yes. The code is in this repository under [AGPL-3.0](LICENSE); `sdk/` and `examples/` are MIT. The DSH Go name and logo, and the mascots Deepy and Whale girl, are not covered by the open-source license; see [ASSETS.md](ASSETS.md).
+Yes. The code is in this repository under [AGPL-3.0](LICENSE); `sdk/` and `examples/` are MIT. The DSH Go name and logo, and the mascots Deepy and Whale girl, are not covered by the open-source license; see [ASSETS.md](ASSETS.md). Credit requirements for forks and redistributed builds are in [License scope and redistribution](#license-scope-and-redistribution).
 
 </details>
 
@@ -326,6 +326,17 @@ Report security issues through [SECURITY.en.md](SECURITY.en.md). Keep vulnerabil
 ## Friends' Links
 
 - **[DSH-TUI](https://dshtui.com/)**: the interactive terminal UI for DeepSeek Harness by the same author — the desktop counterpart to DSH Go, with a pixel whale, live status and time travel ([GitHub](https://github.com/ccch1mneyyy/dsh-TUI)).
+
+## License scope and redistribution
+
+The code is open source under [AGPL-3.0](LICENSE), and forking it to study, self-host or build on is welcome. Please respect the original author and project origin:
+
+- **Please contact the author before making modifications.** If you plan to modify this project, develop it further or publish a derivative product, please contact the original author, ccch1mneyyy, through [Issues](https://github.com/ccch1mneyyy/dsh-go/issues) or the [community](#community) in advance and describe your intended use and plans.
+- **Please credit the upstream repository and author in forks.** When publishing a modified version, please clearly credit <https://github.com/ccch1mneyyy/dsh-go> and the original author, [ccch1mneyyy](https://github.com/ccch1mneyyy), in the repository README, in-app About screen and release page. Retain copyright, license and modification notices as required by the applicable license.
+- **No unauthorized commercial reskins.** Do not use this project's brand graphics or protected assets, including Deepy and Whale girl, in reskinned products for sale, paid distribution or other commercial products without permission. Do not violate the applicable license by removing required copyright and license notices or distributing derivative code without the required source, or impersonate the original author or an official release.
+- **The name and assets are separate.** The DSH Go name and logo, and the Deepy and Whale girl mascots, are not covered by AGPL-3.0. Ship a modified build under your own name and assets; see [ASSETS.md](ASSETS.md).
+
+**License clarification:** AGPL-3.0 permits modification, redistribution and commercial use subject to its terms. Advance contact and the requested credit locations above are collaboration requests from the author, not additional restrictions on the code license. Brand and asset use remains subject to their own terms; this notice does not change the licenses of `sdk/`, `examples/` or third-party content.
 
 ## License and acknowledgments
 

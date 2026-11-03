@@ -169,7 +169,7 @@
 DSH Go 提供聊天界面、本机运行环境和远程连接，是基于 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 的第三方项目。运行在手机上的是 DSH 引擎；模型请求仍由你配置的模型提供方处理。
 
 - **本机运行**：在 App 内安装 Ubuntu、Node.js 与 DSH 运行环境，无需 Root 或另装 Termux。
-- **远程连接**：通过 SSH 或 [DSHarness Remote](https://github.com/liguobao/ds-harness-remote) 使用电脑、服务器上的 DSH。
+- **远程连接**：通过 SSH 或李国宝老师开发的 [DSHarness Remote](https://github.com/liguobao/ds-harness-remote) 使用电脑、服务器上的 DSH。
 - **聊天与工具**：切换模型，发送图片、使用语音输入，处理工具审批和提问；支持聊天界面与网页模式。
 - **插件界面**：使用适配 DSH Go 的原生工具卡、表单和面板；仓库提供 SDK、教程和示例。
 - **手机操控**：在你开启权限后，让本机引擎读取屏幕、点按和输入，并可随时停止。
@@ -243,7 +243,7 @@ Android 8 及以上。手机直接下载 Release 页面上的安装包即可，�
 <summary><b>开源吗？</b></summary>
 <br>
 
-开源，代码就在这个仓库，以 [AGPL-3.0](LICENSE) 发布，`sdk/` 和 `examples/` 为 MIT。DSH Go 的名称和标识，以及 Deepy、鲸娘两位吉祥物，不在开源授权范围内，见 [ASSETS.md](ASSETS.md)。
+开源，代码就在这个仓库，以 [AGPL-3.0](LICENSE) 发布，`sdk/` 和 `examples/` 为 MIT。DSH Go 的名称和标识，以及 Deepy、鲸娘两位吉祥物，不在开源授权范围内，见 [ASSETS.md](ASSETS.md)。再发布和 fork 时的署名要求见[授权范围与再发布](#授权范围与再发布)。
 
 </details>
 
@@ -326,6 +326,17 @@ DSH_BETA_TOKEN_FILE= bash tooling/build-apk.sh --dry-run -f all
 ## 友情链接
 
 - **[DSH-TUI](https://dshtui.com/)**：同一作者的作品，面向 DeepSeek Harness 的交互式终端界面。手机上用 DSH Go，电脑上就用它——像素鲸鱼、实时状态、时间回溯，装上即开工（[GitHub](https://github.com/ccch1mneyyy/dsh-TUI)）。
+
+## 授权范围与再发布
+
+代码以 [AGPL-3.0](LICENSE) 开源，欢迎 fork 学习、自用和二次开发。请尊重原作者和项目来源：
+
+- **改造前请提前联系作者**：如需基于本项目进行改造、二次开发或衍生产品发布，请先通过 [Issues](https://github.com/ccch1mneyyy/dsh-go/issues) 或[社区](#community)联系原作者 ccch1mneyyy，说明用途与计划。
+- **fork 请标注主仓库与作者**：基于本仓库改造并发布时，请在仓库说明、应用「关于」页和发布页面清楚标注主仓库 <https://github.com/ccch1mneyyy/dsh-go> 与原作者 [ccch1mneyyy](https://github.com/ccch1mneyyy)，并按适用许可证保留版权、许可及修改声明。
+- **禁止未授权商业化套皮**：不得未经授权将本项目的品牌标识、Deepy、鲸娘等受保护素材用于套皮售卖、收费分发或其他商业产品；不得违反适用许可证，删除应保留的版权与许可声明、闭源分发衍生代码，或冒充原作者、官方版本。
+- **名称与素材另有限制**：DSH Go 的名称、标识，以及 Deepy、鲸娘形象不在 AGPL 授权范围内，以修改版身份发布时请换成自己的名称和素材，见 [ASSETS.md](ASSETS.md)。
+
+**许可说明**：AGPL-3.0 允许符合其条款的修改、再发布和商业使用；上述提前联系及署名位置是作者的协作请求，不是对代码许可证追加的限制。品牌与素材须遵守各自的授权条件；本说明不改变 `sdk/`、`examples/` 及第三方内容的许可。
 
 ## 许可证与致谢
 
