@@ -16,6 +16,7 @@ final class DshPlugin: NSObject, FlutterPlugin, FlutterSceneLifeCycleDelegate {
 
   private let links: LinksChannel
   private let shortcuts: ShortcutsChannel
+  private let shares: ShareChannel
   private let keep: [AnyObject]
 
   static func register(with registrar: any FlutterPluginRegistrar) {
@@ -27,6 +28,7 @@ final class DshPlugin: NSObject, FlutterPlugin, FlutterSceneLifeCycleDelegate {
   private init(messenger: any FlutterBinaryMessenger) {
     links = LinksChannel(messenger: messenger)
     shortcuts = ShortcutsChannel(messenger: messenger)
+    shares = ShareChannel(messenger: messenger)
     keep = [
       AppChannel(messenger: messenger),
       FilesChannel(messenger: messenger),
@@ -45,14 +47,19 @@ final class DshPlugin: NSObject, FlutterPlugin, FlutterSceneLifeCycleDelegate {
     willConnectTo session: UISceneSession,
     options connectionOptions: UIScene.ConnectionOptions?
   ) -> Bool {
-    connectionOptions?.urlContexts.forEach { links.open($0.url) }
+    connectionOptions?.urlContexts.forEach { open($0.url) }
     if let item = connectionOptions?.shortcutItem { _ = shortcuts.perform(item) }
     return false
   }
 
   func scene(_ scene: UIScene, openURLContexts URLContexts: Set<UIOpenURLContext>) -> Bool {
-    URLContexts.forEach { links.open($0.url) }
+    URLContexts.forEach { open($0.url) }
     return !URLContexts.isEmpty
+  }
+
+  /// A share left while the app was away; the wake-up address isn't always what brought it back.
+  func sceneWillEnterForeground(_ scene: UIScene) {
+    shares.drain()
   }
 
   func windowScene(
@@ -63,6 +70,14 @@ final class DshPlugin: NSObject, FlutterPlugin, FlutterSceneLifeCycleDelegate {
     let handled = shortcuts.perform(shortcutItem)
     if handled { completionHandler(true) }
     return handled
+  }
+
+  private func open(_ url: URL) {
+    if url == ShareInbox.wakeUp {
+      shares.drain()
+    } else {
+      links.open(url)
+    }
   }
 }
 
