@@ -1,6 +1,7 @@
 import AppLinksPlugin from '../plugins/AppLinksPlugin';
 import SecretsPlugin from '../plugins/SecretsPlugin';
 import AttachmentFilesPlugin from '../plugins/AttachmentFilesPlugin';
+import IslandsPlugin from '../plugins/IslandsPlugin';
 import NotifyPlugin from '../plugins/NotifyPlugin';
 import { FlutterAbility, FlutterEngine } from '@ohos/flutter_ohos';
 import ConnectivityPlugin from '../plugins/ConnectivityPlugin';
@@ -62,6 +63,7 @@ export default class EntryAbility extends FlutterAbility {
     flutterEngine.getPlugins()?.add(new RuntimePlugin())
     flutterEngine.getPlugins()?.add(new FilesMediaPlugin())
     flutterEngine.getPlugins()?.add(new WebFilesPlugin())
+    flutterEngine.getPlugins()?.add(new IslandsPlugin())
     flutterEngine.getPlugins()?.add(new NotifyPlugin())
     flutterEngine.getPlugins()?.add(new NativeFilesPlugin())
     flutterEngine.getPlugins()?.add(new NativeMediaPlugin(async (root: string, relative: string): Promise<number> => {

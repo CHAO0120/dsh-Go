@@ -114,6 +114,7 @@ flowchart TD
 | connectivity_plus | 承载类型列表和事件，失败不伪装 none | 有网络不等于互联网可达；真实 observer 回收待设备 |
 | `dsh/notify` | 普通锁屏安全文字提醒、HMAC 导航点击、串行取消 | 通知外审批/拒绝、实况窗不支持；publish 成功不证明已展示 |
 | `dsh/web-files` | 系统文档选择、accept 后缀提示、owner 取消与迟到结果隔离 | 无已证的原生可见 WebView 校验；回调取消不等于关闭系统 picker；ArkWeb 临时 URI 上传待设备 |
+| `dsh/islands` | Dart 侧与 Android 同协议：`attach`/`setDark`/`setTextZoom`/`pause`/`resume`/`destroy`、`device`、`appPss`，回调 `rendererGone`、`trimMemory`；深色和渲染进程回调经 `fork-fixes` | `device` 无 `webView` 字段；页面跟随、崩溃恢复、岛的内存开销和上屏行为待设备 |
 | `dsh/native-files` | 前台用户手势、系统授权 URI、handle 与分块预算读取 | 精确主包已独审；不接任意本地路径，不持久化 grant；真实授权待设备 |
 | `dsh/native-media` | 本阶段 audio，固定缓存文件、安全 fd、完成/停止前真实释放归属 | 精确主包已独审；voice/overlay 明确 unsupported，真实播放和焦点待设备 |
 | `dsh/performance` | 内存事实、低/中默认、八级热状态和 active uptime 恢复 | 精确主包已独审；不虚构 Android SDK/MPC 或跑分，不输出 high，真实热事件待设备 |

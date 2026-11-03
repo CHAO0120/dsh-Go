@@ -76,6 +76,22 @@ class BridgeInventoryTest(unittest.TestCase):
         self.assertEqual(report['gateStatus'],'PASS_SCOPED')
         self.assertEqual(report['dartCalls'][0]['channel'],'dsh/first')
 
+    def test_group1_requires_the_islands_channel_and_every_method_of_it(self):
+        def row():
+            report=audit.audit(self.root,{},(),True)
+            return next(r for r in report['required'] if r.get('channel')=='dsh/islands')
+        self.assertEqual([e['status'] for e in row()['errors']],['NO_DART_CALLS','NO_NATIVE_CHANNEL'])
+        with self.dart.open('a') as f:f.write("\nclass Islands { Islands([MethodChannel? channel]) : _channel = channel ?? const MethodChannel('dsh/islands'); final MethodChannel _channel; void run() { _channel.invokeMethod<bool>('attach'); _channel.invokeMethod<void>('pause'); } }\n")
+        self.assertEqual(row()['status'],'FAIL')
+        plugin=self.native.parent/'IslandsPlugin.ets'
+        plugin.write_text("export default class IslandsPlugin { onAttachedToEngine(binding) { this.methods = new MethodChannel(binding.getBinaryMessenger(), 'dsh/islands'); this.methods.setMethodCallHandler(this); } onMethodCall(call, result) { switch (call.method) { case 'attach': result.success(true); return; default: result.notImplemented(); } } }")
+        self.entry.write_text(self.entry.read_text().replace('add(new FixturePlugin());','add(new FixturePlugin());\n    engine.getPlugins()?.add(new IslandsPlugin());'))
+        failed=row()
+        self.assertEqual(failed['status'],'FAIL')
+        self.assertEqual([(e['method'],e['status']) for e in failed['errors']],[('pause','MISSING_METHOD')])
+        plugin.write_text(plugin.read_text().replace("case 'attach':","case 'attach': case 'pause':"))
+        self.assertEqual(row()['status'],'PASS_SCOPED')
+
     def test_selector_gap_is_not_hidden_by_channel_presence(self):
         fork=self.root/'secure';(fork/'lib').mkdir(parents=True)
         (fork/'pubspec.yaml').write_text('name: flutter_secure_storage\nflutter:\n  plugin:\n    platforms:\n      android:\n        pluginClass: SecurePlugin\n')
