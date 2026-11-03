@@ -120,6 +120,26 @@ if ((dry)); then
   exit 0
 fi
 
+# Gradle packages these per-ABI assets as-is. Reject stale rootfs archives
+# before starting a build; --dry-run above only describes commands.
+python3 - "$ROOT/runtime/out" "${flavors[@]}" <<'PYEOF'
+import json
+from pathlib import Path
+import sys
+
+for flavor in sys.argv[2:]:
+    abi = {"arm64": "arm64-v8a", "x64": "x86_64"}[flavor]
+    manifest = Path(sys.argv[1]) / abi / "assets/runtime/manifest.json"
+    try:
+        value = json.loads(manifest.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        value = None
+    schema = value.get("schema") if isinstance(value, dict) else None
+    if type(schema) is not int or schema != 2:
+        sys.exit(f"build-apk: {manifest}: runtime manifest must have schema 2; "
+                 f"rebuild with bash runtime/build-runtime.sh {abi}")
+PYEOF
+
 # Toolchain: use what's on PATH; the gitignored tooling/env.sh is the fallback.
 if ! command -v flutter >/dev/null 2>&1; then
   [[ -f $ROOT/tooling/env.sh ]] && source "$ROOT/tooling/env.sh"

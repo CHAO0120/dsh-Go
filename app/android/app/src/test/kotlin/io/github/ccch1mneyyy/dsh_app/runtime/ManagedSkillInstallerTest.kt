@@ -331,9 +331,11 @@ class ManagedSkillInstallerTest {
     }
 
     @Test fun physicalWriterAndActualRootActivationAreSerialOnSharedWorker() {
-        val base = Files.createTempDirectory("managed-activation-").toFile()
+        val files = Files.createTempDirectory("managed-activation-").toFile()
+        val base = File(files, "runtime")
         val root = File(base, "rootfs").apply { File(this, "root/.dsh").mkdirs() }
-        File(base, "staging/root").mkdirs(); File(base, "staging/new-engine").writeText("new")
+        val layers = RuntimeLayers(base)
+        val next = RuntimeLayerSet("new-version", "arm64-v8a", "new-base", "new-dsh", "new-go", "new-info")
         val worker = Executors.newSingleThreadExecutor()
         val staged = CountDownLatch(1); val resume = CountDownLatch(1); val activated = CountDownLatch(1)
         val retired = AtomicBoolean(false); val results = mutableListOf<Map<String, Any?>>()
@@ -348,7 +350,13 @@ class ManagedSkillInstallerTest {
             }) { synchronized(results) { results.add(it) } }
             assertTrue(staged.await(5, TimeUnit.SECONDS))
             retired.set(true)
-            worker.execute { activateRootfs(base, "new-version", sync = {}); activated.countDown() }
+            worker.execute {
+                val preparation = requireNotNull(layers.prepare(next, sync = {}))
+                writeRuntimeLayerFixture(layers, next)
+                File(layers.staged("base"), "new-engine").writeText("new")
+                val commit = layers.activate(next, preparation, sync = {})
+                activated.countDown()
+            }
             assertFalse(activated.await(50, TimeUnit.MILLISECONDS))
             resume.countDown()
             assertTrue(activated.await(5, TimeUnit.SECONDS))
@@ -358,7 +366,7 @@ class ManagedSkillInstallerTest {
             noTemps(root)
             synchronized(results) { assertEquals(false, results.single()["current"]) }
         } finally {
-            resume.countDown(); worker.shutdown(); worker.awaitTermination(5, TimeUnit.SECONDS); base.deleteRecursively()
+            resume.countDown(); worker.shutdown(); worker.awaitTermination(5, TimeUnit.SECONDS); files.deleteRecursively()
         }
     }
 }

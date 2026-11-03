@@ -934,7 +934,7 @@ class HashingWriter:
         self.sink.flush()
 
 
-def cmd_assemble(args):
+def assemble_entries(args):
     abi = args.abi
     machine = ABI[abi]["machine"]
     entries = {}
@@ -1234,29 +1234,44 @@ def cmd_assemble(args):
         elif e.kind == "file":
             e.mode = (e.mode & 0o777) | 0o600
 
-    # 7. Write the tar (GNU format, sorted, root-owned, fixed mtime) through the compressor
-    def sort_key(p):
-        return p.split("/")
+    report["runtimeInfo"] = runtime_info
+    report["origins"] = {o: sum(1 for e in entries.values() if e.origin == o)
+                         for o in ("ubuntu", "deb", "python", "node", "dsh", "pnpm", "bridge", "overlay", "implicit")}
+    report["droppedBytes"] = sum(report["dropped"].values())
+    return entries, report
 
-    out_tmp = args.out + ".tmp"
-    if args.compress == "xz":
-        comp = subprocess.Popen(["xz", "-T%d" % args.threads, "-%s" % args.xz_preset, "-c"],
-                                stdin=subprocess.PIPE, stdout=open(out_tmp, "wb"))
-        sink = comp.stdin
-    else:
-        comp = None
-        raw = open(out_tmp, "wb")
-        sink = gzip.GzipFile(filename="", mode="wb", fileobj=raw, compresslevel=args.gzip_level, mtime=0)
+
+LAYER_NAMES = ("base", "dsh", "go")
+RUNTIME_IDENTITY = "etc/dsh-app/runtime.json"
+
+
+def split_layers(entries):
+    """Partition only the already-normalized final tree; shared parents stay in base."""
+    for root in ("opt/dsh", "opt/dsh-go"):
+        if root not in entries or entries[root].kind != "dir":
+            raise SystemExit("layer root must be a directory: " + root)
+    layers = {name: {} for name in LAYER_NAMES}
+    for path, entry in entries.items():
+        if path == RUNTIME_IDENTITY:
+            continue
+        name = ("dsh" if path == "opt/dsh" or path.startswith("opt/dsh/") else
+                "go" if path == "opt/dsh-go" or path.startswith("opt/dsh-go/") else "base")
+        layers[name][path] = entry
+    return layers
+
+
+def write_tar(entries, sink, epoch):
+    """The original GNU tar encoding, shared by every layer and the union test."""
     hw = HashingWriter(sink)
     counts = {"dir": 0, "file": 0, "symlink": 0}
     file_bytes = 0
     with tarfile.open(fileobj=hw, mode="w|", format=tarfile.GNU_FORMAT) as tar:
-        for p in sorted(entries, key=sort_key):
+        for p in sorted(entries, key=lambda p: p.split("/")):
             e = entries[p]
             ti = tarfile.TarInfo(p)
             ti.uid = ti.gid = 0
             ti.uname = ti.gname = "root"
-            ti.mtime = args.epoch
+            ti.mtime = epoch
             ti.mode = e.mode
             counts[e.kind] += 1
             if e.kind == "dir":
@@ -1271,36 +1286,49 @@ def cmd_assemble(args):
                 ti.size = len(data)
                 file_bytes += len(data)
                 tar.addfile(ti, io.BytesIO(data))
-    if comp is not None:
-        comp.stdin.close()
-        if comp.wait() != 0:
-            raise SystemExit("xz failed")
-    else:
-        sink.close()
-        raw.close()
-    os.replace(out_tmp, args.out)
+    return {"tarBytes": hw.n, "contentSha256": hw.h.hexdigest(),
+            "uncompressedBytes": file_bytes, "entries": counts}
 
-    with open(args.out, "rb") as f:
+
+def write_archive(entries, path, args):
+    temporary = path + ".tmp"
+    raw = open(temporary, "wb")
+    if args.compress == "xz":
+        comp = subprocess.Popen(["xz", "-T%d" % args.threads, "-%s" % args.xz_preset, "-c"],
+                                stdin=subprocess.PIPE, stdout=raw)
+        sink = comp.stdin
+    else:
+        comp = None
+        sink = gzip.GzipFile(filename="", mode="wb", fileobj=raw,
+                             compresslevel=args.gzip_level, mtime=0)
+    try:
+        report = write_tar(entries, sink, args.epoch)
+    finally:
+        sink.close()
+        status = comp.wait() if comp else 0
+        raw.close()
+    if status != 0:
+        raise SystemExit("xz failed")
+    os.replace(temporary, path)
+    with open(path, "rb") as f:
         archive_sha = hashlib.file_digest(f, "sha256").hexdigest() if hasattr(hashlib, "file_digest") \
             else hashlib.sha256(f.read()).hexdigest()
-    report.update({
-        "archive": os.path.basename(args.out),
-        "archiveBytes": os.path.getsize(args.out),
-        "archiveSha256": archive_sha,
-        "tarBytes": hw.n,
-        "tarSha256": hw.h.hexdigest(),
-        "uncompressedBytes": file_bytes,
-        "counts": counts,
-        "origins": {o: sum(1 for e in entries.values() if e.origin == o)
-                    for o in ("ubuntu", "deb", "python", "node", "dsh", "pnpm", "bridge", "overlay", "implicit")},
-    })
-    report["droppedBytes"] = sum(report["dropped"].values())
+    return {"asset": os.path.basename(path), "bytes": os.path.getsize(path),
+            "archiveSha256": archive_sha, **report}
+
+
+def cmd_assemble(args):
+    entries, report = assemble_entries(args)
+    os.makedirs(args.out, exist_ok=True)
+    report["layers"] = {"schema": 1}
+    for name, layer in split_layers(entries).items():
+        path = os.path.join(args.out, "%s-%s.tar.%s" % (name, args.abi, args.compress))
+        report["layers"][name] = write_archive(layer, path, args)
     with open(args.report, "w") as f:
         json.dump(report, f, indent=2, sort_keys=True)
         f.write("\n")
-    print("rootfs %s: %d files, %d dirs, %d symlinks, %.1f MiB unpacked, %.1f MiB archive" % (
-        args.out, counts["file"], counts["dir"], counts["symlink"], file_bytes / 2**20,
-        report["archiveBytes"] / 2**20))
+    print("runtime layers: " + ", ".join(
+        "%s: %d bytes" % (name, report["layers"][name]["bytes"]) for name in LAYER_NAMES))
     if report["warnings"]:
         print("warnings: %d (see %s)" % (len(report["warnings"]), args.report))
 
@@ -1399,17 +1427,9 @@ def cmd_manifest(args):
     jni = json.load(open(args.jnilibs))
     v = json.loads(args.versions)
     m = {
-        "schema": 1,
-        "runtimeVersion": v["runtimeVersion"],
+        "schema": 2,
         "abi": args.abi,
-        "rootfs": report["archive"],
-        "rootfsFormat": "tar.xz" if report["archive"].endswith(".xz") else "tar.gz",
-        "rootfsSha256": report["archiveSha256"],
-        "rootfsBytes": report["archiveBytes"],
-        "tarBytes": report["tarBytes"],
-        "tarSha256": report["tarSha256"],
-        "uncompressedBytes": report["uncompressedBytes"],
-        "entries": report["counts"],
+        "layers": report["layers"],
         "archiveNotes": "GNU tar; names relative (no ./); only dirs, regular files and symlinks; "
                         "hard links already converted to copies; every symlink is relative and stays "
                         "inside the rootfs; no member lies under a symlink; setuid/setgid cleared; "
@@ -1448,10 +1468,66 @@ def cmd_manifest(args):
         "launch": launch_template(),
         "build": v.get("build", {}),
     }
+    identity = {
+        "schema": 1,
+        "abi": args.abi,
+        "layers": {name: m["layers"][name]["contentSha256"] for name in LAYER_NAMES},
+        "launch": {key: m["launch"][key] for key in ("argv", "env")},
+        "directEngine": {key: m["directEngine"][key] for key in
+                         ("schema", "defaultEnabled", "preload", "loader", "nativeAddonInventory")},
+        "jniLibs": {name: {key: item[key] for key in ("sha256", "bytes")} for name, item in jni.items()},
+    }
+    encoded = json.dumps(identity, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode("utf-8")
+    m["runtimeVersion"] = "r-layers1-" + hashlib.sha256(encoded).hexdigest()
+    runtime_info = {**report["runtimeInfo"], "runtimeVersion": m["runtimeVersion"]}
+    info_bytes = (json.dumps(runtime_info, indent=2, sort_keys=True) + "\n").encode("utf-8")
+    info_path = os.path.join(os.path.dirname(args.out), "runtime-info.json")
+    with open(info_path, "wb") as f:
+        f.write(info_bytes)
+    m["runtimeIdentity"] = {"asset": "runtime-info.json", "bytes": len(info_bytes),
+                            "sha256": hashlib.sha256(info_bytes).hexdigest()}
+    m["rootfsBytes"] = sum(m["layers"][name]["bytes"] for name in LAYER_NAMES) + len(info_bytes)
+    m["uncompressedBytes"] = sum(m["layers"][name]["uncompressedBytes"] for name in LAYER_NAMES) + len(info_bytes)
+    m["entries"] = {kind: sum(m["layers"][name]["entries"][kind] for name in LAYER_NAMES)
+                    + (1 if kind == "file" else 0) for kind in ("dir", "file", "symlink")}
     with open(args.out, "w") as f:
         json.dump(m, f, indent=2)
         f.write("\n")
     print("wrote " + args.out)
+
+
+
+def cmd_extract_host(args):
+    """Materialize the APK's fixed layers for the existing disposable host smoke root."""
+    with open(args.manifest) as f:
+        manifest = json.load(f)
+    if manifest["schema"] != 2 or manifest["layers"]["schema"] != 1:
+        raise SystemExit("layered runtime manifest required")
+    directory = os.path.dirname(os.path.abspath(args.manifest))
+    assets = []
+    for name in LAYER_NAMES:
+        item = manifest["layers"][name]
+        if item["asset"] not in ("%s-%s.tar.%s" % (name, manifest["abi"], ext) for ext in ("xz", "gz")):
+            raise SystemExit("unexpected layer asset: " + item["asset"])
+        assets.append((item["asset"], item["archiveSha256"], item["bytes"]))
+    identity = manifest["runtimeIdentity"]
+    if identity["asset"] != "runtime-info.json":
+        raise SystemExit("unexpected runtime identity asset")
+    assets.append((identity["asset"], identity["sha256"], identity["bytes"]))
+    for name, expected, size in assets:
+        path = os.path.join(directory, name)
+        digest = hashlib.sha256()
+        with open(path, "rb") as f:
+            for chunk in iter(lambda: f.read(1024 * 1024), b""):
+                digest.update(chunk)
+        if os.path.getsize(path) != size or digest.hexdigest() != expected:
+            raise SystemExit("runtime asset checksum mismatch: " + name)
+    os.makedirs(args.out, exist_ok=True)
+    for name, _, _ in assets[:-1]:
+        subprocess.run(["tar", "-xf", os.path.join(directory, name), "-C", args.out], check=True)
+    target = os.path.join(args.out, RUNTIME_IDENTITY)
+    shutil.copyfile(os.path.join(directory, identity["asset"]), target)
+    os.chmod(target, 0o644)
 
 
 def main():
@@ -1500,7 +1576,7 @@ def main():
     p.add_argument("--node", required=True)
     p.add_argument("--dsh-prefix", required=True)
     p.add_argument("--pnpm-prefix", help="npm --prefix tree holding node_modules/pnpm -> /usr/local/lib/node_modules/pnpm")
-    p.add_argument("--out", required=True)
+    p.add_argument("--out", required=True, help="asset directory for the three fixed layer archives")
     p.add_argument("--report", required=True)
     p.add_argument("--runtime-info", required=True)
     p.add_argument("--compress", choices=("xz", "gz"), default="xz")
@@ -1521,6 +1597,11 @@ def main():
     p.add_argument("--versions", required=True)
     p.add_argument("--out", required=True)
     p.set_defaults(fn=cmd_manifest)
+
+    p = sub.add_parser("extract-host")
+    p.add_argument("--manifest", required=True)
+    p.add_argument("--out", required=True, help="disposable smoke-test root")
+    p.set_defaults(fn=cmd_extract_host)
 
     args = ap.parse_args()
     args.fn(args)

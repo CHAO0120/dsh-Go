@@ -177,11 +177,14 @@ class RuntimeController private constructor(private val app: Context) : DshProce
     }
 
     /** [dropKept]: give up what a reset kept but cannot be put back (see [KeepFailed]). */
-    fun install(dropKept: Boolean = false, onDone: (Throwable?) -> Unit) {
+    @Synchronized fun install(dropKept: Boolean = false, onDone: (Throwable?) -> Unit) {
         if (phase == Phase.INSTALLING) return onDone(null)
         if (installer.isCurrent() && phase != Phase.ERROR) {
             if (phase == Phase.NOT_INSTALLED) setPhase(Phase.INSTALLED)
             return onDone(null)
+        }
+        if (process != null || phase in setOf(Phase.STARTING, Phase.RUNNING, Phase.STOPPING) || resetting) {
+            return onDone(IllegalStateException("stop the engine before installing its runtime"))
         }
         setPhase(Phase.INSTALLING)
         worker.execute {
@@ -285,7 +288,7 @@ class RuntimeController private constructor(private val app: Context) : DshProce
     }
 
     @Synchronized internal fun startProcess() {
-        if (process != null || phase == Phase.INSTALLING || phase == Phase.STOPPING) return
+        if (process != null || phase == Phase.INSTALLING || phase == Phase.STOPPING || resetting) return
         lastLaunch = null
         if (!installer.isCurrent()) {
             error = "runtime not installed"
@@ -423,7 +426,7 @@ class RuntimeController private constructor(private val app: Context) : DshProce
      * Stops DSH and waits for it to exit, then deletes the runtime with everything in /root except
      * [keep], which the next install puts back.
      */
-    fun reset(keep: Set<ResetKeep> = emptySet(), onDone: (Throwable?) -> Unit) {
+    @Synchronized fun reset(keep: Set<ResetKeep> = emptySet(), onDone: (Throwable?) -> Unit) {
         stopGen = runGen
         resetting = true
         setPhase(Phase.STOPPING)

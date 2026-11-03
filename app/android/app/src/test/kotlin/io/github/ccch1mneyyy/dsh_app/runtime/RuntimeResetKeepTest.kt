@@ -1,6 +1,7 @@
 package io.github.ccch1mneyyy.dsh_app.runtime
 
 import java.io.File
+import java.io.IOException
 import java.nio.file.Files
 import org.junit.After
 import org.junit.Assert.*
@@ -48,12 +49,26 @@ class RuntimeResetKeepTest {
         File(base, "rootfs.version").writeText("r1")
     }
 
-    /** What install() does after a reset: extract staging, settle, activate with the restore. */
-    private fun install(version: String = "r1", dropKept: Boolean = false) {
+    /** Real layer preparation and activation with the same kept-data callback as install(). */
+    private fun install(
+        version: String = "r1",
+        dropKept: Boolean = false,
+        fresh: (File) -> Unit = {},
+        checkpoint: (String) -> Unit = {},
+    ) {
         settleReset(retired, keep, dropKept)
-        write(base, "staging/bin/sh", "staging/etc/os-release")
-        File(base, "staging/root/.dsh").mkdirs()
-        activateRootfs(base, version, keep, dropKept, sync = {})
+        val layers = RuntimeLayers(base)
+        val next = RuntimeLayerSet(version, "arm64-v8a", "base-$version", "dsh-$version", "go-$version", "info-$version")
+        val preparation = requireNotNull(layers.prepare(next, sync = {}))
+        writeRuntimeLayerFixture(layers, next)
+        val staged = layers.staged("base")
+        write(staged, "bin/sh", "etc/os-release")
+        File(staged, "root/.dsh").mkdirs()
+        fresh(staged)
+        val commit = layers.activate(next, preparation, sync = {}, restoreKept = { root ->
+            listOf("root", "root/workspace", "tmp", "dev", "proc", "sys").forEach { File(root, it).mkdirs() }
+            restoreKept(keep, root, dropKept)
+        }, checkpoint = checkpoint)
     }
 
     private fun assertKeepFailed(block: () -> Unit) {
@@ -132,10 +147,10 @@ class RuntimeResetKeepTest {
     @Test fun keptCopiesReplaceFreshOnes() {
         installed()
         retireRuntime(base, retired, keep, ui)
-        settleReset(retired, keep)
-        File(base, "staging/root/.dsh/skills/shipped").mkdirs()
-        File(base, "staging/root/.dsh/skills/shipped/SKILL.md").writeText("fresh")
-        activateRootfs(base, "r1", keep, sync = {})
+        install(fresh = { staged ->
+            File(staged, "root/.dsh/skills/shipped").mkdirs()
+            File(staged, "root/.dsh/skills/shipped/SKILL.md").writeText("fresh")
+        })
         assertSettled()
         assertEquals("SKILL.md", text("root/.dsh/skills/mine/SKILL.md"))
         assertNull(text("root/.dsh/skills/shipped/SKILL.md"))
@@ -203,8 +218,9 @@ class RuntimeResetKeepTest {
         installed()
         retireRuntime(base, retired, keep, ui)
         lock(File(keep, "root/.agents")) // the shared skills cannot move out
-        write(base, "staging/root/.agents/skills/shipped/SKILL.md")
-        assertKeepFailed { activateRootfs(base, "r1", keep, sync = {}) }
+        assertKeepFailed {
+            install(fresh = { write(it, "root/.agents/skills/shipped/SKILL.md") })
+        }
         // Not installed, nothing lost: what moved is in place, the rest still kept, the fresh copy back.
         assertFalse(File(base, "rootfs.version").exists())
         assertEquals("ui.json", text("root/.dsh/dsh-go/ui.json"))
@@ -224,8 +240,9 @@ class RuntimeResetKeepTest {
         installed()
         retireRuntime(base, retired, keep, ui)
         lock(File(keep, "root/.agents")) // the shared skills cannot move out
-        write(base, "staging/root/.agents/skills/shipped/SKILL.md")
-        assertKeepFailed { activateRootfs(base, "r1", keep, sync = {}) }
+        assertKeepFailed {
+            install(fresh = { write(it, "root/.agents/skills/shipped/SKILL.md") })
+        }
         write(files, "runtime-keep.dropped/root/old") // left by an earlier drop cut short
 
         // 「不保留，继续安装」: what can move goes back, the rest is given up, the install finishes.
@@ -272,17 +289,19 @@ class RuntimeResetKeepTest {
         assertFalse(keep.exists())
     }
 
-    @Test fun aRestoreKilledHalfwayIsFinishedByTheReinstall() {
+    @Test fun aRestoreKilledBeforeCommitKeepsRestoredDataOnTheReinstall() {
         installed()
         retireRuntime(base, retired, keep, ui + plugins)
-        write(base, "staging/bin/sh")
-        File(base, "staging/root/.dsh").mkdirs()
-        assertTrue(File(base, "staging").renameTo(File(base, "rootfs")))
-        // Killed after two paths were back and one fresh copy was set aside.
-        assertTrue(File(keep, "root/.dsh/dsh-go").renameTo(File(base, "rootfs/root/.dsh/dsh-go")))
-        assertTrue(File(keep, "root/.dsh/skills").renameTo(File(base, "rootfs/root/.dsh/skills")))
-        write(base, "keep.trash/root/.agents/skills/shipped/SKILL.md")
-
+        var reached = false
+        try {
+            install(checkpoint = {
+                if (it == "home-restored") { reached = true; throw IOException("test interruption") }
+            })
+            fail("restore checkpoint did not interrupt")
+        } catch (e: IOException) {
+            assertTrue("unexpected failure before restore: $e", reached)
+        }
+        assertFalse(File(base, "rootfs.version").exists())
         install()
         assertSettled()
         for (path in listOf(
@@ -329,8 +348,7 @@ class RuntimeResetKeepTest {
 
     @Test fun anUpgradeWithoutAKeepLeavesTheHomeAlone() {
         installed()
-        write(base, "staging/bin/sh")
-        activateRootfs(base, "r2", keep, sync = {})
+        install(version = "r2")
         assertEquals("ui.json", text("root/.dsh/dsh-go/ui.json"))
         assertEquals("notes", text("root/workspace/notes"))
         assertEquals("r2", File(base, "rootfs.version").readText())
