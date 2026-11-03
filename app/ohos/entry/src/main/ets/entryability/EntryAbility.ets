@@ -1,4 +1,6 @@
 import AppLinksPlugin from '../plugins/AppLinksPlugin';
+import SecretsPlugin from '../plugins/SecretsPlugin';
+import AttachmentFilesPlugin from '../plugins/AttachmentFilesPlugin';
 import NotifyPlugin from '../plugins/NotifyPlugin';
 import { FlutterAbility, FlutterEngine } from '@ohos/flutter_ohos';
 import ConnectivityPlugin from '../plugins/ConnectivityPlugin';
@@ -55,6 +57,8 @@ export default class EntryAbility extends FlutterAbility {
     super.configureFlutterEngine(flutterEngine)
     flutterEngine.getPlugins()?.add(new ConnectivityPlugin())
     GeneratedPluginRegistrant.registerWith(flutterEngine)
+    flutterEngine.getPlugins()?.add(new SecretsPlugin())
+    flutterEngine.getPlugins()?.add(new AttachmentFilesPlugin())
     flutterEngine.getPlugins()?.add(new RuntimePlugin())
     flutterEngine.getPlugins()?.add(new FilesMediaPlugin())
     flutterEngine.getPlugins()?.add(new WebFilesPlugin())
