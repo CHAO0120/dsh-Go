@@ -74,6 +74,7 @@ class AppearancePage extends ConsumerWidget {
     final l10n = context.l10n;
     final appearance = ref.watch(appearanceProvider);
     final wallpaper = ref.watch(wallpaperAccentProvider).value;
+    final androidFeatures = ref.watch(androidSystemFeaturesProvider);
     return AppPage.list(
       title: l10n.pluginsTheme,
       children: [
@@ -93,20 +94,19 @@ class AppearancePage extends ConsumerWidget {
           title: l10n.pluginsFeatureIcons,
           children: [SpotAnchor(spot: Spots.tileStyle, child: const TileStylePicker())],
         ),
-        if (ref.watch(androidSystemFeaturesProvider)) ...[
-          SettingsSection(
-            title: l10n.pluginsAppIcon,
-            children: [
-              SpotAnchor(spot: Spots.appIcon, child: const AppIconPicker()),
-              const IconShortcutTile(),
-            ],
-          ),
+        SettingsSection(
+          title: l10n.pluginsAppIcon,
+          children: [
+            SpotAnchor(spot: Spots.appIcon, child: const AppIconPicker()),
+            if (androidFeatures) const IconShortcutTile(),
+          ],
+        ),
+        if (androidFeatures)
           SettingsSection(
             title: l10n.launchScreenTitle,
             footer: Text(l10n.launchFooter),
             children: [SpotAnchor(spot: Spots.launchScreen, child: const LaunchScreenSection())],
           ),
-        ],
         SettingsSection(
           title: l10n.wallpaperTitle,
           footer: Text(l10n.wallpaperFooter),

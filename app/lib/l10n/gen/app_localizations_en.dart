@@ -7369,6 +7369,10 @@ class L10nEn extends L10n {
   String get harmonyCredentialsClearFailed => 'Couldn’t clear. Try again.';
 
   @override
+  String get harmonyIconChangeFailed =>
+      'Couldn’t change it. The launcher icon can’t change under a custom theme or in an app twin.';
+
+  @override
   String get hubSessionDetails => 'Chat details';
 
   @override

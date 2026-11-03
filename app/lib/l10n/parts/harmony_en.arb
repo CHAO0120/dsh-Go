@@ -27,5 +27,6 @@
   "harmonyCredentialsClearBody": "Trying again won’t help. Clearing removes every API key, DSH Remote sign-in, SSH password and private key, forum sign-in and shared link saved on this phone, and you’ll need to enter them or sign in again. Conversations and the host list stay. This can’t be undone.",
   "harmonyCredentialsClearAction": "Clear keys",
   "harmonyCredentialsCleared": "Cleared. Enter them or sign in again.",
-  "harmonyCredentialsClearFailed": "Couldn’t clear. Try again."
+  "harmonyCredentialsClearFailed": "Couldn’t clear. Try again.",
+  "harmonyIconChangeFailed": "Couldn’t change it. The launcher icon can’t change under a custom theme or in an app twin."
 }

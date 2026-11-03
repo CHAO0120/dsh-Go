@@ -5,9 +5,10 @@
 
 Layered icons take 1024 px layers (module-configuration-file.md, shortcuts): a
 full-bleed background, and a transparent foreground the launcher masks. Writes
-into app/ohos, reads app/android. Needs rsvg-convert and magick.
+into app/ohos, reads app/android and app/assets/brand. Needs rsvg-convert and magick.
 """
 import json
+import re
 import subprocess
 import tempfile
 import xml.etree.ElementTree as ET
@@ -16,10 +17,19 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 ANDROID_RES = ROOT / 'app/android/app/src/main/res'
 ENTRY_RES = ROOT / 'app/ohos/entry/src/main/resources'
+APP_MEDIA = ROOT / 'app/ohos/AppScope/resources/base/media'
+BRAND = ROOT / 'app/assets/brand'
 NS = '{http://schemas.android.com/apk/res/android}'
 SIZE = 1024
 # The shortcut guide's foreground: shown at 450 px on the 1024 px layer.
 SHORTCUT_GLYPH = 450
+# 桌面图标's alternates, the app's own icon being the fourth: which brand master
+# each draws (AppIconArt in app_icon_picker.dart), and the flat colour of the mono one.
+ALTERNATE_ICONS = {
+    'night': ('glyph-dark.svg', None),
+    'frost': ('glyph-light.svg', None),
+    'ink': ('glyph-mono.svg', '#F5F7FB'),
+}
 
 
 def render(svg, out):
@@ -62,5 +72,21 @@ def shortcuts():
         layered(ENTRY_RES / f'base/media/shortcut_{name}.json', 'shortcut_background', f'shortcut_{name}_foreground')
 
 
+def alternate_icons():
+    """The launcher's 108 grid, as Android's layers and the app's own layered icon."""
+    for name, (master, colour) in ALTERNATE_ICONS.items():
+        gradient = ET.parse(ANDROID_RES / f'drawable/ic_launcher_{name}_background.xml').getroot().find('.//gradient')
+        start, end = (f'#{item.get(f"{NS}color")[3:]}' for item in gradient.findall('item'))
+        x1, y1, x2, y2 = (gradient.get(f'{NS}{key}') for key in ('startX', 'startY', 'endX', 'endY'))
+        render('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 108 108"><defs>'
+               f'<linearGradient id="g" gradientUnits="userSpaceOnUse" x1="{x1}" y1="{y1}" x2="{x2}" y2="{y2}">'
+               f'<stop offset="0" stop-color="{start}"/><stop offset="1" stop-color="{end}"/></linearGradient></defs>'
+               '<rect width="108" height="108" fill="url(#g)"/></svg>', APP_MEDIA / f'{name}_background.png')
+        glyph = re.sub(r'viewBox="[^"]*"', 'viewBox="0 0 108 108"', (BRAND / master).read_text(), count=1)
+        render(glyph.replace('currentColor', colour or 'currentColor'), APP_MEDIA / f'{name}_foreground.png')
+        layered(APP_MEDIA / f'icon_{name}.json', f'{name}_background', f'{name}_foreground')
+
+
 if __name__ == '__main__':
     shortcuts()
+    alternate_icons()

@@ -755,7 +755,6 @@ abstract final class Spots {
     page: SettingsPageId.appearance,
     title: (l) => l.pluginsAppIcon,
     keywords: (l) => l.searchKwAppIcon,
-    androidOnly: true,
   );
   static final iconShortcut = SettingSpot(
     'icon-shortcut',

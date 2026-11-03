@@ -4,14 +4,43 @@
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
+import 'dart:ui' as ui;
 
 import 'package:dsh_app/links/launcher_entries.dart';
+import 'package:dsh_app/state/app_icon_state.dart';
+import 'package:dsh_app/ui/settings/appearance/app_icon_picker.dart';
+import 'package:flutter/painting.dart' show Color;
 import 'package:flutter_test/flutter_test.dart';
 
 const _project = 'ohos';
 const _entryRes = '$_project/entry/src/main/resources';
 
 Map<String, dynamic> _json(String path) => jsonDecode(File(path).readAsStringSync()) as Map<String, dynamic>;
+
+Future<ByteData> _decode(String path) async {
+  final codec = await ui.instantiateImageCodec(File(path).readAsBytesSync());
+  final image = (await codec.getNextFrame()).image;
+  final pixels = await image.toByteData(format: ui.ImageByteFormat.rawStraightRgba);
+  image.dispose();
+  return pixels!;
+}
+
+Color _pixel(ByteData rgba, int x, int y) {
+  final offset = (y * 1024 + x) * 4;
+  return Color.fromARGB(
+    rgba.getUint8(offset + 3),
+    rgba.getUint8(offset),
+    rgba.getUint8(offset + 1),
+    rgba.getUint8(offset + 2),
+  );
+}
+
+Color _lerp(AppIconArt art, double t) => Color.lerp(art.from, art.to, t)!;
+
+Matcher _isNear(Color expected) => predicate<Color>(
+  (color) => (color.r - expected.r).abs() < 0.03 && (color.g - expected.g).abs() < 0.03 && (color.b - expected.b).abs() < 0.03,
+  'close to $expected',
+);
 
 /// `$media:name` as a layered icon under [resources]: both layers exist, 1024 px.
 void _expectLayered(String resources, String reference) {
@@ -27,6 +56,38 @@ void _expectLayered(String resources, String reference) {
 }
 
 void main() {
+  group('alternate icons', () {
+    final app = _json('$_project/AppScope/app.json5')['app'] as Map<String, dynamic>;
+    final icons = (app['alternateIcons'] as List).cast<Map<String, dynamic>>();
+
+    test('one per AppIcon but the app\'s own, under the name Dart asks for', () {
+      expect(icons.map((icon) => icon['name']), [
+        for (final icon in AppIcon.values)
+          if (icon != AppIcon.mist) icon.name,
+      ]);
+    });
+
+    test('every one is layered like the app\'s own icon, resolved from AppScope', () {
+      _expectLayered('$_project/AppScope/resources', app['icon'] as String);
+      for (final icon in icons) {
+        _expectLayered('$_project/AppScope/resources', icon['icon'] as String);
+      }
+    });
+
+    test('the layers are the art the previews draw: the gradient\'s two ends, a glyph in the middle', () async {
+      for (final choice in AppIcon.values.where((icon) => icon != AppIcon.mist)) {
+        final art = AppIconArt.of(choice);
+        final background = await _decode('$_project/AppScope/resources/base/media/${choice.name}_background.png');
+        // The corners of the visible 72 of the 108 grid lie inside the gradient's ends.
+        expect(_pixel(background, 0, 0), _isNear(_lerp(art, 0.069)), reason: '${choice.name} top left');
+        expect(_pixel(background, 1023, 1023), _isNear(_lerp(art, 0.931)), reason: '${choice.name} bottom right');
+        final foreground = await _decode('$_project/AppScope/resources/base/media/${choice.name}_foreground.png');
+        expect(_pixel(foreground, 0, 0).a, 0, reason: 'the launcher masks a transparent layer');
+        expect(_pixel(foreground, 512, 720).a, greaterThan(0.9), reason: 'the body of the glyph');
+      }
+    });
+  });
+
   group('static shortcuts', () {
     final shortcuts = (_json('$_entryRes/base/profile/shortcuts_config.json')['shortcuts'] as List)
         .cast<Map<String, dynamic>>();

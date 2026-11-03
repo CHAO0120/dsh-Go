@@ -6972,6 +6972,9 @@ class L10nZh extends L10n {
   String get harmonyCredentialsClearFailed => '没能清除，再试一次';
 
   @override
+  String get harmonyIconChangeFailed => '没能更换。使用自定义主题或应用分身时不能换桌面图标';
+
+  @override
   String get hubSessionDetails => '对话详情';
 
   @override

@@ -19,7 +19,7 @@ python3 tooling/ohos/tests/audit-dart-bridges.test.py
 模式会在报告写明 `explicit-source-review-roots`，不能当成一次真实依赖解析的收据。
 `--package-config` 和 `--fork-roots` 不能同时使用。脚本不下载依赖、不补注册文件。
 
-`--require-group1` 要求 `dsh/secrets`、`dsh/attachment-files`、`dsh/islands` 的实际 literal 调用、
+`--require-group1` 要求 `dsh/secrets`、`dsh/attachment-files`、`dsh/islands`、`dsh/launcher_icon` 的实际 literal 调用、
 handler 和 EntryAbility 注册存在，并检查当前仓库明确的五处 secrets 默认选择及
 attachments 的 OH/default factory。不能用任意同名 ArkTS 类或同文件的另一套 `case`
 使这个门通过。`--require-channel <name>` 可另外选择一个已明确的通道合同。

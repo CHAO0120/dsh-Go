@@ -12782,6 +12782,12 @@ abstract class L10n {
   /// **'没能清除，再试一次'**
   String get harmonyCredentialsClearFailed;
 
+  /// No description provided for @harmonyIconChangeFailed.
+  ///
+  /// In zh, this message translates to:
+  /// **'没能更换。使用自定义主题或应用分身时不能换桌面图标'**
+  String get harmonyIconChangeFailed;
+
   /// No description provided for @hubSessionDetails.
   ///
   /// In zh, this message translates to:

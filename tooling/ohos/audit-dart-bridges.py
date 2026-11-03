@@ -526,7 +526,7 @@ def audit(source, roots, required=(), require_group1=False):
         else:row['status']='MISSING_METHOD'
     checks=[]
     if require_group1:
-        required=tuple(dict.fromkeys([*required,'dsh/secrets','dsh/attachment-files','dsh/islands']))
+        required=tuple(dict.fromkeys([*required,'dsh/secrets','dsh/attachment-files','dsh/islands','dsh/launcher_icon']))
     for channel in required:
         calls=[row for row in dart if (row['channel']==channel or (row['channel'] is None and channel in row['possibleChannels'])) and row['api'] in INVOKES]
         native_rows=[row for row in handlers if row['channel']==channel]
@@ -560,7 +560,7 @@ def main():
     inputs.add_argument('--package-config',type=Path)
     inputs.add_argument('--fork-roots',type=Path,help='Explicit source-review roots JSON, not a pub-resolution receipt')
     parser.add_argument('--require-channel',action='append',default=[])
-    parser.add_argument('--require-group1',action='store_true',help='Require the ADD15 channels and dsh/islands, registration, and the explicit five-secrets/two-picker defaults')
+    parser.add_argument('--require-group1',action='store_true',help='Require the ADD15 channels, dsh/islands and dsh/launcher_icon, registration, and the explicit five-secrets/two-picker defaults')
     parser.add_argument('--report',type=Path,required=True)
     args_=parser.parse_args()
     roots=package_roots(args_.package_config) if args_.package_config else {k:Path(v) for k,v in json.loads(args_.fork_roots.read_text()).items()}
