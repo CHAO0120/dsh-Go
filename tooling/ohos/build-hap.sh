@@ -13,6 +13,7 @@
 #
 # The Node-side native libraries come from runtime/ohos/native/build-hap-libs.py and are placed only for this run.
 # The runtime is one Stored dsh-runtime/runtime.zip, which the app streams from rawfile; it is never expanded here.
+# tooling/ohos/patch_framework.py changes a few framework branches in the SDK itself, and leaves them: only ohos takes them.
 # A release build uses the embedding from tooling/ohos/prepare-pasteboard.py: it stands in for the SDK's HAR for
 # this run, since flutter_tools and flutter-hvigor-plugin both read that one path, and goes back on exit.
 # hvigor builds libdsh_host.so itself, against the placed libnode, through entry/src/main/cpp/CMakeLists.txt.
@@ -69,8 +70,9 @@ with zipfile.ZipFile(transport) as bundle:
         sys.exit(f"{transport} must contain one unencrypted Stored dsh-runtime/runtime.zip")
     bundle.extract(entries[0], rawfile)
 PY_RUNTIME_ARCHIVE
+FLUTTER_ROOT="$(dirname "$(dirname "$(readlink -f "$(command -v "$FLUTTER")")")")"
+python3 -I -B "$APP/../tooling/ohos/patch_framework.py" "$FLUTTER_ROOT"
 if [[ "$MODE" == --release ]]; then
-  FLUTTER_ROOT="$(dirname "$(dirname "$(readlink -f "$(command -v "$FLUTTER")")")")"
   ENGINE_HAR="$FLUTTER_ROOT/bin/cache/artifacts/engine/ohos-arm64-release/flutter_embedding_release.har"
   [[ -f "$ENGINE_HAR" ]] || "$FLUTTER" precache --ohos
   PREPARED="$(mktemp -d)"

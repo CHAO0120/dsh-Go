@@ -40,6 +40,9 @@ jobs:
           test "$(git -C "$sdk" rev-parse HEAD)" = "$FLUTTER_OHOS_COMMIT"
           echo "$sdk/bin" >> "$GITHUB_PATH"
 
+      - name: Patch the framework's HarmonyOS branches
+        run: python3 tooling/ohos/patch_framework.py "$RUNNER_TEMP/flutter-ohos"
+
       - name: Fetch the SDK's own tools
         run: |
           flutter --version
