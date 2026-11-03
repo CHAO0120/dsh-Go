@@ -98,9 +98,11 @@ jobs:
       - name: Install pinned golden-test fonts
         run: |
           sudo apt-get update
-          sudo apt-get install -y fonts-noto-cjk=1:20230817+repack1-3 fonts-noto-cjk-extra=1:20230817+repack1-3 fonts-noto-color-emoji=2.047-0ubuntu0.24.04.1
-          sudo install -Dm644 /usr/share/fonts/truetype/noto/NotoColorEmoji.ttf /usr/share/fonts/noto/NotoColorEmoji.ttf
-          test -s /usr/share/fonts/noto/NotoColorEmoji.ttf
+          sudo apt-get install -y curl fonts-noto-cjk=1:20230817+repack1-3 fonts-noto-cjk-extra=1:20230817+repack1-3
+          emoji_font="$RUNNER_TEMP/NotoColorEmoji.ttf"
+          curl --fail --location --retry 3 --output "$emoji_font" https://raw.githubusercontent.com/googlefonts/noto-emoji/8998f5dd683424a73e2314a8c1f1e359c19e8742/fonts/NotoColorEmoji.ttf
+          printf '%s  %s\n' 72a635cb3d2f3524c51620cdde406b217204e8a6a06c6a096ff8ed4b5fd6e27b "$emoji_font" | sha256sum --check
+          echo "DSH_TEST_EMOJI_FONT=$emoji_font" >> "$GITHUB_ENV"
           for weight in Light Regular Bold; do
             test -s "$DSH_TEST_FONT_DIR/NotoSansCJK-$weight.ttc"
           done
@@ -111,6 +113,8 @@ jobs:
           python3 tool/l10n_merge.py
           git diff --exit-code -- pubspec.lock lib/l10n/app_zh.arb lib/l10n/app_en.arb lib/l10n/gen
       - run: flutter analyze --no-pub
+      - name: Check both folder-editor goldens independently before the full run
+        run: flutter test --no-pub test/drawer/drawer_golden_test.dart --plain-name drawer_g9_folder_editor --reporter expanded
       - name: Run the complete default Flutter suite, including checked-in goldens
         run: flutter test --no-pub --concurrency=2 --reporter expanded
       - name: Keep synthetic golden failure comparisons

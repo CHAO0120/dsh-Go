@@ -56,6 +56,8 @@ For initial deployment, merge the workflow and confirm the check actually runs b
 
 "Full" means the default automated suites above. It does not include live tests requiring real credentials, opt-in previews without baselines, complete rootfs/PRoot/direct release acceptance, or Android device tests. Record these skips honestly. CI does not replace installing a new build and verifying touch, keyboard, permissions, phone control, installation or startup behavior on a device.
 
+Drawer goldens use [Noto Emoji v2.051](https://github.com/googlefonts/noto-emoji/tree/8998f5dd683424a73e2314a8c1f1e359c19e8742/fonts) ([SIL OFL 1.1](https://github.com/googlefonts/noto-emoji/blob/8998f5dd683424a73e2314a8c1f1e359c19e8742/fonts/LICENSE)). CI verifies the pinned font's SHA-256 and exports `DSH_TEST_EMOJI_FONT`; point that variable at the same font for focused local reproduction without replacing system fonts. A missing font is an error, not a box-glyph fallback. Ubuntu's 2.047 is not the same screenshot fixture. CI runs the dark/light folder-editor goldens independently before the complete Flutter suite; comparator thresholds and checked-in baselines stay unchanged.
+
 ## Common checks
 
 Run these commands from the repository root for local reproduction and focused regressions; PR CI coverage follows the policy above. Record actual commands, CI links and results in the PR. If a device, asset or dependency is unavailable, say what was not run and why.

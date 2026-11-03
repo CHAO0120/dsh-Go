@@ -56,6 +56,8 @@
 
 “全量”指上述默认自动化套件，不包括需要真实凭据的 live 测试、尚无基线的 opt-in 预览、完整 rootfs/PRoot/direct 发布验收或 Android 真机测试。这些项目的跳过仍须如实记录；涉及触摸、键盘、权限、手机操控、安装和启动方式的改动，不能用 CI 结果代替新包真机确认。
 
+抽屉 golden 的彩色 emoji 使用 [Noto Emoji v2.051](https://github.com/googlefonts/noto-emoji/tree/8998f5dd683424a73e2314a8c1f1e359c19e8742/fonts)（[SIL OFL 1.1](https://github.com/googlefonts/noto-emoji/blob/8998f5dd683424a73e2314a8c1f1e359c19e8742/fonts/LICENSE)），CI 校验固定字体的 SHA-256 后通过 `DSH_TEST_EMOJI_FONT` 加载。本地定点复现时将该变量指向同一字体文件，无需替换系统字体；缺少字体直接报错，不用方框代替。Ubuntu 自带的 2.047 不能当作同一截图基准。CI 先单独跑深浅色文件夹编辑截图，再跑完整 Flutter 套件，比较阈值和已提交基准图不变。
+
 ## 常用检查
 
 以下命令从仓库根目录运行，供本地复现和定向回归使用；PR 的 CI 范围按上述规则决定。在 PR 中写明实际执行的命令、CI 链接及结果；缺少设备、资源或依赖时，明确写“未运行”和原因。

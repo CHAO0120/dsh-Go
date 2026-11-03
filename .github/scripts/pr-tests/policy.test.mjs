@@ -46,6 +46,20 @@ test('CI toolchain pins match the build inputs and do not rely on an ignored wra
   assert.doesNotMatch(workflow, /--update-goldens|DSH_TEST_GOLDEN_OUT:|DSH_TEST_LANG:\s*en/);
 });
 
+test('folder goldens use the checksum-pinned emoji font and run independently first', () => {
+  const root = new URL('../../../', import.meta.url);
+  const workflow = readFileSync(new URL('.github/workflows/pr-tests.yml', root), 'utf8');
+  const support = readFileSync(new URL('app/test/drawer/support.dart', root), 'utf8');
+  assert.match(workflow, /8998f5dd683424a73e2314a8c1f1e359c19e8742\/fonts\/NotoColorEmoji\.ttf/);
+  assert.match(workflow, /72a635cb3d2f3524c51620cdde406b217204e8a6a06c6a096ff8ed4b5fd6e27b/);
+  assert.match(workflow, /sha256sum --check/);
+  assert.match(workflow, /DSH_TEST_EMOJI_FONT=\$emoji_font/);
+  assert.match(workflow, /--plain-name drawer_g9_folder_editor/);
+  assert.match(support, /Platform\.environment\['DSH_TEST_EMOJI_FONT'\]/);
+  assert.match(support, /throw StateError\('Test emoji font missing:/);
+  assert.doesNotMatch(workflow, /--update-goldens/);
+});
+
 test('cloud Android uses upstream repositories without changing local mirror defaults', () => {
   const root = new URL('../../../', import.meta.url);
   for (const file of ['settings.gradle.kts', 'build.gradle.kts']) {
