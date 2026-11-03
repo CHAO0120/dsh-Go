@@ -29,6 +29,8 @@ flutter build ios --simulator --debug
 flutter build ios --release --no-codesign
 ```
 
+分支上的推送也会跑 `iOS compile`。它失败时不用登录也能看原因：Xcode 的报错会列在运行页的 Annotations 里（`tooling/ios/build.sh`）。
+
 ## 现状
 
 - 代码只经过 CI 编译，还没有在设备上跑过，下面的验收项都没做。
