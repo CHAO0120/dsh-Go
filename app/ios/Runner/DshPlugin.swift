@@ -412,6 +412,10 @@ private final class NotifyChannel {
     let args = arguments(call)
     switch call.method {
     case "status": status(center, result: result)
+    case "requestPermission":
+      center.requestAuthorization(options: [.alert, .sound, .badge]) { granted, _ in
+        onMain { result(granted) }
+      }
     case "show": show(center, args, result: result)
     case "cancel":
       let id = identifier(args)
@@ -429,12 +433,7 @@ private final class NotifyChannel {
       center.removeAllDeliveredNotifications()
       center.removeAllPendingNotificationRequests()
       result(nil)
-    case "openSettings", "openLiveSettings":
-      if #available(iOS 16.0, *) {
-        openAppSettings(UIApplication.openNotificationSettingsURLString, result: result)
-      } else {
-        openAppSettings(UIApplication.openSettingsURLString, result: result)
-      }
+    case "openSettings", "openLiveSettings": openNotificationSettings(center, result: result)
     case "live", "actionResult": result(nil)
     case "liveStatus": result(["supported": false, "allowed": false])
     default: result(FlutterMethodNotImplemented)
@@ -445,21 +444,34 @@ private final class NotifyChannel {
     "\(args["group"] as? String ?? "")|\(args["key"] as? String ?? "")"
   }
 
-  /// Asks the first time, while the app is on screen to show the question.
+  /// Not asked yet reads as off: nothing can post, and first run's dialog is what
+  /// [requestPermission] is for.
   private static func status(_ center: UNUserNotificationCenter, result: @escaping FlutterResult) {
     center.getNotificationSettings { settings in
-      if settings.authorizationStatus == .notDetermined {
-        onMain {
-          guard UIApplication.shared.applicationState == .active else {
-            return result(["enabled": true, "done": true, "attention": true])
-          }
-          center.requestAuthorization(options: [.alert, .sound, .badge]) { granted, _ in
-            onMain { result(["enabled": granted, "done": true, "attention": true]) }
-          }
+      let status = settings.authorizationStatus
+      let on = status != .denied && status != .notDetermined
+      onMain { result(["enabled": on, "done": true, "attention": true]) }
+    }
+  }
+
+  /// Settings has no notifications page for an app that hasn't asked yet, so the
+  /// first time this is the question itself.
+  private static func openNotificationSettings(
+    _ center: UNUserNotificationCenter,
+    result: @escaping FlutterResult
+  ) {
+    center.getNotificationSettings { settings in
+      guard settings.authorizationStatus != .notDetermined else {
+        return center.requestAuthorization(options: [.alert, .sound, .badge]) { _, _ in
+          onMain { result(true) }
         }
-      } else {
-        let on = settings.authorizationStatus != .denied
-        onMain { result(["enabled": on, "done": true, "attention": true]) }
+      }
+      onMain {
+        if #available(iOS 16.0, *) {
+          openAppSettings(UIApplication.openNotificationSettingsURLString, result: result)
+        } else {
+          openAppSettings(UIApplication.openSettingsURLString, result: result)
+        }
       }
     }
   }

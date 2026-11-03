@@ -87,6 +87,7 @@ void main() {
   group('notifications, by OS', () {
     test('a dialog item on HarmonyOS only', () {
       expect(AccessItem.notifications.dialogOn('ohos'), isTrue);
+      expect(AccessItem.notifications.dialogOn('ios'), isTrue);
       expect(AccessItem.notifications.dialogOn('android'), isFalse);
       for (final item in AccessItem.values.where((i) => i != AccessItem.notifications)) {
         expect(item.dialogOn('ohos'), item.dialogOn('android'), reason: item.name);
@@ -197,6 +198,7 @@ void main() {
 
     test('HarmonyOS: 回复提醒 and 语音输入, which ask for notifications and the microphone', () {
       expect(accessFeaturesFor('ohos'), [AccessFeature.alerts, AccessFeature.voice]);
+      expect(accessFeaturesFor('ios'), accessFeaturesFor('ohos'));
       expect(accessItemsFor(AccessFeature.alerts, null), [AccessItem.notifications]);
       // A maker's name changes nothing: none of its switches belong to these.
       expect(accessWalk(accessFeaturesFor('ohos'), 'huawei'), [AccessItem.mic, AccessItem.notifications]);
@@ -205,6 +207,7 @@ void main() {
     test('only Android\'s voice input downloads a model', () {
       expect(accessVoiceDownloads('android'), isTrue);
       expect(accessVoiceDownloads('ohos'), isFalse);
+      expect(accessVoiceDownloads('ios'), isFalse);
     });
   });
 
