@@ -192,7 +192,7 @@ DS Bot 的 NOTICE 原文附在文末。
 | 许可 | Apache License 2.0 |
 | 用途 | 桌面快捷方式与快速设置磁贴的图标；按自适应图标画布缩放、居中 |
 
-均在 `app/android/app/src/main/res/drawable/` 下：`ic_shortcut_chat_glyph.xml`（`chat_bubble_outline_rounded`）、`ic_shortcut_new_chat_glyph.xml`（`add_comment_outlined`）、`ic_shortcut_voice_glyph.xml`（`mic_none_rounded`）、`ic_tile_new_chat.xml`（`add_comment_outlined`）。
+均在 `app/android/app/src/main/res/drawable/` 下：`ic_shortcut_chat_glyph.xml`（`chat_bubble_outline_rounded`）、`ic_shortcut_new_chat_glyph.xml`（`add_comment_outlined`）、`ic_shortcut_voice_glyph.xml`（`mic_none_rounded`）、`ic_tile_new_chat.xml`（`add_comment_outlined`）。鸿蒙的 `app/ohos/entry/src/main/resources/{base,dark}/media/shortcut_{new_chat,voice}_foreground.png` 由其中的 `ic_shortcut_new_chat_glyph.xml`、`ic_shortcut_voice_glyph.xml` 渲染（`tooling/ohos/make-launcher-icons.py`）。
 
 ### discourse-emojis（MIT）
 

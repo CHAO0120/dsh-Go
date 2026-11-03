@@ -11,6 +11,14 @@
     {
       "name": "EntryAbility_label",
       "value": "DSH Go"
+    },
+    {
+      "name": "shortcut_new_chat",
+      "value": "新对话"
+    },
+    {
+      "name": "shortcut_voice_input",
+      "value": "语音输入"
     }
   ]
 }

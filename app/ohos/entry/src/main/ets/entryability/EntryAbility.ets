@@ -17,6 +17,7 @@ import { loadNativeHost } from '../runtime/NativeHost';
 import WebFilesPlugin from '../plugins/WebFilesPlugin';
 import HmsSharePlugin from '../plugins/HmsSharePlugin';
 import { HmsShareInbox } from '../plugins/HmsShareInbox';
+import ShortcutsPlugin from '../plugins/ShortcutsPlugin';
 import VoicePlugin from '../plugins/VoicePlugin';
 import Want from '@ohos.app.ability.Want';
 import AbilityConstant from '@ohos.app.ability.AbilityConstant';
@@ -24,11 +25,13 @@ import AbilityConstant from '@ohos.app.ability.AbilityConstant';
 export default class EntryAbility extends FlutterAbility {
   onCreate(want: Want, launch: AbilityConstant.LaunchParam): void {
     HmsShareInbox.receive(this.context, want, launch);
+    ShortcutsPlugin.receive(want, launch);
     super.onCreate(want, launch);
   }
 
   onNewWant(want: Want, launch: AbilityConstant.LaunchParam): void {
     HmsShareInbox.receive(this.context, want, launch);
+    ShortcutsPlugin.receive(want, launch);
     super.onNewWant(want, launch);
   }
 
@@ -74,5 +77,6 @@ export default class EntryAbility extends FlutterAbility {
     flutterEngine.getPlugins()?.add(new DiagnosticsPlugin())
     flutterEngine.getPlugins()?.add(new HmsSharePlugin())
     flutterEngine.getPlugins()?.add(new VoicePlugin())
+    flutterEngine.getPlugins()?.add(new ShortcutsPlugin())
   }
 }

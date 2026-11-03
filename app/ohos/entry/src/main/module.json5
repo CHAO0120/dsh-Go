@@ -25,6 +25,12 @@
         "orientation": "auto_rotation_restricted",
         "exported": true,
         "launchType": "singleton",
+        "metadata": [
+          {
+            "name": "ohos.ability.shortcuts",
+            "resource": "$profile:shortcuts_config"
+          }
+        ],
         "skills": [
           {
             "entities": [
