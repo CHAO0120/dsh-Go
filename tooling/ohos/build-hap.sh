@@ -26,8 +26,9 @@ NATIVE_LIBS="${DSH_OHOS_NATIVE_LIBS:?Set DSH_OHOS_NATIVE_LIBS to the arm64-v8a d
 RUNTIME="${DSH_OHOS_RUNTIME:?Set DSH_OHOS_RUNTIME to the zip from runtime/ohos/package/compose-runtime.py}"
 RUNTIME="$(cd "$(dirname "$RUNTIME")" && pwd)/$(basename "$RUNTIME")"
 [[ -f "$RUNTIME" ]] || { printf 'Missing runtime zip: %s\n' "$RUNTIME" >&2; exit 1; }
-PASTEBOARD_HAR_SHA256=44f0653e205bec3f75e5cc53a32724d6282a03cc1ea5002bea7d86f8b45f7ac0
+PREPARED_HAR_SHA256=759a836691934a209ee39591fd8b0e25da38a77a330cb52d910d98f8b5f3899a
 PASTEBOARD_HELPER_SHA256=4f16b6fa39cfc6d668895ce6e01a6faeec250c845feeeac700ba5d3263a84803
+PLATFORM_PLUGIN_SHA256=938829683d527ce8e0c4f2f76895122c36b0992633596dc0e7b196890e2882a9
 PREBUILT=(libnode.so libdsh_flock.so libdsh_require_builtin.so)
 for lib in "${PREBUILT[@]}"; do
   [[ -f "$NATIVE_LIBS/$lib" ]] || { printf 'Missing native library: %s\n' "$NATIVE_LIBS/$lib" >&2; exit 1; }
@@ -77,8 +78,8 @@ if [[ "$MODE" == --release ]]; then
     printf '%s is not the pinned release embedding; run "flutter precache --ohos --force" if an interrupted build left it replaced\n' "$ENGINE_HAR" >&2
     exit 1
   }
-  echo "$PASTEBOARD_HAR_SHA256  $PREPARED/out/flutter_embedding_release.har" | sha256sum -c --status || {
-    printf 'The prepared embedding HAR is not %s\n' "$PASTEBOARD_HAR_SHA256" >&2
+  echo "$PREPARED_HAR_SHA256  $PREPARED/out/flutter_embedding_release.har" | sha256sum -c --status || {
+    printf 'The prepared embedding HAR is not %s\n' "$PREPARED_HAR_SHA256" >&2
     exit 1
   }
   ENGINE_KEPT="$ENGINE_HAR.dsh-upstream"
@@ -87,7 +88,7 @@ if [[ "$MODE" == --release ]]; then
   # ohpm keeps a file dependency by path and version, so an older install would hide the swap.
   rm -rf ohos/oh_modules ohos/entry/oh_modules ohos/oh-package-lock.json5
 else
-  printf 'build-hap: %s has no pinned paste fix, PasteboardUtils stays upstream\n' "$MODE" >&2
+  printf 'build-hap: %s has no pinned fixes, paste and haptics stay upstream\n' "$MODE" >&2
 fi
 export DSH_NODE_HEADERS
 cp ohos/pubspec_overrides.ohos.yaml pubspec_overrides.yaml
@@ -108,12 +109,15 @@ python3 -I -B "$APP/../tooling/ohos/prepare-forks.py" \
 python3 -I -B "$APP/../tooling/ohos/prepare-forks.py" --verify-installed "$APP/ohos"
 if [[ "$MODE" == --release ]]; then
   # What ohpm installed is what hvigor compiled.
-  helpers="$(find ohos/oh_modules -path '*/@ohos/flutter_ohos/src/main/ets/util/PasteboardUtils.ets')"
-  [[ -n "$helpers" ]] || { printf 'No installed PasteboardUtils.ets under ohos/oh_modules\n' >&2; exit 1; }
-  while IFS= read -r helper; do
-    echo "$PASTEBOARD_HELPER_SHA256  $helper" | sha256sum -c --status || {
-      printf 'The installed helper is not the settled one: %s\n' "$helper" >&2
-      exit 1
-    }
-  done <<< "$helpers"
+  for pinned in "util/PasteboardUtils.ets $PASTEBOARD_HELPER_SHA256" "plugin/PlatformPlugin.ets $PLATFORM_PLUGIN_SHA256"; do
+    read -r file sum <<< "$pinned"
+    installed="$(find ohos/oh_modules -path "*/@ohos/flutter_ohos/src/main/ets/$file")"
+    [[ -n "$installed" ]] || { printf 'No installed %s under ohos/oh_modules\n' "$file" >&2; exit 1; }
+    while IFS= read -r copy; do
+      echo "$sum  $copy" | sha256sum -c --status || {
+        printf 'The installed file is not the prepared one: %s\n' "$copy" >&2
+        exit 1
+      }
+    done <<< "$installed"
+  done
 fi

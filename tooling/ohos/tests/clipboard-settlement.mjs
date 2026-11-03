@@ -13,10 +13,12 @@ assert(embeddingValue && manifestValue && outputValue && process.env.OHOS_TYPESC
 const embedding=resolve(embeddingValue),manifest=JSON.parse(readFileSync(manifestValue,'utf8'));
 const ts=createRequire(resolve(process.env.OHOS_TYPESCRIPT_PREFIX,'package.json'))('typescript');
 const observations=[],hashes={},compiled=new Map();
+const inPackage=name=>resolve(embedding,name.slice('package/'.length));
+const hashOf=path=>createHash('sha256').update(readFileSync(path)).digest('hex');
 const helperPath=resolve(embedding,'src/main/ets/util/PasteboardUtils.ets');
-const helperHash=createHash('sha256').update(readFileSync(helperPath)).digest('hex');
-assert([manifest.beforeSha256,manifest.afterSha256].includes(helperHash),'unknown helper source');
-for(const [name,expected]of Object.entries(manifest.consumers))assert.equal(createHash('sha256').update(readFileSync(resolve(embedding,name.slice('package/'.length)))).digest('hex'),expected,name);
+const helperHash=hashOf(helperPath);
+for(const fix of manifest.fixes)assert([fix.beforeSha256,fix.afterSha256].includes(hashOf(inPackage(fix.target))),'unknown source '+fix.target);
+for(const [name,expected]of Object.entries(manifest.consumers))assert.equal(hashOf(inPackage(name)),expected,name);
 const plain=value=>JSON.parse(JSON.stringify(value));
 const defaults=value=>({__esModule:true,default:value});
 

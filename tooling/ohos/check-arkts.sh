@@ -38,7 +38,7 @@
 # - no flutter-hvigor-plugin and no Dart: oh_modules is laid out by hand (ohpm isn't
 #   public) and GeneratedPluginRegistrant.ets is written here
 # - in release, the embedding is prepare-pasteboard.py's output, as in build-hap.sh;
-#   the debug embedding has no pinned fix and stays upstream, with a note on stderr
+#   the debug embedding has no pinned fixes and stays upstream, with a note on stderr
 set -euo pipefail
 
 HVIGOR_VERSION=6.26.9
@@ -48,7 +48,7 @@ PLUGIN_SHA512=54b84b5f857fd53376fbaabe358ba8bb0fafac786813306de25e391da048bddc94
 EMBEDDING_BASE=https://atomgit.com/oh-flutter/flutter_flutter/releases/download/3.47.9-ohos-1.0.0
 EMBEDDING_DEBUG_SHA256=90ebf7067ad3c91a53d564a38b1ee1130df8a34a01797bb4fcf8bd26bf9397ef
 EMBEDDING_RELEASE_SHA256=20903e3b9197004b0181e3a2acc9243d04e5b10fa63d19453969dfc97dc87e42
-PASTEBOARD_HAR_SHA256=44f0653e205bec3f75e5cc53a32724d6282a03cc1ea5002bea7d86f8b45f7ac0
+PREPARED_HAR_SHA256=759a836691934a209ee39591fd8b0e25da38a77a330cb52d910d98f8b5f3899a
 SDK_API=26
 SDK_TESTED=26.0.0.38
 
@@ -163,12 +163,12 @@ if [ "$MODE" = release ]; then
   rm -rf "$PREPARED"
   python3 -I -B "$REPO/tooling/ohos/prepare-pasteboard.py" --input-har "$EMBEDDING_HAR" --output "$PREPARED" >/dev/null ||
     die "prepare-pasteboard.py refused $EMBEDDING_HAR"
-  echo "$PASTEBOARD_HAR_SHA256  $PREPARED/flutter_embedding_release.har" | sha256sum -c --status ||
-    die "the prepared embedding HAR isn't $PASTEBOARD_HAR_SHA256"
+  echo "$PREPARED_HAR_SHA256  $PREPARED/flutter_embedding_release.har" | sha256sum -c --status ||
+    die "the prepared embedding HAR isn't $PREPARED_HAR_SHA256"
   EMBEDDING_HAR="$PREPARED/flutter_embedding_release.har"
   EMBEDDING_PACKAGE="$PREPARED/package"
 else
-  echo "check-arkts: debug embedding: no pinned paste fix, PasteboardUtils stays upstream" >&2
+  echo "check-arkts: debug embedding: no pinned fixes, paste and haptics stay upstream" >&2
 fi
 
 # --- SDK: normal checks use symlinks; HMS checks use a private prepared ETS copy.
@@ -470,7 +470,29 @@ functions = re.findall(r'^\.function [^\n]*\.util\.PasteboardUtils\.[^\n]*\{\n.*
 settled = sum(len(re.findall(r'lda\.str ""\n\s*sta (v\d+)\n\s*lda v\d+\n\s*callarg1 0x[0-9a-f]+, \1\n', body)) for body in functions)
 if settled != 3:
     sys.exit(f"check-arkts: PasteboardUtils has {settled} resolve('') exits in the HAP's bytecode, not the prepared 3")
+print("check-arkts: bytecode: PasteboardUtils settles its 3 exits with resolve('')")
 PY_PASTEBOARD
+  # Every haptic in the bytecode that was packaged goes through a preset, with no duration of its own.
+  python3 -I - "$ABC_TEXT" <<'PY_HAPTICS' || IDENTITY_RC=$?
+import collections, re, sys
+text = open(sys.argv[1], errors="replace").read()
+def body(name):
+    found = re.findall(r'^\.function [^\n]*\.plugin\.PlatformPlugin\.#[^\n#]*#' + name + r'\([^\n]*\{\n.*?^\}\n', text, re.M | re.S)
+    if len(found) != 1:
+        sys.exit(f"check-arkts: {len(found)} PlatformPlugin {name} functions in the HAP's bytecode, not 1")
+    return found[0]
+table, play, query = body("vibrateHapticFeedback"), body("vibratePreset"), body("hasHapticPreset")
+rows = collections.Counter(re.findall(r'lda\.str "(haptic\.[^"]*)"\n[^"]*?"vibratePreset", a2,', table))
+if rows != {"haptic.clock.timer": 1, "haptic.effect.soft": 1, "haptic.effect.hard": 3}:
+    sys.exit(f"check-arkts: the haptic table in the HAP's bytecode plays {dict(rows)}")
+if "startVibration" in table or "duration" in table:
+    sys.exit("check-arkts: vibrateHapticFeedback still starts the motor itself in the HAP's bytecode")
+if not re.search(r'string:"type", string:"preset", string:"effectId"[^\n]*\n(.*\n){1,8}?\s*callthis2withname [^\n]*"startVibration"', play):
+    sys.exit("check-arkts: vibratePreset doesn't start a preset in the HAP's bytecode")
+if re.search(r'string:"duration", i32:', play) or '"hasHapticPreset"' not in play or '"isSupportEffect"' not in query:
+    sys.exit("check-arkts: vibratePreset has a fixed duration or doesn't ask for the preset in the HAP's bytecode")
+print(f"check-arkts: bytecode: haptics play presets {sorted(rows)}, timed only where the device has none")
+PY_HAPTICS
 fi
 
 # --- diagnostics: every one, grouped by file; a file that never reached the bytecode counts.

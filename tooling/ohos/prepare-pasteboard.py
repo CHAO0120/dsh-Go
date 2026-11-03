@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-"""Prepare a private, pinned Flutter embedding HAR with the three-line IME fix.
+"""Prepare a private, pinned Flutter embedding HAR with its source fixes.
 
-Never edits the input HAR, SDK, build-hap.sh, application permissions or platform
-channel. Output is a new directory containing the HAR, matching extracted package,
-license notices and exact byte audit. A caller chooses how to stage this private
-bundle into its build; production build integration is intentionally separate.
+The fixes are embedding-fixes/pasteboard-settlement.json's: the three-line IME paste
+fix and the haptic presets. Never edits the input HAR, SDK, build-hap.sh, application
+permissions or platform channel. Output is a new directory containing the HAR, matching
+extracted package, license notices and exact byte audit. A caller chooses how to stage
+this private bundle into its build; production build integration is intentionally separate.
 """
 import argparse
 import copy
@@ -30,14 +31,15 @@ def prepare(source, output):
     root = Path(__file__).resolve().parent / 'embedding-fixes'
     config_bytes = (root / 'pasteboard-settlement.json').read_bytes()
     config = json.loads(config_bytes)
-    if config['schema'] != 1:
+    if config['schema'] != 2:
         raise ValueError('unsupported preparation schema')
     archive = source.read_bytes()
     if sha(archive) != config['upstream']['harSha256']:
         raise ValueError('input HAR SHA256 does not match the pinned release')
-    patch = root / 'pasteboard-settlement.patch'
-    if sha(patch.read_bytes()) != config['patchSha256']:
-        raise ValueError('patch SHA256 mismatch')
+    fixes = config['fixes']
+    for fix in fixes:
+        if sha((root / fix['patch']).read_bytes()) != fix['patchSha256']:
+            raise ValueError('patch SHA256 mismatch: ' + fix['patch'])
     for name, expected in config['licenses'].items():
         if sha((root / name).read_bytes()) != expected:
             raise ValueError('license SHA256 mismatch: ' + name)
@@ -60,9 +62,9 @@ def prepare(source, output):
             blobs[member.name] = data
             if data is not None:
                 before[member.name] = sha(data)
-    target = config['target']
-    if before.get(target) != config['beforeSha256']:
-        raise ValueError('target helper SHA256 mismatch')
+    for fix in fixes:
+        if before.get(fix['target']) != fix['beforeSha256']:
+            raise ValueError('target SHA256 mismatch: ' + fix['target'])
     for name, expected in config['consumers'].items():
         if before.get(name) != expected:
             raise ValueError('consumer SHA256 mismatch: ' + name)
@@ -70,25 +72,28 @@ def prepare(source, output):
     # Isolated temporary directory outside any checkout: git apply never modifies
     # an installed SDK or accidentally interprets a parent repository index.
     with tempfile.TemporaryDirectory(prefix='dsh-pasteboard-patch-') as temporary:
-        copy_path = Path(temporary) / target
-        copy_path.parent.mkdir(parents=True)
-        copy_path.write_bytes(blobs[target])
-        for argv in [['git', 'apply', '--check', str(patch)], ['git', 'apply', str(patch)]]:
-            subprocess.run(argv, cwd=temporary, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        changed = copy_path.read_bytes()
-    if sha(changed) != config['afterSha256']:
-        raise ValueError('patched helper SHA256 mismatch')
-    # Copyright header is unchanged. Retain all source bytes except the pinned diff.
-    if changed.split(b'import ', 1)[0] != blobs[target].split(b'import ', 1)[0]:
-        raise ValueError('upstream notice changed')
-    blobs[target] = changed
+        for fix in fixes:
+            target, patch = fix['target'], root / fix['patch']
+            copy_path = Path(temporary) / target
+            copy_path.parent.mkdir(parents=True, exist_ok=True)
+            copy_path.write_bytes(blobs[target])
+            for argv in [['git', 'apply', '--check', str(patch)], ['git', 'apply', str(patch)]]:
+                subprocess.run(argv, cwd=temporary, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            changed = copy_path.read_bytes()
+            if sha(changed) != fix['afterSha256']:
+                raise ValueError('patched SHA256 mismatch: ' + target)
+            # Copyright header is unchanged. Retain all source bytes except the pinned diff.
+            if changed.split(b'import ', 1)[0] != blobs[target].split(b'import ', 1)[0]:
+                raise ValueError('upstream notice changed: ' + target)
+            blobs[target] = changed
+    targets = sorted(fix['target'] for fix in fixes)
 
     tar_bytes = io.BytesIO()
     with tarfile.open(fileobj=tar_bytes, mode='w', format=tarfile.PAX_FORMAT) as tar:
         for original in members:
             member = copy.copy(original)
-            if member.name == target:
-                member.size = len(changed)
+            if member.name in targets:
+                member.size = len(blobs[member.name])
             data = blobs[member.name]
             tar.addfile(member, io.BytesIO(data) if data is not None else None)
     compressed_stream = io.BytesIO()
@@ -97,8 +102,8 @@ def prepare(source, output):
     compressed = compressed_stream.getvalue()
     after = {name: sha(data) for name, data in blobs.items() if data is not None}
     differences = [name for name in before if before[name] != after[name]]
-    if differences != [target]:
-        raise ValueError('unexpected changes outside the helper')
+    if sorted(differences) != targets:
+        raise ValueError('unexpected changes outside the fixed files')
     if sha(source.read_bytes()) != config['upstream']['harSha256']:
         raise ValueError('source HAR changed while preparing')
 
@@ -118,10 +123,11 @@ def prepare(source, output):
         licenses.mkdir()
         for name in config['licenses']:
             shutil.copyfile(root / name, licenses / name)
-        shutil.copyfile(patch, stage / 'pasteboard-settlement.patch')
+        for fix in fixes:
+            shutil.copyfile(root / fix['patch'], stage / fix['patch'])
         report = {
             'schema': 1, 'sourceHar': str(source), 'sourceHarSha256': sha(archive),
-            'outputHarSha256': sha(compressed), 'patchSha256': config['patchSha256'],
+            'outputHarSha256': sha(compressed), 'patches': {fix['patch']: fix['patchSha256'] for fix in fixes},
             'configSha256': sha(config_bytes), 'preparerSha256': sha(Path(__file__).read_bytes()),
             'pythonVersion': sys.version, 'zlibVersion': zlib.ZLIB_RUNTIME_VERSION,
             'changedFiles': differences, 'regularFileCount': len(before),
