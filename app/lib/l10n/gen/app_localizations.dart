@@ -5978,6 +5978,24 @@ abstract class L10n {
   /// **'未发送'**
   String get chatUnsent;
 
+  /// No description provided for @chatFailedSubmission.
+  ///
+  /// In zh, this message translates to:
+  /// **'未送达 · 已保留'**
+  String get chatFailedSubmission;
+
+  /// No description provided for @chatEditFailedSubmission.
+  ///
+  /// In zh, this message translates to:
+  /// **'编辑后重发'**
+  String get chatEditFailedSubmission;
+
+  /// No description provided for @chatErrReasoningEffortUnsupported.
+  ///
+  /// In zh, this message translates to:
+  /// **'当前模型不支持此推理档位，请调整档位或换模型'**
+  String get chatErrReasoningEffortUnsupported;
+
   /// No description provided for @chatSteerNextStep.
   ///
   /// In zh, this message translates to:
@@ -8197,6 +8215,78 @@ abstract class L10n {
   /// In zh, this message translates to:
   /// **'{month}月{day}日'**
   String commonMonthDay(String month, int day);
+
+  /// No description provided for @engineNewChatDefaultsLast.
+  ///
+  /// In zh, this message translates to:
+  /// **'新对话默认（上次选择）'**
+  String get engineNewChatDefaultsLast;
+
+  /// No description provided for @engineNewChatDefaultsFixed.
+  ///
+  /// In zh, this message translates to:
+  /// **'新对话默认（固定）'**
+  String get engineNewChatDefaultsFixed;
+
+  /// No description provided for @engineNewChatUseLast.
+  ///
+  /// In zh, this message translates to:
+  /// **'沿用上次'**
+  String get engineNewChatUseLast;
+
+  /// No description provided for @engineNewChatUseFixed.
+  ///
+  /// In zh, this message translates to:
+  /// **'固定默认'**
+  String get engineNewChatUseFixed;
+
+  /// No description provided for @engineNewChatDefaultsHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'保存在当前主机，只影响新对话的模型和思考深度。权限仍用独立默认，不继承临时会话授权。'**
+  String get engineNewChatDefaultsHint;
+
+  /// No description provided for @engineNewChatDefaultsLegacy.
+  ///
+  /// In zh, this message translates to:
+  /// **'此引擎仅支持沿用上次选择；不支持固定默认，也无法确认切换时默认值是否保存成功。'**
+  String get engineNewChatDefaultsLegacy;
+
+  /// No description provided for @engineNewChatDefaultsUnsupported.
+  ///
+  /// In zh, this message translates to:
+  /// **'此主机没有可编辑的默认模型设置'**
+  String get engineNewChatDefaultsUnsupported;
+
+  /// No description provided for @engineNewChatDefaultsSelectionUnavailable.
+  ///
+  /// In zh, this message translates to:
+  /// **'此模型或思考深度已不可用，请重新选择。'**
+  String get engineNewChatDefaultsSelectionUnavailable;
+
+  /// No description provided for @engineNewChatDefaultsInheritedEffort.
+  ///
+  /// In zh, this message translates to:
+  /// **'主机基础配置指定了思考深度，不能在这里为无思考模型清除。请先调整主机配置。'**
+  String get engineNewChatDefaultsInheritedEffort;
+
+  /// No description provided for @engineNewChatDefaultsSaving.
+  ///
+  /// In zh, this message translates to:
+  /// **'正在保存并确认默认值…'**
+  String get engineNewChatDefaultsSaving;
+
+  /// No description provided for @engineNewChatDefaultsUnconfirmed.
+  ///
+  /// In zh, this message translates to:
+  /// **'没能确认完整默认值，请刷新后检查模型和思考深度。主机基础配置或其他客户端可能已改变它们。'**
+  String get engineNewChatDefaultsUnconfirmed;
+
+  /// No description provided for @engineModelDefaultSaveFailed.
+  ///
+  /// In zh, this message translates to:
+  /// **'当前对话的模型已切换，但新对话默认未保存。请到设置 › 模型检查并重试。'**
+  String get engineModelDefaultSaveFailed;
 
   /// No description provided for @engineAccountSignedIn.
   ///
@@ -13382,6 +13472,30 @@ abstract class L10n {
   /// **'关于 DSH Go'**
   String get hubAbout;
 
+  /// No description provided for @hubAboutAuthor.
+  ///
+  /// In zh, this message translates to:
+  /// **'DSH Go 原作者'**
+  String get hubAboutAuthor;
+
+  /// No description provided for @hubAboutBilibili.
+  ///
+  /// In zh, this message translates to:
+  /// **'B站主页'**
+  String get hubAboutBilibili;
+
+  /// No description provided for @hubAboutX.
+  ///
+  /// In zh, this message translates to:
+  /// **'X 主页'**
+  String get hubAboutX;
+
+  /// No description provided for @hubAboutGithub.
+  ///
+  /// In zh, this message translates to:
+  /// **'GitHub 主页'**
+  String get hubAboutGithub;
+
   /// No description provided for @hubAboutNewVersion.
   ///
   /// In zh, this message translates to:
@@ -13471,6 +13585,36 @@ abstract class L10n {
   /// In zh, this message translates to:
   /// **'开启后，Shift+Enter 换行。屏幕键盘仍换行；Ctrl/⌘+Enter 始终可发送。'**
   String get hubHardwareEnterSendsHint;
+
+  /// No description provided for @hubQuickPanel.
+  ///
+  /// In zh, this message translates to:
+  /// **'左滑快捷入口'**
+  String get hubQuickPanel;
+
+  /// No description provided for @hubQuickPanelSwipe.
+  ///
+  /// In zh, this message translates to:
+  /// **'左滑打开'**
+  String get hubQuickPanelSwipe;
+
+  /// No description provided for @hubQuickPanelSwipeHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'在对话里从右向左滑。代码块、表格这些能横向滚动的内容不受影响。'**
+  String get hubQuickPanelSwipeHint;
+
+  /// No description provided for @hubQuickPanelItems.
+  ///
+  /// In zh, this message translates to:
+  /// **'显示的入口'**
+  String get hubQuickPanelItems;
+
+  /// No description provided for @hubQuickPanelItemsNone.
+  ///
+  /// In zh, this message translates to:
+  /// **'没有选择，左滑不会打开'**
+  String get hubQuickPanelItemsNone;
 
   /// No description provided for @launchScreenTitle.
   ///
@@ -16343,8 +16487,14 @@ abstract class L10n {
   /// No description provided for @phoneDndRootConnected.
   ///
   /// In zh, this message translates to:
-  /// **'root 已连接。断开后要回到这里再选一次，DSH Go 不会自己重新申请。'**
+  /// **'root 已连接。断开后要回到这里再选一次；打开上面的「保持 root 通道」，DSH Go 才会自己再去申请。'**
   String get phoneDndRootConnected;
+
+  /// No description provided for @phoneDndRootConnectedKept.
+  ///
+  /// In zh, this message translates to:
+  /// **'root 已连接。断开后 DSH Go 会自己向 root 管理器再次申请。'**
+  String get phoneDndRootConnectedKept;
 
   /// No description provided for @phoneDndRootRetry.
   ///
@@ -18227,8 +18377,74 @@ abstract class L10n {
   /// No description provided for @phonePrivilegedRootRiskBody.
   ///
   /// In zh, this message translates to:
-  /// **'root 管理器（Magisk、KernelSU 或 APatch）会弹窗问你。允许后，DSH Go 以 root 运行自己的后台服务；连接断开后不会自己重新申请。'**
+  /// **'root 管理器（Magisk、KernelSU 或 APatch）会弹窗问你。允许后，DSH Go 以 root 运行自己的后台服务；只有打开「保持 root 通道」，断开或重启后才会自己再去申请。'**
   String get phonePrivilegedRootRiskBody;
+
+  /// No description provided for @phoneKeepTitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'{mode, select, shizuku{保持 Shizuku 通道} sui{保持 Sui 通道} root{保持 root 通道} adb{保持自连 ADB 通道} other{保持这个通道}}'**
+  String phoneKeepTitle(String mode);
+
+  /// No description provided for @phoneKeepRootDescription.
+  ///
+  /// In zh, this message translates to:
+  /// **'断开、重开 App 或重启手机后，DSH Go 会自己再向 root 管理器申请；给不给仍由管理器决定。'**
+  String get phoneKeepRootDescription;
+
+  /// No description provided for @phoneKeepSharedDescription.
+  ///
+  /// In zh, this message translates to:
+  /// **'断开、重开 App 或重启手机后，DSH Go 用已有的授权自己连回去，不会替你申请授权。'**
+  String get phoneKeepSharedDescription;
+
+  /// No description provided for @phoneKeepAdbDescription.
+  ///
+  /// In zh, this message translates to:
+  /// **'断开、重开 App 或重启手机后，DSH Go 用已有的配对在 Wi‑Fi 下自己连回去；有「自动恢复无障碍」的权限时，还会试着打开一次无线调试。'**
+  String get phoneKeepAdbDescription;
+
+  /// No description provided for @phoneKeepRestoring.
+  ///
+  /// In zh, this message translates to:
+  /// **'正在重新连接'**
+  String get phoneKeepRestoring;
+
+  /// No description provided for @phoneKeepWaiting.
+  ///
+  /// In zh, this message translates to:
+  /// **'等通道可用后再连'**
+  String get phoneKeepWaiting;
+
+  /// No description provided for @phoneKeepWaitingService.
+  ///
+  /// In zh, this message translates to:
+  /// **'等所选服务运行后再连'**
+  String get phoneKeepWaitingService;
+
+  /// No description provided for @phoneKeepWaitingPermission.
+  ///
+  /// In zh, this message translates to:
+  /// **'还没有授权；授权后会自己连上'**
+  String get phoneKeepWaitingPermission;
+
+  /// No description provided for @phoneKeepWaitingNetwork.
+  ///
+  /// In zh, this message translates to:
+  /// **'等连上 Wi‑Fi 后再连'**
+  String get phoneKeepWaitingNetwork;
+
+  /// No description provided for @phoneKeepNotPaired.
+  ///
+  /// In zh, this message translates to:
+  /// **'还没有配对，请先完成无线调试配对'**
+  String get phoneKeepNotPaired;
+
+  /// No description provided for @phoneKeepFailed.
+  ///
+  /// In zh, this message translates to:
+  /// **'没连上；下次打开 App 或开始操控时再试'**
+  String get phoneKeepFailed;
 
   /// No description provided for @phoneModeTitle.
   ///
@@ -25334,6 +25550,12 @@ abstract class L10n {
   /// **'统计,使用统计,匿名,隐私,数据,改进,遥测,分析'**
   String get searchKwUsageStats;
 
+  /// No description provided for @searchKwQuickPanel.
+  ///
+  /// In zh, this message translates to:
+  /// **'左滑,快捷入口,手势,滑动,目录,自定义目录,快捷,常用入口'**
+  String get searchKwQuickPanel;
+
   /// No description provided for @shellDeletePermanently.
   ///
   /// In zh, this message translates to:
@@ -27092,6 +27314,18 @@ abstract class L10n {
   /// **'已归档 {count} 个对话，{failed} 个没能归档'**
   String shellChatsArchivedPartial(int count, int failed);
 
+  /// No description provided for @shellQuickPanel.
+  ///
+  /// In zh, this message translates to:
+  /// **'快捷入口'**
+  String get shellQuickPanel;
+
+  /// No description provided for @shellQuickPanelHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'在「{path}」里调整'**
+  String shellQuickPanelHint(String path);
+
   /// The star prompt's first line. hours is the whole hours of use so far, rounded down; 0 is half an hour (the first ask comes after 30 minutes). The word joiner keeps the ~ on the line of the word before it.
   ///
   /// In zh, this message translates to:
@@ -27821,7 +28055,7 @@ abstract class L10n {
   /// No description provided for @stateChatTextOnlyModel.
   ///
   /// In zh, this message translates to:
-  /// **'当前模型只能读文字，图片已作为文件发给 AI。想让 AI 直接看图，请换成 V4.1 Flash'**
+  /// **'当前模型未声明支持图片，已按文件发送。可换模型，或把自定义模型的输入类型设为「文本和图片」'**
   String get stateChatTextOnlyModel;
 
   /// No description provided for @stateAttachmentUploadFailed.
@@ -27833,7 +28067,7 @@ abstract class L10n {
   /// No description provided for @stateChatImageModelRequired.
   ///
   /// In zh, this message translates to:
-  /// **'当前模型看不了图片，换成 V4.1 Flash 再发'**
+  /// **'当前模型未声明支持图片。请换模型，或把自定义模型的输入类型设为「文本和图片」再发'**
   String get stateChatImageModelRequired;
 
   /// No description provided for @stateSendFailed.
@@ -29105,8 +29339,14 @@ abstract class L10n {
   /// No description provided for @stateAttachmentFileLimit.
   ///
   /// In zh, this message translates to:
-  /// **'文件「{name}」超过 30 MB'**
+  /// **'文件「{name}」超过 200 MB'**
   String stateAttachmentFileLimit(String name);
+
+  /// No description provided for @stateAttachmentTotalLimit.
+  ///
+  /// In zh, this message translates to:
+  /// **'附件总大小超过 400 MB'**
+  String get stateAttachmentTotalLimit;
 
   /// No description provided for @stateBotFinished.
   ///

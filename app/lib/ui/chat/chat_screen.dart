@@ -824,7 +824,10 @@ class _ChatScreenState extends ConsumerState<ChatScreen> with WidgetsBindingObse
         picked = switch (source) {
           AttachSource.gallery => PickedAttachments(await picker.pickImages(limit: room)),
           AttachSource.camera => PickedAttachments([?await picker.takePhoto()]),
-          AttachSource.files => await picker.pickFiles(limit: room),
+          AttachSource.files => await picker.pickFiles(
+            limit: room,
+            heldBytes: totalAttachmentBytes(_drafts),
+          ),
         };
       } on PlatformException catch (e) {
         if (!ownsDraft()) return;
@@ -864,13 +867,15 @@ class _ChatScreenState extends ConsumerState<ChatScreen> with WidgetsBindingObse
 
   void _addDrafts(List<DraftAttachment> picked, {String? problem}) {
     final room = maxAttachments - _drafts.length;
+    var heldBytes = totalAttachmentBytes(_drafts);
     final ok = <DraftAttachment>[];
     for (final a in picked) {
-      final p = attachmentProblem(a);
+      final p = attachmentProblem(a) ?? attachmentBudgetProblem(heldBytes, a);
       if (p != null) {
         problem ??= p;
       } else if (ok.length < room) {
         ok.add(a);
+        heldBytes += a.size;
       } else {
         problem ??= appL10n.chatAttachmentLimit(maxAttachments);
       }
@@ -1245,7 +1250,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> with WidgetsBindingObse
     final selection = sessionId == null ? ref.read(pendingModelProvider) : ref.read(chatProvider(sessionId)).model;
     return showModelSheet(
       context,
-      current: selection ?? ref.read(modelCatalogProvider).value?.defaultSelection,
+      current: selection ?? ref.read(currentModelCatalogProvider)?.defaultSelection,
       onSelected: _modelTarget(),
     );
   }
@@ -1263,10 +1268,20 @@ class _ChatScreenState extends ConsumerState<ChatScreen> with WidgetsBindingObse
   /// again, another conversation or host chosen — and a pick then goes to
   /// neither, rather than to whatever is open by then.
   ValueChanged<ModelSelection> _modelTarget() {
-    final host = ref.read(activeHostProvider);
+    final scope = ref.read(modelSelectionScopeProvider);
+    final client = ref.read(activeConnectionProvider).value?.client;
+    final generation = client?.mux.generation;
     final sessionId = ref.read(currentSessionProvider);
     return (selection) {
-      if (!mounted || ref.read(activeHostProvider) != host || ref.read(currentSessionProvider) != sessionId) return;
+      if (!mounted ||
+          client == null ||
+          !_sameConnection(client, generation) ||
+          ref.read(activeConnectionProvider).isLoading ||
+          ref.read(activeConnectionProvider).hasError ||
+          !identical(ref.read(modelSelectionScopeProvider), scope) ||
+          ref.read(currentSessionProvider) != sessionId) {
+        return;
+      }
       if (sessionId == null) {
         ref.read(pendingModelProvider.notifier).select(selection);
       } else {
@@ -1344,6 +1359,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> with WidgetsBindingObse
                 singleQuestion: s.singleQuestion != null,
                 model: s.model,
                 error: s.error,
+                defaultModelSaveFailed: s.defaultModelSaveFailed,
                 notice: s.notice,
                 autoApprove: s.autoApprove,
               ),
@@ -1453,7 +1469,10 @@ class _ChatScreenState extends ConsumerState<ChatScreen> with WidgetsBindingObse
         : ref.watch(mediaCatalogProvider.select((c) => c.resolve(generate.model, generate.kind)?.model));
     // 引用追问: the passage waiting above this conversation's composer.
     final quote = ref.watch(composerQuoteProvider.select((quotes) => quotes[_draftKey]));
-    final error = sessionId == null ? _localError : chat?.error;
+    final modelDefaultWarning = sessionId != null && chat?.error == null && (chat?.defaultModelSaveFailed ?? false);
+    final error = sessionId == null
+        ? _localError
+        : chat?.error ?? (modelDefaultWarning ? l10n.engineModelDefaultSaveFailed : null);
     // An error wins the slot; a notice shows when there is none.
     final notice = error == null && sessionId != null ? chat?.notice : null;
     // A phone on its side with the keyboard up keeps a strip of chat: the
@@ -1716,6 +1735,10 @@ class _ChatScreenState extends ConsumerState<ChatScreen> with WidgetsBindingObse
                                               onDismiss: () {
                                                 if (sessionId == null) {
                                                   setState(() => _localError = null);
+                                                } else if (modelDefaultWarning) {
+                                                  ref
+                                                      .read(chatProvider(sessionId).notifier)
+                                                      .dismissDefaultModelSaveWarning();
                                                 } else {
                                                   ref.read(chatProvider(sessionId).notifier).dismissError();
                                                 }
