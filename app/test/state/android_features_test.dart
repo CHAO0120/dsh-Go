@@ -22,6 +22,8 @@ import 'package:dsh_app/ui/engine/engine_screen.dart';
 import 'package:dsh_app/ui/features/all_features_page.dart';
 import 'package:dsh_app/ui/features/feature_catalog.dart';
 import 'package:dsh_app/ui/features/permission_page.dart';
+import 'package:dsh_app/ui/notify/background_net_host.dart';
+import 'package:dsh_app/ui/notify/background_pause_host.dart';
 import 'package:dsh_app/ui/onboarding/access_step.dart';
 import 'package:dsh_app/ui/onboarding/connect_page.dart';
 import 'package:dsh_app/ui/onboarding/runtime_setup_page.dart';
@@ -43,6 +45,7 @@ import 'package:dsh_app/ui/settings/search/settings_search.dart';
 import 'package:dsh_app/ui/settings/search/settings_search_page.dart';
 import 'package:dsh_app/ui/settings/settings_screen.dart';
 import 'package:dsh_app/ui/settings/system_access_page.dart';
+import 'package:dsh_app/ui/shell/home_shell.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_riverpod/misc.dart' show Override;
@@ -293,9 +296,11 @@ void main() {
         usePhoneSurface(tester);
         await tester.pumpWidget(
           goldenApp(
-            home: Consumer(
-              builder: (context, ref, _) =>
-                  TextButton(onPressed: () => openNativePage(context, ref, 'phone'), child: const Text('open')),
+            home: Scaffold(
+              body: Consumer(
+                builder: (context, ref, _) =>
+                    TextButton(onPressed: () => openNativePage(context, ref, 'phone'), child: const Text('open')),
+              ),
             ),
             brightness: Brightness.light,
             overrides: _on(android: android),
@@ -305,6 +310,28 @@ void main() {
         await tester.pump();
         await tester.pump(const Duration(milliseconds: 500));
         expect(find.byType(PhoneControlScreen), android ? findsOneWidget : findsNothing);
+        expect(find.text(_zh.harmonyPageUnavailable), android ? findsNothing : findsOneWidget);
+      });
+    }
+  });
+
+  group('the line about the background', () {
+    for (final android in [true, false]) {
+      testWidgets('in the shell: one of them with android=$android', (tester) async {
+        usePhoneSurface(tester);
+        await tester.pumpWidget(
+          goldenApp(
+            home: HomeShell(chatBuilder: (_) => const SizedBox.expand()),
+            brightness: Brightness.light,
+            overrides: _on(android: android),
+          ),
+        );
+        await tester.pump();
+        expect(find.byType(BackgroundNetHost), android ? findsOneWidget : findsNothing);
+        expect(find.byType(BackgroundPauseHost), android ? findsNothing : findsOneWidget);
+        // Away from the shell before its first timers matter.
+        await tester.pumpWidget(const SizedBox());
+        await tester.pump(const Duration(seconds: 1));
       });
     }
   });

@@ -8,13 +8,15 @@
 // Pages only, from a fixed list: the settings index's pages and rows (a row
 // opens its page) and a few 全部功能 pages; nothing that switches the
 // conversation or the host, opens a sheet, runs an action, or needs an open
-// conversation. An unknown page gets the router's 「无法打开这个链接」.
+// conversation. An unknown page gets the router's 「无法打开这个链接」; one this
+// OS doesn't have yet says that instead.
 
 import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../l10n/l10n.dart';
 import '../state/android_features.dart';
 import '../ui/features/feature_catalog.dart';
 import '../ui/settings/index/settings_pages.dart';
@@ -60,7 +62,7 @@ Widget? pageForId(String id, String? sessionId) {
 typedef PageResolver = Widget? Function(String id, String? sessionId);
 
 /// [pageForId] (tests swap in light pages); on HarmonyOS, Android's own pages
-/// are unknown ones.
+/// have none ([registerPageLinks] says so).
 final pageLinkResolverProvider = Provider<PageResolver>((ref) {
   if (ref.watch(androidSystemFeaturesProvider)) return pageForId;
   return (id, sessionId) => SettingsIndex.androidOnlyLink(id) ? null : pageForId(id, sessionId);
@@ -74,7 +76,11 @@ VoidCallback registerPageLinks(LinkRouter router, {String? Function()? session, 
       final context = router.context;
       if (id == null || context == null || !context.mounted) return false;
       final widget = page(id, session?.call());
-      if (widget == null) return false;
+      if (widget == null) {
+        if (!SettingsIndex.androidOnlyLink(id)) return false;
+        router.toast(appL10n.harmonyPageUnavailable);
+        return true;
+      }
       unawaited(Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => widget)));
       return true;
     });

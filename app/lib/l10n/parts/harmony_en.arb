@@ -13,5 +13,9 @@
   "harmonyBackgroundUseRemote": "Or run them on a connected remote host",
   "harmonyEngineBackgroundHint": "The on-device engine pauses when the app leaves the screen",
   "harmonyKwBackground": "background activity,keep alive,suspended,paused,killed",
-  "harmonyPausedInBackground": "Paused in the background, continuing now"
+  "harmonyPausedInBackground": "Paused in the background, continuing now",
+  "harmonyAlertsRequirement": "Alerts need the app running: the system suspends it seconds after it leaves the screen, and none go out then",
+  "harmonyLiveUnavailable": "Live activities aren't available in this version yet",
+  "harmonySchedulesLocal": "Tasks on this phone only fire while the app is running: they won't run on time while the system has it suspended",
+  "harmonyPageUnavailable": "This page isn't available on HarmonyOS yet"
 }

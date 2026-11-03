@@ -12698,6 +12698,30 @@ abstract class L10n {
   /// **'对话在后台暂停了，现在继续'**
   String get harmonyPausedInBackground;
 
+  /// No description provided for @harmonyAlertsRequirement.
+  ///
+  /// In zh, this message translates to:
+  /// **'提醒要应用在运行才发得出：离开屏幕几秒后系统会挂起应用，挂起期间没有提醒'**
+  String get harmonyAlertsRequirement;
+
+  /// No description provided for @harmonyLiveUnavailable.
+  ///
+  /// In zh, this message translates to:
+  /// **'这个版本暂时没有实时活动'**
+  String get harmonyLiveUnavailable;
+
+  /// No description provided for @harmonySchedulesLocal.
+  ///
+  /// In zh, this message translates to:
+  /// **'本机的任务只在应用运行时触发：应用被系统挂起时，到点不会运行'**
+  String get harmonySchedulesLocal;
+
+  /// No description provided for @harmonyPageUnavailable.
+  ///
+  /// In zh, this message translates to:
+  /// **'鸿蒙版暂时没有这个页面'**
+  String get harmonyPageUnavailable;
+
   /// No description provided for @hubSessionDetails.
   ///
   /// In zh, this message translates to:

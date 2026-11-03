@@ -6929,6 +6929,18 @@ class L10nZh extends L10n {
   String get harmonyPausedInBackground => '对话在后台暂停了，现在继续';
 
   @override
+  String get harmonyAlertsRequirement => '提醒要应用在运行才发得出：离开屏幕几秒后系统会挂起应用，挂起期间没有提醒';
+
+  @override
+  String get harmonyLiveUnavailable => '这个版本暂时没有实时活动';
+
+  @override
+  String get harmonySchedulesLocal => '本机的任务只在应用运行时触发：应用被系统挂起时，到点不会运行';
+
+  @override
+  String get harmonyPageUnavailable => '鸿蒙版暂时没有这个页面';
+
+  @override
   String get hubSessionDetails => '对话详情';
 
   @override

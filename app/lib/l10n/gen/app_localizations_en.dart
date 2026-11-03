@@ -7322,6 +7322,20 @@ class L10nEn extends L10n {
   String get harmonyPausedInBackground => 'Paused in the background, continuing now';
 
   @override
+  String get harmonyAlertsRequirement =>
+      'Alerts need the app running: the system suspends it seconds after it leaves the screen, and none go out then';
+
+  @override
+  String get harmonyLiveUnavailable => 'Live activities aren\'t available in this version yet';
+
+  @override
+  String get harmonySchedulesLocal =>
+      'Tasks on this phone only fire while the app is running: they won\'t run on time while the system has it suspended';
+
+  @override
+  String get harmonyPageUnavailable => 'This page isn\'t available on HarmonyOS yet';
+
+  @override
   String get hubSessionDetails => 'Chat details';
 
   @override

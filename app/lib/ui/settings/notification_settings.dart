@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../l10n/l10n.dart';
+import '../../state/android_features.dart';
 import '../../state/live_activity_state.dart';
 import '../../state/notify_state.dart';
 import '../phone/phone_widgets.dart';
@@ -166,7 +167,8 @@ class _NotificationSettingsPageState extends ConsumerState<NotificationSettingsP
     final system = ref.watch(notifySystemStatusProvider).value ?? const NotifySystemStatus();
     // Unknown until the phone answers: no 「不支持」 flashing up meanwhile.
     final live = ref.watch(liveSystemStatusProvider).value;
-    final liveSupported = live?.supported ?? true;
+    final ohos = ref.watch(operatingSystemProvider) == 'ohos';
+    final liveSupported = !ohos && (live?.supported ?? true);
     final on = prefs.enabled;
     final note = on ? _systemNote(system) : null;
     final liveBlocked = on && prefs.live && live != null && live.supported && !live.allowed;
@@ -188,7 +190,7 @@ class _NotificationSettingsPageState extends ConsumerState<NotificationSettingsP
         ),
         SettingsSection(
           title: l10n.pluginsAlerts,
-          footer: Text(l10n.pluginsRemoteAlertsRequirement),
+          footer: Text(ohos ? l10n.harmonyAlertsRequirement : l10n.pluginsRemoteAlertsRequirement),
           children: [
             SettingsSwitchTile(
               spot: Spots.notifyDone,
@@ -219,11 +221,15 @@ class _NotificationSettingsPageState extends ConsumerState<NotificationSettingsP
         if (liveBlocked) _liveNote(),
         SettingsSection(
           title: l10n.liveSettingsTitle,
-          footer: Text(l10n.liveSettingsFooter),
+          footer: ohos ? null : Text(l10n.liveSettingsFooter),
           children: [
             SettingsSwitchTile(
               spot: Spots.notifyLive,
-              subtitle: liveSupported ? l10n.liveSettingsSubtitle : l10n.liveUnsupported,
+              subtitle: ohos
+                  ? l10n.harmonyLiveUnavailable
+                  : liveSupported
+                  ? l10n.liveSettingsSubtitle
+                  : l10n.liveUnsupported,
               value: prefs.live && liveSupported,
               onChanged: on && liveSupported ? (v) => unawaited(notifier.setLive(v)) : null,
             ),
