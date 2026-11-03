@@ -119,7 +119,7 @@ class SettingsScreen extends ConsumerWidget {
     final newApi = search == null
         ? null
         : search.valueOf(const FieldRef(WebSearchSettingsPage.webNs, ['searchProvider'])) == 'deepseek-search-api';
-    // 通用.
+    // 通用. HarmonyOS has no battery exemption to report.
     final exempt = android ? ref.watch(batteryExemptProvider).value : null;
     // 主机.
     final ssh = ref.watch(hostsProvider.select((s) => s.ssh.length));
@@ -241,17 +241,16 @@ class SettingsScreen extends ConsumerWidget {
             const NotificationSettingsTile(tint: SettingsHues.general),
             const VoiceSettingsTile(tint: SettingsHues.general),
             const PerformanceSettingsTile(tint: SettingsHues.general),
-            if (android)
-              SettingsTile(
-                icon: AppIcons.keepAlive,
-                tint: SettingsHues.general,
-                spot: SettingsIndex.entry(SettingsPageId.background),
-                value: text(
-                  exempt == null ? null : (exempt ? l10n.hubValueAllowed : l10n.hubValueNeedsSetup),
-                  color: exempt == false ? colors.warning : null,
-                ),
-                onTap: () => _push(context, const BackgroundGuidePage()),
+            SettingsTile(
+              icon: AppIcons.keepAlive,
+              tint: SettingsHues.general,
+              spot: SettingsIndex.entry(SettingsPageId.background),
+              value: text(
+                exempt == null ? null : (exempt ? l10n.hubValueAllowed : l10n.hubValueNeedsSetup),
+                color: exempt == false ? colors.warning : null,
               ),
+              onTap: () => _push(context, const BackgroundGuidePage()),
+            ),
             SettingsTile(
               icon: AppIcons.systemAccess,
               tint: SettingsHues.general,

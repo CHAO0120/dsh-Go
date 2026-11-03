@@ -7288,6 +7288,37 @@ class L10nEn extends L10n {
   String get harmonyKwSystemAccess => 'permissions,grant,microphone,notification permission,reply alerts,voice input';
 
   @override
+  String get harmonyBackgroundSubtitle => 'On-device chats pause when the app leaves the screen';
+
+  @override
+  String get harmonyBackgroundAway => 'When the app leaves the screen';
+
+  @override
+  String get harmonyBackgroundLocal =>
+      'The system suspends the app within seconds. A running turn pauses with it and continues when you come back';
+
+  @override
+  String get harmonyBackgroundRemoteTitle => 'Connected remote host';
+
+  @override
+  String get harmonyBackgroundRemote => 'Replies there keep running';
+
+  @override
+  String get harmonyBackgroundLong => 'Long tasks';
+
+  @override
+  String get harmonyBackgroundStay => 'Keep the app on screen';
+
+  @override
+  String get harmonyBackgroundUseRemote => 'Or run them on a connected remote host';
+
+  @override
+  String get harmonyEngineBackgroundHint => 'The on-device engine pauses when the app leaves the screen';
+
+  @override
+  String get harmonyKwBackground => 'background activity,keep alive,suspended,paused,killed';
+
+  @override
   String get hubSessionDetails => 'Chat details';
 
   @override

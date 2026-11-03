@@ -155,12 +155,11 @@ class EngineScreen extends ConsumerWidget {
             SettingsSection(
               title: l10n.commonMore,
               children: [
-                if (guest)
-                  SettingsTile(
-                    spot: SettingsIndex.entry(SettingsPageId.background),
-                    subtitle: l10n.phoneEngineKeepAliveHint,
-                    onTap: () => _push(context, const BackgroundGuidePage()),
-                  ),
+                SettingsTile(
+                  spot: SettingsIndex.entry(SettingsPageId.background),
+                  subtitle: guest ? l10n.phoneEngineKeepAliveHint : l10n.harmonyEngineBackgroundHint,
+                  onTap: () => _push(context, const BackgroundGuidePage()),
+                ),
                 SettingsTile(
                   spot: SettingsIndex.entry(SettingsPageId.diagnostics),
                   subtitle: l10n.phoneEngineDiagnosticsHint,

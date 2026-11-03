@@ -6896,6 +6896,36 @@ class L10nZh extends L10n {
   String get harmonyKwSystemAccess => '权限一览,授权,麦克风,通知权限,回复提醒,语音输入,补开权限';
 
   @override
+  String get harmonyBackgroundSubtitle => '应用离开屏幕后，本机的对话会暂停';
+
+  @override
+  String get harmonyBackgroundAway => '离开屏幕后';
+
+  @override
+  String get harmonyBackgroundLocal => '系统几秒内就会挂起应用，正在跑的对话跟着暂停，回到应用后继续';
+
+  @override
+  String get harmonyBackgroundRemoteTitle => '已连接的远程主机';
+
+  @override
+  String get harmonyBackgroundRemote => '上面的回复继续跑，不受影响';
+
+  @override
+  String get harmonyBackgroundLong => '长任务';
+
+  @override
+  String get harmonyBackgroundStay => '把应用留在屏幕上';
+
+  @override
+  String get harmonyBackgroundUseRemote => '或者放到已连接的远程主机上跑';
+
+  @override
+  String get harmonyEngineBackgroundHint => '离开屏幕后本机引擎会暂停';
+
+  @override
+  String get harmonyKwBackground => '后台,保活,挂起,暂停,被杀,杀后台';
+
+  @override
   String get hubSessionDetails => '对话详情';
 
   @override

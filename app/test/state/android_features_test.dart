@@ -35,6 +35,7 @@ import 'package:dsh_app/ui/settings/appearance/appearance_page.dart';
 import 'package:dsh_app/ui/settings/appearance/icon_shortcut_sheet.dart';
 import 'package:dsh_app/ui/settings/appearance/launch_screen_section.dart';
 import 'package:dsh_app/ui/settings/appearance/wallpaper_section.dart';
+import 'package:dsh_app/ui/settings/background_guide_page.dart';
 import 'package:dsh_app/ui/settings/index/spot_anchor.dart';
 import 'package:dsh_app/ui/settings/index/spots.dart';
 import 'package:dsh_app/ui/settings/performance_page.dart';
@@ -59,7 +60,6 @@ const _pages = {
   'page:phoneAppRules',
   'page:phoneDnd',
   'page:phoneUnlocks',
-  'page:background',
 };
 const _rows = {
   'phone-a11y-restore',
@@ -115,6 +115,11 @@ Future<void> _pump(
   await tester.pumpAndSettle();
 }
 
+class _NotExempt extends FakeBridge {
+  @override
+  Future<bool?> batteryExempt() async => false;
+}
+
 void main() {
   setUp(() => SharedPreferences.setMockInitialValues({}));
 
@@ -136,35 +141,54 @@ void main() {
     });
 
     test('links to them are known by name', () {
-      for (final id in ['phone', 'phone-unlocks', 'phone-confirm', 'phone-files', 'background']) {
+      for (final id in ['phone', 'phone-unlocks', 'phone-confirm', 'phone-files']) {
         expect(SettingsIndex.androidOnlyLink(id), isTrue, reason: id);
       }
-      for (final id in ['engine', 'appearance', 'dark-mode', 'system-permissions', 'nope']) {
+      for (final id in ['engine', 'appearance', 'dark-mode', 'background', 'system-permissions', 'nope']) {
         expect(SettingsIndex.androidOnlyLink(id), isFalse, reason: id);
       }
     });
   });
 
   group('settings hub', () {
-    const tiles = ['page:phone', 'page:background'];
+    const both = ['page:background', 'page:systemAccess'];
 
     testWidgets('on Android: phone control, background and system access', (tester) async {
       await _pump(tester, const SettingsScreen(), android: true);
-      for (final id in tiles) {
+      for (final id in ['page:phone', ...both]) {
         expect(find.byKey(SpotKey(id)), findsOneWidget, reason: id);
       }
     });
 
-    testWidgets('on HarmonyOS: none of them, every group still there', (tester) async {
+    testWidgets('on HarmonyOS: no phone control, every group still there', (tester) async {
       await _pump(tester, const SettingsScreen(), android: false);
-      for (final id in tiles) {
-        expect(find.byKey(SpotKey(id)), findsNothing, reason: id);
+      expect(find.byKey(const SpotKey('page:phone')), findsNothing);
+      for (final id in both) {
+        expect(find.byKey(SpotKey(id)), findsOneWidget, reason: id);
       }
       expect(find.text('手机操控'), findsNothing);
-      expect(find.byKey(const SpotKey('page:systemAccess')), findsOneWidget);
       expect(find.byKey(const SpotKey('page:webSearch')), findsOneWidget);
       expect(find.byKey(const SpotKey('page:privacy')), findsOneWidget);
     });
+
+    for (final android in [true, false]) {
+      testWidgets('后台运行 reports the battery exemption with android=$android', (tester) async {
+        await _pump(
+          tester,
+          const SettingsScreen(),
+          android: android,
+          overrides: [runtimeBridgeProvider.overrideWithValue(_NotExempt())],
+        );
+        expect(
+          find.descendant(
+            of: find.byKey(const SpotKey('page:background')),
+            matching: find.text(_zh.hubValueNeedsSetup),
+          ),
+          android ? findsOneWidget : findsNothing,
+        );
+        expect(find.text(_zh.hubValueAllowed), findsNothing);
+      });
+    }
   });
 
   group('全部功能', () {
@@ -198,6 +222,7 @@ void main() {
       expect(ids('手机操控', android: true), contains('page:phone'));
       expect(ids('phone control', android: true), contains('page:phone'));
       expect(ids('后台', android: true), contains('page:background'));
+      expect(ids('电池优化', android: true), contains('page:background'));
       expect(ids('桌面图标', android: true), contains('app-icon'));
       expect(ids('悬浮窗', android: true), contains('pet-outside-app'));
     });
@@ -213,6 +238,15 @@ void main() {
       expect(ids('引擎', android: false), contains('page:engine'));
     });
 
+    test('on HarmonyOS: 后台运行 by what happens there, not by a battery switch it hasn\'t got', () {
+      for (final q in ['后台', '后台运行', '杀后台', '挂起', 'suspended']) {
+        expect(ids(q, android: false), contains('page:background'), reason: q);
+      }
+      for (final q in ['电池优化', '自启动', 'autostart']) {
+        expect(ids(q, android: false), isNot(contains('page:background')), reason: q);
+      }
+    });
+
     testWidgets('on Android: the page offers 后台运行 and lists the page', (tester) async {
       await _pump(tester, const SettingsSearchPage(), android: true);
       expect(find.text(_zh.searchSuggestBackground), findsOneWidget);
@@ -222,9 +256,9 @@ void main() {
       expect(find.text(_zh.searchNoResults), findsNothing);
     });
 
-    testWidgets('on HarmonyOS: no 后台运行 word, and 手机操控 finds nothing', (tester) async {
+    testWidgets('on HarmonyOS: 后台运行 is there, and 手机操控 finds nothing', (tester) async {
       await _pump(tester, const SettingsSearchPage(), android: false);
-      expect(find.text(_zh.searchSuggestBackground), findsNothing);
+      expect(find.text(_zh.searchSuggestBackground), findsOneWidget);
       expect(find.text(_zh.searchSuggestDark), findsOneWidget);
       await tester.enterText(find.byType(TextField), '手机操控');
       await tester.pumpAndSettle();
@@ -246,10 +280,11 @@ void main() {
     });
 
     test('on HarmonyOS they are unknown; other pages still open', () {
-      for (final id in ['phone', 'phone-unlocks', 'phone-confirm', 'phone-files', 'background']) {
+      for (final id in ['phone', 'phone-unlocks', 'phone-confirm', 'phone-files']) {
         expect(resolve(id, android: false), isNull, reason: id);
       }
       expect(resolve('engine', android: false), isA<EngineScreen>());
+      expect(resolve('background', android: false), isA<BackgroundGuidePage>());
       expect(resolve('system-permissions', android: false), isA<SystemAccessPage>());
     });
 
@@ -370,10 +405,12 @@ void main() {
       expect(find.byKey(const SpotKey('page:background')), findsOneWidget);
     });
 
-    testWidgets('on HarmonyOS: only 诊断 under 更多', (tester) async {
+    testWidgets('on HarmonyOS: 后台运行 under 更多, and what it says is true there', (tester) async {
       await _pump(tester, const EngineScreen(), android: false, overrides: bridge());
-      expect(find.byKey(const SpotKey('page:background')), findsNothing);
+      expect(find.byKey(const SpotKey('page:background')), findsOneWidget);
       expect(find.byKey(const SpotKey('page:diagnostics')), findsOneWidget);
+      expect(find.text(_zh.harmonyEngineBackgroundHint), findsOneWidget);
+      expect(find.text(_zh.phoneEngineKeepAliveHint), findsNothing);
     });
 
     final killed = RuntimeStatus(
@@ -398,7 +435,7 @@ void main() {
         );
         await tester.pumpAndSettle();
         expect(find.text(_zh.phoneFailureKilled), findsOneWidget);
-        expect(find.text(_zh.phoneEngineKeepAlive), android ? findsOneWidget : findsNothing);
+        expect(find.text(_zh.phoneEngineKeepAlive), findsOneWidget);
         expect(find.text(_zh.commonRetry), findsOneWidget);
       });
     }

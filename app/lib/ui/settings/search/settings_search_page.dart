@@ -82,9 +82,9 @@ class SettingsSearchPage extends ConsumerStatefulWidget {
   static Route<void> route() => MaterialPageRoute<void>(builder: (_) => const SettingsSearchPage());
 
   /// The few words offered before anything is typed.
-  static List<String> suggestions(L10n l10n, {bool androidFeatures = true}) => [
+  static List<String> suggestions(L10n l10n) => [
     l10n.searchSuggestDark,
-    if (androidFeatures) l10n.searchSuggestBackground,
+    l10n.searchSuggestBackground,
     l10n.searchSuggestPermission,
     l10n.searchSuggestTextSize,
   ];
@@ -220,7 +220,6 @@ class _SettingsSearchPageState extends ConsumerState<SettingsSearchPage> {
   List<Widget> _idle(BuildContext context) {
     final l10n = context.l10n;
     final recent = ref.watch(recentSearchesProvider);
-    final android = ref.watch(androidSystemFeaturesProvider);
     return [
       Padding(
         padding: const EdgeInsets.fromLTRB(24, 0, 24, 8),
@@ -232,7 +231,7 @@ class _SettingsSearchPageState extends ConsumerState<SettingsSearchPage> {
           spacing: 8,
           runSpacing: 8,
           children: [
-            for (final word in SettingsSearchPage.suggestions(l10n, androidFeatures: android))
+            for (final word in SettingsSearchPage.suggestions(l10n))
               CapsuleChoiceChip(label: word, selected: false, onSelected: () => _fill(word)),
           ],
         ),

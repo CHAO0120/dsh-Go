@@ -468,9 +468,9 @@ final _pages = <SettingsPageMeta>[
     title: (l) => l.phoneEngineKeepAlive,
     group: _general,
     keywords: (l) => l.searchKwBackground,
+    ohosKeywords: (l) => l.harmonyKwBackground,
     freq: Freq.medium,
     links: const ['background'],
-    androidOnly: true,
   ),
   SettingsPageMeta(
     SettingsPageId.systemAccess,

@@ -2,5 +2,15 @@
   "@@locale": "en",
   "harmonyAccessSubtitle": "What each feature needs from HarmonyOS",
   "harmonyNotifyWhy": "While the app is running, tells you when a reply ends or needs you",
-  "harmonyKwSystemAccess": "permissions,grant,microphone,notification permission,reply alerts,voice input"
+  "harmonyKwSystemAccess": "permissions,grant,microphone,notification permission,reply alerts,voice input",
+  "harmonyBackgroundSubtitle": "On-device chats pause when the app leaves the screen",
+  "harmonyBackgroundAway": "When the app leaves the screen",
+  "harmonyBackgroundLocal": "The system suspends the app within seconds. A running turn pauses with it and continues when you come back",
+  "harmonyBackgroundRemoteTitle": "Connected remote host",
+  "harmonyBackgroundRemote": "Replies there keep running",
+  "harmonyBackgroundLong": "Long tasks",
+  "harmonyBackgroundStay": "Keep the app on screen",
+  "harmonyBackgroundUseRemote": "Or run them on a connected remote host",
+  "harmonyEngineBackgroundHint": "The on-device engine pauses when the app leaves the screen",
+  "harmonyKwBackground": "background activity,keep alive,suspended,paused,killed"
 }

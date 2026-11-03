@@ -12632,6 +12632,66 @@ abstract class L10n {
   /// **'权限一览,授权,麦克风,通知权限,回复提醒,语音输入,补开权限'**
   String get harmonyKwSystemAccess;
 
+  /// No description provided for @harmonyBackgroundSubtitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'应用离开屏幕后，本机的对话会暂停'**
+  String get harmonyBackgroundSubtitle;
+
+  /// No description provided for @harmonyBackgroundAway.
+  ///
+  /// In zh, this message translates to:
+  /// **'离开屏幕后'**
+  String get harmonyBackgroundAway;
+
+  /// No description provided for @harmonyBackgroundLocal.
+  ///
+  /// In zh, this message translates to:
+  /// **'系统几秒内就会挂起应用，正在跑的对话跟着暂停，回到应用后继续'**
+  String get harmonyBackgroundLocal;
+
+  /// No description provided for @harmonyBackgroundRemoteTitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'已连接的远程主机'**
+  String get harmonyBackgroundRemoteTitle;
+
+  /// No description provided for @harmonyBackgroundRemote.
+  ///
+  /// In zh, this message translates to:
+  /// **'上面的回复继续跑，不受影响'**
+  String get harmonyBackgroundRemote;
+
+  /// No description provided for @harmonyBackgroundLong.
+  ///
+  /// In zh, this message translates to:
+  /// **'长任务'**
+  String get harmonyBackgroundLong;
+
+  /// No description provided for @harmonyBackgroundStay.
+  ///
+  /// In zh, this message translates to:
+  /// **'把应用留在屏幕上'**
+  String get harmonyBackgroundStay;
+
+  /// No description provided for @harmonyBackgroundUseRemote.
+  ///
+  /// In zh, this message translates to:
+  /// **'或者放到已连接的远程主机上跑'**
+  String get harmonyBackgroundUseRemote;
+
+  /// No description provided for @harmonyEngineBackgroundHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'离开屏幕后本机引擎会暂停'**
+  String get harmonyEngineBackgroundHint;
+
+  /// No description provided for @harmonyKwBackground.
+  ///
+  /// In zh, this message translates to:
+  /// **'后台,保活,挂起,暂停,被杀,杀后台'**
+  String get harmonyKwBackground;
+
   /// No description provided for @hubSessionDetails.
   ///
   /// In zh, this message translates to:
