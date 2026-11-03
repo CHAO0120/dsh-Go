@@ -7357,7 +7357,7 @@ class L10nEn extends L10n {
 
   @override
   String get harmonyCredentialsClearBody =>
-      'Trying again won’t help. Clearing removes every API key, DSH Remote sign-in, SSH password and private key, forum sign-in and shared link saved on this phone, and you’ll need to enter them or sign in again. Conversations and the host list stay. This can’t be undone.';
+      'Trying again won’t help. Clearing removes the API keys, DSH Remote sign-in, SSH passwords and private keys, and forum sign-in the app has saved, and you’ll need to enter them or sign in again. Links you’ve already shared stay up, but this phone can no longer delete them. Conversations and the host list stay. This can’t be undone.';
 
   @override
   String get harmonyCredentialsClearAction => 'Clear keys';

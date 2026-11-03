@@ -6960,7 +6960,7 @@ class L10nZh extends L10n {
 
   @override
   String get harmonyCredentialsClearBody =>
-      '重试没有用。清除后，这台手机上保存的所有 API key、DSH Remote 登录、SSH 密码和私钥、论坛登录和分享链接都会被删除，需要重新填写或登录。对话和主机列表会保留。此操作无法撤销。';
+      '重试没有用。清除后，App 保存的 API key、DSH Remote 登录、SSH 密码和私钥、论坛登录都会被删除，需要重新填写或登录。已发布的分享链接还在，但这台手机上删不掉了。对话和主机列表会保留。此操作无法撤销。';
 
   @override
   String get harmonyCredentialsClearAction => '清除密钥';
