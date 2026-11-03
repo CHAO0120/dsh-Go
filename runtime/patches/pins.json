@@ -425,6 +425,14 @@
           "after": "d5317cfa41996c379958f5fbb9d90a282edc30bf9f8d67981f1b06d37e2131f6"
         }
       }
+    },
+    "ohos-output-utf8.diff": {
+      "0.2.1-rc.4": {
+        "node_modules/@deepseek-ai/dsh-subprocess-local/lib/output.js": {
+          "before": "4f77ef6da608d36df168c99177e9b527e7145df1418845eba567635e64a4c2a3",
+          "after": "3be3d0fe5376087a57af7f881cf889bc6cedc2f821f5e6b08324d82414cb8445"
+        }
+      }
     }
   },
   "schema": 2,
@@ -469,7 +477,8 @@
       "zzzzzzzzzzzz-ohos-composition.diff",
       "zzzzzzzzzzzz-ohos-runtime-capabilities.diff",
       "zzzzzzzzzzzzz-ohos-lifecycle.diff",
-      "zzzzzzzzzzzzzz-ohos-composition-imports.diff"
+      "zzzzzzzzzzzzzz-ohos-composition-imports.diff",
+      "ohos-output-utf8.diff"
     ]
   }
 }

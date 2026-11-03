@@ -1,0 +1,60 @@
+--- a/node_modules/@deepseek-ai/dsh-subprocess-local/lib/output.js
++++ b/node_modules/@deepseek-ai/dsh-subprocess-local/lib/output.js
+@@ -65,6 +65,25 @@
+ 		spillDir: internals.spillDir ?? privateSpillDir(),
+ 		onSpillFailure: internals.onSpillFailure ?? reportSpillFailureToStderr
+ 	};
++}
++/**
++* Return the byte length that cannot still be completed by later UTF-8 bytes.
++* Only a well-formed but incomplete final sequence is deferred (at most 3 bytes).
++* Invalid prefixes retain Buffer's replacement behavior instead of waiting.
++*/
++function completeUtf8PrefixLength(bytes) {
++	let start = bytes.length - 1;
++	while (start >= 0 && bytes[start] >= 128 && bytes[start] <= 191 && bytes.length - start <= 3) start--;
++	if (start < 0) return bytes.length;
++	const lead = bytes[start];
++	const width = lead >= 194 && lead <= 223 ? 2 : lead >= 224 && lead <= 239 ? 3 : lead >= 240 && lead <= 244 ? 4 : 0;
++	const available = bytes.length - start;
++	if (width === 0 || available >= width) return bytes.length;
++	if (available > 1) {
++		const second = bytes[start + 1];
++		if (lead === 224 && second < 160 || lead === 237 && second > 159 || lead === 240 && second < 144 || lead === 244 && second > 143) return bytes.length;
++	}
++	return start;
+ }
+ /**
+ * Collects one stream with a bounded in-memory tail. With spill options, on
+@@ -91,6 +110,7 @@
+ 	spillFd;
+ 	spillFile;
+ 	spillDisabled;
++	sealed = false;
+ 	/** Total bytes ever pushed (not just retained). */
+ 	total = 0;
+ 	/**
+@@ -189,9 +209,13 @@
+ 		const windowStart = this.total - this.bytes;
+ 		const buffer = Buffer.concat(this.chunks);
+ 		const lossy = fromByte < windowStart;
++		const delta = lossy ? buffer : buffer.subarray(fromByte - windowStart);
++		// Each reader keeps its own byte cursor. Do not commit an incomplete
++		// character before EOF; a lossy tail keeps its existing truncation semantics.
++		const length = this.sealed || lossy ? delta.length : completeUtf8PrefixLength(delta);
+ 		return {
+-			text: (lossy ? buffer : buffer.subarray(fromByte - windowStart)).toString("utf8"),
+-			nextOffset: this.total,
++			text: delta.subarray(0, length).toString("utf8"),
++			nextOffset: this.total - delta.length + length,
+ 			lossy,
+ 			...this.spillFile !== void 0 ? { spillPath: this.spillFile } : {}
+ 		};
+@@ -214,6 +238,7 @@
+ 	* never point at a still-open file.
+ 	*/
+ 	seal() {
++		this.sealed = true;
+ 		if (this.spillFd === void 0) return;
+ 		try {
+ 			closeSync(this.spillFd);
