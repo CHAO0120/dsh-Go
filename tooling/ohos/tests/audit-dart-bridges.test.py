@@ -51,6 +51,34 @@ class BridgeInventoryTest(unittest.TestCase):
         self.assertEqual(report['fullInventoryStatus'],'INCOMPLETE')
         self.assertEqual(report['counts']['UNKNOWN_DYNAMIC'],1)
 
+    def test_whitelist_and_dispatch_are_independent_requirements(self):
+        original=self.native.read_text()
+        for removed in ('whitelist','dispatch'):
+            with self.subTest(removed=removed):
+                if removed=='whitelist':
+                    changed=original.replace("['read', 'readAll']", "['read']")
+                else:
+                    changed=original.replace("if (call.method === 'readAll') result.success({});", '')
+                self.native.write_text(changed)
+                report=self.report()
+                row=next(row for row in report['dartCalls'] if row['method']=='readAll')
+                self.assertEqual(report['gateStatus'],'FAIL')
+                self.assertIn(removed,row['missingLayers'])
+        self.native.write_text(original)
+        self.assertEqual(self.report()['gateStatus'],'PASS_SCOPED')
+
+    def test_dynamic_whitelist_is_not_assumed_to_accept_all_methods(self):
+        self.native.write_text(self.native.read_text().replace("['read', 'readAll']", "allowedMethods"))
+        report=self.report()
+        self.assertEqual(report['gateStatus'],'FAIL')
+        self.assertTrue(any(row['status']=='UNKNOWN_ACCEPTANCE' for row in report['dartCalls']))
+
+    def test_a_whitelist_is_not_required_for_a_switch_only_handler(self):
+        report=self.report(('dsh/second',))
+        self.assertEqual(report['gateStatus'],'PASS_SCOPED')
+        row=next(row for row in report['nativeHandlers'] if row['channel']=='dsh/second')
+        self.assertEqual(row['acceptanceGuards'],[])
+
     def test_scoped_success_does_not_erase_other_channel_gap(self):
         with self.dart.open('a') as f:f.write("\nvoid missing() { const MethodChannel('dsh/unknown').invokeMethod('x'); }\n")
         report=self.report()

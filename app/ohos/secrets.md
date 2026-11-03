@@ -1,4 +1,4 @@
-# 鸿蒙本机凭据：四方法通道与密文仓库
+# 鸿蒙本机凭据：数据通道、显式恢复与密文仓库
 
 五处默认存储（remote、forum、settings、provider keys、hosted links）通过
 `AppSecureStorage` 选择平台。`Platform.operatingSystem == 'ohos'` 且没有显式注入
@@ -17,10 +17,11 @@
 | `write` | `{key: String, value: String}` | `null` |
 | `delete` | `{key: String}` | `null`，不存在时也成功 |
 | `readAll` | 无 | `Map<String, String>` |
+| `recover` | `{confirmed: true}`，必须是布尔值 true | `null` |
 
 Dart 的 `write(value: null)` 使用 `delete`，不会向原生发送空值。无效回包或原生错误是
 失败，不被适配器转换成空串或空 Map。错误消息不包含键名、凭据、密文或系统路径。
-插件支持 `secrets_invalid`、`secrets_unavailable`、`secrets_unreadable`、`secrets_io`
+插件支持 `secrets_invalid`、`secrets_unavailable`、`secrets_key_missing`、`secrets_unreadable`、`secrets_io`
 和 `cancelled`；现有界面自身的错误处理没有在这里改写。
 
 ## 为什么使用 HUKS
@@ -63,9 +64,47 @@ rename 到最终路径，再 fsync 仓库目录。队列不是跨进程锁；没
 的保证。
 
 提交边界是 rename。此前的写入失败或已观察到的 engine 退役不会发布新密文；rename
-完成后的目录 sync 失败或迟到退役可能返回错误，但文件已经更新，不能解释为回滚。
+完成后的目录打开、fsync 或关闭失败不会让已提交保存报错，仅在本进程首次发生时
+输出固定诊断 `Credential change committed; directory durability unavailable`，不带 key、
+凭据、密文、路径或原始错误。目录句柄总会尝试关闭；关闭失败不能当作已释放的证明。
+普通密文文件写入、fsync、close 和 rename 失败仍返回错误，旧库不被替换。
+迟到 engine 退役仍可能取消通道回包，即使文件已经更新，不能解释为回滚。
 首次创建目录时没有据此宣称整个父目录链具备经断电验证的持久性。临时文件只有密文；
 清理尽力收束，不承诺任意崩溃后磁盘不存在旧密文残留。
+
+## 显式恢复入口（界面由本机接入）
+
+`secrets_unreadable` 表示已保存的密文无法验证/解析；`secrets_key_missing` 表示已有密文
+但 HUKS 明确报告 alias 不存在。`secrets_unavailable` 仍表示系统密钥暂不可用，不把
+IPC 等错误误认成密钥丢失。所有错误原样穿过 Dart；读取或写入失败从不自动恢复。
+
+界面可在前两类错误旁提供“清除已保存的密钥”入口。建议确认正文：
+“将清除本机保存的 API key、SSH 密码和私钥、论坛登录密钥及分享链接凭据。
+主机配置和其他应用数据会保留。清除后需要重新填写或登录。此操作无法撤销。”
+按钮为“取消”与“清除密钥”，英文可用 “Clear saved credentials”、
+“Clear locally saved API keys, SSH passwords and private keys, forum sign-in keys, and
+shared-link credentials? Host configurations and other app data will be kept. You will
+need to enter credentials or sign in again. This cannot be undone.”、
+“Cancel” / “Clear credentials”。此补丁只交数据协议，不修改 UI/ARB。
+
+用户明确确认后调用 `const AppSecureStorage().recover(confirmed: true)`。
+Dart 拒绝 false，原生独立拒绝缺参数、false、字符串或数字；Android 和显式注入存储
+不提供这个 OH 恢复入口，不调用原插件的 deleteAll。确认参数是调用协议，不代替 UI
+真实的用户确认。恢复成功后界面需重载相应数据，防止仍展示旧内存值；不要自动重试
+旧的编辑提交或把内存里的凭据再保存回来。
+
+恢复只 unlink 固定 `dsh-secrets/vault-v1.bin`，不读/解密旧库，不递归删除目录，不触碰
+主机配置、工作区或其他文件。不删除仍可用的 HUKS alias；缺 alias 时下一次显式写入
+才生成新密钥。文件已经不存在时恢复也成功。恢复与读取和完整 load→modify→save
+共用同一个静态串行队列，排在恢复前的旧 RMW 先结束，不能在恢复后复活旧记录。
+删除失败返回 `secrets_io`，不会伪称成功；已排队但 engine 退役的恢复在 unlink 前取消。
+与保存一样，unlink 已完成后的目录持久性步骤只降级诊断。崩溃遗留的 staging 密文
+不再被加载，但此入口不承诺介质安全擦除。
+
+公开文档核查（2026-11-03）：[官方 fs API 入口](https://developer.huawei.com/consumer/cn/doc/harmonyos-references/js-apis-file-fs)
+经允许的 web 入口仅取得导航壳；OpenHarmony 官方 raw 文档抓取被拒。现有材料不足以
+确认目标 API26 的目录 fsync 或断电保证，因此按追加17采用提交后的降级语义。
+这只降低断电持久性保证，不降低普通文件完整写入与关闭要求；未在真机核实。
 
 ## 升级、删除和设备范围
 
@@ -93,7 +132,7 @@ node --jitless --test --test-isolation=none --test-reporter=tap --test-timeout=1
 行为。普通 `check-arkts.sh --hms-stubs` 的最终组合结果另附实际记录；HMS 非官方桩的
 限制不被本次公开 HUKS API 编译消除。
 
-Dart 的四项 consumer 是非 UI 测试，子目录 `flutter_test_config.dart` 不加载字体；
+Dart consumer 是非 UI 测试，子目录 `flutter_test_config.dart` 不加载字体；
 应用其他目录的视觉测试配置保持原样。依赖准备后可在 `app` 执行：
 
 ```sh

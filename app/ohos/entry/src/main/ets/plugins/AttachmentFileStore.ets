@@ -73,6 +73,36 @@ export class AttachmentFileEntry {
 // Only DocumentViewPicker supplies source URIs. Names are display metadata;
 // private filenames are numeric within an atomically created unique directory.
 export class AttachmentFileBatch {
+  private static readonly initialized: Map<string, Promise<void>> = new Map<string, Promise<void>>();
+
+  static initialize(cacheDir: string): Promise<void> {
+    let ready = AttachmentFileBatch.initialized.get(cacheDir);
+    if (ready === undefined) {
+      ready = AttachmentFileBatch.recover(cacheDir);
+      AttachmentFileBatch.initialized.set(cacheDir, ready);
+    }
+    return ready;
+  }
+
+  // Run once per process, before any batch is created. Never follow links or
+  // remove other features' caches; live batches on a later attach are untouched.
+  private static async recover(cacheDir: string): Promise<void> {
+    let failed = false;
+    for (const name of await fs.listFile(cacheDir)) {
+      if (!/^dsh-attachments-[A-Za-z0-9]{6}$/.test(name)) continue;
+      const directory = cacheDir + '/' + name;
+      try {
+        const metadata = await fs.lstat(directory);
+        if (!metadata.isDirectory() || metadata.isSymbolicLink()) continue;
+        const children = await fs.listFile(directory);
+        if (children.some(child => !/^[0-8]$/.test(child))) continue;
+        for (const child of children) await fs.unlink(directory + '/' + child);
+        await fs.rmdir(directory);
+      } catch (_) { failed = true; }
+    }
+    if (failed) throw new Error('Attachment cache recovery failed');
+  }
+
   private directory: string | null = null;
   private readonly paths: string[] = [];
   private readonly cacheDir: string;

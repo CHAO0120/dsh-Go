@@ -141,6 +141,7 @@ export async function attachmentFixture(t, initial = {}) {
     const channel = channels.at(-1); assert.equal(channel.name, 'dsh/attachment-files');
     return { plugin, engine, ability, channel };
   }
+  await options.seedCache?.(context.cacheDir);
   const attached = attach();
   function invoke(method, arguments_ = {}, channel = attached.channel) {
     const result = deferred(), replies = [], args = new Map(Object.entries(arguments_));
@@ -156,7 +157,16 @@ export async function attachmentFixture(t, initial = {}) {
     await fsp.writeFile(local, bytes);
     const uri = 'file://docs/' + number + '/' + encodeURIComponent(name); uris.set(uri, local); return uri;
   }
-  async function cached() { return (await fsp.readdir(context.cacheDir, { recursive: true })).sort(); }
+  async function cached() {
+    // Recursive readdir can observe a directory removed during traversal.
+    // Retry the observation; do not turn a failed snapshot into an empty cache.
+    for (let attempt = 0; ; attempt++) {
+      try { return (await fsp.readdir(context.cacheDir, { recursive: true })).sort(); }
+      catch (error) {
+        if (attempt === 4 || error.code !== 'ENOENT' || !error.path?.startsWith(context.cacheDir + '/')) throw error;
+      }
+    }
+  }
   t.after(async () => {
     for (const picker of pickers) if (!picker.settled) picker.wait.resolve([]);
     attached.plugin.onDetachedFromEngine(attached.engine);
@@ -169,6 +179,9 @@ export async function attachmentFixture(t, initial = {}) {
   });
   return { ...attached, root, context, operations, descriptors, pickers, uris, file, cached, invoke, attach,
     change: changes => Object.assign(options, changes),
-    select: values => pickers.at(-1).wait.resolve(values),
+    select: async values => {
+      await until(() => pickers.some(picker => !picker.settled));
+      pickers.at(-1).wait.resolve(values);
+    },
   };
 }

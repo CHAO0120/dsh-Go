@@ -78,7 +78,7 @@ test('missing HUKS key with existing ciphertext is not first use, including subs
   await f.request('write', { key: 'hosted_links', value: '[{"secret":"saved"}]' });
   const before = await fs.readFile(f.vaultPath); f.keys.clear();
   for (const [method, args] of [['read', { key: 'hosted_links' }], ['readAll', {}], ['write', { key: 'hosted_links', value: '[]' }], ['delete', { key: 'hosted_links' }]]) {
-    assert.equal((await f.request(method, args)).error, 'secrets_unavailable');
+    assert.equal((await f.request(method, args)).error, 'secrets_key_missing');
     assert.deepEqual(await fs.readFile(f.vaultPath), before);
   }
   assert.equal(f.events.filter(row => row.op === 'generate').length, 1);
@@ -138,4 +138,124 @@ test('channel rejects malformed arguments without echoing secrets and keeps reti
   const read = f.call(f.channel, 'read', { key: 'absent' });
   assert.deepEqual(await read.done, { value: null }); await new Promise(resolve => setImmediate(resolve));
   assert.equal(read.replies.length, 1);
+});
+
+
+test('recovery requires literal confirmation, clears only credentials and works without decrypting a corrupt vault', async t => {
+  const f = await secretsFixture(t);
+  const config = f.app.filesDir + '/hosts.json';
+  await fs.writeFile(config, '{"host":"keep-me"}');
+  await f.request('write', { key: 'remote.password', value: 'old' });
+  const corrupt = Buffer.from('broken encrypted vault');
+  await fs.writeFile(f.vaultPath, corrupt);
+  for (const args of [{}, { confirmed: false }, { confirmed: 'true' }, { confirmed: 1 }]) {
+    assert.equal((await f.request('recover', args)).error, 'secrets_invalid');
+    assert.deepEqual(await fs.readFile(f.vaultPath), corrupt);
+  }
+  assert.deepEqual(await f.request('recover', { confirmed: true }), { value: null });
+  assert.equal(await fs.readFile(config, 'utf8'), '{"host":"keep-me"}');
+  assert.deepEqual(await f.request('readAll'), { value: {} });
+  assert.deepEqual(await f.request('recover', { confirmed: true }), { value: null });
+  assert.deepEqual(await f.request('write', { key: 'replacement', value: 'new' }), { value: null });
+  assert.equal(f.events.filter(row => row.op === 'generate').length, 1);
+});
+
+test('missing-key recovery deletes only ciphertext and permits new key creation on the next write', async t => {
+  const f = await secretsFixture(t);
+  await f.request('write', { key: 'lost', value: 'old' });
+  f.keys.clear();
+  assert.equal((await f.request('readAll')).error, 'secrets_key_missing');
+  assert.deepEqual(await f.request('recover', { confirmed: true }), { value: null });
+  assert.equal(f.events.filter(row => row.op === 'generate').length, 1);
+  assert.deepEqual(await f.request('write', { key: 'replacement', value: 'new' }), { value: null });
+  assert.deepEqual(await f.request('readAll'), { value: { replacement: 'new' } });
+  assert.equal(f.events.filter(row => row.op === 'generate').length, 2);
+});
+
+test('recovery serializes behind the entire old read-modify-write and before the next write across engines', async t => {
+  const f = await secretsFixture(t), next = f.attach();
+  await f.request('write', { key: 'old', value: 'must disappear' });
+  const entered = deferred(), release = deferred();
+  f.change({ beforeFinish: async ({ encrypt }) => { if (encrypt) { entered.resolve(); await release.promise; } } });
+  const oldWrite = f.request('write', { key: 'before', value: 'also disappear' });
+  await entered.promise;
+  const recovery = f.request('recover', { confirmed: true }, next.channel);
+  const freshWrite = f.request('write', { key: 'after', value: 'retained' }, next.channel);
+  release.resolve();
+  assert.deepEqual(await oldWrite, { value: null });
+  assert.deepEqual(await recovery, { value: null });
+  assert.deepEqual(await freshWrite, { value: null });
+  assert.deepEqual(await f.request('readAll'), { value: { after: 'retained' } });
+  next.plugin.onDetachedFromEngine(next.engine);
+});
+
+test('failed or retired recovery preserves the vault and later requests still work', async t => {
+  const f = await secretsFixture(t);
+  await f.request('write', { key: 'old', value: 'retained' });
+  const before = await fs.readFile(f.vaultPath);
+  f.change({ beforeUnlink: async () => { throw Error('controlled unlink failure'); } });
+  assert.equal((await f.request('recover', { confirmed: true })).error, 'secrets_io');
+  assert.deepEqual(await fs.readFile(f.vaultPath), before);
+  f.change({ beforeUnlink: null });
+  const entered = deferred(), release = deferred();
+  f.change({ beforeFinish: async ({ encrypt }) => { if (!encrypt) { entered.resolve(); await release.promise; } } });
+  const reading = f.request('readAll');
+  await entered.promise;
+  const recovery = f.request('recover', { confirmed: true });
+  f.plugin.onDetachedFromEngine(f.engine);
+  const next = f.attach();
+  release.resolve();
+  assert.equal((await reading).error, 'cancelled');
+  assert.equal((await recovery).error, 'cancelled');
+  assert.deepEqual(await fs.readFile(f.vaultPath), before);
+  f.change({ beforeFinish: null });
+  assert.deepEqual(await f.request('readAll', {}, next.channel), { value: { old: 'retained' } });
+  next.plugin.onDetachedFromEngine(next.engine);
+});
+
+test('post-commit directory sync failure succeeds with one safe diagnostic across writes and recovery', async t => {
+  const f = await secretsFixture(t, { beforeSync: async path => {
+    if (path.endsWith('/dsh-secrets')) throw Error('do not log path or secret');
+  } });
+  for (const value of ['first', 'replacement']) {
+    assert.deepEqual(await f.request('write', { key: 'remote.password', value }), { value: null });
+    assert.deepEqual(await f.request('read', { key: 'remote.password' }), { value });
+  }
+  const next = f.attach();
+  assert.deepEqual(await f.request('recover', { confirmed: true }, next.channel), { value: null });
+  assert.deepEqual(await f.request('readAll'), { value: {} });
+  const warnings = f.events.filter(row => row.op === 'warning');
+  assert.equal(warnings.length, 1);
+  assert.equal(warnings[0].message, 'Credential change committed; directory durability unavailable');
+  assert.equal(f.fds.size, 0);
+  next.plugin.onDetachedFromEngine(next.engine);
+});
+
+test('directory open or close failures after rename are diagnosed without rejecting a committed write', async t => {
+  for (const operation of ['beforeOpen', 'afterClose']) {
+    await t.test(operation, async t => {
+      const f = await secretsFixture(t, { [operation]: async path => {
+        if (path.endsWith('/dsh-secrets')) throw Error('controlled directory failure');
+      } });
+      assert.deepEqual(await f.request('write', { key: 'key', value: 'saved' }), { value: null });
+      assert.deepEqual(await f.request('read', { key: 'key' }), { value: 'saved' });
+      assert.equal(f.events.filter(row => row.op === 'warning').length, 1);
+      assert.equal(f.fds.size, 0);
+    });
+  }
+});
+
+test('ordinary file sync, close and rename failures remain errors and retain the original vault', async t => {
+  for (const operation of ['beforeSync', 'afterClose', 'beforeRename']) {
+    await t.test(operation, async t => {
+      const f = await secretsFixture(t);
+      await f.request('write', { key: 'old', value: 'retained' });
+      const before = await fs.readFile(f.vaultPath);
+      f.change({ [operation]: async path => { if (path.endsWith('/ciphertext')) throw Error('controlled precommit failure'); } });
+      assert.equal((await f.request('write', { key: 'new', value: 'not committed' })).error, 'secrets_io');
+      assert.deepEqual(await fs.readFile(f.vaultPath), before);
+      assert.equal(f.events.filter(row => row.op === 'warning').length, 0);
+      assert.equal(f.fds.size, 0);
+    });
+  }
 });

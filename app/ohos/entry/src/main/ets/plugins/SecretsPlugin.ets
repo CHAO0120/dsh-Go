@@ -20,7 +20,7 @@ export default class SecretsPlugin implements FlutterPlugin {
       const current = (): void => {
         if (this.engine !== binding) throw new SecretStorageError('cancelled', '窗口已关闭，凭据操作已取消。');
       };
-      if (!['read', 'write', 'delete', 'readAll'].includes(call.method)) { result.notImplemented(); return; }
+      if (!['read', 'write', 'delete', 'readAll', 'recover'].includes(call.method)) { result.notImplemented(); return; }
       const work: Promise<Any> = this.invoke(call, current);
       work.then((value: Any): void => {
         try { current(); } catch (error) { this.error(result, error as Error); return; }
@@ -48,14 +48,24 @@ export default class SecretsPlugin implements FlutterPlugin {
     current();
     const vault = this.vault;
     if (!vault) throw new SecretStorageError('secrets_unavailable', '本机加密凭据暂不可用，请重试。');
+    if (call.method === 'recover') {
+      if (call.argument('confirmed') !== true) {
+        throw new SecretStorageError('secrets_invalid', '清除已保存的密钥需要明确确认。');
+      }
+      await vault.recover(current);
+      return null;
+    }
     if (call.method === 'readAll') return vault.readAll(current);
     const key: Any = call.argument('key');
     if (typeof key !== 'string') throw new SecretStorageError('secrets_invalid', '凭据参数无效。');
     if (call.method === 'read') return vault.read(key as string, current);
     if (call.method === 'delete') { await vault.delete(key as string, current); return null; }
-    const value: Any = call.argument('value');
-    if (typeof value !== 'string') throw new SecretStorageError('secrets_invalid', '凭据参数无效。');
-    await vault.write(key as string, value as string, current);
-    return null;
+    if (call.method === 'write') {
+      const value: Any = call.argument('value');
+      if (typeof value !== 'string') throw new SecretStorageError('secrets_invalid', '凭据参数无效。');
+      await vault.write(key as string, value as string, current);
+      return null;
+    }
+    throw new SecretStorageError('secrets_invalid', '凭据方法无效。');
   }
 }

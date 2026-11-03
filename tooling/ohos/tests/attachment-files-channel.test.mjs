@@ -88,6 +88,7 @@ for (const failure of ['read', 'write']) {
 test('logical cancellation replies once but retains the physical picker slot until selection settles', async t => {
   const f = await attachmentFixture(t);
   const selected = f.invoke('pick', request());
+  await until(() => f.pickers.length === 1);
   await f.invoke('cancel', { owner: 'wrong-owner' }).done;
   assert.equal(selected.replies.length, 0);
   await f.invoke('cancel', { owner: 'test-1' }).done;
@@ -163,4 +164,104 @@ test('invalid budgets do not launch a picker; returned excess selection is bound
   assert.equal(f.operations.filter(v => v.op === 'open' && v.path.startsWith('file:')).length, 1);
   await release(f);
   assert.deepEqual(await pick(f, []), []); await release(f);
+});
+
+
+test('retired never-returning picker cannot block a new Ability; late old result and duplicate release stay isolated', async t => {
+  const f = await attachmentFixture(t);
+  const old = f.invoke('pick', request('old'));
+  await until(() => f.pickers.length === 1);
+  f.plugin.onDetachedFromAbility();
+  assert.deepEqual(await old.done, { value: [] });
+  f.plugin.onAttachedToAbility({ getAbility: () => ({ context: f.context }) });
+  const next = f.invoke('pick', request('new'));
+  await until(() => f.pickers.length === 2 || next.replies.length > 0);
+  assert.equal(next.replies.length, 0, 'new Ability must not inherit the retired busy slot');
+  f.pickers[1].wait.resolve([await f.file('new', 'new data')]);
+  const reply = await next.done;
+  assert.equal(reply.value.length, 1);
+  const path = reply.value[0].path;
+  f.pickers[0].wait.resolve([await f.file('old', 'old data')]);
+  await until(() => f.pickers[0].settled);
+  await new Promise(resolve => setImmediate(resolve));
+  await f.invoke('release', { owner: 'old' }).done;
+  await f.invoke('release', { owner: 'old' }).done;
+  assert.equal(await fsp.readFile(path, 'utf8'), 'new data');
+  assert.equal(f.operations.filter(v => v.op === 'open' && v.path.startsWith('file:')).length, 1);
+  assert.equal(old.replies.length, 1);
+  assert.equal((await f.invoke('pick', request('third')).done).error, 'ohos_attachment_busy');
+  await release(f, 'new');
+});
+
+test('engine retirement after release failure frees the slot and a new attach can retry selection', async t => {
+  const f = await attachmentFixture(t, { unlink: () => { throw new Error('cleanup denied'); } });
+  await pick(f, [await f.file('old', 'retained')]);
+  assert.equal((await f.invoke('release', { owner: 'test-1' }).done).error, 'ohos_attachment_cleanup');
+  f.plugin.onDetachedFromEngine(f.engine);
+  const attached = f.attach(f.plugin);
+  const next = f.invoke('pick', request('new'), attached.channel);
+  await until(() => f.pickers.length === 2 || next.replies.length > 0);
+  assert.equal(next.replies.length, 0);
+  f.pickers[1].wait.resolve([]);
+  assert.deepEqual(await next.done, { value: [] });
+  f.plugin.onDetachedFromEngine(attached.engine);
+});
+
+test('startup reclaims killed attachment batches before copying and preserves unrelated caches and source files', async t => {
+  const f = await attachmentFixture(t, { seedCache: async cache => {
+    await fsp.mkdir(cache + '/dsh-attachments-Ab12CD');
+    await fsp.writeFile(cache + '/dsh-attachments-Ab12CD/0', 'orphan');
+    await fsp.mkdir(cache + '/share-inbox');
+    await fsp.writeFile(cache + '/share-inbox/0', 'share');
+    await fsp.mkdir(cache + '/dsh-attachments-not-owned');
+    await fsp.writeFile(cache + '/dsh-attachments-not-owned/0', 'other');
+    await fsp.symlink(cache + '/share-inbox', cache + '/dsh-attachments-Link12');
+    await fsp.mkdir(cache + '/dsh-attachments-Mixed1');
+    await fsp.writeFile(cache + '/dsh-attachments-Mixed1/marker', 'unknown');
+  } });
+  const uri = await f.file('source', 'source data');
+  const entries = await pick(f, [uri]);
+  assert.equal((await f.cached()).includes('dsh-attachments-Ab12CD'), false);
+  assert.equal(await fsp.readFile(f.context.cacheDir + '/share-inbox/0', 'utf8'), 'share');
+  assert.equal(await fsp.readFile(f.context.cacheDir + '/dsh-attachments-not-owned/0', 'utf8'), 'other');
+  assert.equal((await fsp.lstat(f.context.cacheDir + '/dsh-attachments-Link12')).isSymbolicLink(), true);
+  assert.equal(await fsp.readFile(f.context.cacheDir + '/dsh-attachments-Mixed1/marker', 'utf8'), 'unknown');
+  assert.equal(await fsp.readFile(f.uris.get(uri), 'utf8'), 'source data');
+  assert.equal(await fsp.readFile(entries[0].path, 'utf8'), 'source data');
+  await f.invoke('release', { owner: 'test-1' }).done;
+});
+
+
+test('old in-flight copy closes after detach without deleting a newly attached batch', async t => {
+  const gate = deferred(); let entered = false;
+  const f = await attachmentFixture(t, { read: async () => { entered = true; await gate.promise; } });
+  const old = f.invoke('pick', request('old'));
+  f.select([await f.file('old', 'old data')]);
+  await until(() => entered);
+  f.plugin.onDetachedFromAbility();
+  f.plugin.onAttachedToAbility({ getAbility: () => ({ context: f.context }) });
+  f.change({ read: undefined });
+  const entries = await pick(f, [await f.file('new', 'new data')], {}, 'new');
+  gate.resolve();
+  await until(() => f.descriptors.size === 0);
+  await until(async () => (await f.cached()).filter(v => !v.includes('/')).length === 1);
+  assert.deepEqual(await old.done, { value: [] });
+  assert.equal(await fsp.readFile(entries[0].path, 'utf8'), 'new data');
+  await release(f, 'new');
+});
+
+test('failed startup cleanup diagnoses retained cache but does not prevent a fresh selection', async t => {
+  const f = await attachmentFixture(t, {
+    seedCache: async cache => {
+      await fsp.mkdir(cache + '/dsh-attachments-Ab12CD');
+      await fsp.writeFile(cache + '/dsh-attachments-Ab12CD/0', 'orphan');
+    },
+    unlink: () => { throw new Error('cleanup denied'); },
+  });
+  const entries = await pick(f, [await f.file('new', 'read succeeds')]);
+  assert.equal(await fsp.readFile(entries[0].path, 'utf8'), 'read succeeds');
+  assert.equal(await fsp.readFile(f.context.cacheDir + '/dsh-attachments-Ab12CD/0', 'utf8'), 'orphan');
+  assert.equal(f.operations.filter(v => v.op === 'cleanup-warning').length, 1);
+  f.change({ unlink: undefined });
+  assert.deepEqual(await f.invoke('release', { owner: 'test-1' }).done, { value: null });
 });

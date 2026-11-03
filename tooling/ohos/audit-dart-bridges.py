@@ -235,7 +235,7 @@ def reached_bodies(seed, methods):
     return result, sorted(seen)
 
 def dispatch_methods(tokens):
-    """Collect dispatch switch/guard/table keys, not unrelated switch cases."""
+    """Collect positive dispatch branches, never an acceptance whitelist."""
     names, matching = set(), pairs(tokens)
     for i in range(len(tokens)):
         if tokens[i].value == 'switch' and i+1 in matching:
@@ -249,15 +249,40 @@ def dispatch_methods(tokens):
                 if tokens[j].value == 'case' and j+1 < end and tokens[j+1].kind == 'string': names.add(tokens[j+1].value)
                 if tokens[j].value == '{' and j in matching: j = matching[j]+1
                 else: j += 1
-        if i+4 < len(tokens) and tokens[i].value in ('call', 'methodCall') and tokens[i+1].value == '.' and tokens[i+2].value == 'method' and tokens[i+3].value in ('==', '===', '!=', '!==') and tokens[i+4].kind == 'string':
+        if i+4 < len(tokens) and tokens[i].value in ('call', 'methodCall') and tokens[i+1].value == '.' and tokens[i+2].value == 'method' and tokens[i+3].value in ('==', '===') and tokens[i+4].kind == 'string':
             names.add(tokens[i+4].value)
-        if tokens[i].value == '[' and i in matching:
-            end = matching[i]
-            tail = expression(tokens[end+1:end+8])
-            if tail in ('. includes ( call . method )', '. includes ( methodCall . method )'):
-                values = args(tokens, i, matching)
-                names.update(literal(v) for v in values if literal(v) is not None)
     return sorted(names)
+
+def acceptance_guards(tokens):
+    """Recognize the explicit rejecting list guard; other lists stay unknown."""
+    matching=pairs(tokens); result=[]
+    for i, token in enumerate(tokens):
+        if token.value!='includes' or i+1 not in matching: continue
+        end=matching[i+1]
+        if expression(tokens[i+2:end]) not in ('call . method','methodCall . method'): continue
+        opening=matching.get(i-2) if i>=2 and tokens[i-2].value==']' else None
+        names=None
+        if opening is not None and expression(tokens[opening-3:opening])=='if ( !':
+            body_start=end+2
+            body_end=matching.get(body_start)
+            if end+1<len(tokens) and tokens[end+1].value==')' and body_end is not None:
+                body=tokens[body_start+1:body_end]
+                values=args(tokens,opening,matching)
+                if (has_sequence([t.value for t in body],['result','.','notImplemented','(',')',';','return',';'])
+                        and all(literal(value) is not None for value in values)):
+                    names=sorted({literal(value) for value in values})
+        result.append({'line':token.line,'methods':names})
+    return result
+
+def accepts(handler, method):
+    return all(guard['methods'] is not None and method in guard['methods']
+               for guard in handler['acceptanceGuards'])
+
+def missing_layers(handlers, method):
+    layers=[]
+    if not any(method in row['methods'] for row in handlers): layers.append('dispatch')
+    if not any(accepts(row,method) for row in handlers): layers.append('whitelist')
+    return layers
 
 def native_class_inventory(tokens, label, registered, class_name):
     matching = pairs(tokens); methods = method_bodies(tokens)
@@ -282,7 +307,7 @@ def native_class_inventory(tokens, label, registered, class_name):
             reached, chain=reached_bodies(seed,methods)
             rows.append({'channel':channel['channel'],'kind':channel['kind'],'source':label,
                          'line':token.line,'class':class_name,'registration':'EXPLICIT_ENTRY' if class_name in registered else 'UNCONFIRMED_REGISTRATION',
-                         'methods':dispatch_methods(reached),'handlerChain':chain,
+                         'methods':dispatch_methods(reached),'acceptanceGuards':acceptance_guards(reached),'handlerChain':chain,
                          'handlerResolved':bool(seed),'scope':'source dispatch recognition; not success/capability/device behavior'})
     return rows
 
@@ -369,8 +394,9 @@ def fork_inventory(roots):
                     matches=[item for item in native_rows if item['channel']==call['channel'] and call['channel']]
                     if call['classification']=='BASIC_MESSAGE_OR_PIGEON':call['status']='PIGEON_MESSAGE_REQUIRES_GENERATED_PROTOCOL_REVIEW'
                     elif not call['channel'] or not call['method']:call['status']='UNKNOWN_DYNAMIC'
-                    elif any(call['method'] in item['methods'] for item in matches):call['status']='DECLARED_FORK_HANDLER_PRESENT'
+                    elif any(call['method'] in item['methods'] and accepts(item,call['method']) for item in matches):call['status']='DECLARED_FORK_HANDLER_PRESENT'
                     elif not matches:call['status']='MISSING_OR_UNRESOLVED_FORK_CHANNEL'
+                    elif any(guard['methods'] is None for item in matches for guard in item['acceptanceGuards']):call['status']='UNKNOWN_FORK_ACCEPTANCE'
                     else:call['status']='MISSING_FORK_METHOD'
                     fork_calls.append(call)
         row['dartCalls']=fork_calls
@@ -483,6 +509,8 @@ def audit(source, roots, required=(), require_group1=False):
     for row in dart:
         channel=row['channel']; matches=[x for x in handlers if x['channel']==channel and channel is not None]
         row['nativeCandidates']=matches
+        active=[x for x in matches if x['registration']=='EXPLICIT_ENTRY']
+        row['missingLayers']=missing_layers(active,row['method']) if active and row['method'] else []
         if channel in SYSTEM_CHANNELS:
             row['status']='SYSTEM_BUILTIN_NOT_APP_ARKTS'
         elif row['classification']=='UNKNOWN_DYNAMIC':row['status']='UNKNOWN_DYNAMIC'
@@ -490,8 +518,11 @@ def audit(source, roots, required=(), require_group1=False):
         elif not matches:row['status']='MISSING_CHANNEL'
         elif not any(x['registration']=='EXPLICIT_ENTRY' for x in matches):row['status']='UNCONFIRMED_REGISTRATION'
         elif row['classification']=='EVENT_STREAM':row['status']='EVENT_HANDLER_PRESENT'
-        elif any(row['method'] in x['methods'] and x['registration']=='EXPLICIT_ENTRY' for x in matches):row['status']='HANDLER_PRESENT'
+        elif any(row['method'] in x['methods'] and accepts(x,row['method']) for x in active):row['status']='HANDLER_PRESENT'
         elif any(not x['handlerResolved'] for x in matches):row['status']='UNKNOWN_HANDLER'
+        elif any(guard['methods'] is None for x in active for guard in x['acceptanceGuards']):row['status']='UNKNOWN_ACCEPTANCE'
+        elif 'dispatch' in row['missingLayers']:row['status']='MISSING_METHOD'
+        elif 'whitelist' in row['missingLayers']:row['status']='MISSING_WHITELIST_METHOD'
         else:row['status']='MISSING_METHOD'
     checks=[]
     if require_group1:

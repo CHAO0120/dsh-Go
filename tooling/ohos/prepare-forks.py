@@ -151,18 +151,49 @@ def verify_resolved(path, output, entries, after_build=False):
     return result
 
 
+def installed_root(project, package):
+    # Match hvigor's OHPM resolver: the first visible package alias wins,
+    # starting at the importing entry module, then its ancestors. Do not scan
+    # .ohpm for a copy whose contents happen to match our pins.
+    importer = project.resolve(strict=True) / 'entry'
+    searched = []
+    for directory in (importer, *importer.parents):
+        if directory == directory.parent:
+            break
+        if directory.name.lower() == 'oh_modules':
+            continue
+        alias = directory / 'oh_modules' / package
+        searched.append(str(alias))
+        if alias.exists():
+            native = alias.resolve(strict=True)
+            if not (native / 'oh-package.json5').is_file():
+                raise ValueError('resolved native plugin has no oh-package.json5: '
+                                 + str(alias) + ' -> ' + str(native))
+            return native, alias
+    raise ValueError('native plugin was not installed: ' + package
+                     + '; searched ' + ', '.join(searched)
+                     + '; run ohpm install for this project and rebuild; '
+                     'the installed package alias must resolve to native sources')
+
+
 def verify_installed(project, entries):
     result = []
     for name, config in entries.items():
-        native = project / 'entry/oh_modules' / config['nativePackage']
-        if not native.is_dir():
-            raise ValueError('native plugin was not installed: ' + name)
+        native, alias = installed_root(project, config['nativePackage'])
         for target, hashes in config['targets'].items():
             relative = Path(target).relative_to(config['nativeSubdir'])
             path = native / relative
-            if sha(path.read_bytes()) != hashes['afterSha256']:
-                raise ValueError('installed native target SHA256 mismatch: ' + str(path))
-            result.append({'package': name, 'target': str(path), 'sha256': hashes['afterSha256']})
+            try:
+                actual = sha(path.read_bytes())
+            except OSError as error:
+                raise ValueError('installed native target unavailable: ' + str(path)
+                                 + '; selected alias ' + str(alias)
+                                 + '; native sources are required for SHA256 verification') from error
+            if actual != hashes['afterSha256']:
+                raise ValueError('installed native target SHA256 mismatch: ' + str(path)
+                                 + '; expected ' + hashes['afterSha256'] + ', got ' + actual)
+            result.append({'package': name, 'target': str(path), 'alias': str(alias),
+                           'sha256': hashes['afterSha256']})
     return result
 
 

@@ -58,7 +58,12 @@ class OhosAttachmentFiles {
       // Also runs for a malformed reply, stream failure, limit rejection and
       // cancellation. Only an owner token is accepted; Dart cannot delete an
       // arbitrary path through this channel.
-      await channel.invokeMethod<void>('release', {'owner': owner});
+      try {
+        await channel.invokeMethod<void>('release', {'owner': owner});
+      } catch (_) {
+        // Native retains cleanup ownership. A cleanup error must not replace
+        // either consumed data or the original selection/read failure.
+      }
     }
   }
 }

@@ -1,5 +1,6 @@
 import fs from '@ohos.file.fs';
 import util from '@ohos.util';
+import hilog from '@ohos.hilog';
 import { huks } from '@kit.UniversalKeystoreKit';
 import { cryptoFramework } from '@kit.CryptoArchitectureKit';
 import { BusinessError } from '@ohos.base';
@@ -19,6 +20,7 @@ class SecretRecord {
 // One queue spans plugin/engine instances in this process; it is not a cross-process lock.
 export class SecretVault {
   private static tail: Promise<void> = Promise.resolve();
+  private static durabilityWarned: boolean = false;
   private static readonly alias: string = 'DSH.Go.Secrets.AES256.GCM.v1';
   private static readonly chunkSize: number = 64 * 1024;
   private readonly directory: string;
@@ -66,14 +68,19 @@ export class SecretVault {
   private async key(existingCiphertext: boolean): Promise<void> {
     try {
       if (await this.hasKey()) return;
-      if (existingCiphertext) throw this.unavailable();
+      if (existingCiphertext) {
+        throw new SecretStorageError('secrets_key_missing', '已保存的凭据缺少系统密钥，原加密数据已保留。');
+      }
       const generation: huks.HuksOptions = { properties: this.generationParameters() };
       try { await huks.generateKeyItem(SecretVault.alias, generation); }
       catch (error) {
         if ((error as BusinessError).code !== 12000017 ||
             !await this.hasKey()) throw this.unavailable();
       }
-    } catch (_) { throw this.unavailable(); }
+    } catch (error) {
+      if (error instanceof SecretStorageError) throw error;
+      throw this.unavailable();
+    }
   }
 
   private async hasKey(): Promise<boolean> {
@@ -258,12 +265,36 @@ export class SecretVault {
       current();
       await fs.rename(temporary, this.path);
       published = true;
-      const directory = await fs.open(this.directory, fs.OpenMode.READ_ONLY | fs.OpenMode.DIR | fs.OpenMode.NOFOLLOW);
-      try { await fs.fsync(directory.fd); } finally { await fs.close(directory); }
+      await this.syncDirectory();
     } finally {
       if (!published) { try { await fs.unlink(temporary); } catch (_) {} }
       try { await fs.rmdir(staging); } catch (_) {}
     }
+  }
+
+  // Only called after rename/unlink commits. Failure affects durability, not visibility.
+  private async syncDirectory(): Promise<void> {
+    try {
+      const directory = await fs.open(this.directory, fs.OpenMode.READ_ONLY | fs.OpenMode.DIR | fs.OpenMode.NOFOLLOW);
+      try { await fs.fsync(directory.fd); } finally { await fs.close(directory); }
+    } catch (_) {
+      if (!SecretVault.durabilityWarned) {
+        SecretVault.durabilityWarned = true;
+        hilog.warn(0, 'DshSecrets', 'Credential change committed; directory durability unavailable');
+      }
+    }
+  }
+
+  // Deliberately does not load/decrypt: the confirmed recovery must work on corrupt data.
+  recover(current: () => void): Promise<void> {
+    return this.queue(async (): Promise<void> => {
+      current();
+      if (!await this.directoryExists()) return;
+      current();
+      try { await fs.unlink(this.path); }
+      catch (error) { if ((error as BusinessError).code === 13900002) return; throw error as Error; }
+      await this.syncDirectory();
+    });
   }
 
   read(key: string, current: () => void): Promise<string | null> {

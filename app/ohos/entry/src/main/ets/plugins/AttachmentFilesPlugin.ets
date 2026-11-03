@@ -20,8 +20,8 @@ class AttachmentPickPending {
   }
 }
 
-// A logical cancel cannot dismiss DocumentViewPicker. Keep the physical slot
-// through selection/copy cleanup, and through Dart's consumption of a cache batch.
+// Logical cancel keeps the slot while its Ability is live. Retirement frees
+// admission without claiming that DocumentViewPicker or in-flight I/O stopped.
 let activePick: AttachmentPickPending | null = null;
 
 export default class AttachmentFilesPlugin implements FlutterPlugin, AbilityAware {
@@ -29,12 +29,15 @@ export default class AttachmentFilesPlugin implements FlutterPlugin, AbilityAwar
   private ability: AbilityPluginBinding | null = null;
   private channel: MethodChannel | null = null;
   private pending: AttachmentPickPending | null = null;
+  private ready: Promise<void> = Promise.resolve();
 
   getUniqueClassName(): string { return 'DshAttachmentFilesPlugin'; }
 
   onAttachedToEngine(binding: FlutterPluginBinding): void {
     this.retire(); this.channel?.setMethodCallHandler(null);
     this.engine = binding; this.ability = null;
+    this.ready = AttachmentFileBatch.initialize(binding.getApplicationContext().cacheDir)
+      .catch((): void => this.cleanupWarning());
     this.channel = new MethodChannel(binding.getBinaryMessenger(), 'dsh/attachment-files');
     this.channel.setMethodCallHandler({ onMethodCall: (call: MethodCall, result: MethodResult): void => {
       if (this.engine !== binding) { result.error('ohos_attachment_detached', 'Attachment picker detached', null); return; }
@@ -46,8 +49,10 @@ export default class AttachmentFilesPlugin implements FlutterPlugin, AbilityAwar
         }
         this.cancel(request);
         if (!request.workDone) { result.success(null); return; }
-        this.cleanup(request).then((): void => result.success(null), (): void =>
-          result.error('ohos_attachment_cleanup', 'Unable to release attachment cache', null));
+        this.cleanup(request).then((): void => result.success(null), (): void => {
+          this.cleanupWarning();
+          result.error('ohos_attachment_cleanup', 'Unable to release attachment cache', null);
+        });
       } else result.notImplemented();
     } });
   }
@@ -72,6 +77,8 @@ export default class AttachmentFilesPlugin implements FlutterPlugin, AbilityAwar
     const request = this.pending;
     if (request === null) return;
     this.cancel(request);
+    this.pending = null;
+    if (activePick === request) activePick = null;
     if (request.workDone) this.cleanup(request).catch((): void => this.cleanupWarning());
   }
 
@@ -107,12 +114,14 @@ export default class AttachmentFilesPlugin implements FlutterPlugin, AbilityAwar
   }
 
   private async run(pending: AttachmentPickPending, ability: AbilityPluginBinding): Promise<void> {
+    const current = (): boolean => this.pending === pending && !pending.cancelled && this.ability === ability;
     try {
+      await this.ready;
+      if (!current()) throw new AttachmentFileRetired();
       const options = new picker.DocumentSelectOptions();
       options.maxSelectNumber = pending.request.limit;
       options.selectMode = picker.DocumentSelectMode.FILE;
       const uris = await new picker.DocumentViewPicker(ability.getAbility().context).select(options);
-      const current = (): boolean => this.pending === pending && !pending.cancelled && this.ability === ability;
       if (!current()) throw new AttachmentFileRetired();
       const entries = uris.length === 0 ? [] : await pending.batch.copy(uris, pending.request, current);
       if (!current()) throw new AttachmentFileRetired();

@@ -16,8 +16,9 @@ export class FixturePlugin {
     this.events.setStreamHandler(this);
   }
   firstCall(call: MethodCall, result: MethodResult): void {
+    if (!['read', 'readAll'].includes(call.method)) { result.notImplemented(); return; }
     if (call.method === 'read') result.success(null);
-    if (!['read', 'readAll'].includes(call.method)) result.notImplemented();
+    if (call.method === 'readAll') result.success({});
   }
   secondCall(call: MethodCall, result: MethodResult): void {
     switch (call.method) {

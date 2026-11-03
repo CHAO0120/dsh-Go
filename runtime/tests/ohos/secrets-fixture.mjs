@@ -34,8 +34,8 @@ export async function secretsFixture(t, initial = {}) {
     async stat(value) { return stat(typeof value === 'number' ? await promisify(fs.fstat)(value) : await fsp.stat(value)); },
     async mkdir(path) { try { await fsp.mkdir(path, { mode: 0o700 }); } catch (error) { fileError(error); } },
     async mkdtemp(template) { assert(template.endsWith('XXXXXX')); return fsp.mkdtemp(template.slice(0, -6)); },
-    async open(path, flags) { const fd = await promisify(fs.open)(path, flags, 0o600); fds.set(fd, path); events.push({ op: 'open', path }); return { fd, path }; },
-    async close(file) { const fd = fdOf(file); await promisify(fs.close)(fd); fds.delete(fd); },
+    async open(path, flags) { if (options.beforeOpen) await options.beforeOpen(path, flags); const fd = await promisify(fs.open)(path, flags, 0o600); fds.set(fd, path); events.push({ op: 'open', path }); return { fd, path }; },
+    async close(file) { const fd = fdOf(file); const path = fds.get(fd); await promisify(fs.close)(fd); fds.delete(fd); if (options.afterClose) await options.afterClose(path); },
     async read(fd, buffer, args) {
       return (await promisify(fs.read)(fd, Buffer.from(buffer), 0, Math.min(args.length, options.maxRead ?? Infinity), args.offset)).bytesRead;
     },
@@ -45,7 +45,7 @@ export async function secretsFixture(t, initial = {}) {
     },
     async fsync(fd) { events.push({ op: 'fsync', path: fds.get(fd) }); if (options.beforeSync) await options.beforeSync(fds.get(fd)); await promisify(fs.fsync)(fd); },
     async rename(from, to) { if (options.beforeRename) await options.beforeRename(from, to); await fsp.rename(from, to); events.push({ op: 'publish', path: to }); },
-    unlink: path => fsp.unlink(path), rmdir: path => fsp.rmdir(path),
+    async unlink(path) { if (options.beforeUnlink) await options.beforeUnlink(path); try { await fsp.unlink(path); } catch (error) { fileError(error); } }, rmdir: path => fsp.rmdir(path),
   };
   for (const [name, operation] of Object.entries(api)) {
     if (typeof operation !== 'function') continue;
@@ -118,6 +118,7 @@ export async function secretsFixture(t, initial = {}) {
       TextDecoder: { create: (encoding, supplied) => ({ decodeToString: bytes => new TextDecoder(encoding, supplied).decode(bytes) }) },
     } },
     '@ohos/flutter_ohos': { MethodChannel },
+    '@ohos.hilog': { default: { warn(domain, tag, message) { events.push({ op: 'warning', domain, tag, message }); } } },
   };
   function load(path) {
     if (modules.has(path)) return modules.get(path).exports;

@@ -4,7 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
-/// The four secret-storage operations used by this app.
+/// Secret-storage operations and explicit OH credential recovery.
 ///
 /// OH uses the app's HUKS channel. Other platforms and explicit test injections
 /// keep the original flutter_secure_storage implementation and options.
@@ -37,6 +37,14 @@ class AppSecureStorage {
   Future<void> delete({required String key}) async {
     if (!_ohos) return _fallback.delete(key: key);
     await _channel.invokeMethod<void>('delete', {'key': key});
+  }
+
+  /// Call only after the user confirms clearing all locally saved credentials.
+  /// Native recovery keeps host configuration and shares the read/write queue.
+  Future<void> recover({required bool confirmed}) async {
+    if (!_ohos) throw UnsupportedError('Credential recovery is only available on OHOS');
+    if (!confirmed) throw ArgumentError.value(confirmed, 'confirmed', 'Explicit confirmation required');
+    await _channel.invokeMethod<void>('recover', {'confirmed': true});
   }
 
   Future<Map<String, String>> readAll() async {

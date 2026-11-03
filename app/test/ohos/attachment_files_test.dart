@@ -15,6 +15,7 @@ void main() {
   late List<Map<String, Object?>> selected;
   late List<MethodCall> calls;
   Object? pickError;
+  Object? releaseError;
   Object? rawReply;
 
   Future<Map<String, Object?>> file(String name, List<int> bytes, {int? reportedSize}) async {
@@ -35,6 +36,7 @@ void main() {
     selected = [];
     calls = [];
     pickError = null;
+    releaseError = null;
     rawReply = null;
     messenger.setMockMethodCallHandler(OhosAttachmentFiles.channel, (call) async {
       calls.add(call);
@@ -43,6 +45,7 @@ void main() {
         return rawReply ?? selected;
       }
       expect(call.method, 'release');
+      if (releaseError != null) throw releaseError!;
       // This boundary double owns only its private files. Real ArkTS copying,
       // partial I/O and lifecycle cleanup are covered by the native channel gate.
       for (final child in await root.list().toList()) {
@@ -191,4 +194,28 @@ void main() {
     );
     await released();
   });
+  test('release failure preserves successful attachment bytes and text', () async {
+    releaseError = PlatformException(code: 'ohos_attachment_cleanup');
+    await file('good.txt', utf8.encode('中文'));
+    final files = await picker.pickFiles();
+    expect(utf8.decode(files.attachments.single.bytes), '中文');
+    expect(files.problem, isNull);
+    expect(await picker.pickTextFile(), '中文');
+    expect(await root.list().toList(), isNotEmpty);
+    expect(calls.where((call) => call.method == 'release').length, 2);
+  });
+
+  test('release failure preserves read, protocol and original picker errors', () async {
+    releaseError = PlatformException(code: 'ohos_attachment_cleanup');
+    selected.add({'name': 'key', 'path': '${root.path}/missing', 'size': 0, 'problem': null});
+    await expectLater(picker.pickTextFile(), throwsA(isA<FileSystemException>()));
+    rawReply = [42];
+    await expectLater(picker.pickFiles(), throwsFormatException);
+    rawReply = null;
+    pickError = PlatformException(code: 'ohos_attachment_io');
+    await expectLater(picker.pickFiles(), throwsA(isA<PlatformException>()
+        .having((error) => error.code, 'code', 'ohos_attachment_io')));
+    expect(calls.where((call) => call.method == 'release').length, 3);
+  });
+
 }

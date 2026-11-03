@@ -38,6 +38,10 @@ void main() {
         case 'write':
           values[args!['key'] as String] = args['value'] as String;
           return null;
+        case 'recover':
+          expect(args, {'confirmed': true});
+          values.clear();
+          return null;
         case 'delete':
           values.remove(args!['key']);
           return null;
@@ -74,6 +78,43 @@ void main() {
     });
     await expectLater(store.write(key: 'hosted_links', value: '[]'),
         throwsA(isA<PlatformException>().having((error) => error.code, 'code', 'secrets_unreadable')));
+  });
+
+  test('OH recovery is explicitly confirmed and propagates native failure', () async {
+    const store = AppSecureStorage.forPlatform('ohos');
+    await store.write(key: 'saved', value: 'credential');
+    await expectLater(store.recover(confirmed: false), throwsArgumentError);
+    expect(await store.readAll(), {'saved': 'credential'});
+    expect(calls.where((call) => call.method == 'recover'), isEmpty);
+    await store.recover(confirmed: true);
+    expect(await store.readAll(), isEmpty);
+    expect(calls.where((call) => call.method == 'recover').single.arguments, {'confirmed': true});
+    messenger.setMockMethodCallHandler(channel, (_) async {
+      throw PlatformException(code: 'secrets_io');
+    });
+    await expectLater(store.recover(confirmed: true),
+        throwsA(isA<PlatformException>().having((error) => error.code, 'code', 'secrets_io')));
+  });
+
+  test('missing HUKS key stays explicit and never triggers automatic recovery', () async {
+    const store = AppSecureStorage.forPlatform('ohos');
+    messenger.setMockMethodCallHandler(channel, (call) async {
+      calls.add(call);
+      throw PlatformException(code: 'secrets_key_missing');
+    });
+    await expectLater(store.readAll(),
+        throwsA(isA<PlatformException>().having((error) => error.code, 'code', 'secrets_key_missing')));
+    expect(calls.map((call) => call.method), ['readAll']);
+  });
+
+  test('recovery is unavailable on Android and explicit Flutter injections without touching their data', () async {
+    const android = AppSecureStorage.forPlatform('android');
+    const injected = AppSecureStorage.forPlatform('ohos', FlutterSecureStorage());
+    await android.write(key: 'kept', value: 'original');
+    await expectLater(android.recover(confirmed: true), throwsUnsupportedError);
+    await expectLater(injected.recover(confirmed: true), throwsUnsupportedError);
+    expect(await android.readAll(), {'kept': 'original'});
+    expect(calls, isEmpty);
   });
 
   test('Android default and explicit Flutter injection use the original storage, not the OH channel', () async {
