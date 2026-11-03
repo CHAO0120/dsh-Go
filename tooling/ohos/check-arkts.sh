@@ -48,7 +48,6 @@ PLUGIN_SHA512=54b84b5f857fd53376fbaabe358ba8bb0fafac786813306de25e391da048bddc94
 EMBEDDING_BASE=https://atomgit.com/oh-flutter/flutter_flutter/releases/download/3.47.9-ohos-1.0.0
 EMBEDDING_DEBUG_SHA256=90ebf7067ad3c91a53d564a38b1ee1130df8a34a01797bb4fcf8bd26bf9397ef
 EMBEDDING_RELEASE_SHA256=20903e3b9197004b0181e3a2acc9243d04e5b10fa63d19453969dfc97dc87e42
-PREPARED_HAR_SHA256=759a836691934a209ee39591fd8b0e25da38a77a330cb52d910d98f8b5f3899a
 SDK_API=26
 SDK_TESTED=26.0.0.38
 
@@ -163,8 +162,9 @@ if [ "$MODE" = release ]; then
   rm -rf "$PREPARED"
   python3 -I -B "$REPO/tooling/ohos/prepare-pasteboard.py" --input-har "$EMBEDDING_HAR" --output "$PREPARED" >/dev/null ||
     die "prepare-pasteboard.py refused $EMBEDDING_HAR"
-  echo "$PREPARED_HAR_SHA256  $PREPARED/flutter_embedding_release.har" | sha256sum -c --status ||
-    die "the prepared embedding HAR isn't $PREPARED_HAR_SHA256"
+  python3 -I -B "$REPO/tooling/ohos/prepare-pasteboard.py" --input-har "$EMBEDDING_HAR" \
+    --verify-har "$PREPARED/flutter_embedding_release.har" >/dev/null ||
+    die "the prepared embedding HAR members do not match the pinned sources"
   EMBEDDING_HAR="$PREPARED/flutter_embedding_release.har"
   EMBEDDING_PACKAGE="$PREPARED/package"
 else

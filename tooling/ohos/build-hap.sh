@@ -27,7 +27,6 @@ NATIVE_LIBS="${DSH_OHOS_NATIVE_LIBS:?Set DSH_OHOS_NATIVE_LIBS to the arm64-v8a d
 RUNTIME="${DSH_OHOS_RUNTIME:?Set DSH_OHOS_RUNTIME to the zip from runtime/ohos/package/compose-runtime.py}"
 RUNTIME="$(cd "$(dirname "$RUNTIME")" && pwd)/$(basename "$RUNTIME")"
 [[ -f "$RUNTIME" ]] || { printf 'Missing runtime zip: %s\n' "$RUNTIME" >&2; exit 1; }
-PREPARED_HAR_SHA256=759a836691934a209ee39591fd8b0e25da38a77a330cb52d910d98f8b5f3899a
 PASTEBOARD_HELPER_SHA256=4f16b6fa39cfc6d668895ce6e01a6faeec250c845feeeac700ba5d3263a84803
 PLATFORM_PLUGIN_SHA256=938829683d527ce8e0c4f2f76895122c36b0992633596dc0e7b196890e2882a9
 PREBUILT=(libnode.so libdsh_flock.so libdsh_require_builtin.so)
@@ -80,8 +79,9 @@ if [[ "$MODE" == --release ]]; then
     printf '%s is not the pinned release embedding; run "flutter precache --ohos --force" if an interrupted build left it replaced\n' "$ENGINE_HAR" >&2
     exit 1
   }
-  echo "$PREPARED_HAR_SHA256  $PREPARED/out/flutter_embedding_release.har" | sha256sum -c --status || {
-    printf 'The prepared embedding HAR is not %s\n' "$PREPARED_HAR_SHA256" >&2
+  python3 -I -B "$APP/../tooling/ohos/prepare-pasteboard.py" --input-har "$ENGINE_HAR" \
+    --verify-har "$PREPARED/out/flutter_embedding_release.har" >/dev/null || {
+    printf 'The prepared embedding HAR members do not match the pinned sources\n' >&2
     exit 1
   }
   ENGINE_KEPT="$ENGINE_HAR.dsh-upstream"

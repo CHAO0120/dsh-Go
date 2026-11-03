@@ -38,9 +38,17 @@ python3 tooling/ohos/prepare-pasteboard.py \
 
 输入 HAR 必须为上述准确字节；准备器同时校验两个修复目标、两个真实消费者、补丁和许可文件，任一不符即退出。输出目录必须不存在，不会原地改原件或已有产物。`git apply` 只对 `/tmp` 内的目标文件私有副本执行，未运行网络操作。
 
-输出目录包含新的 `flutter_embedding_release.har`、与 HAR 每个文件逐字对应的 `package/`、`licenses/`、小差分和 `report.json`。归档所有文件中只有 `package/src/main/ets/util/PasteboardUtils.ets` 和 `package/src/main/ets/plugin/PlatformPlugin.ets` 的内容变化，报告列出全部前后哈希。gzip 时间固定为 0、文件名为空，并记录 Python/zlib 版本；本次同环境重复生成的 HAR 完全一致，SHA 为 `759a836691934a209ee39591fd8b0e25da38a77a330cb52d910d98f8b5f3899a`。
+输出目录包含新的 `flutter_embedding_release.har`、与 HAR 每个文件逐字对应的 `package/`、`licenses/`、小差分和 `report.json`。归档所有文件中只有 `package/src/main/ets/util/PasteboardUtils.ets` 和 `package/src/main/ets/plugin/PlatformPlugin.ets` 的内容变化，报告列出全部前后哈希。gzip 时间固定为 0、文件名为空，并记录 Python/zlib 版本。压缩字节 SHA 仅供该产物追溯，不作为跨 Python/zlib 的接受条件。两个构建入口都调用下列只读校验：先硬核原始 HAR、补丁和许可 SHA，再从原始包的完整成员清单推导预期，仅将两个目标的内容 SHA 替换为已有 afterSha256；实际输出必须逐项匹配 path、文件/目录类型、mode 和文件内容 SHA。成员排序后按固定 JSON 编码另记 outputMembersSha256；重复（含规范化重复）路径、额外/缺失成员、链接或模式变化均拒绝。时间戳、所有者和 gzip/tar 封装差异不参与包内容身份。
 
-根代理/本机构建方应在自己的新私有构建目录同时使用这个 HAR 与匹配的提取 package，再跑真实 `check-arkts.sh`。这里没有自动覆盖构建下载缓存，也没有改动禁改的生产构建脚本。未完成这一步之前不能宣称应用已经使用补丁。
+```sh
+python3 -I -B tooling/ohos/prepare-pasteboard.py \
+  --input-har /path/to/original/flutter_embedding_release.har \
+  --verify-har /path/to/prepared/flutter_embedding_release.har
+```
+
+原始输入、两个补丁、目标前后文件及许可的钉值均未放宽；验证不会修改任一 HAR。
+
+根代理/本机构建方应在自己的新私有构建目录同时使用这个 HAR 与匹配的提取 package，再跑真实 `check-arkts.sh`。准备器不会自动覆盖构建下载缓存。本轮按追加要求更新了 build-hap.sh 与 check-arkts.sh 的成员身份校验接线；完整 HAP 构建仍待验证，不能仅凭准备器测试宣称应用已使用补丁。
 
 ### 实际验证
 
