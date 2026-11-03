@@ -3,6 +3,7 @@
 // The native sides are faked the way SharePlugin.kt / ShortcutsPlugin.kt
 // behave: arrivals held until Dart says `ready`, then pushed as calls.
 
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -10,11 +11,14 @@ import 'package:dsh_app/links/app_links.dart';
 import 'package:dsh_app/state/chat_state.dart';
 import 'package:dsh_app/state/hosts_state.dart';
 import 'package:dsh_app/state/sessions_state.dart';
+import 'package:dsh_app/state/ui_mode_state.dart';
 import 'package:dsh_app/state/voice_state.dart';
 import 'package:dsh_app/ui/chat/chat_screen.dart';
 import 'package:dsh_app/ui/chat/composer.dart';
 import 'package:dsh_app/ui/chat/widgets/attachments.dart';
+import 'package:dsh_app/ui/common/discard_guard.dart';
 import 'package:dsh_app/ui/shell/system_entry_host.dart';
+import 'package:dsh_app/ui/web/web_home.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -173,6 +177,112 @@ void main() {
     expect(image.existsSync(), isFalse);
     expect(pdf.existsSync(), isFalse);
     await _unmount(tester);
+  });
+
+  // A page with unsaved edits above [anchor], which asks before anyone leaves.
+  Future<void> openDirtyPage(WidgetTester tester, Finder anchor) async {
+    unawaited(
+      Navigator.of(tester.element(anchor)).push(
+        MaterialPageRoute<void>(
+          builder: (_) => DiscardGuard(listenable: ValueNotifier(0), isDirty: () => true, child: const Scaffold()),
+        ),
+      ),
+    );
+    await pumpFrames(tester);
+  }
+
+  // The share has reached the dialog, and any read it started has had real
+  // time to finish.
+  Future<void> untilAsked(WidgetTester tester) async {
+    await _settle(tester, () => find.byType(AlertDialog).evaluate().isNotEmpty);
+    await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 50)));
+    await tester.pump();
+  }
+
+  Finder dialogButton<T extends Widget>() =>
+      find.descendant(of: find.byType(AlertDialog), matching: find.byType(T));
+
+  Map<String, Object?> sharing(File file) => {
+    'files': [
+      {'path': file.path, 'name': file.uri.pathSegments.last, 'mime': 'application/pdf'},
+    ],
+    'skipped': [],
+  };
+
+  group('behind an unanswered 放弃修改', () {
+    testWidgets('a share stays in the cache until the person leaves the page', (tester) async {
+      natives(tester);
+      final file = cached('a.pdf', utf8.encode('%PDF-1.7'));
+      await _pump(tester, ChatHarness());
+      await openDirtyPage(tester, find.byType(ChatScreen));
+
+      await _shares.push(sharing(file));
+      await untilAsked(tester);
+      expect(file.existsSync(), isTrue);
+
+      await tester.tap(dialogButton<FilledButton>());
+      await _settle(tester, () => _tray(tester).isNotEmpty);
+      expect(_tray(tester), ['a.pdf']);
+      expect(file.existsSync(), isFalse);
+      await _unmount(tester);
+    });
+
+    testWidgets('a share still lands for later when the person keeps editing', (tester) async {
+      natives(tester);
+      final file = cached('a.pdf', utf8.encode('%PDF-1.7'));
+      await _pump(tester, ChatHarness());
+      await openDirtyPage(tester, find.byType(ChatScreen));
+
+      await _shares.push(sharing(file));
+      await untilAsked(tester);
+      expect(file.existsSync(), isTrue);
+
+      await tester.tap(dialogButton<TextButton>());
+      await _settle(tester, () => !file.existsSync());
+      expect(find.byType(DiscardGuard), findsOneWidget);
+      // The composer under the page has taken it, ready for when they're back.
+      final tray = tester.widget<ComposerTray>(find.byType(ComposerTray, skipOffstage: false));
+      expect([for (final a in tray.items) a.name], ['a.pdf']);
+      await _unmount(tester);
+    });
+
+    Future<ProviderContainer> pumpWeb(WidgetTester tester, File file) async {
+      natives(tester);
+      await tester.pumpWidget(
+        testApp(
+          const Stack(fit: StackFit.expand, children: [LinkHost(), WebEntryHost(), Scaffold()]),
+          overrides: ChatHarness().overrides,
+        ),
+      );
+      await pumpFrames(tester);
+      final container = ProviderScope.containerOf(tester.element(find.byType(WebEntryHost)));
+      await openDirtyPage(tester, find.byType(WebEntryHost));
+      await _shares.push(sharing(file));
+      await untilAsked(tester);
+      expect(file.existsSync(), isTrue);
+      return container;
+    }
+
+    testWidgets('the web home reads a share once the person leaves the page', (tester) async {
+      final file = cached('a.pdf', utf8.encode('%PDF-1.7'));
+      final container = await pumpWeb(tester, file);
+
+      await tester.tap(dialogButton<FilledButton>());
+      await _settle(tester, () => container.read(webOpenProvider) != null);
+      expect([for (final a in container.read(webOpenProvider)!.compose!.attachments) a.name], ['a.pdf']);
+      expect(file.existsSync(), isFalse);
+      await _unmount(tester);
+    });
+
+    testWidgets('the web home drops a share unread when the person keeps editing', (tester) async {
+      final file = cached('a.pdf', utf8.encode('%PDF-1.7'));
+      final container = await pumpWeb(tester, file);
+
+      await tester.tap(dialogButton<TextButton>());
+      await _settle(tester, () => !file.existsSync());
+      expect(container.read(webOpenProvider), isNull);
+      await _unmount(tester);
+    });
   });
 
   testWidgets('a share joins what the new chat already holds and says what did not fit', (tester) async {

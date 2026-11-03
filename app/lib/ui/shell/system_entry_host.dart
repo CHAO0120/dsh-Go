@@ -84,8 +84,12 @@ class _SystemEntryHostState extends ConsumerState<SystemEntryHost> {
       ref.read(appLinksProvider).add(link.appLink);
       return;
     }
+    // Read after the answer: shares arriving behind an unanswered 「放弃修改？」
+    // wait in the cache, not in memory.
+    await _showChat();
+    if (!mounted) return ComposeRequest.discardShare(share);
     final request = await ComposeRequest.fromShare(share, heldBytes: _heldDraftBytes);
-    if (mounted) await _compose(request);
+    if (mounted) ref.read(composeInboxProvider.notifier).push(request);
   }
 
   /// Bytes the draft this arrival lands in already holds; share loading checks

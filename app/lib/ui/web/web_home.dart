@@ -291,8 +291,12 @@ class _WebEntryHostState extends ConsumerState<WebEntryHost> {
       ref.read(appLinksProvider).add(link.appLink);
       return;
     }
+    // Read after the answer, as on the native home.
+    if (!mounted || !await DiscardGuard.confirmLeave(context) || !mounted) {
+      return ComposeRequest.discardShare(share);
+    }
     final request = await ComposeRequest.fromShare(share, maxBytes: maxWebComposeBytes);
-    if (mounted) await _compose(request);
+    if (mounted) _open(request);
   }
 
   Future<void> _onEntry(LauncherEntry entry) async {
@@ -326,8 +330,11 @@ class _WebEntryHostState extends ConsumerState<WebEntryHost> {
   /// composer.
   Future<void> _compose(ComposeRequest? request) async {
     if (!mounted || !await DiscardGuard.confirmLeave(context) || !mounted) return;
-    ref.read(webOpenProvider.notifier).request(const DshWebTarget(newSession: true), compose: request);
+    _open(request);
   }
+
+  void _open(ComposeRequest? request) =>
+      ref.read(webOpenProvider.notifier).request(const DshWebTarget(newSession: true), compose: request);
 
   @override
   Widget build(BuildContext context) => const SizedBox.shrink();
