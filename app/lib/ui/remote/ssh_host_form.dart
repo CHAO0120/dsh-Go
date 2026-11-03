@@ -11,6 +11,7 @@ import '../../state/attachments.dart';
 import '../../state/connection_state.dart';
 import '../../state/hosts_state.dart';
 import '../providers/provider_widgets.dart' show FormFieldBlock, FormFieldGroup;
+import '../settings/credential_recovery_dialog.dart';
 import '../settings/settings_widgets.dart';
 import '../shell/page_frame.dart';
 import '../theme/app_icons.dart';
@@ -279,7 +280,11 @@ class _SshHostFormPageState extends ConsumerState<SshHostFormPage> {
       await ref.read(hostsProvider.notifier).saveSsh(config, secrets: _secrets);
       if (mounted) Navigator.of(context).pop(config);
     } catch (e) {
-      if (mounted) setState(() => _formError = context.l10n.commonSaveFailed);
+      if (mounted) {
+        setState(() => _formError = context.l10n.commonSaveFailed);
+        // Cleared or not, nothing was saved: the form stays filled in.
+        await offerCredentialRecovery(context, ref, e);
+      }
     } finally {
       if (mounted) setState(() => _saving = false);
     }

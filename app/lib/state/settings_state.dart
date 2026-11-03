@@ -176,6 +176,24 @@ class SettingsController extends Notifier<AppSettings> {
     );
   }
 
+  /// Takes the keys in again once the saved credentials were cleared
+  /// (credential_recovery.dart). Only the keys: invalidating this provider would
+  /// drop [AppSettings.loaded] and the whole app back to the splash.
+  Future<void> reloadCredentials() async {
+    await _loaded;
+    if (!ref.mounted) return;
+    var apiKey = '';
+    var providerIds = const <String>{};
+    try {
+      apiKey = await _secure.read(key: _apiKeyKey) ?? '';
+      providerIds = (await ref.read(providerKeyVaultProvider).readAll()).keys.toSet();
+    } catch (_) {
+      // As in [_load]: the user can re-enter them.
+    }
+    if (!ref.mounted) return;
+    state = state.copyWith(apiKey: apiKey, customProviderIds: providerIds);
+  }
+
   /// Keeps [key] for the local engine's custom provider [id] (see
   /// [ProviderKeyVault]).
   Future<void> saveProviderKey(String id, String key) async {

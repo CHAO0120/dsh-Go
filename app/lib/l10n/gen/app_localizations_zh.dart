@@ -6947,6 +6947,31 @@ class L10nZh extends L10n {
   String get harmonySearchUnavailable => '鸿蒙版暂时没有这项功能';
 
   @override
+  String get harmonyCredentialsSection => '密钥';
+
+  @override
+  String get harmonyCredentialsUnreadable => '已保存的密钥无法读取';
+
+  @override
+  String get harmonyCredentialsUnreadableHint => '已保存的密钥无法读取。到「设置 → 隐私与分享」清除后再试';
+
+  @override
+  String get harmonyCredentialsClear => '清除已保存的密钥';
+
+  @override
+  String get harmonyCredentialsClearBody =>
+      '重试没有用。清除后，这台手机上保存的所有 API key、DSH Remote 登录、SSH 密码和私钥、论坛登录和分享链接都会被删除，需要重新填写或登录。对话和主机列表会保留。此操作无法撤销。';
+
+  @override
+  String get harmonyCredentialsClearAction => '清除密钥';
+
+  @override
+  String get harmonyCredentialsCleared => '已清除，请重新填写或登录';
+
+  @override
+  String get harmonyCredentialsClearFailed => '没能清除，再试一次';
+
+  @override
   String get hubSessionDetails => '对话详情';
 
   @override

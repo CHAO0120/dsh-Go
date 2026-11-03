@@ -111,6 +111,9 @@ class ForumAuthController extends Notifier<ForumAuthState> {
   @override
   ForumAuthState build() {
     _base = ref.watch(forumBaseUrlProvider);
+    // A rebuild keeps this object: the pair is read again, not remembered past
+    // the saved credentials being cleared.
+    _keys = null;
     unawaited(_restore(_base));
     return const ForumAuthState();
   }
@@ -188,8 +191,13 @@ class ForumAuthController extends Notifier<ForumAuthState> {
       final url = await authorizeUrl();
       if (await ref.read(accountBrowserProvider).open(url)) return true;
       if (ref.mounted) state = state.copyWith(phase: ForumAuthPhase.signedOut, error: appL10n.stateBrowserOpenFailed);
-    } catch (_) {
-      if (ref.mounted) state = state.copyWith(phase: ForumAuthPhase.signedOut, error: appL10n.stateSignInStartFailed);
+    } catch (e) {
+      if (ref.mounted) {
+        state = state.copyWith(
+          phase: ForumAuthPhase.signedOut,
+          error: credentialsUnreadable(e) ? appL10n.harmonyCredentialsUnreadableHint : appL10n.stateSignInStartFailed,
+        );
+      }
     }
     return false;
   }
@@ -224,9 +232,12 @@ class ForumAuthController extends Notifier<ForumAuthState> {
       state = ForumAuthState(phase: ForumAuthPhase.signedIn, credentials: credentials);
       unawaited(refreshUser());
       return true;
-    } catch (_) {
+    } catch (e) {
       if (ref.mounted) {
-        state = state.copyWith(phase: ForumAuthPhase.signedOut, error: appL10n.stateSignInIncompleteRetry);
+        state = state.copyWith(
+          phase: ForumAuthPhase.signedOut,
+          error: credentialsUnreadable(e) ? appL10n.harmonyCredentialsUnreadableHint : appL10n.stateSignInIncompleteRetry,
+        );
       }
       return false;
     }

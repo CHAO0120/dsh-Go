@@ -22,7 +22,7 @@
 Dart 的 `write(value: null)` 使用 `delete`，不会向原生发送空值。无效回包或原生错误是
 失败，不被适配器转换成空串或空 Map。错误消息不包含键名、凭据、密文或系统路径。
 插件支持 `secrets_invalid`、`secrets_unavailable`、`secrets_key_missing`、`secrets_unreadable`、`secrets_io`
-和 `cancelled`；现有界面自身的错误处理没有在这里改写。
+和 `cancelled`。
 
 ## 为什么使用 HUKS
 
@@ -72,26 +72,34 @@ rename 到最终路径，再 fsync 仓库目录。队列不是跨进程锁；没
 首次创建目录时没有据此宣称整个父目录链具备经断电验证的持久性。临时文件只有密文；
 清理尽力收束，不承诺任意崩溃后磁盘不存在旧密文残留。
 
-## 显式恢复入口（界面由本机接入）
+## 显式恢复入口
 
 `secrets_unreadable` 表示已保存的密文无法验证/解析；`secrets_key_missing` 表示已有密文
 但 HUKS 明确报告 alias 不存在。`secrets_unavailable` 仍表示系统密钥暂不可用，不把
 IPC 等错误误认成密钥丢失。所有错误原样穿过 Dart；读取或写入失败从不自动恢复。
 
-界面可在前两类错误旁提供“清除已保存的密钥”入口。建议确认正文：
-“将清除本机保存的 API key、SSH 密码和私钥、论坛登录密钥及分享链接凭据。
-主机配置和其他应用数据会保留。清除后需要重新填写或登录。此操作无法撤销。”
-按钮为“取消”与“清除密钥”，英文可用 “Clear saved credentials”、
-“Clear locally saved API keys, SSH passwords and private keys, forum sign-in keys, and
-shared-link credentials? Host configurations and other app data will be kept. You will
-need to enter credentials or sign in again. This cannot be undone.”、
-“Cancel” / “Clear credentials”。此补丁只交数据协议，不修改 UI/ARB。
+这两类错误（`credentialsUnreadable`）只在这些地方有出口，仅鸿蒙：
 
-用户明确确认后调用 `const AppSecureStorage().recover(confirmed: true)`。
-Dart 拒绝 false，原生独立拒绝缺参数、false、字符串或数字；Android 和显式注入存储
-不提供这个 OH 恢复入口，不调用原插件的 deleteAll。确认参数是调用协议，不代替 UI
-真实的用户确认。恢复成功后界面需重载相应数据，防止仍展示旧内存值；不要自动重试
-旧的编辑提交或把内存里的凭据再保存回来。
+| 位置 | 看到什么 |
+| --- | --- |
+| 设置 › 隐私与分享 | “清除已保存的密钥”一行，只在一次探测读取报这两类错误时出现 |
+| API key 页、清除 API key、SSH 主机表单 | 直接弹确认框，不再说“再试一次”；表单内容保留 |
+| DSH Remote 登录、论坛登录 | 错误文案说明无法读取并指向隐私页；DSH Remote 不再当网络错误重连 |
+
+确认框按钮是“取消”与“清除密钥”，危险色。用户确认后才调用
+`CredentialRecovery.recover`（`app/lib/state/credential_recovery.dart`），它调用一次
+`recover(confirmed: true)`。Dart 拒绝 false，原生独立拒绝缺参数、false、字符串或数字；
+Android 和显式注入存储不提供这个 OH 恢复入口，不调用原插件的 deleteAll。确认参数是
+调用协议，不代替 UI 真实的用户确认。
+
+恢复前后都让内存持有者放手，防止旧值写回：`hostedLinksProvider`（任何改动都重写整个
+列表）、`relayBackendProvider`（token 轮换写回）、`forumAuthProvider`（会话和密钥对）。
+`settingsProvider` 只重读 API key 和 provider id，因为失效它会让整个应用回到启动页。
+五个 store 本身没有缓存。不自动重试旧的编辑提交，也不把内存里的凭据再保存回来。
+
+引擎自己的 `$DSH_HOME/.credentials.yaml` 不在这个密钥库里，恢复不动它：内存里有
+DeepSeek key 时，`apiKey` 变空会经 `clearProviderKey` 清掉引擎那份；启动时就读不出来则
+没有这一步。自定义 provider 的引擎副本同样保留。
 
 恢复只 unlink 固定 `dsh-secrets/vault-v1.bin`，不读/解密旧库，不递归删除目录，不触碰
 主机配置、工作区或其他文件。不删除仍可用的 HUKS alias；缺 alias 时下一次显式写入

@@ -12734,6 +12734,54 @@ abstract class L10n {
   /// **'鸿蒙版暂时没有这项功能'**
   String get harmonySearchUnavailable;
 
+  /// No description provided for @harmonyCredentialsSection.
+  ///
+  /// In zh, this message translates to:
+  /// **'密钥'**
+  String get harmonyCredentialsSection;
+
+  /// No description provided for @harmonyCredentialsUnreadable.
+  ///
+  /// In zh, this message translates to:
+  /// **'已保存的密钥无法读取'**
+  String get harmonyCredentialsUnreadable;
+
+  /// No description provided for @harmonyCredentialsUnreadableHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'已保存的密钥无法读取。到「设置 → 隐私与分享」清除后再试'**
+  String get harmonyCredentialsUnreadableHint;
+
+  /// No description provided for @harmonyCredentialsClear.
+  ///
+  /// In zh, this message translates to:
+  /// **'清除已保存的密钥'**
+  String get harmonyCredentialsClear;
+
+  /// No description provided for @harmonyCredentialsClearBody.
+  ///
+  /// In zh, this message translates to:
+  /// **'重试没有用。清除后，这台手机上保存的所有 API key、DSH Remote 登录、SSH 密码和私钥、论坛登录和分享链接都会被删除，需要重新填写或登录。对话和主机列表会保留。此操作无法撤销。'**
+  String get harmonyCredentialsClearBody;
+
+  /// No description provided for @harmonyCredentialsClearAction.
+  ///
+  /// In zh, this message translates to:
+  /// **'清除密钥'**
+  String get harmonyCredentialsClearAction;
+
+  /// No description provided for @harmonyCredentialsCleared.
+  ///
+  /// In zh, this message translates to:
+  /// **'已清除，请重新填写或登录'**
+  String get harmonyCredentialsCleared;
+
+  /// No description provided for @harmonyCredentialsClearFailed.
+  ///
+  /// In zh, this message translates to:
+  /// **'没能清除，再试一次'**
+  String get harmonyCredentialsClearFailed;
+
   /// No description provided for @hubSessionDetails.
   ///
   /// In zh, this message translates to:

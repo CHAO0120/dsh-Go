@@ -7343,6 +7343,32 @@ class L10nEn extends L10n {
   String get harmonySearchUnavailable => 'This isn\'t available on HarmonyOS yet';
 
   @override
+  String get harmonyCredentialsSection => 'Keys';
+
+  @override
+  String get harmonyCredentialsUnreadable => 'Saved keys can’t be read';
+
+  @override
+  String get harmonyCredentialsUnreadableHint =>
+      'Saved keys can’t be read. Clear them in Settings → Privacy and sharing, then try again.';
+
+  @override
+  String get harmonyCredentialsClear => 'Clear saved keys';
+
+  @override
+  String get harmonyCredentialsClearBody =>
+      'Trying again won’t help. Clearing removes every API key, DSH Remote sign-in, SSH password and private key, forum sign-in and shared link saved on this phone, and you’ll need to enter them or sign in again. Conversations and the host list stay. This can’t be undone.';
+
+  @override
+  String get harmonyCredentialsClearAction => 'Clear keys';
+
+  @override
+  String get harmonyCredentialsCleared => 'Cleared. Enter them or sign in again.';
+
+  @override
+  String get harmonyCredentialsClearFailed => 'Couldn’t clear. Try again.';
+
+  @override
   String get hubSessionDetails => 'Chat details';
 
   @override

@@ -1,8 +1,13 @@
 import 'dart:io';
 
-import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+
+/// True for the two failures trying again can't fix: the saved credentials
+/// don't decrypt, or the system key they need is gone. Only the OH channel
+/// reports them. Everything else (`secrets_unavailable`, `secrets_io`) may pass.
+bool credentialsUnreadable(Object? error) =>
+    error is PlatformException && (error.code == 'secrets_unreadable' || error.code == 'secrets_key_missing');
 
 /// Secret-storage operations and explicit OH credential recovery.
 ///
@@ -11,7 +16,6 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 class AppSecureStorage {
   const AppSecureStorage([this._injected]) : _platform = null;
 
-  @visibleForTesting
   const AppSecureStorage.forPlatform(String operatingSystem, [this._injected]) : _platform = operatingSystem;
 
   final FlutterSecureStorage? _injected;
