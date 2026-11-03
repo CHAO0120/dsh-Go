@@ -48,7 +48,7 @@ class RefreshRateService {
 
   static bool get _testing => Platform.environment.containsKey('FLUTTER_TEST');
 
-  static bool get _systemDecides => Platform.operatingSystem == 'ohos';
+  static bool get _systemDecides => Platform.operatingSystem == 'ohos' || Platform.isIOS;
 
   /// Called by the settings row and by the stored preference after launch.
   Future<void> setMode(RefreshRateMode mode) async {

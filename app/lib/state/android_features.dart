@@ -10,12 +10,19 @@ final operatingSystemProvider = Provider<String>((ref) => Platform.operatingSyst
 /// service to drive the phone), the pet's windows over other apps, refresh-rate
 /// caps, a picture as a launcher shortcut, a launch screen of one's own, the rescue
 /// tools that work on its Linux guest (安全模式, 重置和卸载运行环境, Direct 引擎),
-/// the relay's direct link, and the line about a maker cutting the network.
+/// and the line about a maker cutting the network.
 ///
-/// This hides only what has no HarmonyOS form yet, in the hub, search and links
-/// alike (a link says the page isn't available here); each moves out of here
+/// This hides only what has no HarmonyOS or iOS form yet, in the hub, search and
+/// links alike (a link says the page isn't available here); each moves out of here
 /// once it is built there. What HarmonyOS does differently rather than lacks
 /// asks [operatingSystemProvider] instead (后台运行, 系统权限). It asks the OS, where
 /// [LocalRuntimeState.available] and [AppUpdateState.installable] ask for a
 /// channel handler that may still come.
-final androidSystemFeaturesProvider = Provider<bool>((ref) => ref.watch(operatingSystemProvider) != 'ohos');
+final androidSystemFeaturesProvider = Provider<bool>((ref) => androidSystemFeaturesOn(ref.watch(operatingSystemProvider)));
+
+/// Whether flutter_webrtc has an implementation here, for DSH Remote's direct path.
+final webRtcAvailableProvider = Provider<bool>((ref) => webRtcOn(ref.watch(operatingSystemProvider)));
+
+bool androidSystemFeaturesOn(String os) => os != 'ohos' && os != 'ios';
+
+bool webRtcOn(String os) => os != 'ohos';

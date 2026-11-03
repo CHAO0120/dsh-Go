@@ -125,7 +125,7 @@ class _NotExempt extends FakeBridge {
 void main() {
   setUp(() => SharedPreferences.setMockInitialValues({}));
 
-  test('everything but ohos counts as Android, so tests run on the Android path', () {
+  test('everything but ohos and ios counts as Android, so tests run on the Android path', () {
     final container = ProviderContainer();
     addTearDown(container.dispose);
     expect(container.read(androidSystemFeaturesProvider), isTrue);
@@ -519,11 +519,11 @@ void main() {
   });
 
   group('relay', () {
-    DshRemoteRelayBackend backend({required bool android}) {
+    DshRemoteRelayBackend backend({required bool webRtc}) {
       final container = ProviderContainer(
         overrides: [
           secretStoreProvider.overrideWithValue(MemorySecretStore()),
-          androidSystemFeaturesProvider.overrideWithValue(android),
+          webRtcAvailableProvider.overrideWithValue(webRtc),
         ],
       );
       addTearDown(container.dispose);
@@ -531,15 +531,27 @@ void main() {
     }
 
     test('on Android: direct first', () {
-      final relay = backend(android: true);
+      final relay = backend(webRtc: true);
       expect(relay.peerConnector, flutterPeerConnector);
       expect(relay.account.peerConnector, flutterPeerConnector);
     });
 
     test('on HarmonyOS: straight to the relay', () {
-      final relay = backend(android: false);
+      final relay = backend(webRtc: false);
       expect(relay.peerConnector, isNull);
       expect(relay.account.peerConnector, isNull);
     });
+  });
+
+  test("Android's own system features stay off HarmonyOS and iOS", () {
+    expect(androidSystemFeaturesOn('android'), isTrue);
+    expect(androidSystemFeaturesOn('ohos'), isFalse);
+    expect(androidSystemFeaturesOn('ios'), isFalse);
+  });
+
+  test('turning those off on iOS leaves its WebRTC path alone', () {
+    expect(webRtcOn('android'), isTrue);
+    expect(webRtcOn('ios'), isTrue);
+    expect(webRtcOn('ohos'), isFalse);
   });
 }

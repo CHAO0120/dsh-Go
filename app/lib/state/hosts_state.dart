@@ -384,7 +384,7 @@ final relayBackendProvider = Provider<RelayBackend>((ref) {
     clientVersion: AppInfo.version.split('+').first,
     // flutter_webrtc has no HarmonyOS implementation: straight to the relay,
     // not two handshakes that fail on the way there.
-    peerConnector: ref.watch(androidSystemFeaturesProvider) ? flutterPeerConnector : null,
+    peerConnector: ref.watch(webRtcAvailableProvider) ? flutterPeerConnector : null,
   );
   // The old default-off preference no longer controls automatic transport selection.
   unawaited(
