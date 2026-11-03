@@ -2100,6 +2100,7 @@
   "harmonyBackgroundUseRemote": "Or run them on a connected remote host",
   "harmonyEngineBackgroundHint": "The on-device engine pauses when the app leaves the screen",
   "harmonyKwBackground": "background activity,keep alive,suspended,paused,killed",
+  "harmonyPausedInBackground": "Paused in the background, continuing now",
   "hubSessionDetails": "Chat details",
   "hubTerminal": "Terminal",
   "hubSessionNoTurns": "No complete turns yet",

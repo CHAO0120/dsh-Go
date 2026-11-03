@@ -6926,6 +6926,9 @@ class L10nZh extends L10n {
   String get harmonyKwBackground => '后台,保活,挂起,暂停,被杀,杀后台';
 
   @override
+  String get harmonyPausedInBackground => '对话在后台暂停了，现在继续';
+
+  @override
   String get hubSessionDetails => '对话详情';
 
   @override

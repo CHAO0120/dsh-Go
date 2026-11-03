@@ -7319,6 +7319,9 @@ class L10nEn extends L10n {
   String get harmonyKwBackground => 'background activity,keep alive,suspended,paused,killed';
 
   @override
+  String get harmonyPausedInBackground => 'Paused in the background, continuing now';
+
+  @override
   String get hubSessionDetails => 'Chat details';
 
   @override

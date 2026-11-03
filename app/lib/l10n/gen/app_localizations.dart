@@ -12692,6 +12692,12 @@ abstract class L10n {
   /// **'后台,保活,挂起,暂停,被杀,杀后台'**
   String get harmonyKwBackground;
 
+  /// No description provided for @harmonyPausedInBackground.
+  ///
+  /// In zh, this message translates to:
+  /// **'对话在后台暂停了，现在继续'**
+  String get harmonyPausedInBackground;
+
   /// No description provided for @hubSessionDetails.
   ///
   /// In zh, this message translates to:

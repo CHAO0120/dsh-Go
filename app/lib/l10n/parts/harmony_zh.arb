@@ -12,5 +12,6 @@
   "harmonyBackgroundStay": "把应用留在屏幕上",
   "harmonyBackgroundUseRemote": "或者放到已连接的远程主机上跑",
   "harmonyEngineBackgroundHint": "离开屏幕后本机引擎会暂停",
-  "harmonyKwBackground": "后台,保活,挂起,暂停,被杀,杀后台"
+  "harmonyKwBackground": "后台,保活,挂起,暂停,被杀,杀后台",
+  "harmonyPausedInBackground": "对话在后台暂停了，现在继续"
 }
