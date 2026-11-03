@@ -3,17 +3,22 @@ import ImageIO
 import UniformTypeIdentifiers
 
 // dsh/share, after android/.../share/SharePlugin.kt: what the share extension left in
-// the inbox becomes one `share` call, with its files moved into the app's cache and
-// photos sized as ShareImages.kt sizes them.
+// the inbox becomes one `share` call, with its files copied into the app's cache and
+// photos sized as ShareImages.kt sizes them. A share leaves the inbox only once Dart
+// has answered that call: killed before then, it's delivered again next time.
 
 final class ShareChannel {
   private static let keepSlots = 4
   private static let maxSide = 2560
   private static let quality = 0.88
+  private static let abandonedAfter: TimeInterval = 24 * 60 * 60
 
   private let channel: FlutterMethodChannel
   private let work = DispatchQueue(label: "dsh.share")
   private var ready = false
+
+  /// Shares on their way to Dart, by folder. Only touched on [work].
+  private var delivering = Set<String>()
 
   init(messenger: any FlutterBinaryMessenger) {
     channel = FlutterMethodChannel(name: "dsh/share", binaryMessenger: messenger)
@@ -30,31 +35,46 @@ final class ShareChannel {
   func drain() {
     guard ready else { return }
     work.async { [weak self] in
-      guard let inbox = ShareInbox.folder else { return }
-      for folder in Self.finished(in: inbox) {
-        let share = Self.take(folder)
-        onMain { self?.channel.invokeMethod("share", arguments: share) }
+      guard let self, let inbox = ShareInbox.folder else { return }
+      for folder in Self.oldestFirst(in: inbox) {
+        let name = folder.lastPathComponent
+        if name.hasPrefix(ShareInbox.unfinishedPrefix) {
+          Self.removeIfAbandoned(folder)
+        } else if self.delivering.insert(name).inserted {
+          let share = Self.read(folder)
+          onMain { self.deliver(share, from: folder) }
+        }
       }
     }
   }
 
-  private static func finished(in inbox: URL) -> [URL] {
-    oldestFirst(in: inbox).filter { !$0.lastPathComponent.hasPrefix(ShareInbox.unfinishedPrefix) }
+  private func deliver(_ share: [String: Any?], from folder: URL) {
+    channel.invokeMethod("share", arguments: share) { [weak self] answer in
+      self?.work.async {
+        self?.delivering.remove(folder.lastPathComponent)
+        let refused = answer is FlutterError || (answer as? NSObject) === FlutterMethodNotImplemented
+        if !refused { try? FileManager.default.removeItem(at: folder) }
+      }
+    }
+  }
+
+  private static func created(_ url: URL) -> Date {
+    (try? url.resourceValues(forKeys: [.creationDateKey]).creationDate) ?? .distantPast
   }
 
   private static func oldestFirst(in folder: URL) -> [URL] {
     let keys: [URLResourceKey] = [.creationDateKey]
     let items = (try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: keys)) ?? []
-    func created(_ url: URL) -> Date {
-      (try? url.resourceValues(forKeys: [.creationDateKey]).creationDate) ?? .distantPast
-    }
     return items.sorted { created($0) < created($1) }
   }
 
-  /// Reads one share and empties its folder: nothing is delivered twice.
-  private static func take(_ folder: URL) -> [String: Any?] {
-    let manager = FileManager.default
-    defer { try? manager.removeItem(at: folder) }
+  /// The extension was killed while writing this one, and nothing will finish it.
+  private static func removeIfAbandoned(_ folder: URL) {
+    guard created(folder).timeIntervalSinceNow < -abandonedAfter else { return }
+    try? FileManager.default.removeItem(at: folder)
+  }
+
+  private static func read(_ folder: URL) -> [String: Any?] {
     let manifestFile = folder.appendingPathComponent(ShareInbox.manifestName)
     guard let data = try? Data(contentsOf: manifestFile),
       let manifest = try? JSONDecoder().decode(ShareInbox.Manifest.self, from: data)
@@ -65,8 +85,8 @@ final class ShareChannel {
     var skipped: [[String: String?]] = manifest.skipped.map { ["name": $0.name, "reason": $0.reason] }
     let slot = manifest.files.isEmpty ? nil : newSlot()
     for file in manifest.files {
-      if let slot, let moved = move(folder.appendingPathComponent(file.name), mime: file.mime, to: slot) {
-        files.append(moved)
+      if let slot, let copied = copy(folder.appendingPathComponent(file.name), mime: file.mime, to: slot) {
+        files.append(copied)
       } else {
         skipped.append(["name": file.name, "reason": "unreadable"])
       }
@@ -93,11 +113,11 @@ final class ShareChannel {
     oldestFirst(in: root).dropLast(keepSlots - 1).forEach { try? FileManager.default.removeItem(at: $0) }
   }
 
-  private static func move(_ source: URL, mime: String?, to slot: URL) -> [String: Any?]? {
+  private static func copy(_ source: URL, mime: String?, to slot: URL) -> [String: Any?]? {
     if let image = sized(source, mime: mime, in: slot) { return description(image.url, mime: image.mime) }
     let target = ShareInbox.unique(source.lastPathComponent, in: slot)
     do {
-      try FileManager.default.moveItem(at: source, to: target)
+      try FileManager.default.copyItem(at: source, to: target)
       return description(target, mime: mime)
     } catch {
       return nil

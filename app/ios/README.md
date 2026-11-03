@@ -12,6 +12,8 @@ open ios/Runner.xcworkspace
 
 第一次要在 Xcode 里给 `Runner` 和 `ShareExtension` 两个 target 都选上 Team（Signing & Capabilities）。两个 target 都用 App Group，开了自动签名时 Xcode 会自己注册。
 
+免费 Apple 账号（Personal Team）可以先用：每次签名 7 天有效，最多 3 台设备，不能用推送。它能不能注册 App Group 还没实测；不能的话，先在 Xcode 里去掉 `ShareExtension` target 和两份 `.entitlements`，只是少了分享入口。
+
 Bundle ID 如果被占用，要一起改三处：两个 target 的 `PRODUCT_BUNDLE_IDENTIFIER`，两份 `.entitlements` 里的 App Group，`ShareExtension/ShareInbox.swift` 的 `group`。扩展的 ID 必须以主应用的 ID 开头。
 
 然后插上手机：
@@ -34,7 +36,9 @@ flutter build ios --release --no-codesign
 - 已接的通道：`dsh/app`、`dsh/links`、`dsh/files`、`dsh/media`、`dsh/notify`、`dsh/voice`、`dsh/shortcuts`、`dsh/share`。
 - 没接的通道，Dart 都按不支持处理：`dsh/native-files`、`dsh/native-media`（原生插件的文件和媒体能力）、`dsh/performance`（设备档位固定中档，不响应发热）、`dsh/launcher_icon`（换图标）、`dsh/diagnostics`、`dsh/usage`、`dsh/launch`、`dsh/dynamic_color`、`dsh/picture_shortcut`。
 - `dsh/islands` 在 Dart 侧只对 Android 开放，所以 WebView 不跟随应用的深色设置和文字缩放，跟随系统。
-- 通知只在应用运行时发得出去。锁屏和离开应用后的提醒要 APNs，还没做。
+- 通知只在应用运行时发得出去。锁屏和离开应用后的提醒要 APNs，还没做，所以离开应用后等你确认的请求不会提醒你，回到应用才看得到。
+- 凭据存在 Keychain，只留在本机，不随备份迁移。全新安装时会先清掉上一次安装留下的 Keychain。“完整凭据能不能落盘”这件事和安卓一样还没改，发行前要定。
+- 包里还带着 `assets/engine/`，隐藏入口不等于移除。发行前要决定去留，并生成 iOS 的第三方许可清单。
 - 分享扩展靠响应链唤起主应用，这是非公开用法，上架时要重新评估。唤起失败时，内容留在收件箱，下次回到应用时送达。
 
 ## 真机验收
@@ -55,6 +59,8 @@ flutter build ios --release --no-codesign
 | 分享照片 | 相册选 3 张（含一张 HEIC），分享 | 都在附件里，HEIC 变成 JPEG，长边不超过 2560 |
 | 分享过多 | 一次分享超过 9 项 | 系统不提供 DSH Go，或多出的提示被跳过 |
 | 唤起失败 | 分享后没有回到应用时，手动打开应用 | 内容仍然送达，只送一次 |
+| 分享时被杀 | 分享后立刻划掉应用，再打开 | 内容还在，可能重复一次，不会自动发送 |
+| 重装 | 登录后卸载，再装回来 | 不会带着旧凭据自动连上 |
 | `.dshgo` | 文件 App 里打开或分享一个 `.dshgo` | 进入分享码导入，不会变成聊天附件 |
 | 链接 | Safari 打开 `dshgo://` 链接 | 进入对应页面 |
 | 文件 | 打开和保存对话产生的文件、PDF 预览 | 预览正常，保存后在文件 App 的 DSH Go 目录里 |
