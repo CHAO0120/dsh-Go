@@ -15,6 +15,7 @@ final class DshPlugin: NSObject, FlutterPlugin, FlutterSceneLifeCycleDelegate {
   private static var instance: DshPlugin?
 
   private let links: LinksChannel
+  private let shortcuts: ShortcutsChannel
   private let keep: [AnyObject]
 
   static func register(with registrar: any FlutterPluginRegistrar) {
@@ -25,11 +26,13 @@ final class DshPlugin: NSObject, FlutterPlugin, FlutterSceneLifeCycleDelegate {
 
   private init(messenger: any FlutterBinaryMessenger) {
     links = LinksChannel(messenger: messenger)
+    shortcuts = ShortcutsChannel(messenger: messenger)
     keep = [
       AppChannel(messenger: messenger),
       FilesChannel(messenger: messenger),
       MediaChannel(messenger: messenger),
       NotifyChannel(messenger: messenger),
+      VoiceChannel(messenger: messenger),
       // The runtime controller subscribes before it learns there is no engine, and
       // activating a stream with no handler reports an error to Flutter.
       SilentEvents(name: "dsh/runtime/events", messenger: messenger),
@@ -43,12 +46,23 @@ final class DshPlugin: NSObject, FlutterPlugin, FlutterSceneLifeCycleDelegate {
     options connectionOptions: UIScene.ConnectionOptions?
   ) -> Bool {
     connectionOptions?.urlContexts.forEach { links.open($0.url) }
+    if let item = connectionOptions?.shortcutItem { _ = shortcuts.perform(item) }
     return false
   }
 
   func scene(_ scene: UIScene, openURLContexts URLContexts: Set<UIOpenURLContext>) -> Bool {
     URLContexts.forEach { links.open($0.url) }
     return !URLContexts.isEmpty
+  }
+
+  func windowScene(
+    _ windowScene: UIWindowScene,
+    performActionFor shortcutItem: UIApplicationShortcutItem,
+    completionHandler: @escaping (Bool) -> Void
+  ) -> Bool {
+    let handled = shortcuts.perform(shortcutItem)
+    if handled { completionHandler(true) }
+    return handled
   }
 }
 
@@ -67,11 +81,11 @@ private final class SilentEvents: NSObject, FlutterStreamHandler {
   func onCancel(withArguments arguments: Any?) -> FlutterError? { nil }
 }
 
-private func arguments(_ call: FlutterMethodCall) -> [String: Any] {
+func arguments(_ call: FlutterMethodCall) -> [String: Any] {
   call.arguments as? [String: Any] ?? [:]
 }
 
-private func onMain(_ work: @escaping () -> Void) {
+func onMain(_ work: @escaping () -> Void) {
   DispatchQueue.main.async(execute: work)
 }
 
@@ -145,6 +159,74 @@ private final class LinksChannel {
       return ["uri": copy.absoluteString]
     } catch {
       return ["error": "unreadable", "name": name]
+    }
+  }
+}
+
+// MARK: - dsh/shortcuts
+
+/// The home screen's quick actions. 新对话 and 语音输入 are declared in Info.plist, the
+/// latest conversations are set from Dart, and the system shows four in all.
+private final class ShortcutsChannel {
+  private static let prefix = "io.github.ccch1mneyyy.dshgo."
+  private static let recentShown = 2
+
+  private let channel: FlutterMethodChannel
+  private var ready = false
+  private var held: [[String: String]] = []
+
+  init(messenger: any FlutterBinaryMessenger) {
+    channel = FlutterMethodChannel(name: "dsh/shortcuts", binaryMessenger: messenger)
+    channel.setMethodCallHandler { [weak self] call, result in
+      guard let self else { return result(FlutterMethodNotImplemented) }
+      switch call.method {
+      case "ready":
+        self.ready = true
+        self.held.forEach { self.channel.invokeMethod("entry", arguments: $0) }
+        self.held.removeAll()
+        result(true)
+      case "setRecent":
+        self.setRecent(arguments(call)["items"] as? [[String: Any]] ?? [])
+        result(true)
+      default: result(FlutterMethodNotImplemented)
+      }
+    }
+  }
+
+  /// False for an item that isn't the app's.
+  func perform(_ item: UIApplicationShortcutItem) -> Bool {
+    guard let entry = Self.entry(item) else { return false }
+    if ready {
+      channel.invokeMethod("entry", arguments: entry)
+    } else {
+      held.append(entry)
+    }
+    return true
+  }
+
+  private static func entry(_ item: UIApplicationShortcutItem) -> [String: String]? {
+    switch item.type {
+    case prefix + "new": return ["kind": "new"]
+    case prefix + "voice": return ["kind": "voice"]
+    case prefix + "chat":
+      guard let id = item.userInfo?["sessionId"] as? String else { return nil }
+      return ["kind": "chat", "sessionId": id, "host": item.userInfo?["host"] as? String ?? ""]
+    default: return nil
+    }
+  }
+
+  private func setRecent(_ items: [[String: Any]]) {
+    UIApplication.shared.shortcutItems = items.prefix(Self.recentShown).compactMap { item -> UIApplicationShortcutItem? in
+      guard let id = item["id"] as? String, let title = item["title"] as? String else { return nil }
+      var info: [String: NSSecureCoding] = ["sessionId": id as NSString]
+      if let host = item["host"] as? String { info["host"] = host as NSString }
+      return UIApplicationShortcutItem(
+        type: Self.prefix + "chat",
+        localizedTitle: title,
+        localizedSubtitle: nil,
+        icon: UIApplicationShortcutIcon(systemImageName: "bubble.left"),
+        userInfo: info
+      )
     }
   }
 }
@@ -335,7 +417,7 @@ private func topViewController() -> UIViewController? {
   return top
 }
 
-private func openAppSettings(_ address: String, result: @escaping FlutterResult) {
+func openAppSettings(_ address: String, result: @escaping FlutterResult) {
   guard let url = URL(string: address) else { return result(false) }
   UIApplication.shared.open(url) { result($0) }
 }

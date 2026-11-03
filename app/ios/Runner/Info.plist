@@ -6,6 +6,11 @@
 	<true/>
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
+	<key>CFBundleLocalizations</key>
+	<array>
+		<string>en</string>
+		<string>zh-Hans</string>
+	</array>
 	<key>CFBundleDisplayName</key>
 	<string>DSH Go</string>
 	<key>CFBundleExecutable</key>
@@ -47,6 +52,25 @@
 			</array>
 		</dict>
 	</dict>
+	<key>UIApplicationShortcutItems</key>
+	<array>
+		<dict>
+			<key>UIApplicationShortcutItemIconSymbolName</key>
+			<string>square.and.pencil</string>
+			<key>UIApplicationShortcutItemTitle</key>
+			<string>New chat</string>
+			<key>UIApplicationShortcutItemType</key>
+			<string>io.github.ccch1mneyyy.dshgo.new</string>
+		</dict>
+		<dict>
+			<key>UIApplicationShortcutItemIconSymbolName</key>
+			<string>mic</string>
+			<key>UIApplicationShortcutItemTitle</key>
+			<string>Voice input</string>
+			<key>UIApplicationShortcutItemType</key>
+			<string>io.github.ccch1mneyyy.dshgo.voice</string>
+		</dict>
+	</array>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
 	<key>UILaunchStoryboardName</key>
@@ -126,14 +150,16 @@
 		<true/>
 	</dict>
 	<key>NSLocalNetworkUsageDescription</key>
-	<string>连接你选择的电脑或服务器上的 DSH。</string>
+	<string>Connects to DSH on a computer or server you choose.</string>
 	<key>NSCameraUsageDescription</key>
-	<string>拍照后作为附件发给 DSH。</string>
+	<string>Takes photos to send to DSH as attachments.</string>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>语音输入时使用麦克风。</string>
+	<string>Used for voice input.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>Turns voice input into text. Where the phone can't do it by itself, the audio goes to Apple's speech service.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
-	<string>选择图片作为附件发给 DSH。</string>
+	<string>Picks images to send to DSH as attachments.</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>
-	<string>把生成的图片存到相册。</string>
+	<string>Saves generated images to your photo library.</string>
 </dict>
 </plist>
