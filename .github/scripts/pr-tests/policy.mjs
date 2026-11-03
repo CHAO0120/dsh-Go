@@ -2,7 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { appendFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 
-export const HEAVY_JOBS = Object.freeze(['flutter', 'dart', 'sdk', 'runtime', 'python', 'android']);
+export const HEAVY_JOBS = Object.freeze(['flutter', 'dart', 'sdk', 'runtime', 'python', 'android', 'web']);
 const ROOT_DOCS = new Set([
   'README.md', 'README.en.md', 'CONTRIBUTING.md', 'CONTRIBUTING.en.md',
   'SECURITY.md', 'SECURITY.en.md', 'LICENSE', '.github/PULL_REQUEST_TEMPLATE.md',
@@ -34,7 +34,7 @@ export function classifyChanges(changes) {
 }
 
 export function parseRawDiff(data) {
-  const text = new TextDecoder('utf-8', { fatal: true }).decode(data);
+  const text = new TextDecoder('utf-8').decode(data);
   if (text === '') return [];
   const fields = text.split('\0');
   if (fields.pop() !== '' || fields.length % 2 !== 0) throw new Error('Incomplete git diff');

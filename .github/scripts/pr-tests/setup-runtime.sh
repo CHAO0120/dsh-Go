@@ -13,16 +13,14 @@ if not match:
 print(match[1])
 PY
 )"
-prefix="$(mktemp -d "${RUNNER_TEMP:-${TMPDIR:-/tmp}}/dsh-ci-prefix.XXXXXX")"
 lock="$root/runtime/locks/dsh-$version"
-if [[ -f "$lock/package.json" && -f "$lock/package-lock.json" ]]; then
-  cp "$lock/package.json" "$lock/package-lock.json" "$prefix/"
-  npm ci --prefix "$prefix" --ignore-scripts --no-audit --no-fund
-else
-  # Source checkouts need not contain the build host's ignored lock cache.
-  # Exact DSH version plus rtbuild's byte pins reject incompatible npm drift.
-  npm install --prefix "$prefix" --save-exact --ignore-scripts --no-audit --no-fund "@deepseek-ai/dsh@$version"
+if [[ ! -f "$lock/package.json" || ! -f "$lock/package-lock.json" ]]; then
+  echo 'Tracked DSH lockfiles are missing; use a complete checkout, not an unpinned install.' >&2
+  exit 1
 fi
+prefix="$(mktemp -d "${RUNNER_TEMP:-${TMPDIR:-/tmp}}/dsh-ci-prefix.XXXXXX")"
+cp "$lock/package.json" "$lock/package-lock.json" "$prefix/"
+npm ci --prefix "$prefix" --ignore-scripts --no-audit --no-fund
 node - "$prefix" "$version" <<'JS'
 const fs = require('node:fs');
 const path = require('node:path');

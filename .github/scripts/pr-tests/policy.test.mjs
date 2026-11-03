@@ -38,10 +38,18 @@ test('CI toolchain pins match the build inputs and do not rely on an ignored wra
   assert.equal(pin('FLUTTER_VERSION'), read('tooling/setup-toolchain.sh').match(/FLUTTER_VERSION="\$\{FLUTTER_VERSION:-([^}]+)\}"/)[1]);
   assert.equal(pin('NODE_VERSION'), read('runtime/build-runtime.sh').match(/NODE_VERSION="\$\{NODE_VERSION:-([^}]+)\}"/)[1]);
   assert.equal(pin('GRADLE_VERSION'), read('app/android/gradle/wrapper/gradle-wrapper.properties').match(/gradle-([0-9.]+)-all\.zip/)[1]);
+  assert.equal(pin('ANDROID_CMDLINE_TOOLS'), read('tooling/setup-toolchain.sh').match(/CMDLINE_TOOLS_BUILD="\$\{CMDLINE_TOOLS_BUILD:-([^}]+)\}"/)[1]);
+  assert.match(workflow, /uses: android-actions\/setup-android@/);
   assert.match(workflow, /uses: gradle\/actions\/setup-gradle@/);
   assert.match(workflow, /run: gradle --no-daemon/);
   assert.doesNotMatch(workflow, /run: \.\/gradlew/);
   assert.doesNotMatch(workflow, /--update-goldens|DSH_TEST_GOLDEN_OUT:|DSH_TEST_LANG:\s*en/);
+});
+
+test('PR description edits cannot cancel and restart the full suite', () => {
+  const workflow = readFileSync(new URL('../../workflows/pr-tests.yml', import.meta.url), 'utf8');
+  assert.doesNotMatch(workflow, /types:.*\bedited\b/);
+  assert.match(workflow, /types: \[opened, synchronize, reopened, ready_for_review\]/);
 });
 
 test('mixed code, configuration, agent instructions and unknown paths require full tests', () => {
@@ -81,6 +89,10 @@ test('NUL-separated raw diffs include deletions and reject truncated or renamed 
     assert.throws(() => parseRawDiff(Buffer.from(invalid)));
   }
   assert.throws(() => parseRawDiff(Buffer.from([0xff])));
+  const nonUtf8Path = Buffer.concat([
+    Buffer.from(':100644 100644 abcdef0 abcdef1 M\0docs/'), Buffer.from([0xff]), Buffer.from('.md\0'),
+  ]);
+  assert.equal(classifyChanges(parseRawDiff(nonUtf8Path)).mode, 'full');
 });
 
 test('full gate requires every expected suite to succeed, without silent skips', () => {
@@ -126,6 +138,7 @@ function fixture(t) {
 
 function runPlan(root, base, head, event = 'pull_request') {
   const output = join(root, 'output.txt');
+  writeFileSync(output, '');
   const child = spawnSync(process.execPath, [policy, 'plan'], {
     cwd: root, encoding: 'utf8', env: { ...process.env, GITHUB_EVENT_NAME: event,
       BASE_SHA: base, HEAD_SHA: head, GITHUB_OUTPUT: output, GITHUB_STEP_SUMMARY: join(root, 'summary.md') },
@@ -163,9 +176,10 @@ test('classification uses the PR merge base rather than unrelated updates on mai
 test('manual and merge-queue runs never infer a documentation exemption', t => {
   const { root } = fixture(t);
   for (const event of ['workflow_dispatch', 'merge_group', 'push']) {
-    const { child } = runPlan(root, undefined, undefined, event);
+    const { child, output } = runPlan(root, undefined, undefined, event);
     assert.equal(child.status, 0, child.stderr);
     assert.match(child.stdout, /Test plan: full/);
+    assert.equal(readFileSync(output, 'utf8'), 'mode=full\n');
   }
   const { child } = runPlan(root, 'not-a-sha', 'not-a-sha');
   assert.notEqual(child.status, 0);

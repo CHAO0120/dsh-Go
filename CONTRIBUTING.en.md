@@ -44,11 +44,13 @@ Use one PR for one independently reviewable problem. Explain the old behavior, i
 
 Prefer focused regression tests while developing on a phone. Before merging, [PR Tests](.github/workflows/pr-tests.yml) runs the standard automated suites; the phone does not need to repeat the full run.
 
-- **Code, configuration or mixed changes:** run the complete default Flutter suite (including existing goldens), both Dart packages, the plugin SDK including TypeScript, unit and host bridge integration tests against an isolated, hash-verified patched DSH, Python tooling/asset tests, and Android JVM unit tests for both debug flavors. A failed, cancelled, unexpectedly skipped or missing required job fails the aggregate gate.
+- **Code, configuration or mixed changes:** run the complete default Flutter suite (including existing goldens), both Dart packages, the plugin SDK including TypeScript, media and all example plugins, site/market offline checks and share-worker build/type/unit tests, unit and host bridge integration tests against an isolated, hash-verified patched DSH, Python tooling/asset tests, and Android JVM unit tests for both debug flavors. A failed, cancelled, unexpectedly skipped or missing required job fails the aggregate gate.
 - **Documentation-only changes:** only explicitly allowlisted paths and ordinary non-executable files in the [classification policy](.github/scripts/pr-tests/policy.mjs) qualify for a heavy-test exemption: the root project/contribution/security/license files, specified SDK READMEs, the PR template, Markdown and PNG/JPEG/WebP under `docs/`, and corresponding bundled guide help pages. Classification regressions, localization-input validation, guide synchronization/validation and SDK skill synchronization/loading tests remain required. An exemption is not a full-test pass.
 - **No exemption:** UI ARB files, dependencies and lockfiles, CI/build configuration, runtime patches, agent instructions and skill entry points (including the guide's `SKILL.md`), other runtime assets, and unknown paths. Any mixed-in non-documentation change requires full tests. Both old and new rename paths are checked; symlinks and executable-bit changes cannot qualify as documentation. Titles, labels and line counts do not decide exemptions.
 
-An empty or unreadable complete diff never grants an exemption. Main-branch pushes, manual runs and merge-queue runs always use the full plan. The stable aggregate check is **PR test gate**; the workflow itself has no path filters, so documentation PRs also produce that check.
+Default npm test entries are checked against the complete Git commit tree; omitting a new package from CI fails policy regression tests. Runtime dependencies must use tracked lockfiles, never an unpinned fallback because a sparse checkout hid them.
+
+An empty or unreadable complete diff never grants an exemption. Main-branch pushes, manual runs and merge-queue runs always use the full plan. The stable aggregate check is **PR test gate**; the workflow itself has no path filters, so documentation PRs also produce that check. Editing only a PR title or description does not restart tests. After retargeting a PR to `main`, update the branch or reopen the PR if the current revision has no matching result; a missing result is not an exemption.
 
 For initial deployment, merge the workflow and confirm the check actually runs before an administrator makes **PR test gate** required for `main` in branch protection/rulesets and requires the latest revision to pass. Adding a workflow alone does not prevent merges. Maintainers must still review CI/policy changes: an ordinary required check name is not an independent trust boundary against malicious workflow edits. The existing external-PR intake gate continues to run default-branch code only, never PR-head code.
 
@@ -102,7 +104,7 @@ node sdk/plugin-kit/scripts/sync-skill.mjs --check
 
 For APK validation, use the build entry point in the README. For changes to Android processes, PRoot, direct startup, phone control or update installation, record the ABI, Android version, startup mode and device used. Desktop test results do not establish device behavior.
 
-Online checks, deployments and publishing scripts under `services/` and `infra/` are not part of routine contribution checks. When changing a companion service, confirm that tests target your own local environment; do not run examples with production credentials.
+Local site and share-service tests are included in the CI above. Online market scans/builds and online smoke, deployment and publishing scripts under `services/` and `infra/` are not routine contribution checks. When changing a companion service, confirm that tests target your own local environment; do not run examples with production credentials.
 
 ## Open a PR
 
