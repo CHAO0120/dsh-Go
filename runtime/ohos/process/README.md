@@ -23,7 +23,11 @@ Cordis 的 `subprocess` 提供者改为本目录的 `index.mjs`，`sandbox` 提�
 
 shell 任务在独立 `worker_threads` 中运行已固定的 just-bash 解释器；直接 node 任务使用其自身脚本 Worker。同一服务使用两个 FIFO 队列：直接 `rg` 独占一个搜索槽，其余命令共享一个执行槽，最多两个顶层任务。bash 的 node 命令和脚本创建的后代 Worker 可增加线程数，不能继续把两槽写成整个进程最多两个线程。写任务仍串行；长 bash 不再阻塞直接搜索。bash 内部调用 rg 仍在执行槽，因为同一脚本可能同时写文件。搜索可能观察到同时执行任务或外部编辑器正在修改的文件，不宣称快照一致性。
 
-宿主主线程与普通 Worker 不由 Node 脚本适配器改写；只有专属脚本 Worker 按追加2重定位 `process.cwd/chdir` 与固定公开 fs 路径表，并明确拒绝 child_process。`python:false`、`javascript:false` 禁用 just-bash 自带可选运行时；node 是单独的受控入口。`defenseInDepth:false` 防止 just-bash 改写宿主内建入口。公开 JS 路径检查不能控制原生 addon、process.binding 或未重定位的后代 Worker，不宣称能安全承载不可信任意 JS。
+宿主主线程与普通 Worker 的 cwd/fs 不由 Node 脚本适配器改写；只有专属脚本 Worker 按追加2重定位 `process.cwd/chdir` 与固定公开 fs 路径表，并明确拒绝 child_process。`python:false`、`javascript:false` 禁用 just-bash 自带可选运行时；node 是单独的受控入口。`defenseInDepth:false` 防止 just-bash 改写宿主内建入口。公开 JS 路径检查不能控制原生 addon、process.binding 或未重定位的后代 Worker，不宣称能安全承载不可信任意 JS。
+
+追加13增加独立的产品 `child_process` 边界：唯一产品 preload 在 network、publication 和插件加载前，且仅在 `process.platform === "openharmony"` 时，替换 `spawn`、`spawnSync`、`exec`、`execSync`、`execFile`、`execFileSync`、`fork` 与 `ChildProcess.prototype.spawn`，同步 ESM 导出，并抛出固定 `ERR_OHOS_NO_SPAWN`。普通 Worker 继承该边界；协议1的专属 Node 脚本 Worker 随后仍使用既有 `ERR_OHOS_CHILD_PROCESS_UNAVAILABLE`，保留原契约。`worker_threads` 和上述虚拟命令继续使用线程。该公开 JS 入口边界不是 OS 沙箱，也不保证拦截在唯一产品 preload 之前已捕获的旧同步函数引用。
+
+OHOS 专用 MCP 补丁对 `transport: stdio` 在建立连接和注册重连副作用前明确拒绝；错误包含服务器名称、`ERR_OHOS_NO_SPAWN` 和改用 `streamable-http` 的建议。普通可选 MCP 服务器显示失败，HTTP MCP 继续原连接和取消路径；原有必需插件失败策略保留。Android 的补丁选择和已安装运行时字节不变。
 
 `ReadWriteFs` 的路径和符号链接检查能拒绝已存在的越界链接；检查与后续宿主文件操作之间不是原子的，不能对抗另一个宿主调用同时替换路径的竞态。因此返回的 `sandbox.enforcement` 是 `partial`。这不是完整 OS 沙箱，真机验证也不能把这一结构边界消掉。
 

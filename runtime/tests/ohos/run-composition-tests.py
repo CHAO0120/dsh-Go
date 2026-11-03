@@ -79,7 +79,8 @@ def main():
         if mode == 'strict':
             env.update(DSH_GO_OHOS_SIM_PLATFORM='openharmony', DSH_GO_OHOS_SIM_ADDONS='[]')
             flags = ['--jitless', '--import', str(ROOT / 'runtime/ohos/sim/preload.mjs')]
-        argv = [str(node), *flags, '--import', str(payload / 'runtime/ohos/process/node-worker-preload.mjs'),
+        argv = [str(node), *flags, '--import', str(payload / 'runtime/ohos/process/child-process.mjs'),
+                '--import', str(payload / 'runtime/ohos/process/node-worker-preload.mjs'),
                 '--test', '--test-isolation=none', *[str(tests / (name + '.test.mjs')) for name in TESTS]]
         with (out / (mode + '.log')).open('x') as log:
             result = subprocess.run(argv, cwd=ROOT, env=env, stdout=log, stderr=subprocess.STDOUT)

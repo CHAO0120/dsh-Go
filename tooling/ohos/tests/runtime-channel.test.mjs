@@ -143,6 +143,7 @@ const files = {
   'runtime/ohos/lifecycle/index.mjs': 'export function apply() {}',
   'runtime/ohos/capabilities/index.mjs': 'export function apply() {}',
   'runtime/bridge/dsh-go-bridge/lib/index.js': 'export function apply() {}',
+  'runtime/ohos/process/child-process.mjs': 'export const childProcess = true;',
   'runtime/ohos/中文 空格.txt': '中文与 emoji 🐳\n',
 };
 

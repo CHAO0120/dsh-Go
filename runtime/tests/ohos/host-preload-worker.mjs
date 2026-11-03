@@ -9,7 +9,7 @@ assert.equal(globalThis[Symbol.for('dsh.go.ohos.publication')], undefined);
 assert.equal(globalThis[Symbol.for('dsh.go.ohos.sim')], true);
 if (workerData.strict) {
   assert.equal(typeof WebAssembly, 'undefined');
-  assert.throws(() => spawnSync('/not-a-real-command'), { code: 'ERR_OHOS_SIM_SPAWN' });
+  assert.throws(() => spawnSync('/not-a-real-command'), { code: 'ERR_OHOS_NO_SPAWN' });
   assert.throws(() => linkSync('/missing-source', '/missing-target'), { code: 'EACCES' });
   assert.throws(() => process.dlopen({ exports: {} }, '/missing-addon.node'), { code: 'ERR_OHOS_SIM_DLOPEN' });
 }

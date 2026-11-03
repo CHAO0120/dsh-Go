@@ -25,7 +25,7 @@ if (config.mode === 'strict') {
   assert(process.execArgv.includes('--jitless'));
   assert.equal(process.platform, 'openharmony');
   assert.equal(typeof WebAssembly, 'undefined');
-  assert.throws(() => spawn(process.execPath, ['-e', '0']), { code: 'ERR_OHOS_SIM_SPAWN' });
+  assert.throws(() => spawn(process.execPath, ['-e', '0']), { code: 'ERR_OHOS_NO_SPAWN' });
   assert.throws(() => process.dlopen({ exports: {} }, '/no-fuse-addon.node'), { code: 'ERR_OHOS_SIM_DLOPEN' });
   await assert.rejects(fs.link('/no-fuse-source', '/no-fuse-target'), { code: 'EACCES' });
 }

@@ -228,6 +228,7 @@ void Host::Start(HostOptions options, StartNode start_node, StopNode stop_node) 
   File(options.runtime_root, "runtime/ohos/lifecycle/index.mjs");
   File(options.runtime_root, "runtime/ohos/capabilities/index.mjs");
   File(options.runtime_root, "runtime/bridge/dsh-go-bridge/lib/index.js");
+  File(options.runtime_root, "runtime/ohos/process/child-process.mjs");
   std::lock_guard<std::mutex> lock(mutex_);
   Require(!state_.consumed, "ERR_OHOS_HOST_ALREADY_STARTED", "Restart the application before starting Node again");
   for (const auto& [key, value] : options.env) {

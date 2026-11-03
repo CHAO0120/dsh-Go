@@ -20,7 +20,7 @@ test('actual info uses OH facts, validated manifest and existing Dart section na
   assert.equal(reply.value.device.osVersion,'OpenHarmony fixture');assert.equal(reply.value.device.memoryMb,8192);
   assert.equal(reply.value.device.freeStorageMb,3072);assert.equal(reply.value.device.display.fontScale,1.25);
   assert.equal(reply.value.device.sdkInt,undefined);assert.equal(reply.value.device.android,undefined);
-  assert.deepEqual(reply.value.manifest,{runtimeVersion:'fixture-runtime',dshVersion:'0.0.fixture',nodeVersion:'24.22.1',files:7,uncompressedBytes:98});
+  assert.deepEqual(reply.value.manifest,{runtimeVersion:'fixture-runtime',dshVersion:'0.0.fixture',nodeVersion:'24.22.1',files:8,uncompressedBytes:116});
   assert.deepEqual(reply.value.voice,{});assert(!JSON.stringify(reply.value).includes('secrets'));
   assert(!f.operations.some(v=>['open','mkdir','write'].includes(v.op)));
   assert.deepEqual(f.operations.filter(v=>v.op==='resource').map(v=>v.name), ['dsh-runtime/runtime.zip']);

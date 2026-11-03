@@ -28,6 +28,7 @@ const pack=await makeArchive(path.join(output,'runtime.hap'),{
   'runtime/ohos/process/index.mjs':'process','runtime/ohos/process/sandbox.mjs':'sandbox',
   'runtime/ohos/capabilities/index.mjs':'capabilities','runtime/ohos/lifecycle/index.mjs':'lifecycle',
   'runtime/bridge/dsh-go-bridge/lib/index.js':'bridge',
+  'runtime/ohos/process/child-process.mjs':'child-process',
 });
 const original=new old.RuntimeInstaller(new OriginalStorage(pack.resources,directory),directory+'/runtime');
 let failure;

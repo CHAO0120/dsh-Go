@@ -18,7 +18,9 @@
 | 取消 | 排队尚未启动可直接取消；已启动则调用真实 Worker.terminate，等实际退出及输出排空。同步死循环和真实后代 Worker 均有取消测试。已写入的内容不会回滚。 |
 | CLI 拒绝 | 不支持的 Node CLI 形式 exit 2；找不到脚本 exit 1；缺少可继承预加载器 exit 127，且 node 从能力命令表中移除。越界/read-only 等实际策略错误保留 EACCES。 |
 
-宿主仍只有 `runtime/ohos/preload.mjs` 一个产品 `--import`，依次完成 network、publication、Node Worker 预加载。主线程分支仅登记可继承标记，专属 Worker 由 workerData 协议选择路径适配。普通 Worker 不修改 cwd/fs；嵌套的普通 Worker 也不会自动得到父脚本的私有 cwd。预加载器必须真实存在于继承的 execArgv；只在主线程动态 import 一个标记不能宣称入口可用。
+宿主仍只有 `runtime/ohos/preload.mjs` 一个产品 `--import`；追加13后依次完成 child_process 产品边界、network、publication、Node Worker 预加载。Node Worker 预加载器自身的主线程分支仅登记可继承标记，专属 Worker 由 workerData 协议选择路径适配。普通 Worker 不修改 cwd/fs；嵌套的普通 Worker 也不会自动得到父脚本的私有 cwd。预加载器必须真实存在于继承的 execArgv；只在主线程动态 import 一个标记不能宣称入口可用。
+
+独立产品边界使 OH 主线程和普通 Worker 的 OS 子进程调用报 `ERR_OHOS_NO_SPAWN`；专属协议1 Worker 的后继路径适配器仍报原 `ERR_OHOS_CHILD_PROCESS_UNAVAILABLE`。这不改变本节 cwd/fs、私有 stdin 或线程取消合同，具体入口范围见 [虚拟进程说明](README.md)。
 
 Worker 不显式设置 execArgv。Node 24 会拒绝显式传给 Worker 的 `--jitless`，而默认继承主线程 V8 标志与预加载是实际可跑路径。测试同时验证主线程、普通 Worker 与原 App stdio 未被专属脚本替换。
 

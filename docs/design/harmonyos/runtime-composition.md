@@ -35,7 +35,7 @@ npm ci --ignore-scripts --omit=optional --include=dev \
 
 ## 二、宿主、清单和组成器的共同必需入口
 
-本基底实际 `host_core.cpp` 的 `File(options.runtime_root, "…")` 要求七个文件：
+本基底实际 `host_core.cpp` 的 `File(options.runtime_root, "…")` 要求八个文件：
 
 | 用途 | 安装根下的路径 |
 | --- | --- |
@@ -46,10 +46,11 @@ npm ci --ignore-scripts --omit=optional --include=dev \
 | 生命周期工具边界插件 | `runtime/ohos/lifecycle/index.mjs` |
 | 能力协议插件 | `runtime/ohos/capabilities/index.mjs` |
 | App 路由桥 | `runtime/bridge/dsh-go-bridge/lib/index.js` |
+| OS 子进程边界 | `runtime/ohos/process/child-process.mjs` |
 
 `RuntimeCore.validateManifest` 现在要求同一集合。组成器从真实 C++ 源中的固定字面量调用提取要求，并与实际 ETS 声明比较；不能识别的调用形式、集合漂移或最终载荷缺项都会拒绝。新增宿主入口时必须继续遵守并更新这一明确约定与测试，不能仅修改某一层的常量。
 
-`composition-required.test.mjs` 执行真实 ETS 校验函数的逻辑体，依次删除七个入口验证拒绝；旧基底在七项中五项失败，新定义七项通过。`composition-inputs.test.py` 另用真实文件检查新入口、清单漂移、调用语法漂移及输入收据边界。Node 类型擦除仅用于 Linux 逻辑验证，不能作为 ArkTS 编译通过的依据。
+`composition-required.test.mjs` 执行真实 ETS 校验函数的逻辑体，依次删除八个入口验证拒绝；最初加这道门时，旧基底在七项中五项失败，新定义七项通过。`composition-inputs.test.py` 另用真实文件检查新入口、清单漂移、调用语法漂移及输入收据边界。Node 类型擦除仅用于 Linux 逻辑验证，不能作为 ArkTS 编译通过的依据。
 
 `host-layout.py --assembled-payload` 读取实际 manifest，验证整个文件集合后直接把该树传给由原样 `host_core.cpp` 编译的驱动。驱动真正调用 `Host::Start`，完成所有文件预检和 profile 生成；runner 回调只负责捕获 argv/env。随后测试用这些原样参数启动真正 pinned DSH，并完成消费者检查、配置 dump 和原严格回合。此路径不复制 npm 开发前缀、不重建 process、不用开发目录顶替运行依赖，回合前后整树 SHA/size 集合必须一致。
 

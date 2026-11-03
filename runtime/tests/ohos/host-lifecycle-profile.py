@@ -41,7 +41,7 @@ def main():
     for name in ['runtime/ohos/preload.mjs', 'node_modules/@deepseek-ai/dsh/lib/bin.js',
                  'runtime/ohos/process/index.mjs', 'runtime/ohos/process/sandbox.mjs',
                  'runtime/ohos/lifecycle/index.mjs', 'runtime/ohos/capabilities/index.mjs',
-                 'runtime/bridge/dsh-go-bridge/lib/index.js']:
+                 'runtime/bridge/dsh-go-bridge/lib/index.js', 'runtime/ohos/process/child-process.mjs']:
         path = runtime / name
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text('// Only a filesystem preflight fixture.\n')
@@ -52,7 +52,12 @@ def main():
     services = [('lifecycle', 'ohos-lifecycle', 'runtime/ohos/lifecycle/index.mjs'),
                 ('capabilities', 'ohos-capabilities', 'runtime/ohos/capabilities/index.mjs'),
                 ('bridge', 'dsh-go-bridge', 'runtime/bridge/dsh-go-bridge/lib/index.js')]
-    for name in ['default-profile', 'missing-lifecycle', 'missing-capabilities', 'missing-bridge']:
+    guard = runtime / 'runtime/ohos/process/child-process.mjs'
+    for name in ['default-profile', 'missing-lifecycle', 'missing-capabilities', 'missing-bridge', 'missing-child-process']:
+        if name == 'missing-child-process':
+            guard.unlink()
+        else:
+            guard.write_text('// Only a filesystem preflight fixture.\n')
         for module, _identifier, relative in services:
             path = runtime / relative
             if name == 'missing-' + module:

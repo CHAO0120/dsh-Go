@@ -3,7 +3,7 @@ import { Readable } from 'node:stream';
 import { installNodeWorkerPaths } from './node-worker-paths.mjs';
 
 // The host still has one --import. Its inherited Worker branch runs before
-// Node's native CJS/ESM entry loader; ordinary Workers get no builtin changes.
+// Node's native CJS/ESM entry loader; ordinary Workers get no path/stdin changes here.
 if (workerData?.dshOhosNodeScript?.protocol === 1) {
   const config = workerData.dshOhosNodeScript;
   if (!(config.stdin instanceof Uint8Array)) throw new TypeError('Node script batch input must be bytes');

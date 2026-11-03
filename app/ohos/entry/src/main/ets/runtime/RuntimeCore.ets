@@ -51,7 +51,7 @@ export function validateManifest(manifest: RuntimeManifest): RuntimeManifest {
   for (const entry of ['node_modules/@deepseek-ai/dsh/lib/bin.js', 'runtime/ohos/preload.mjs',
     'runtime/ohos/process/index.mjs', 'runtime/ohos/process/sandbox.mjs',
     'runtime/ohos/lifecycle/index.mjs', 'runtime/ohos/capabilities/index.mjs',
-    'runtime/bridge/dsh-go-bridge/lib/index.js']) {
+    'runtime/bridge/dsh-go-bridge/lib/index.js', 'runtime/ohos/process/child-process.mjs']) {
     if (!paths.has(entry)) throw new RuntimeChannelError('ohos_manifest_invalid', '运行时缺少固定启动入口。');
   }
   return manifest;
