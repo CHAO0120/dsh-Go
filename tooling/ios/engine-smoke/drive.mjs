@@ -1,6 +1,6 @@
-// Drives one real round against the engine running on the iOS Simulator: the same
-// script as runtime/ohos/sim/round.mjs (write, edit, read, grep, bash, with approvals)
-// against a local fake model, then stops and restarts the engine in the same process.
+// Drives real tool and lifecycle rounds on the iOS Simulator: the same
+// five tools as runtime/ohos/sim/round.mjs, then Node Worker, git, rg, 2 MiB output,
+// cancellation, stop during a Worker, persisted sessions and another round after restart.
 //
 //   node drive.mjs --simulator <udid> --smoke <binary> --frameworks <dir> --runtime <tree> \
 //     --work <new dir> --ws <dir holding the ws package>
@@ -11,20 +11,22 @@ import { randomUUID } from 'node:crypto';
 import { once } from 'node:events';
 import http from 'node:http';
 import { appendFileSync, cpSync, existsSync, mkdirSync, realpathSync, writeFileSync } from 'node:fs';
-import { readFile } from 'node:fs/promises';
+import { readFile, stat, rm } from 'node:fs/promises';
+import { setTimeout as delay } from 'node:timers/promises';
+import { fileURLToPath } from 'node:url';
+import { startScenarios } from './scenarios.mjs';
 import { createRequire } from 'node:module';
 import { join, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
-import { pathToFileURL } from 'node:url';
 
-const { values } = parseArgs({ options: Object.fromEntries(
-  ['simulator', 'smoke', 'frameworks', 'runtime', 'work', 'ws'].map((name) => [name, { type: 'string' }])) });
-for (const name of ['simulator', 'smoke', 'frameworks', 'runtime', 'work', 'ws']) {
+const { values } = parseArgs({ options: { ...Object.fromEntries(
+  ['simulator', 'smoke', 'frameworks', 'runtime', 'work', 'ws'].map((name) => [name, { type: 'string' }])),
+  direct: { type: 'boolean', default: false },
+} });
+for (const name of [...(values.direct ? [] : ['simulator']), 'smoke', 'frameworks', 'runtime', 'work', 'ws']) {
   if (!values[name]) throw new Error(`--${name} is required`);
 }
-const here = new URL('.', import.meta.url);
-const repo = resolve(new URL('../../..', here).pathname);
-const { startFakeModel } = await import(pathToFileURL(join(repo, 'runtime/ohos/sim/fake-model.mjs')));
+const repo = fileURLToPath(new URL('../../..', import.meta.url));
 const { WebSocket } = createRequire(join(resolve(values.ws), 'package.json'))('ws');
 
 const work = resolve(values.work);
@@ -36,10 +38,10 @@ const cache = realpathSync(work) + '/cache';
 for (const directory of [dshHome, `${guest}/root/.agents`, workspace, cache]) mkdirSync(directory, { recursive: true });
 
 const logFile = join(work, 'engine.log');
-const report = { status: 'BLOCKED', stage: 'startup', approvals: 0, restart: 'not-run', eventTypes: [] };
+const report = { status: 'BLOCKED', stage: 'startup', approvals: 0, restart: 'not-run', eventTypes: [], scenarios: [] };
 const fail = (message) => { throw new Error(message); };
 
-const model = await startFakeModel(workspace);
+const model = await startScenarios(workspace);
 // The phone tools' backend, wired the way EngineChannel.preparePhone does it. Only the
 // system actions themselves need the app.
 const phoneRun = randomUUID();
@@ -62,10 +64,13 @@ writeFileSync(overlay, JSON.stringify([
   { id: 'session-title-llm', disabled: true },
 ]));
 
-const engine = spawn('xcrun', ['simctl', 'spawn', values.simulator, resolve(values.smoke), resolve(values.frameworks),
-  resolve(values.runtime), guest, cache], {
+const smokeArgs = [resolve(values.frameworks), resolve(values.runtime), guest, cache];
+const engine = spawn(values.direct ? resolve(values.smoke) : 'xcrun', values.direct ? smokeArgs :
+  ['simctl', 'spawn', values.simulator, resolve(values.smoke), ...smokeArgs], {
   env: {
     ...process.env,
+    DSH_IOS_SMOKE_PATCH: overlay,
+    DSH_IOS_SMOKE_PHONE_RUN: phoneRun,
     SIMCTL_CHILD_DSH_IOS_SMOKE_PATCH: overlay,
     SIMCTL_CHILD_DSH_IOS_SMOKE_PHONE_RUN: phoneRun,
   },
@@ -80,6 +85,7 @@ let tail = [];
 let buffered = '';
 const repeats = new Map();
 const noteLine = (line) => {
+  line = line.replace(/([?&]token=)[^\s]+/gu, '$1<redacted>');
   appendFileSync(logFile, line + '\n');
   // A warning repeated thousands of times would push the cause out of the tail.
   const key = line.replace(/\d+/g, '#');
@@ -119,6 +125,10 @@ engine.stdout.on('data', (data) => {
     }
   }
 });
+engine.on('error', (error) => {
+  exited = { error: error.message };
+  for (const waiter of readyWaiters.splice(0)) waiter();
+});
 engine.on('exit', (code, signal) => {
   exited = { code, signal };
   noteLine(`[smoke exited] ${code ?? signal}`);
@@ -128,7 +138,7 @@ engine.on('exit', (code, signal) => {
 async function waitReady(index, ms) {
   const deadline = Date.now() + ms;
   while (readies.length <= index) {
-    if (exited) fail(`engine exited before readiness: ${exited.code ?? exited.signal}`);
+    if (exited) fail(`engine exited before readiness: ${exited.error ?? exited.code ?? exited.signal}`);
     if (engineEnded) fail(`engine ended before readiness: ${JSON.stringify(engineEnded)}`);
     if (Date.now() > deadline) fail('engine readiness deadline');
     await Promise.race([new Promise((done) => readyWaiters.push(done)), new Promise((done) => setTimeout(done, 1000))]);
@@ -175,7 +185,7 @@ async function login(ready) {
   return { cookie, rpc };
 }
 
-async function round(ready) {
+async function round(ready, { mode = 'normal', restore, resume = false } = {}) {
   const { cookie, rpc } = await login(ready);
   const frames = [];
   const waiters = new Set();
@@ -219,15 +229,63 @@ async function round(ready) {
   socket.send(JSON.stringify({ type: 'open', streamId: 'host', endpoint: '$events', payload: { args: {} } }));
   await waitFrame((frame) => frame.streamId === 'host' && frame.value?.type === 'ready');
   report.stage = 'session/create';
-  const { sessionId } = await rpc('session/create', { request: { cwd: workspace, agentPreset: 'standard' } });
+  const sessionId = restore ?? (await rpc('session/create', { request: { cwd: workspace, agentPreset: 'standard' } })).sessionId;
   report.stage = 'session/follow';
   socket.send(JSON.stringify({ type: 'open', streamId: 'session', endpoint: 'session/follow', payload: { args: { request: { address: { kind: 'session', sessionId }, assistantDeltas: true } } } }));
-  await waitFrame((frame) => frame.streamId === 'session' && frame.value?.type === 'snapshot');
-  report.stage = 'round';
+  const snapshot = await waitFrame((frame) => frame.streamId === 'session' && frame.value?.type === 'snapshot');
+  const close = () => { socket.removeAllListeners('close'); socket.terminate(); };
+  if (restore) {
+    const records = snapshot.value.records ?? [];
+    if (!records.some((row) => row.event?.type === 'tool/result')) fail('restored session lost its real tool history');
+    if (resume) {
+      const before = events.length;
+      await rpc('session/prompt', { request: { requestId: randomUUID(), sessionId, mode: 'queue',
+        content: [{ type: 'text', text: '[DSH_IOS_SMOKE:resume] Continue the saved scripted conversation after restart.' }] } });
+      const end = await waitFrame((frame) => frame.streamId === 'session' && frame.value?.event?.type === 'turn/end');
+      if (end.value.event.data.reason?.kind !== 'completed') fail('restored session could not continue');
+      const results = events.slice(before).filter((event) => event.type === 'tool/result');
+      if (results.length !== 1 || results[0].data.message?.isError !== false ||
+        !results[0].data.message.content.some((part) => part.text?.includes('修改后内容'))) {
+        fail('restored session did not read its prior file');
+      }
+    }
+    report.scenarios.push({ name: 'restore-session', sessionId, records: records.length, continued: resume });
+    close();
+    return sessionId;
+  }
+  await rm(model.file, { force: true }); // Only this new test workspace's own five-tool fixture.
+  writeFileSync(join(workspace, 'scenario-mode.txt'), mode);
+  report.stage = mode;
+  const approvalsBefore = report.approvals;
   const before = events.length;
-  await rpc('session/prompt', { request: { requestId: randomUUID(), sessionId, mode: 'queue', content: [{ type: 'text', text: 'iOS scripted file, search, shell and approval round.' }] } });
+  await rpc('session/prompt', { request: { requestId: randomUUID(), sessionId, mode: 'queue', content: [{ type: 'text', text: '[DSH_IOS_SMOKE:round] iOS scripted file, search, shell and approval round.' }] } });
+  if (mode !== 'normal') {
+    const marker = join(workspace, 'started-' + mode);
+    const deadline = Date.now() + 180000;
+    while (!existsSync(marker)) {
+      if (muxError) throw muxError;
+      if (Date.now() > deadline) fail('long Worker never started: ' + mode);
+      await delay(50);
+    }
+    if (mode === 'stop') {
+      close();
+      engineEnded = null;
+      restarting = true;
+      writeFileSync(`${guest}/restart`, '');
+      report.scenarios.push({ name: 'stop-active-worker', sessionId });
+      return sessionId;
+    }
+    await rpc('session/cancel', { request: { sessionId } });
+  }
   const end = await waitFrame((frame) => frame.streamId === 'session' && frame.value?.event?.type === 'turn/end');
   const reason = end.value.event.data.reason;
+  if (mode === 'cancel') {
+    if (reason?.kind !== 'aborted') fail('cancel did not abort the running turn');
+    await stoppedHeartbeat('cancel');
+    report.scenarios.push({ name: 'cancel-active-worker', sessionId, reason: reason.kind });
+    close();
+    return sessionId;
+  }
   if (reason?.kind !== 'completed') fail(`turn ended: ${JSON.stringify(reason).slice(0, 1500)}`);
   const results = events.slice(before).filter((event) => event.type === 'tool/result');
   if (results.length !== 5) fail(`expected five tool results, got ${results.length}`);
@@ -235,9 +293,23 @@ async function round(ready) {
   if (failed >= 0) fail(`tool ${failed} failed: ${JSON.stringify(results[failed].data.message?.content)?.slice(0, 400)}`);
   if (!results[4].data.message.content.some((part) => part.text?.includes('shell-ok'))) fail('bash result missing marker');
   if (await readFile(model.file, 'utf8') !== '修改后内容\n') fail('file side effect did not match the script');
-  if (report.approvals < 1) fail('round did not exercise an approval');
-  socket.removeAllListeners('close');
-  socket.terminate();
+  if (report.approvals <= approvalsBefore) fail('round did not exercise a fresh approval');
+  const observation = JSON.parse(await readFile(join(workspace, 'worker-observation.json'), 'utf8'));
+  if (observation.isMainThread !== false || observation.bytes !== 2 * 1024 * 1024) fail('Node Worker/output observation mismatch');
+  if (!results[4].data.message.content.some((part) => part.text?.includes('large-output-tail-中文'))) fail('large output lost its tail');
+  if (!(await readFile(join(workspace, 'git-status.txt'), 'utf8')).includes('中文 文件.txt')) fail('git did not stage the Chinese file');
+  if (await readFile(join(workspace, 'rg-result.txt'), 'utf8') !== 'needle-中文\n') fail('rg did not read the Chinese file');
+  report.scenarios.push({ name: 'worker-git-rg-large-output-unicode', sessionId, observation });
+  close();
+  return sessionId;
+}
+
+async function stoppedHeartbeat(mode) {
+  const path = join(workspace, 'heartbeat-' + mode);
+  const size = async () => (await stat(path).catch(() => ({ size: 0 }))).size;
+  const before = await size();
+  await delay(250);
+  if (await size() !== before) fail(mode + ': Worker kept writing after settlement');
 }
 
 try {
@@ -245,17 +317,18 @@ try {
   const first = await waitReady(0, 240000);
   engineEnded = null;
   report.readyMs = Date.now() - startedAt;
-  await round(first);
+  const completedSession = await round(first);
+  await round(first, { mode: 'cancel' });
   report.status = 'ROUND_PASSED';
   report.stage = 'restart';
-  engineEnded = null;
-  restarting = true;
-  writeFileSync(`${guest}/restart`, '');
+  const interruptedSession = await round(first, { mode: 'stop' });
   const restartedAt = Date.now();
   const second = await waitReady(1, 240000);
   report.restartReadyMs = Date.now() - restartedAt;
-  const { rpc } = await login(second);
-  await rpc('session/create', { request: { cwd: workspace, agentPreset: 'standard' } });
+  await stoppedHeartbeat('stop');
+  await round(second, { restore: completedSession, resume: true });
+  await round(second, { restore: interruptedSession });
+  await round(second);
   report.restart = 'passed';
   report.status = 'PASS';
   report.stage = 'complete';
