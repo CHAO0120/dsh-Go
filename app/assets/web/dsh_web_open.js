@@ -38,6 +38,8 @@
   var STORE = 'dsh.sessions.current';
   // A hop's one-off query (see hop); gone from the address once it landed.
   var HOP_PARAM = 'dsh-go-hop';
+  // How long a blank conversation has to stay as it is after New before it counts as the new one.
+  var BLANK_SETTLE_MS = 1500;
   // How long an open may keep looking once the page has booted.
   var STEPS_MS = 15000;
   // Where the Plugins page marks a card: a bundle's package name, an
@@ -288,12 +290,25 @@
     }, 8000, r);
     var previous = confirm ? composerSession(composerEditor()) : null;
     var stored = confirm ? storedSession() : null;
+    var blank = confirm && !!previous && blankConversation(composerEditor());
     if (!press(r, button)) return false;
     if (confirm) {
+      var blankSince = null;
       var editor = await waitFor(function () {
         var candidate = composerEditor();
         var id = composerSession(candidate);
-        if (!id || id === previous || id === stored) return null;
+        if (id && id !== previous && id !== stored) {
+          r.confirmedSession = id;
+          return candidate;
+        }
+        // New stays on a conversation that's already blank, so no other id is coming. If this is
+        // wrong, a draft sits in the box in front of the person, unsent.
+        if (!blank || id !== previous || !blankConversation(candidate)) {
+          blankSince = null;
+          return null;
+        }
+        if (blankSince === null) blankSince = Date.now();
+        if (Date.now() - blankSince < BLANK_SETTLE_MS) return null;
         r.confirmedSession = id;
         return candidate;
       }, 10000, r);
@@ -308,6 +323,13 @@
   function composerSession(editor) {
     var conversation = editor && editor.closest('[data-conversation-content][data-conversation-session]');
     return conversation && conversation.getAttribute('data-conversation-session');
+  }
+
+  // The client's own word for a conversation with nothing in it, with nothing typed or attached.
+  function blankConversation(editor) {
+    var conversation = editor && editor.closest('[data-conversation-content][data-conversation-session]');
+    return !!conversation && conversation.getAttribute('data-content-phase') === 'hero' &&
+      !(editor.textContent || '').trim() && attachmentCount(editor) === 0;
   }
 
   // The composer's editor (Lexical: one contenteditable root) that is on
