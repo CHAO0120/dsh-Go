@@ -112,3 +112,37 @@ test('a view that refuses is a channel error, not a crash; a retired binding is 
  f.change({viewError:false});const handler=p.methods.handler,replies=[];p.detach();
  handler.onMethodCall({method:'setFrameCache',argument:()=>false},{error:code=>replies.push(code)});assert.deepEqual(replies,['detached']);
 });
+const device=(t,opt)=>{const f=fixture(t,opt);return snapshot(f,f.attach()).device;};
+test('at most two cores is low, as on Android, whatever the memory',t=>{
+ const f=fixture(t,{cores:2,refreshRates:[60,120]}),value=snapshot(f,f.attach());
+ assert.equal(value.device.tier,'low');assert.deepEqual([...value.device.reasons],['at_most_two_cores']);assert.equal(value.device.cpuCores,2);
+ sample('two-cores',value,true,'low');
+ assert.equal(device(t,{cores:1}).tier,'low');
+ assert.deepEqual([...device(t,{cores:2,memoryKb:4n*1024n*1024n}).reasons],['memory_below_5_gib','at_most_two_cores']);
+});
+test('high takes the same memory and cores as Android, with the panel in place of its media class',t=>{
+ const f=fixture(t,{cores:8,refreshRates:[60,90,120]}),value=snapshot(f,f.attach());
+ assert.equal(value.device.tier,'high');assert.deepEqual([...value.device.reasons],['declared_refresh_with_capacity']);
+ assert.deepEqual([...value.device.supportedRefreshRates],[60,90,120]);assert.equal(value.device.mediaPerformanceClass,null);
+ sample('high',value,false,'high');
+ assert.equal(device(t,{cores:4,refreshRates:[90]}).tier,'high');
+ for(const opt of [{cores:8,refreshRates:[60]},{cores:8,refreshRates:[]},{cores:8},{cores:3,refreshRates:[120]},{refreshRates:[120]},
+  {cores:8,refreshRates:[120],memoryError:true},{cores:8,displayError:true}]){
+  const facts=device(t,opt);assert.equal(facts.tier,'medium',JSON.stringify(opt));assert.deepEqual([...facts.reasons],['no_low_tier_evidence']);
+ }
+ assert.equal(device(t,{cores:8,refreshRates:[120],memoryKb:4n*1024n*1024n}).tier,'low');
+});
+test('cpu counts come from the system\'s own sysconf names and anything odd stays unknown',t=>{
+ const f=fixture(t,{cores:8,online:6,refreshRates:[120]}),value=snapshot(f,f.attach());
+ assert.equal(value.device.cpuCores,8);assert.equal(value.device.availableProcessors,6);
+ assert(f.reads.includes('sysconf 83'));assert(f.reads.includes('sysconf 84'));
+ for(const cores of [0,-1,129,1.5,NaN]){const facts=device(t,{cores});assert.equal(facts.cpuCores,null,String(cores));assert.equal(facts.tier,'medium');}
+ const failed=device(t,{sysconfError:true});assert.equal(failed.cpuCores,null);assert.equal(failed.availableProcessors,null);assert.equal(failed.tier,'medium');
+});
+test('refresh rates that are missing or not numbers count for nothing',t=>{
+ const f=fixture(t,{cores:8,refreshRates:[0,-90,NaN]}),value=snapshot(f,f.attach());
+ assert.deepEqual([...value.device.supportedRefreshRates],[]);assert.equal(value.device.tier,'medium');
+ assert.deepEqual([...device(t,{cores:8,displayError:true}).supportedRefreshRates],[]);
+ assert.deepEqual([...device(t,{cores:8}).supportedRefreshRates],[]);
+});
+

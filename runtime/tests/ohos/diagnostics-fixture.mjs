@@ -111,6 +111,7 @@ export async function diagnosticsFixture(t, options = {}) {
     '@ohos.util':{default:{TextEncoder:class {encodeInto(value){return new TextEncoder().encode(value);}},
       TextDecoder:{create:(label,options) => ({decodeToString:bytes => new TextDecoder(label,options).decode(bytes)})}}},
     '@ohos.hidebug':{default:{getSystemMemInfo(){operations.push({op:'memory'});if(opt.memoryError)throw Error('memory');return {totalMem:opt.memoryKb ?? 8n*1024n*1024n};}}},
+    '@ohos.process':{default:{ProcessManager:class {getSystemConfig(){throw Error('sysconf outside diagnostics scope');}}}},
     '@ohos.deviceInfo':{default:{manufacture:'fixture maker',brand:'fixture brand',productModel:'fixture model',
       osFullName:'OpenHarmony fixture',sdkApiVersion:26,abiList:'arm64-v8a,x86_64'}},
     '@ohos.display':{default:{getDefaultDisplaySync(){operations.push({op:'display'});if(opt.displayError)throw Error('display');
