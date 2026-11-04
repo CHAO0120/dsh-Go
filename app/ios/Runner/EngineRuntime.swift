@@ -299,7 +299,7 @@ final class RuntimeInstaller {
     // An upgrade can turn a file into a directory or the other way round, so what's gone
     // takes its emptied parents with it. rmdir stops at anything this install doesn't own.
     let current = Set(manifest.files.map(\.path))
-    for path in owned.sorted(by: { $0.count > $1.count }) where !current.contains(path) {
+    for path in owned.lazy.filter({ !current.contains($0) }).sorted(by: { $0.count > $1.count }) {
       let file = root.appendingPathComponent(path)
       unlink(file.path)
       var parent = file.deletingLastPathComponent()
