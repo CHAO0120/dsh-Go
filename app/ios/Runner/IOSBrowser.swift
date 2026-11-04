@@ -22,6 +22,8 @@ final class IOSBrowser: NSObject, WKNavigationDelegate, WKUIDelegate {
   private var webView: WKWebView?
   private var approvedHosts: Set<String> = []
   private var loading: CheckedContinuation<String?, Never>?
+  private var loadingID: UUID?
+  private var loadingTimer: Task<Void, Never>?
   private var notes: [String] = []
   private var handedOver: IOSBrowserSheet?
 
@@ -134,12 +136,15 @@ final class IOSBrowser: NSObject, WKNavigationDelegate, WKUIDelegate {
   private func load(_ view: WKWebView, start: (WKWebView) -> Void) async -> IOSPhoneOutcome {
     finishLoading("被新的导航取代。")
     let failure = await withCheckedContinuation { (continuation: CheckedContinuation<String?, Never>) in
+      let id = UUID()
       loading = continuation
-      start(view)
-      Task { [weak self] in
-        try? await Task.sleep(nanoseconds: Self.loadLimit)
-        self?.finishLoading(nil, timedOut: true)
+      loadingID = id
+      loadingTimer = Task { [weak self] in
+        do { try await Task.sleep(nanoseconds: Self.loadLimit) } catch { return }
+        guard let self, self.loadingID == id else { return }
+        self.finishLoading(nil, timedOut: true)
       }
+      start(view)
     }
     if let failure { return .failure(failure) }
     return .success("已打开：\(view.title ?? "")\n\(view.url?.absoluteString ?? "")\n接着用 read 看页面。")
@@ -148,6 +153,9 @@ final class IOSBrowser: NSObject, WKNavigationDelegate, WKUIDelegate {
   private func finishLoading(_ failure: String?, timedOut: Bool = false) {
     guard let continuation = loading else { return }
     loading = nil
+    loadingID = nil
+    loadingTimer?.cancel()
+    loadingTimer = nil
     // A page that never finishes loading can still be read, and often has to be.
     continuation.resume(returning: timedOut ? nil : failure)
   }
