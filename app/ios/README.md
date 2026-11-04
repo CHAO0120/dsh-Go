@@ -43,7 +43,10 @@ flutter build ios --release --no-codesign
 - 本机引擎和鸿蒙是同一层（`runtime/ohos/`）：同进程的 Node（NodeMobile 24.22.1，`--jitless`），命令是 just-bash 模拟的。没有真正的 Linux，不能起子进程，没有 Python。首次安装解压约 160 MB。引擎第一次启动时才加载，只连远程的人不占这份内存。
 - 和鸿蒙不同：停止后能原地再启动，不用重开应用（`runtime/ios/host/node_runner.cc`）。
 - App 切到后台后，系统很快会暂停引擎；后台的本地监听被回收时，回到前台会自动重启引擎。
-- 手机操控、桌宠悬浮窗、后台常驻、应用内 APK 更新在 iOS 上没有，已隐藏。手机系统动作（日历、分享、拨号草稿等）还在做。
+- 引擎的堆上限是 `--max-old-space-size=256 --max-semi-space-size=4`，还没在设备上定过。它和 App 同进程，真撞上限会带走整个 App。
+- NodeMobile 24.22.1-0 记录 fd 时增删用的哈希不一样，Environment 结束时会按旧号关掉别人的文件和 socket，所以主线程和 Worker 都关了 fd 跟踪。代价：一次运行留下没关的原始 fd，要到 App 退出才释放。
+- 手机操控、桌宠悬浮窗、后台常驻、应用内 APK 更新在 iOS 上没有，已隐藏。
+- 手机系统动作（日历、分享、拨号草稿等）给本机引擎提供 13 个 `mcp__phone__*` 工具，和安卓同一份目录。每个动作都要在 App 里批准一次，通知点击不算批准。系统动作本身还没在设备上跑过。
 - `dsh/native-media` 的语音不提供：回声消除管不到扬声器。`dsh/usage` 只读不上报：Worker 只收安卓的值。`dsh/dynamic_color`、`dsh/picture_shortcut` iOS 没有公开接口，入口隐藏。
 - 设备档位：内存低于 3.5 GiB 算低档，其余中档，不用 `high`。
 - 通知只在应用运行时发得出去。锁屏和离开应用后的提醒要 APNs，还没做，所以离开应用后等你确认的请求不会提醒你，回到应用才看得到。
