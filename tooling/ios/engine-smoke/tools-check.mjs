@@ -1,0 +1,83 @@
+// Runs NativeToolsTests in the app's own process on the Simulator, then puts what each tool answered
+// through the same checks the engine applies to it. The permissions are granted up front, since
+// nobody is there to answer a prompt; only the app's own sheet gets tapped, by the test.
+//
+//   node tools-check.mjs --simulator <udid> --app <Runner.app> --work <new dir>
+import { spawn, spawnSync } from 'node:child_process';
+import { existsSync, mkdirSync, openSync, readFileSync } from 'node:fs';
+import { join, resolve } from 'node:path';
+import { parseArgs } from 'node:util';
+import { actionFor as browserAction } from '../../../runtime/ios/browser/actions.mjs';
+import { actionFor as systemAction } from '../../../runtime/ios/system/actions.mjs';
+import { resultFor } from '../../../runtime/ios/system/results.mjs';
+
+const { values } = parseArgs({ options: { simulator: { type: 'string' }, app: { type: 'string' }, work: { type: 'string' } } });
+for (const key of ['simulator', 'app', 'work']) if (!values[key]) throw new Error(`--${key} required`);
+const work = resolve(values.work);
+mkdirSync(work, { recursive: true });
+const bundleId = 'io.github.ccch1mneyyy.dshgo';
+const clean = (text) => String(text).replace(/%/g, '%25').replace(/\r?\n/g, '%0A');
+const notice = (title, text) => console.log(`::notice title=${title}::${clean(text).slice(0, 3500)}`);
+const fail = (title, text) => console.log(`::error title=${title}::${clean(text).slice(0, 3500)}`);
+
+const simctl = (...args) => {
+  const done = spawnSync('xcrun', ['simctl', ...args], { encoding: 'utf8' });
+  if (done.status !== 0) notice('native tools setup', `simctl ${args.join(' ')}: ${done.status} ${done.stderr}`);
+};
+simctl('install', values.simulator, resolve(values.app));
+for (const service of ['reminders', 'contacts', 'location']) simctl('privacy', values.simulator, 'grant', service, bundleId);
+simctl('location', values.simulator, 'set', '31.2304,121.4737');
+
+const logFile = join(work, 'xcodebuild.log');
+const log = openSync(logFile, 'a');
+const runner = spawn('xcodebuild', ['test', '-workspace', 'ios/Runner.xcworkspace', '-scheme', 'Runner',
+  '-destination', `id=${values.simulator}`, '-only-testing:RunnerTests/NativeToolsTests', '-parallel-testing-enabled', 'NO',
+  'CODE_SIGNING_ALLOWED=NO'], {
+  // xcodebuild passes these on to the test with the prefix removed. It only looks in its environment.
+  cwd: 'app', stdio: ['ignore', log, log], env: { ...process.env, TEST_RUNNER_DSH_TOOLS_CHECK_DIR: work },
+});
+let timedOut = false;
+const deadline = setTimeout(() => { timedOut = true; runner.kill('SIGTERM'); }, 20 * 60 * 1000);
+const code = await new Promise((done) => {
+  runner.once('error', (error) => { notice('native tools setup', error.message); done(-1); });
+  runner.once('exit', (exit, signal) => done(exit ?? signal));
+});
+clearTimeout(deadline);
+
+const rowsFile = join(work, 'rows.jsonl');
+const rows = existsSync(rowsFile) ? readFileSync(rowsFile, 'utf8').split('\n').filter(Boolean).map((line) => JSON.parse(line)) : [];
+const problems = [];
+const lines = [];
+for (const row of rows) {
+  const wrong = (row.expect === 'ok' && row.isError) || (row.expect === 'refused' && !row.isError);
+  let contract = '';
+  try {
+    if (row.group === 'system') {
+      const action = systemAction(row.name, row.args);
+      if (!row.isError) resultFor(action, JSON.parse(row.text));
+    } else browserAction(row.name, row.args);
+  } catch (error) {
+    contract = ` CONTRACT: ${error.message}`;
+    problems.push(`${row.group} ${row.name}: ${error.message}`);
+  }
+  if (wrong) problems.push(`${row.group} ${row.name}: expected ${row.expect}`);
+  const answer = String(row.text).replace(/\s+/g, ' ').slice(0, row.isError ? 200 : 110);
+  const shown = JSON.stringify(row.args).slice(0, 80);
+  lines.push(`${wrong ? 'WRONG ' : ''}${row.name} ${shown} ${row.ms}ms ${row.isError ? 'error' : 'ok'}${row.imageBytes ? ` image ${row.imageBytes}` : ''}: ${answer}${contract}`);
+}
+for (const group of ['system', 'browser']) {
+  notice(`${group} tools`, lines.filter((_, index) => rows[index].group === group).join('\n') || 'no calls recorded');
+}
+
+const logged = existsSync(logFile) ? readFileSync(logFile, 'utf8').split('\n') : [];
+const failures = [...new Set(logged.filter((line) => /error:|BUILD FAILED|TEST FAILED|TEST EXECUTE FAILED/.test(line)))]
+  .map((line) => line.slice(0, 400)).slice(0, 25);
+if (timedOut) problems.push('xcodebuild ran out of time');
+if (code !== 0) problems.push(`xcodebuild ended with ${code}`);
+if (!rows.length) problems.push('no tool was called');
+if (problems.length) {
+  fail('native tools', [...problems, ...failures].join('\n'));
+  if (!failures.length) notice('native tools build', logged.slice(-25).join('\n'));
+  process.exit(1);
+}
+notice('native tools', `${rows.length} calls, all as expected`);

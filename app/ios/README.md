@@ -39,7 +39,7 @@ flutter build ios --release --no-codesign
 
 ## 现状
 
-- CI 会在 iOS 模拟器上真跑：真 NodeMobile 的工具回合、取消、停止和恢复会话；停止时不误关别人的 fd；真 App 里的安装、启动、登录、停止、重启和重置；真 App 启动后 30 秒还活着。这些都是 Debug 构建。真机和 Release 一次都没跑过，下面的验收项都没做。
+- CI 会在 iOS 模拟器上真跑：真 NodeMobile 的工具回合、取消、停止和恢复会话；停止时不误关别人的 fd；真 App 里的安装、启动、登录、停止、重启和重置；真 App 启动后 30 秒还活着；在 App 进程里真调用提醒、联系人、定位、OCR 和网页操作，只有点确认框是测试代点的（`RunnerTests`，选图除外）。这些都是 Debug 构建。真机和 Release 一次都没跑过，下面的验收项都没做。
 - 本机引擎和鸿蒙是同一层（`runtime/ohos/`）：同进程的 Node（NodeMobile 24.22.1，`--jitless`），命令是 just-bash 模拟的。没有真正的 Linux，不能起子进程，没有 Python。首次安装解压约 160 MB。引擎第一次启动时才加载，只连远程的人不占这份内存。
 - 和鸿蒙不同：停止后能原地再启动，不用重开应用（`runtime/ios/host/node_runner.cc`）。
 - 和鸿蒙不同：本机引擎能处理图片。sharp 在这里装不了，所以 `runtime/ios/image/ios-sharp.cjs` 替代它，像素走系统的 ImageIO（`runtime/ios/host/image_binding.cc`），附件库自己的规则不变。ImageIO 写不了 WebP，所以带透明的图存 PNG，比目标大时压不下去（只影响透明图）。校验和缩放都走缩略图路径，大图的像素不用全部放进内存，但实际峰值还没在设备上量过。

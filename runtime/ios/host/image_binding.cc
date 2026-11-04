@@ -64,7 +64,7 @@ int64_t Integer(CFDictionaryRef properties, CFStringRef key) {
 }
 
 void Decode(CGImageSourceRef source, Job* job) {
-  // Making a small copy from the image itself still reads every byte of it, without holding a
+  // A small copy made from the image itself still has ImageIO go through the image, without holding a
   // 48-megapixel photo's 180 MB in the same process as the engine.
   int longEdge = 1024;
   Held<CFNumberRef> edge(CFNumberCreate(kCFAllocatorDefault, kCFNumberIntType, &longEdge));

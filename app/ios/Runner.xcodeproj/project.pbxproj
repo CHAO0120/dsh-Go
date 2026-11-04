@@ -15,6 +15,9 @@
 		74858FAF1ED2DC5600515810 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 74858FAE1ED2DC5600515810 /* AppDelegate.swift */; };
 		D5480000000000000000A001 /* DshPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5480000000000000000A002 /* DshPlugin.swift */; };
 		D5480000000000000000A003 /* VoiceChannel.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5480000000000000000A004 /* VoiceChannel.swift */; };
+		D5480000000000000000C0A1 /* IOSPhoneActions.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5480000000000000000C040 /* IOSPhoneActions.swift */; };
+		D5480000000000000000C0A2 /* IOSBrowser.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5480000000000000000C070 /* IOSBrowser.swift */; };
+		D5480000000000000000C0A3 /* IOSSystemTools.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5480000000000000000C090 /* IOSSystemTools.swift */; };
 		D5480000000000000000C091 /* IOSSystemTools.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5480000000000000000C090 /* IOSSystemTools.swift */; };
 		D5480000000000000000C081 /* IOSPhoneRunner.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5480000000000000000C080 /* IOSPhoneRunner.swift */; };
 		D5480000000000000000C071 /* IOSBrowser.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5480000000000000000C070 /* IOSBrowser.swift */; };
@@ -486,6 +489,9 @@
 			buildActionMask = 2147483647;
 			files = (
 				331C808B294A63AB00263BE5 /* RunnerTests.swift in Sources */,
+				D5480000000000000000C0A1 /* IOSPhoneActions.swift in Sources */,
+				D5480000000000000000C0A2 /* IOSBrowser.swift in Sources */,
+				D5480000000000000000C0A3 /* IOSSystemTools.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

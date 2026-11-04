@@ -14,7 +14,7 @@ import Vision
 /// and only in front of the user. Node checks the arguments and the shape of what comes back.
 @MainActor
 final class IOSSystemTools: NSObject, PHPickerViewControllerDelegate, CLLocationManagerDelegate {
-  private struct Picked {
+  struct Picked {
     let session: String
     let file: URL
     let expires: Date
@@ -35,7 +35,7 @@ final class IOSSystemTools: NSObject, PHPickerViewControllerDelegate, CLLocation
   private let presenter: () -> UIViewController?
   private lazy var eventStore = EKEventStore()
   private lazy var contactStore = CNContactStore()
-  private var picked: [String: Picked] = [:]
+  var picked: [String: Picked] = [:]
   private var pickerShown: PHPickerViewController?
   private var picking: CheckedContinuation<[PHPickerResult], Never>?
   private var locating: CheckedContinuation<CLLocation?, Never>?
