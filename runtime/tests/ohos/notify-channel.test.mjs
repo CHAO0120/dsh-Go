@@ -45,7 +45,7 @@ function fixture(t, { directory, hooks = {}, launchWant = {} } = {}) {
     setStreamHandler(handler) { assert.notEqual(handler, null); this.stream = handler; }
   }
   const notification = {
-    SlotType: { SERVICE_INFORMATION: 2 }, SlotLevel: { LEVEL_NONE: 0 }, ContentType: { NOTIFICATION_CONTENT_BASIC_TEXT: 0 },
+    SlotType: { SERVICE_INFORMATION: 2 }, SlotLevel: { LEVEL_NONE: 0 }, ContentType: { NOTIFICATION_CONTENT_BASIC_TEXT: 0, NOTIFICATION_CONTENT_LONG_TEXT: 1 },
     async isNotificationEnabled() { calls.push('enabled'); await hooks.permission?.(); return state.enabled; },
     async getSlot(type) { assert.equal(type, 2); calls.push('getSlot'); await hooks.slot?.(); return state.slot; },
     async addSlot(type) { assert.equal(type, 2); calls.push('addSlot'); state.slot = { enabled: true, notificationLevel: 3 }; },
@@ -159,11 +159,11 @@ test('app switch stays distinct from a disabled slot; unknown and failed queries
   assert.equal((await f.call('status')).error, 'ohos_notify_failed');
 });
 
-test('public-only post, fixed own target, immutable Want and real persisted HMAC', async t => {
+test('real notification content, fixed own target, immutable Want and real persisted HMAC', async t => {
   const f = fixture(t); f.attach();
   assert.deepEqual(await f.call('show', { ...post, canApprove: true, bundleName: 'attacker', abilityName: 'attacker' }), { value: null });
   const request = f.published[0], info = clone(f.agents[0]), want = info.wants[0];
-  assert.deepEqual(clone(request.content), { notificationContentType: 0, normal: { title: 'DSH Go', text: post.publicText } });
+  assert.deepEqual(clone(request.content), { notificationContentType: 1, longText: { title: post.title, text: post.text, longText: post.fullText, briefText: post.text, expandedTitle: post.title } });
   assert.deepEqual(clone(request.actionButtons), [{ title: '打开应用处理', wantAgent: { agentId: 1 } }]);
   assert.equal(want.bundleName, 'io.github.ccch1mneyyy.dsh_app'); assert.equal(want.abilityName, 'EntryAbility');
   assert.deepEqual(info.actionFlags, [3]); assert.equal(info.actionType, 2);
@@ -172,8 +172,10 @@ test('public-only post, fixed own target, immutable Want and real persisted HMAC
   const params = want.parameters;
   assert.equal(params.dshNotifyMac, createHmac('sha256', Buffer.from(key, 'hex')).update(params.dshNotifyPayload).digest('hex'));
   for (const secret of [post.title, post.text, post.fullText, key]) {
-    assert(!JSON.stringify([request, info]).includes(secret));
+    assert(!JSON.stringify(info).includes(secret), 'tap routing must never contain notification content or its signing key');
   }
+  assert(!JSON.stringify(request).includes(key));
+  assert(!JSON.stringify(f.warnings).includes(post.text));
   assert(!Object.keys(request).some(x => ['distributedOption', 'notDistributed', 'lockscreenVisibility'].includes(x)));
 });
 
@@ -339,4 +341,35 @@ test('corrupt saved key fails closed and never publishes or logs route content',
   const f = fixture(t, { directory: first.root }); f.attach();
   assert.equal((await f.call('show', post)).error, 'ohos_notify_storage'); assert.equal(f.published.length, 0);
   assert(!JSON.stringify(f.warnings).includes(post.sessionId));
+});
+
+
+test('same Dart title/text keys reach basic notifications unchanged, including Unicode and newlines', async t => {
+  const f = fixture(t); f.attach();
+  const title = '真实会话 👩🏽‍💻', text = '第一行\n第二行：等待你确认';
+  assert.deepEqual(await f.call('show', { ...post, title, text, fullText: undefined, body: 'not-a-protocol-key' }), { value: null });
+  assert.deepEqual(clone(f.published[0].content), { notificationContentType: 0, normal: { title, text } });
+  assert(!JSON.stringify(f.published[0].content).includes(post.publicText));
+});
+
+test('missing or empty text uses public fallback only to meet the SDK nonempty content contract', async t => {
+  const f = fixture(t); f.attach();
+  for (const empty of [undefined, null, '']) {
+    assert.deepEqual(await f.call('show', { ...post, title: empty, text: empty, fullText: empty }), { value: null });
+    assert.deepEqual(clone(f.published.at(-1).content), { notificationContentType: 0, normal: { title: 'DSH Go', text: post.publicText } });
+  }
+  assert.deepEqual(await f.call('show', { ...post, title: '', text: '', fullText: '', publicText: '' }), { value: null });
+  assert.equal(f.published.at(-1).content.normal.text, '有新的会话提醒');
+});
+
+test('non-string content fails before signing or publishing without exposing its value', async t => {
+  const f = fixture(t); f.attach();
+  for (const name of ['title', 'text', 'fullText', 'publicText']) {
+    for (const value of [3, false, { secret: 'not-content' }]) {
+      const result = await f.call('show', { ...post, [name]: value });
+      assert.equal(result.error, 'bad_args');
+      assert(!JSON.stringify(result).includes('not-content'));
+    }
+  }
+  assert.equal(f.published.length, 0); assert.equal(f.agents.length, 0); assert.equal(f.state.flushes, 0);
 });

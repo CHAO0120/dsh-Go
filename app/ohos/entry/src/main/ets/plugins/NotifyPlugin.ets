@@ -1,4 +1,4 @@
-// 未编译、未在真机核实。普通通知只发送publicText；实况窗和通知内直接审批明确不支持。
+// 普通通知使用现有 title/text/fullText；锁屏内容隐藏由系统设置控制，待真机核实。
 import notificationManager from '@ohos.notificationManager';
 import wantAgent from '@ohos.app.ability.wantAgent';
 import Want from '@ohos.app.ability.Want';
@@ -234,6 +234,25 @@ export default class NotifyPlugin implements FlutterPlugin, AbilityAware, NewWan
       host: (call.argument('host') ?? '') as string, kind: (call.argument('kind') ?? '') as string,
       eventId: (call.argument('eventId') ?? '') as string };
     if (!group || !key || !route.sessionId || route.sessionId.length > 200) throw new NotifyError('bad_args', '通知缺少有效的会话标识。');
+    const title = (call.argument('title') ?? 'DSH Go') as string;
+    const text = (call.argument('text') ?? '') as string;
+    const publicText = (call.argument('publicText') ?? '有新的会话提醒') as string;
+    const fullText = (call.argument('fullText') ?? '') as string;
+    if (typeof title !== 'string' || typeof text !== 'string' || typeof publicText !== 'string' || typeof fullText !== 'string') {
+      throw new NotifyError('bad_args', '通知标题和正文必须是文字。');
+    }
+    // Public SDK content fields cannot be empty. Keep real nonempty content verbatim.
+    const shownTitle = title || 'DSH Go';
+    const shownText = text || publicText || '有新的会话提醒';
+    let content: notificationManager.NotificationContent = {
+      notificationContentType: notificationManager.ContentType.NOTIFICATION_CONTENT_BASIC_TEXT,
+      normal: { title: shownTitle, text: shownText }
+    };
+    if (fullText !== '') content = {
+      notificationContentType: notificationManager.ContentType.NOTIFICATION_CONTENT_LONG_TEXT,
+      longText: { title: shownTitle, text: shownText, longText: fullText,
+        briefText: shownText, expandedTitle: shownTitle }
+    };
     const permission = await this.permissions();
     if (!permission.enabled || !permission.slot) throw new NotifyError('permission', '系统未允许此类通知，请在通知设置中开启。');
     const payload = JSON.stringify(route);
@@ -246,8 +265,7 @@ export default class NotifyPlugin implements FlutterPlugin, AbilityAware, NewWan
     const request: notificationManager.NotificationRequest = {
       id: 0, label: await this.label(group, key), groupName: await this.group(group),
       notificationSlotType: SLOT, tapDismissed: true, isAlertOnce: true, wantAgent: agent,
-      content: { notificationContentType: notificationManager.ContentType.NOTIFICATION_CONTENT_BASIC_TEXT,
-        normal: { title: 'DSH Go', text: (call.argument('publicText') || '有新的会话提醒') as string } }
+      content: content
     };
     if (call.argument('canApprove') === true) request.actionButtons = [{ title: '打开应用处理', wantAgent: agent }];
     this.ensureCurrent(generation);
