@@ -311,8 +311,65 @@ private final class LauncherIconChannel {
 
 // MARK: - dsh/files
 
-/// Opening, saving and previewing the files a turn produced. There is no local
-/// engine yet, so `resolveGuest` finds nothing and `listOutputs` is empty.
+/// iOS tool paths are already absolute sandbox paths, not Android guest paths.
+/// This is a point-in-time lookup; the Dart caller opens the returned path later.
+private struct LocalEngineFiles {
+  let guestRoot: URL
+
+  private func canonical(_ path: String) -> String? {
+    guard path.hasPrefix("/"), !path.contains("\0"), let resolved = realpath(path, nil) else { return nil }
+    defer { free(resolved) }
+    return String(cString: resolved)
+  }
+
+  func resolve(_ path: String) -> String? {
+    guard
+      let root = canonical(guestRoot.path), let file = canonical(path),
+      file.hasPrefix(root + "/"),
+      let values = try? FileManager.default.attributesOfItem(atPath: file),
+      values[.type] as? FileAttributeType == .typeRegular,
+      FileManager.default.isReadableFile(atPath: file)
+    else { return nil }
+    return file
+  }
+
+  /// Same directory advertised by EngineChannel's managed AGENTS.md. Results
+  /// carry engine-visible absolute paths and epoch milliseconds, as Dart expects.
+  func outputs(depth: Int) -> [[String: Any]] {
+    guard let root = canonical(guestRoot.path) else { return [] }
+    let expected = root + "/root/workspace/DSH-Go"
+    guard canonical(expected) == expected else { return [] }
+    let manager = FileManager.default
+    let maxDepth = min(max(depth, 1), 8)
+    var rows: [[String: Any]] = []
+    var visited = 0
+    func walk(_ folder: URL, level: Int) {
+      guard let entries = try? manager.contentsOfDirectory(
+        at: folder, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles])
+      else { return }
+      for entry in entries.sorted(by: { $0.lastPathComponent < $1.lastPathComponent }) {
+        // Bound both returned files and work in a directory-heavy tree.
+        guard rows.count < 500, visited < 5000 else { return }
+        visited += 1
+        guard let values = try? manager.attributesOfItem(atPath: entry.path) else { continue }
+        let type = values[.type] as? FileAttributeType
+        // Never recurse into or publish a symlink from the output scan.
+        if type == .typeDirectory {
+          if level < maxDepth { walk(entry, level: level + 1) }
+        } else if type == .typeRegular, let path = resolve(entry.path),
+          path.hasPrefix(expected + "/"),
+          let size = values[.size] as? NSNumber, let modified = values[.modificationDate] as? Date
+        {
+          rows.append(["path": path, "bytes": size.int64Value, "modified": Int64(modified.timeIntervalSince1970 * 1000)])
+        }
+      }
+    }
+    walk(URL(fileURLWithPath: expected, isDirectory: true), level: 1)
+    return rows
+  }
+}
+
+/// Opening, saving and previewing the files a turn produced.
 private final class FilesChannel: NSObject, QLPreviewControllerDataSource {
   private let channel: FlutterMethodChannel
   private let pdfQueue = DispatchQueue(label: "dsh.pdf")
@@ -327,8 +384,17 @@ private final class FilesChannel: NSObject, QLPreviewControllerDataSource {
       let args = arguments(call)
       let path = args["path"] as? String ?? ""
       switch call.method {
-      case "resolveGuest": result(nil)
-      case "listOutputs": result([])
+      case "resolveGuest":
+        self.pdfQueue.async {
+          let path = self.localFiles.resolve(path)
+          onMain { result(path) }
+        }
+      case "listOutputs":
+        let depth = args["depth"] as? Int ?? 3
+        self.pdfQueue.async {
+          let rows = self.localFiles.outputs(depth: depth)
+          onMain { result(rows) }
+        }
       case "open":
         self.open(path: path, name: args["name"] as? String, chooser: args["chooser"] as? Bool ?? false, result: result)
       case "saveToDownloads": self.save(path: path, name: args["name"] as? String, result: result)
@@ -343,6 +409,15 @@ private final class FilesChannel: NSObject, QLPreviewControllerDataSource {
       default: result(FlutterMethodNotImplemented)
       }
     }
+  }
+
+  /// Match EngineChannel's application-support root and fallback exactly. Resolve
+  /// aliases only when reading, after the engine has prepared its root.
+  private var localFiles: LocalEngineFiles {
+    let base =
+      (try? FileManager.default.url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true))
+      ?? URL(fileURLWithPath: NSTemporaryDirectory())
+    return LocalEngineFiles(guestRoot: base.appendingPathComponent("runtime/rootfs", isDirectory: true))
   }
 
   // Open
