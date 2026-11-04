@@ -68,7 +68,6 @@ const engine = spawn('xcrun', ['simctl', 'spawn', values.simulator, resolve(valu
     ...process.env,
     SIMCTL_CHILD_DSH_IOS_SMOKE_PATCH: overlay,
     SIMCTL_CHILD_DSH_IOS_SMOKE_PHONE_RUN: phoneRun,
-    SIMCTL_CHILD_DSH_IOS_SMOKE_IMPORT: join(repo, 'tooling/ios/engine-smoke/probe.mjs'),
   },
   stdio: ['ignore', 'pipe', 'pipe'],
 });

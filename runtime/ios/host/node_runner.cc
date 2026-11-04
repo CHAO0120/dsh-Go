@@ -24,15 +24,28 @@ constexpr size_t kEngineStackBytes = 16 * 1024 * 1024;
 
 // runtime/ohos gates everything on process.platform and on WebAssembly being absent:
 // it is the same in-process, no-child-process runtime, and this is what selects it.
-// Workers inherit it with the rest of execArgv. Decodes to:
+// Workers inherit it with the rest of execArgv.
+//
+// It also turns off fd tracking in Workers, as RunEnvironment does for the main thread.
+// NodeMobile 24.22.1-0 hashes an fd one way when it adds it to that set and another when it
+// removes it, so nothing ever leaves. When an Environment ends, it closes every number in
+// the set, by then including ones reused for sockets and files elsewhere in the process.
+// Without the set, a raw fd a run leaves open stays open.
+//
+// Decodes to:
+//   import w from'node:worker_threads';
 //   import{syncBuiltinESMExports as s}from'node:module';
 //   Object.defineProperty(process,'platform',{value:'openharmony'});
-//   Reflect.deleteProperty(globalThis,'WebAssembly');s();
+//   Reflect.deleteProperty(globalThis,'WebAssembly');
+//   const W=w.Worker;
+//   w.Worker=class Worker extends W{constructor(f,o){super(f,{...o,trackUnmanagedFds:false})}};
+//   s();
 constexpr const char* kPlatformImport =
     "--import=data:text/javascript;base64,"
-    "aW1wb3J0e3N5bmNCdWlsdGluRVNNRXhwb3J0cyBhcyBzfWZyb20nbm9kZTptb2R1bGUnO09iamVjdC5kZWZpbmVQcm9wZXJ0eShwcm9jZXNz"
-    "LCdwbGF0Zm9ybScse3ZhbHVlOidvcGVuaGFybW9ueSd9KTtSZWZsZWN0LmRlbGV0ZVByb3BlcnR5KGdsb2JhbFRoaXMsJ1dlYkFzc2VtYmx5"
-    "Jyk7cygpOw==";
+    "aW1wb3J0IHcgZnJvbSdub2RlOndvcmtlcl90aHJlYWRzJztpbXBvcnR7c3luY0J1aWx0aW5FU01FeHBvcnRzIGFzIHN9ZnJvbSdub2RlOm1v"
+    "ZHVsZSc7T2JqZWN0LmRlZmluZVByb3BlcnR5KHByb2Nlc3MsJ3BsYXRmb3JtJyx7dmFsdWU6J29wZW5oYXJtb255J30pO1JlZmxlY3QuZGVs"
+    "ZXRlUHJvcGVydHkoZ2xvYmFsVGhpcywnV2ViQXNzZW1ibHknKTtjb25zdCBXPXcuV29ya2VyO3cuV29ya2VyPWNsYXNzIFdvcmtlciBleHRl"
+    "bmRzIFd7Y29uc3RydWN0b3IoZixvKXtzdXBlcihmLHsuLi5vLHRyYWNrVW5tYW5hZ2VkRmRzOmZhbHNlfSl9fTtzKCk7";
 
 std::mutex environment_mutex;
 node::Environment* active_environment = nullptr;
@@ -59,7 +72,6 @@ bool IsUnifiedPreload(const char* value) {
 int RunEnvironment(const std::vector<std::string>& args, const std::vector<std::string>& exec_args) {
   std::vector<std::string> errors;
   const auto flags = static_cast<node::EnvironmentFlags::Flags>(
-      node::EnvironmentFlags::kTrackUnmanagedFds |
       node::EnvironmentFlags::kNoGlobalSearchPaths |
       node::EnvironmentFlags::kNoCreateInspector |
       node::EnvironmentFlags::kNoStartDebugSignalHandler);
@@ -162,11 +174,7 @@ extern "C" __attribute__((visibility("default"))) int dsh_node_start(int argc, c
   Run run;
   // Node's defaults assume a server's memory: left alone, the heap grows until iOS ends
   // the app. These held a five-tool round with a large JSON worker; not yet set on a device.
-  run.arguments = {argv[0], argv[1], "--max-old-space-size=256", "--max-semi-space-size=4",
-                   // NodeMobile warns on every plain open and close ("File descriptor N
-                   // opened in unmanaged mode twice"), thousands at startup and into tool
-                   // output. The stacks are ordinary readFileSync calls.
-                   "--disable-warning=Warning", kPlatformImport, argv[2], argv[3]};
+  run.arguments = {argv[0], argv[1], "--max-old-space-size=256", "--max-semi-space-size=4", kPlatformImport, argv[2], argv[3]};
   run.arguments.insert(run.arguments.end(), argv + 4, argv + argc);
   // The shared host fixes its own profile. What iOS adds (the phone tools) sits next to
   // it, written by the app for this run, and the CLI only takes --patch here.
@@ -182,9 +190,6 @@ extern "C" __attribute__((visibility("default"))) int dsh_node_start(int argc, c
   if (const char* patch = std::getenv("DSH_IOS_SMOKE_PATCH")) {
     const auto own = std::find(run.arguments.begin(), run.arguments.end(), "--patch");
     run.arguments.insert(own + 2, {"--patch", patch});
-  }
-  if (const char* probe = std::getenv("DSH_IOS_SMOKE_IMPORT")) {
-    run.arguments.insert(std::find(run.arguments.begin(), run.arguments.end(), argv[4]), {"--import", probe});
   }
 #endif
 
