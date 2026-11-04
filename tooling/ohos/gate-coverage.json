@@ -21,6 +21,8 @@
       "runtime/tests/ohos/process-scoped-fd.test.mjs",
       "runtime/tests/ohos/process-stderr-limit.test.mjs",
       "runtime/tests/ohos/process-streaming.test.mjs",
+      "runtime/tests/ohos/process-symlink-mount.test.mjs",
+      "runtime/tests/ohos/process-wc-counts.test.mjs",
       "runtime/tests/ohos/process.test.mjs"
     ],
     "process-test-roots": [
@@ -43,7 +45,8 @@
       "runtime/tests/ohos/net-policy-closed.test.mjs"
     ],
     "git-client-*": [
-      "runtime/tests/ohos/git-owned-client.test.mjs"
+      "runtime/tests/ohos/git-owned-client.test.mjs",
+      "runtime/tests/ohos/process-git-link-first-hop.test.mjs"
     ],
     "git-oracle-*": [
       "runtime/tests/ohos/git.test.mjs"
