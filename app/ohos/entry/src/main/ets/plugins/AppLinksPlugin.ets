@@ -12,6 +12,7 @@ import {
   AbilityAware, AbilityPluginBinding, Any, FlutterPlugin, FlutterPluginBinding,
   MethodCall, MethodCallHandler, MethodChannel, MethodResult, NewWantListener
 } from '@ohos/flutter_ohos';
+import { OhosFrameRateKeeper } from './OhosFrameRate';
 
 class LinkArrival { event?: Map<string, Any>; }
 
@@ -20,15 +21,36 @@ export default class AppLinksPlugin implements FlutterPlugin, AbilityAware, Meth
   private static pending: LinkArrival[] = [];
   private static receiver?: AppLinksPlugin;
   private static copying: number = 0;
+  private static foreground: WeakSet<UIAbility> = new WeakSet<UIAbility>();
+  private static attached: Set<AppLinksPlugin> = new Set<AppLinksPlugin>();
   private app?: MethodChannel;
   private links?: MethodChannel;
   private ability?: AbilityPluginBinding;
   private ready: boolean = false;
+  private frames?: OhosFrameRateKeeper;
+
+  static onForeground(ability: UIAbility): void {
+    AppLinksPlugin.foreground.add(ability);
+    AppLinksPlugin.attached.forEach((plugin: AppLinksPlugin): void => plugin.showFrames());
+  }
+
+  static onBackground(ability: UIAbility): void {
+    AppLinksPlugin.foreground.delete(ability);
+    AppLinksPlugin.attached.forEach((plugin: AppLinksPlugin): void => plugin.showFrames());
+  }
 
   getUniqueClassName(): string { return 'DshAppLinksPlugin'; }
 
   onAttachedToEngine(binding: FlutterPluginBinding): void {
     AppLinksPlugin.receiver = this;
+    AppLinksPlugin.attached.add(this);
+    this.frames?.close();
+    this.frames = new OhosFrameRateKeeper((): boolean => {
+      const napi = binding.getFlutterEngine().getFlutterNapi();
+      if (!napi.isAttached()) return false;
+      napi.LTPODispatchHighFrameRate();
+      return true;
+    });
     const messenger = binding.getBinaryMessenger();
     this.app = new MethodChannel(messenger, 'dsh/app');
     this.links = new MethodChannel(messenger, 'dsh/links');
@@ -46,6 +68,9 @@ export default class AppLinksPlugin implements FlutterPlugin, AbilityAware, Meth
   onDetachedFromEngine(_binding: FlutterPluginBinding): void {
     this.onDetachedFromAbility();
     this.ready = false;
+    AppLinksPlugin.attached.delete(this);
+    this.frames?.close();
+    this.frames = undefined;
     if (AppLinksPlugin.receiver === this) AppLinksPlugin.receiver = undefined;
     this.app?.setMethodCallHandler(null);
     this.links?.setMethodCallHandler(null);
@@ -56,6 +81,7 @@ export default class AppLinksPlugin implements FlutterPlugin, AbilityAware, Meth
   onAttachedToAbility(binding: AbilityPluginBinding): void {
     this.onDetachedFromAbility();
     this.ability = binding;
+    this.showFrames();
     binding.addOnNewWantListener(this);
     const ability = binding.getAbility();
     if (!AppLinksPlugin.launches.has(ability) && this.take(ability.launchWant)) {
@@ -66,6 +92,12 @@ export default class AppLinksPlugin implements FlutterPlugin, AbilityAware, Meth
   onDetachedFromAbility(): void {
     this.ability?.removeOnNewWantListener(this);
     this.ability = undefined;
+    this.showFrames();
+  }
+
+  private showFrames(): void {
+    const ability = this.ability?.getAbility();
+    this.frames?.setVisible(ability !== undefined && AppLinksPlugin.foreground.has(ability));
   }
 
   onNewWant(want: Want, _launchParams: AbilityConstant.LaunchParam): void {
@@ -215,14 +247,22 @@ export default class AppLinksPlugin implements FlutterPlugin, AbilityAware, Meth
         }
         return;
       }
-      case 'setRefreshRateMode':
-        if (call.argument('mode') === 'system') result.success(null);
-        else result.error('ohos_unsupported', '当前由鸿蒙与 Flutter 管理刷新率，请选择系统默认。', null);
-        return;
-      case 'setFrameActive':
-        // system 模式不强制帧率，也不新增周期性VSync请求。
+      case 'setRefreshRateMode': {
+        const mode: string = call.argument('mode');
+        if (!['auto', 'max', 'system'].includes(mode)) {
+          result.error('ohos_unsupported', '未知的刷新率模式。', null);
+          return;
+        }
+        this.frames?.setMode(mode);
         result.success(null);
         return;
+      }
+      case 'setFrameActive': {
+        const active: Any = call.argument('active');
+        if (typeof active === 'boolean') this.frames?.setActive(active);
+        result.success(null);
+        return;
+      }
       default: result.notImplemented();
     }
   }

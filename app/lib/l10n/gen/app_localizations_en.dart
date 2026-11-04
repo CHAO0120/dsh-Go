@@ -9022,6 +9022,10 @@ class L10nEn extends L10n {
       'Auto: fastest while drawing, handed back when still; System: the system decides.';
 
   @override
+  String get performanceRefreshHintOhos =>
+      'Auto: fastest while things move, handed back when still; Max: always fastest, more battery and heat; System: asks for nothing extra.';
+
+  @override
   String get searchKwRefreshRate => 'refresh rate high refresh 120Hz 90Hz smooth';
 
   @override

@@ -76,7 +76,6 @@ const _rows = {
   'launch-screen',
   'pet-outside-app',
   'pet-display-when',
-  'refresh-rate',
   'auto-safe',
   'safe-mode',
   'engine-reset',
@@ -383,9 +382,10 @@ void main() {
       expect(refreshRate(), findsOneWidget);
     });
 
-    testWidgets('on HarmonyOS: no refresh rate, the effects stay', (tester) async {
+    testWidgets('on HarmonyOS: the refresh rate choice too, and what max costs', (tester) async {
       await _pump(tester, const PerformancePage(), android: false);
-      expect(refreshRate(), findsNothing);
+      expect(refreshRate(), findsOneWidget);
+      expect(find.text(_zh.performanceRefreshHintOhos), findsOneWidget);
       expect(find.byKey(const ValueKey('performance-blur')), findsOneWidget);
     });
   });

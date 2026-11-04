@@ -39,6 +39,7 @@ export default class EntryAbility extends FlutterAbility {
   }
 
   onForeground(): void {
+    AppLinksPlugin.onForeground(this);
     RuntimeController.onForeground(this);
     VoicePlugin.onForeground(this);
     NativeFilesPlugin.onForeground(this);
@@ -47,6 +48,7 @@ export default class EntryAbility extends FlutterAbility {
   }
 
   onBackground(): void {
+    AppLinksPlugin.onBackground(this);
     RuntimeController.onBackground(this);
     VoicePlugin.onBackground(this);
     NativeFilesPlugin.onBackground(this);

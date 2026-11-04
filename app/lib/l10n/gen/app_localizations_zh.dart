@@ -8559,6 +8559,9 @@ class L10nZh extends L10n {
   String get performanceRefreshHint => '自动：动时用最高刷新率，停下交回系统；系统：完全由系统决定。';
 
   @override
+  String get performanceRefreshHintOhos => '自动：动画和滚动时用最高刷新率，停下交回系统；最高：一直最高，更耗电也更热；系统：不额外要求。';
+
+  @override
   String get searchKwRefreshRate => '刷新率 高刷 120Hz 90Hz 流畅';
 
   @override
