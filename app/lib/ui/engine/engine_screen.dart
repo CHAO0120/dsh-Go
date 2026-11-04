@@ -231,7 +231,12 @@ class EngineActions extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final l10n = context.l10n;
     final container = ProviderScope.containerOf(context, listen: false);
-    if (phase == RuntimePhase.notInstalled) {
+    // iOS can retain a native/reset error after the installed runtime is gone.
+    // Keep the error visible, but offer installation instead of another start.
+    final iosNeedsInstall = phase == RuntimePhase.error &&
+        ref.watch(operatingSystemProvider) == 'ios' &&
+        ref.watch(localRuntimeProvider.select((s) => s.status.installedVersion)) == null;
+    if (phase == RuntimePhase.notInstalled || iosNeedsInstall) {
       final available = ref.watch(localRuntimeProvider.select((s) => s.available));
       return _Capsule(
         icon: available ? AppIcons.download : AppIcons.computer,
