@@ -107,8 +107,10 @@ REGEX="$(find "$PROCESS/build" -name 're2js-unicode.mjs' | head -1)"
   --target-report "$STEP/inputs/target-report.json" --prepared-inputs "$STEP/inputs/prepared-inputs.json" \
   --regex-artifact "$REGEX" --esbuild-prefix "$TOOLS" --imports-report "$STEP/imports.json" \
   --node "$NODE" --runtime-core "$ROOT/app/ohos/entry/src/main/ets/runtime/RuntimeCore.ets" \
-  --out "$STEP/composed"
-ARCHIVE="$(find "$STEP/composed" -path '*dsh-runtime/runtime.zip' | head -1)"
+  --out "$STEP/composed" --keep-expanded
+"$PYTHON" -I -B "$ROOT/tooling/ios/specialize-runtime.py" \
+  --expanded "$STEP/composed/expanded/dsh-runtime" --out "$STEP/ios-composed"
+ARCHIVE="$STEP/ios-composed/runtime.zip"
 [[ -f "$ARCHIVE" ]] || { printf 'Composition did not produce runtime.zip\n' >&2; exit 1; }
 
 STAGE="$STEP/Engine"
