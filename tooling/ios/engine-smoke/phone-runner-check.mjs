@@ -95,12 +95,28 @@ try {
   const back = await rpc('key', { key: 'back' });
   must(back.ok && /General|通用/.test(back.text), `back didn't return: ${back.text?.slice(0, 400)}`);
 
-  // Typing, in the search field.
+  // Something that takes no text says so, promptly, rather than claiming it worked.
   screen = back;
-  const search = idOf(screen.text, /搜索框|Search/);
-  must(search !== undefined, 'Settings has no search field in the tree');
-  const typed = await rpc('type', { screen: screen.screen, id: search, text: 'wifi' });
-  must(typed.ok && /wifi/i.test(typed.text), `typing didn't reach the field: ${typed.text?.slice(0, 400)}`);
+  const row = idOf(screen.text, /按钮 "/);
+  must(row !== undefined, 'nothing to try typing into');
+  const refused = await rpc('type', { screen: screen.screen, id: row, text: 'x' });
+  must(!refused.ok, 'typing into a button claimed to work');
+  must((await rpc('key', { key: 'home' })).ok, 'home failed');
+
+  // Typing, wherever a built-in app has a field on screen.
+  let typed = null;
+  for (const app of ['com.apple.MobileAddressBook', 'com.apple.mobilesafari', 'com.apple.Maps', 'com.apple.Preferences']) {
+    const current = await rpc('open', { app });
+    await sleep(2000);
+    screen = await rpc('screen');
+    const field = idOf(screen.text ?? '', /\] (搜索框|输入框)/);
+    notice(`fields in ${app}`, (screen.text ?? current.error ?? '').split('\n').slice(0, 14).join('\n'));
+    if (field === undefined) continue;
+    typed = await rpc('type', { screen: screen.screen, id: field, text: 'wifi' });
+    break;
+  }
+  must(typed !== null, 'no app had a text field on screen');
+  must(typed.ok && /wifi/i.test(typed.text), `typing didn't reach the field: ${typed.error ?? typed.text?.slice(0, 400)}`);
 
   // Tools that have no real target here still have to answer.
   must((await rpc('key', { key: 'home' })).ok, 'home failed');

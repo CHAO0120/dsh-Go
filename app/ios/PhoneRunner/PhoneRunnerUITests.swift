@@ -426,11 +426,16 @@ final class PhoneTools {
     if app.secureTextFields.matching(NSPredicate(format: "hasKeyboardFocus == YES")).firstMatch.exists {
       throw ToolError("焦点在密码框上，不能由 AI 输入。用 handoff 交给用户。")
     }
+    // XCTest retries for many seconds and then only records an issue, so ask first.
+    guard app.descendants(matching: .any).matching(NSPredicate(format: "hasKeyboardFocus == YES")).firstMatch.exists else {
+      throw ToolError("这个元素不能输入：点了之后没有输入焦点。先用 screen 确认输入框的编号。")
+    }
     if !target.value.isEmpty, target.value != target.label {
       app.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: target.value.count))
     }
     app.typeText(text)
     if params["submit"] as? Bool == true { app.typeText("\n") }
+    if let issue = PhoneRunnerUITests.lastIssue { throw ToolError("输入没有完成：\(issue)") }
     return try settled()
   }
 
