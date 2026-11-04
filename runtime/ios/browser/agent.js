@@ -129,6 +129,7 @@
       inViewport: rect.bottom > 0 && rect.right > 0 && rect.top < win.innerHeight && rect.left < win.innerWidth,
     };
     if (['checkbox', 'radio'].includes(el.type)) value.checked = el.checked;
+    if (el.type === 'checkbox') value.indeterminate = el.indeterminate;
     for (const key of ['expanded', 'pressed', 'selected']) if (el.hasAttribute('aria-' + key)) value[key] = bounded(attr(el, 'aria-' + key), 16);
     if (tag(el) === 'select') value.multiple = el.multiple;
     return value;
