@@ -75,6 +75,7 @@ class AppearancePage extends ConsumerWidget {
     final appearance = ref.watch(appearanceProvider);
     final wallpaper = ref.watch(wallpaperAccentProvider).value;
     final androidFeatures = ref.watch(androidSystemFeaturesProvider);
+    final ownLaunchScreen = ref.watch(ownLaunchScreenProvider);
     return AppPage.list(
       title: l10n.pluginsTheme,
       children: [
@@ -101,7 +102,7 @@ class AppearancePage extends ConsumerWidget {
             if (androidFeatures) const IconShortcutTile(),
           ],
         ),
-        if (androidFeatures)
+        if (ownLaunchScreen)
           SettingsSection(
             title: l10n.launchScreenTitle,
             footer: Text(l10n.launchFooter),

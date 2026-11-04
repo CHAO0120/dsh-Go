@@ -1,5 +1,5 @@
 // `dsh/islands` over a real channel: every call reaches the platform side on
-// Android and on HarmonyOS, and nothing does anywhere else.
+// Android, HarmonyOS and iOS, and nothing does anywhere else.
 
 import 'package:dsh_app/ui/plugins/islands/island_budget.dart';
 import 'package:dsh_app/ui/plugins/islands/island_platform.dart';
@@ -129,9 +129,26 @@ void main() {
     expect(seen(), expected);
   });
 
-  test('anywhere else nothing reaches the channel', () async {
+  test('iOS goes through the same way, and its events arrive', () async {
     debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
     final platform = MethodChannelIslandPlatform(_channel, 'ios');
+    await everyCall(platform);
+    expect(seen(), expected);
+    answer((_) => {'totalMem': 6 << 30, 'lowRam': false, 'webView': 'WebKit (iOS 18.0)'});
+    expect(maxLiveIslands(await platform.device()), 2);
+    final events = <IslandPlatformEvent>[];
+    final subscription = platform.events.listen(events.add);
+    addTearDown(subscription.cancel);
+    fromNative('rendererGone', {'id': 7, 'crashed': false});
+    fromNative('trimMemory', {'level': 15});
+    await pumpEventQueue();
+    expect(events[0], isA<IslandRendererGone>().having((e) => e.crashed, 'crashed', false));
+    expect(events[1], isA<IslandTrimMemory>().having((e) => e.low, 'low', true));
+  });
+
+  test('anywhere else nothing reaches the channel', () async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
+    final platform = MethodChannelIslandPlatform(_channel, 'macos');
     await everyCall(platform);
     expect(await platform.attach(7, dark: false, textZoom: 100), isFalse);
     final events = <IslandPlatformEvent>[];

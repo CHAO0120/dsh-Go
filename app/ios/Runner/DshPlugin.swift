@@ -20,12 +20,13 @@ final class DshPlugin: NSObject, FlutterPlugin, FlutterSceneLifeCycleDelegate {
   private let keep: [AnyObject]
 
   static func register(with registrar: any FlutterPluginRegistrar) {
-    let plugin = DshPlugin(messenger: registrar.messenger())
+    let plugin = DshPlugin(registrar: registrar)
     instance = plugin
     registrar.addSceneDelegate(plugin)
   }
 
-  private init(messenger: any FlutterBinaryMessenger) {
+  private init(registrar: any FlutterPluginRegistrar) {
+    let messenger = registrar.messenger()
     links = LinksChannel(messenger: messenger)
     shortcuts = ShortcutsChannel(messenger: messenger)
     shares = ShareChannel(messenger: messenger)
@@ -36,6 +37,14 @@ final class DshPlugin: NSObject, FlutterPlugin, FlutterSceneLifeCycleDelegate {
       NotifyChannel(messenger: messenger),
       VoiceChannel(messenger: messenger),
       LauncherIconChannel(messenger: messenger),
+      PerformanceChannel(messenger: messenger),
+      DiagnosticsChannel(messenger: messenger),
+      UsageChannel(messenger: messenger),
+      LaunchChannel(messenger: messenger),
+      LaunchClipChannel(messenger: messenger, textures: registrar.textures()),
+      NativeFilesChannel(messenger: messenger),
+      NativeMediaChannel(messenger: messenger),
+      IslandsChannel(registrar: registrar),
       // In a build without the engine, the runtime controller subscribes before it learns
       // there is none, and activating a stream with no handler reports an error to Flutter.
       EngineChannel.isBundled
@@ -478,7 +487,7 @@ private final class FilesChannel: NSObject, QLPreviewControllerDataSource {
   }
 }
 
-private func topViewController() -> UIViewController? {
+func topViewController() -> UIViewController? {
   let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
   let scene = scenes.first { $0.activationState == .foregroundActive } ?? scenes.first
   var top = scene?.windows.first { $0.isKeyWindow }?.rootViewController

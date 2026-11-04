@@ -106,7 +106,8 @@ const searchLimit = 20;
 /// people come for them, best first, [searchLimit] at most. Matches in [zh]
 /// and [en] alike. Without [androidFeatures], nothing that is Android's own
 /// ([SettingsIndex.androidOnly]), nor a word for what is only there
-/// ([SettingSpot.ohosKeywords]).
+/// ([SettingSpot.ohosKeywords]); on [ios], what it has too stays
+/// ([SettingSpot.iosToo]).
 List<SearchHit> searchSettings(
   String query, {
   required Iterable<SettingSpot> spots,
@@ -114,12 +115,13 @@ List<SearchHit> searchSettings(
   required L10n zh,
   required L10n en,
   bool androidFeatures = true,
+  bool ios = false,
 }) {
   final q = normalizeQuery(query);
   if (q.isEmpty) return const [];
   final hits = <SearchHit>[];
   for (final spot in spots) {
-    if (!androidFeatures && SettingsIndex.androidOnly(spot)) continue;
+    if (!androidFeatures && SettingsIndex.androidOnly(spot) && !(ios && spot.iosToo)) continue;
     final langs = [
       for (final l in [zh, en])
         _Words(spot.title(l), [

@@ -13,6 +13,13 @@
 		74858FAF1ED2DC5600515810 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 74858FAE1ED2DC5600515810 /* AppDelegate.swift */; };
 		D5480000000000000000A001 /* DshPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5480000000000000000A002 /* DshPlugin.swift */; };
 		D5480000000000000000A003 /* VoiceChannel.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5480000000000000000A004 /* VoiceChannel.swift */; };
+		D5480000000000000000C021 /* PerformanceChannel.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5480000000000000000C020 /* PerformanceChannel.swift */; };
+		D5480000000000000000C023 /* DiagnosticsChannel.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5480000000000000000C022 /* DiagnosticsChannel.swift */; };
+		D5480000000000000000C025 /* UsageChannel.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5480000000000000000C024 /* UsageChannel.swift */; };
+		D5480000000000000000C027 /* LaunchChannel.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5480000000000000000C026 /* LaunchChannel.swift */; };
+		D5480000000000000000C029 /* NativeFilesChannel.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5480000000000000000C028 /* NativeFilesChannel.swift */; };
+		D5480000000000000000C02B /* NativeMediaChannel.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5480000000000000000C02A /* NativeMediaChannel.swift */; };
+		D5480000000000000000C02D /* IslandsChannel.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5480000000000000000C02C /* IslandsChannel.swift */; };
 		D5480000000000000000C011 /* EngineChannel.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5480000000000000000C010 /* EngineChannel.swift */; };
 		D5480000000000000000C013 /* EngineRuntime.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5480000000000000000C012 /* EngineRuntime.swift */; };
 		D5480000000000000000C015 /* EngineSkills.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5480000000000000000C014 /* EngineSkills.swift */; };
@@ -80,6 +87,13 @@
 		74858FAE1ED2DC5600515810 /* AppDelegate.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
 		D5480000000000000000A002 /* DshPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DshPlugin.swift; sourceTree = "<group>"; };
 		D5480000000000000000A004 /* VoiceChannel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceChannel.swift; sourceTree = "<group>"; };
+		D5480000000000000000C020 /* PerformanceChannel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PerformanceChannel.swift; sourceTree = "<group>"; };
+		D5480000000000000000C022 /* DiagnosticsChannel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiagnosticsChannel.swift; sourceTree = "<group>"; };
+		D5480000000000000000C024 /* UsageChannel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UsageChannel.swift; sourceTree = "<group>"; };
+		D5480000000000000000C026 /* LaunchChannel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LaunchChannel.swift; sourceTree = "<group>"; };
+		D5480000000000000000C028 /* NativeFilesChannel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeFilesChannel.swift; sourceTree = "<group>"; };
+		D5480000000000000000C02A /* NativeMediaChannel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeMediaChannel.swift; sourceTree = "<group>"; };
+		D5480000000000000000C02C /* IslandsChannel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IslandsChannel.swift; sourceTree = "<group>"; };
 		D5480000000000000000C010 /* EngineChannel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EngineChannel.swift; sourceTree = "<group>"; };
 		D5480000000000000000C012 /* EngineRuntime.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EngineRuntime.swift; sourceTree = "<group>"; };
 		D5480000000000000000C014 /* EngineSkills.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EngineSkills.swift; sourceTree = "<group>"; };
@@ -176,6 +190,13 @@
 				74858FAE1ED2DC5600515810 /* AppDelegate.swift */,
 				D5480000000000000000A002 /* DshPlugin.swift */,
 				D5480000000000000000A004 /* VoiceChannel.swift */,
+				D5480000000000000000C020 /* PerformanceChannel.swift */,
+				D5480000000000000000C022 /* DiagnosticsChannel.swift */,
+				D5480000000000000000C024 /* UsageChannel.swift */,
+				D5480000000000000000C026 /* LaunchChannel.swift */,
+				D5480000000000000000C028 /* NativeFilesChannel.swift */,
+				D5480000000000000000C02A /* NativeMediaChannel.swift */,
+				D5480000000000000000C02C /* IslandsChannel.swift */,
 				D5480000000000000000C010 /* EngineChannel.swift */,
 				D5480000000000000000C012 /* EngineRuntime.swift */,
 				D5480000000000000000C014 /* EngineSkills.swift */,
@@ -399,6 +420,13 @@
 				74858FAF1ED2DC5600515810 /* AppDelegate.swift in Sources */,
 				D5480000000000000000A001 /* DshPlugin.swift in Sources */,
 				D5480000000000000000A003 /* VoiceChannel.swift in Sources */,
+				D5480000000000000000C021 /* PerformanceChannel.swift in Sources */,
+				D5480000000000000000C023 /* DiagnosticsChannel.swift in Sources */,
+				D5480000000000000000C025 /* UsageChannel.swift in Sources */,
+				D5480000000000000000C027 /* LaunchChannel.swift in Sources */,
+				D5480000000000000000C029 /* NativeFilesChannel.swift in Sources */,
+				D5480000000000000000C02B /* NativeMediaChannel.swift in Sources */,
+				D5480000000000000000C02D /* IslandsChannel.swift in Sources */,
 				D5480000000000000000C011 /* EngineChannel.swift in Sources */,
 				D5480000000000000000C013 /* EngineRuntime.swift in Sources */,
 				D5480000000000000000C015 /* EngineSkills.swift in Sources */,

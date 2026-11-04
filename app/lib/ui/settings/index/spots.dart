@@ -175,6 +175,7 @@ class SettingSpot {
     this.field,
     this.altTitle,
     this.androidOnly = false,
+    this.iosToo = false,
   });
 
   /// Stable, unique: `phone-confirm`, `page:phone`.
@@ -210,6 +211,9 @@ class SettingSpot {
 
   /// Android's own, on a page that isn't ([SettingsIndex.androidOnly]).
   final bool androidOnly;
+
+  /// One of [androidOnly]'s that iOS has as well: only HarmonyOS goes without.
+  final bool iosToo;
 
   bool get isEntry => opens != null;
 }
@@ -769,6 +773,7 @@ abstract final class Spots {
     title: (l) => l.launchScreenTitle,
     keywords: (l) => l.searchKwLaunchScreen,
     androidOnly: true,
+    iosToo: true,
   );
   static final wallpaper = SettingSpot(
     'wallpaper',

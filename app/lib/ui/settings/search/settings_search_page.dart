@@ -161,6 +161,7 @@ class _SettingsSearchPageState extends ConsumerState<SettingsSearchPage> {
       zh: _zh,
       en: _en,
       androidFeatures: androidFeatures,
+      ios: ref.watch(operatingSystemProvider) == 'ios',
     );
     final hits = query.trim().isEmpty ? const <SearchHit>[] : search(androidFeatures: androidFeatures);
     final session = ref.watch(currentSessionProvider);

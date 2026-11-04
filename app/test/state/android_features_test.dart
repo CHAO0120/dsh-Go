@@ -86,8 +86,8 @@ const _rows = {
 final _zh = lookupL10n(AppLocale.zhCN);
 final _en = lookupL10n(AppLocale.en);
 
-List<Override> _on({required bool android, RuntimeStatus status = runningStatus}) => [
-  operatingSystemProvider.overrideWithValue(android ? 'android' : 'ohos'),
+List<Override> _on({required bool android, String? os, RuntimeStatus status = runningStatus}) => [
+  operatingSystemProvider.overrideWithValue(os ?? (android ? 'android' : 'ohos')),
   activeHostProvider.overrideWith(() => FixedActiveHost(HostRef.local)),
   hostsProvider.overrideWith(FixedHosts.new),
   localRuntimeProvider.overrideWith(() => FakeRuntime(LocalRuntimeState(loaded: true, status: status))),
@@ -372,6 +372,56 @@ void main() {
       expect(find.text(_zh.launchScreenTitle), findsNothing);
       expect(find.byType(ThemeModePicker), findsOneWidget);
       expect(find.byType(WallpaperSection), findsOneWidget);
+    });
+  });
+
+  group('主题 on iOS', () {
+    Future<void> pump(WidgetTester tester) async {
+      tester.view.devicePixelRatio = 2;
+      tester.view.physicalSize = const Size(390 * 2, 3600 * 2);
+      addTearDown(tester.view.reset);
+      await tester.pumpWidget(
+        goldenApp(
+          home: const AppearancePage(),
+          brightness: Brightness.light,
+          overrides: _on(android: false, os: 'ios'),
+        ),
+      );
+      await tester.pumpAndSettle();
+    }
+
+    testWidgets('its own launch screen: Flutter draws it. No picture shortcut: nothing can pin one', (tester) async {
+      await pump(tester);
+      expect(find.byType(AppIconPicker), findsOneWidget);
+      expect(find.byType(LaunchScreenSection), findsOneWidget);
+      expect(find.byType(IconShortcutTile), findsNothing);
+      expect(find.byType(WallpaperSection), findsOneWidget);
+    });
+
+    testWidgets('no 跟随壁纸: no wallpaper colour to follow', (tester) async {
+      await pump(tester);
+      expect(find.text(_zh.pluginsFollowWallpaper), findsNothing);
+    });
+
+    test('the launch screen is searchable, the picture shortcut isn\'t, and HarmonyOS has neither', () {
+      List<String> ids(String q, {required bool ios}) => [
+        for (final h in searchSettings(
+          q,
+          spots: SettingsIndex.spots,
+          features: featureSections,
+          zh: _zh,
+          en: _en,
+          androidFeatures: false,
+          ios: ios,
+        ))
+          h.spot?.id ?? 'feature:${h.feature!.id}',
+      ];
+      expect(ids(_zh.launchScreenTitle, ios: true), contains('launch-screen'));
+      expect(ids(_zh.launchScreenTitle, ios: false), isNot(contains('launch-screen')));
+      expect(ids(_zh.iconShortcutRow, ios: true), isNot(contains('icon-shortcut')));
+      expect(ownLaunchScreenOn('ios'), isTrue);
+      expect(ownLaunchScreenOn('android'), isTrue);
+      expect(ownLaunchScreenOn('ohos'), isFalse);
     });
   });
 
