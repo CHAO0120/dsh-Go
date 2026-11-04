@@ -535,7 +535,10 @@ final class EngineChannel: NSObject, FlutterStreamHandler {
     }
     let active = nativePhase == "running"
     let bundled = archive?.manifest
-    let exitedMessage: String? = exitedUnasked ? "本机引擎已退出，可以重新启动。" : nil
+    // 70 is the runner stopping the engine at its heap limit, before V8 takes the app with it.
+    let exitedMessage: String? =
+      !exitedUnasked ? nil
+      : state["exitCode"] as? Int == 70 ? "本机引擎内存用完了，已经停下，可以重新启动。" : "本机引擎已退出，可以重新启动。"
     let lifecycleMessage: String? = lifecycle.failure != nil ? EngineChannel.notice : nil
     let shownError: String? = lastError ?? setupError ?? errorMessage ?? exitedMessage ?? lifecycleMessage
     let liveUrl: String? = active ? baseUrl : nil

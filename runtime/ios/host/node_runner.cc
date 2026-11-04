@@ -72,6 +72,20 @@ bool IsUnifiedPreload(const char* value) {
   return length >= suffix_length && std::strcmp(value + length - suffix_length, suffix) == 0;
 }
 
+struct HeapLimitState {
+  node::Environment* environment;
+  bool reached = false;
+};
+
+size_t StopAtHeapLimit(void* data, size_t current, size_t) {
+  auto* state = static_cast<HeapLimitState*>(data);
+  if (state->reached) return current;
+  state->reached = true;
+  node::Stop(state->environment);
+  // Match Node's Worker::NearHeapLimit allowance for completing the current GC.
+  return current + 16 * 1024 * 1024;
+}
+
 int RunEnvironment(const std::vector<std::string>& args, const std::vector<std::string>& exec_args) {
   std::vector<std::string> errors;
   const auto flags = static_cast<node::EnvironmentFlags::Flags>(
@@ -88,11 +102,13 @@ int RunEnvironment(const std::vector<std::string>& args, const std::vector<std::
   int explicit_exit = 0;
   bool has_explicit_exit = false;
   int result = 1;
+  HeapLimitState heap_limit{env};
   {
     v8::Locker locker(isolate);
     v8::Isolate::Scope isolate_scope(isolate);
     v8::HandleScope handle_scope(isolate);
     v8::Context::Scope context_scope(setup->context());
+    isolate->AddNearHeapLimitCallback(StopAtHeapLimit, &heap_limit);
     node::SetProcessExitHandler(env, [&](node::Environment* exiting, int code) {
       explicit_exit = code;
       has_explicit_exit = true;
@@ -112,7 +128,12 @@ int RunEnvironment(const std::vector<std::string>& args, const std::vector<std::
       active_environment = nullptr;
       if (stop_requested && !has_explicit_exit) result = 0;
     }
+    isolate->RemoveNearHeapLimitCallback(StopAtHeapLimit, 0);
     node::Stop(env);
+  }
+  if (heap_limit.reached) {
+    std::fprintf(stderr, "ERR_IOS_HOST_HEAP_LIMIT: engine stopped at heap limit\n");
+    return 70;
   }
   return has_explicit_exit ? explicit_exit : result;
 }
