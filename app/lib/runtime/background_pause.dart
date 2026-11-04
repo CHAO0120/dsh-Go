@@ -14,6 +14,7 @@ import '../state/chat_state.dart';
 import '../state/hosts_state.dart';
 import '../state/notify_state.dart' show appForegroundProvider, launchNoticeShownProvider;
 import '../state/sessions_state.dart';
+import 'runtime_state.dart';
 
 /// The decision, without timers or the platform (unit-tested).
 abstract final class BackgroundPausePolicy {
@@ -24,13 +25,15 @@ abstract final class BackgroundPausePolicy {
 
   /// Whether a return after [away] calls for the line: the on-device engine is
   /// the [local] host (a remote one kept going), and its turn [wasRunning] on
-  /// leaving and is [running] still (one that ended first has nothing to go on with).
+  /// leaving and is [running] still (one that ended first has nothing to go on with). Nor did
+  /// it pause if the system is still letting it [continued] (iOS 26); one that lost that did.
   static bool onReturn({
     required Duration away,
     required bool local,
     required bool wasRunning,
     required bool running,
-  }) => local && wasRunning && running && away >= suspendedAfter;
+    bool continued = false,
+  }) => local && wasRunning && running && !continued && away >= suspendedAfter;
 }
 
 /// Whether the line shows. It follows the app on and off screen by itself; a
@@ -81,6 +84,7 @@ class BackgroundPauseController extends Notifier<bool> {
       local: ref.read(activeHostProvider).isLocal,
       wasRunning: _wasRunning,
       running: _turnRunning,
+      continued: ref.read(localRuntimeProvider).status.continuedRun,
     );
     if (!due) return;
     ref.read(launchNoticeShownProvider.notifier).set(true);

@@ -99,6 +99,7 @@ private final class EngineLifecycle: NSObject, URLSessionTaskDelegate {
   private var requested = -1
   private var acknowledged = -1
   private(set) var failure: String?
+  private(set) var continued = false
   private var retryDelay = 1.0
   private var retry: DispatchWorkItem?
   private var task: URLSessionTask?
@@ -139,6 +140,16 @@ private final class EngineLifecycle: NSObject, URLSessionTaskDelegate {
     push()
   }
 
+  /// The system is letting the engine keep running in the background.
+  func observe(continued: Bool) {
+    guard continued != self.continued else { return }
+    resetRetry()
+    self.continued = continued
+    revision += 1
+    failures = 0
+    push()
+  }
+
   func runtime(baseUrl: String?, token: String?) {
     if origin == baseUrl && self.token == token { return }
     resetRetry()
@@ -156,7 +167,7 @@ private final class EngineLifecycle: NSObject, URLSessionTaskDelegate {
   }
 
   func status() -> [String: Any?] {
-    ["foreground": foreground, "revision": revision, "acknowledgedRevision": acknowledged < 0 ? nil : acknowledged, "error": failure]
+    ["foreground": foreground, "continued": continued, "revision": revision, "acknowledgedRevision": acknowledged < 0 ? nil : acknowledged, "error": failure]
   }
 
   private func resetRetry() {
@@ -234,10 +245,14 @@ private final class EngineLifecycle: NSObject, URLSessionTaskDelegate {
     request.httpMethod = "POST"
     request.setValue(cookie, forHTTPHeaderField: "Cookie")
     request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-    // iOS gives no continuing compute in the background: the engine pauses new tool calls.
-    let body: [String: Any] = ["operation": "host", "revision": revision, "foreground": foreground, "computePermission": "denied"]
+    // Without a continued task iOS gives no compute in the background, so the engine pauses new
+    // tool calls. It pauses on what it's told about the foreground, so a continued task counts.
+    let foreground = self.foreground || continued
+    let body: [String: Any] = [
+      "operation": "host", "revision": revision, "foreground": foreground,
+      "computePermission": continued ? "granted" : "denied",
+    ]
     request.httpBody = try? JSONSerialization.data(withJSONObject: body)
-    let foreground = self.foreground
     task = session.dataTask(with: request) { [weak self] data, response, error in
       guard let self else { return }
       guard error == nil, let http = response as? HTTPURLResponse else { return done("ios_lifecycle_unavailable") }
@@ -321,6 +336,7 @@ final class EngineChannel: NSObject, FlutterStreamHandler {
   private var secrets: [String] = []
 
   private var backgroundTask = UIBackgroundTaskIdentifier.invalid
+  private let continued = ContinuedRun()
   private let pathMonitor = NWPathMonitor()
   private var pathStarted = false
 
@@ -340,6 +356,19 @@ final class EngineChannel: NSObject, FlutterStreamHandler {
     events.setStreamHandler(self)
     queue.async { [self] in
       skillOwner = skills.attachOwner()
+    }
+    continued.onChange = { [weak self] running in
+      guard let self else { return }
+      // Recording the pause takes a moment, and the process is about to stop.
+      if !running, backgroundTask == .invalid, UIApplication.shared.applicationState == .background {
+        backgroundTask = UIApplication.shared.beginBackgroundTask(withName: "dsh.engine.pause") { [weak self] in
+          self?.endBackgroundTask()
+        }
+      }
+      queue.async { [self] in
+        lifecycle.observe(continued: running)
+        emitStatus()
+      }
     }
     let center = NotificationCenter.default
     center.addObserver(
@@ -427,6 +456,10 @@ final class EngineChannel: NSObject, FlutterStreamHandler {
           reply(nil)
         case "stop":
           stop()
+          reply(nil)
+        case "turnRunning":
+          let running = arguments["running"] as? Bool ?? false
+          DispatchQueue.main.async { [self] in continued.update(running: running) }
           reply(nil)
         case "reset":
           try reset(keep: arguments["keep"] as? [String] ?? []) { reply(nil) } failed: { reply(self.flutterError($0)) }
@@ -567,6 +600,7 @@ final class EngineChannel: NSObject, FlutterStreamHandler {
       "launchSpawned": nativePhase != "idle",
       "launchFailureReason": launchFailure,
       "tidyingFiles": false,
+      "continuedRun": lifecycle.continued,
       "lifecycle": lifecycle.status(),
     ]
   }
