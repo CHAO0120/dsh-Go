@@ -8,7 +8,7 @@ import WebKit
 ///
 /// What a page says is data, not instructions. Opening a site takes the user's approval, for
 /// this run; so does leaving it for another. Fields marked sensitive are refused and handed to
-/// the user, who fills them in on screen, unseen by the model.
+/// the user, who fills them in on screen. Later page reads and screenshots may show what they entered.
 @MainActor
 final class IOSBrowser: NSObject, WKNavigationDelegate, WKUIDelegate {
   private static let world = WKContentWorld.world(name: "dsh")
@@ -331,7 +331,7 @@ final class IOSBrowser: NSObject, WKNavigationDelegate, WKUIDelegate {
 }
 
 /// The user takes over: the agent's page on screen, for signing in or filling in what the model
-/// mustn't see. The view returns behind the app when they're done.
+/// can't fill itself. The view returns behind the app when they're done.
 @MainActor
 final class IOSBrowserSheet: UIViewController {
   private let webView: WKWebView
@@ -355,9 +355,9 @@ final class IOSBrowserSheet: UIViewController {
     super.viewDidLoad()
     view.backgroundColor = .systemBackground
     let note = UILabel()
-    note.text = reason.isEmpty ? "AI 请你接手这个页面。这里填的内容它看不到。" : reason
+    note.text = "AI 可以读取页面和截图，输入内容可能可见。\n" + (reason.isEmpty ? "请自行操作，完成后点“完成”。" : reason)
     note.font = .preferredFont(forTextStyle: .subheadline)
-    note.numberOfLines = 3
+    note.numberOfLines = 5
     let finish = UIButton(type: .system)
     finish.setTitle("完成", for: .normal)
     finish.addAction(UIAction { [weak self] _ in self?.finish(completed: true) }, for: .touchUpInside)
