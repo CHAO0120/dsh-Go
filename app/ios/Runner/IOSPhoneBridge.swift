@@ -14,6 +14,7 @@ final class IOSPhoneBridge: NSObject, URLSessionTaskDelegate {
   private let actions: IOSPhoneActions
   private let browser: IOSBrowser
   private let runner: IOSPhoneRunner
+  private let system: IOSSystemTools
   private let runtimeCurrent: () -> Bool
   private var directory: URL?
   private var runId: String?
@@ -42,6 +43,7 @@ final class IOSPhoneBridge: NSObject, URLSessionTaskDelegate {
     self.actions = IOSPhoneActions(presenter: presenter)
     self.browser = IOSBrowser(actions: actions, presenter: presenter)
     self.runner = IOSPhoneRunner(actions: actions)
+    self.system = IOSSystemTools(actions: actions, presenter: presenter)
     self.runtimeCurrent = runtimeCurrent
     super.init()
   }
@@ -88,6 +90,7 @@ final class IOSPhoneBridge: NSObject, URLSessionTaskDelegate {
     session?.invalidateAndCancel(); session = nil
     browser.retire()
     runner.retire()
+    system.retire()
     if let active { actions.cancel(active.id) }
     operation?.cancel(); operation = nil
     if let runId { nativeClear(runId) }
@@ -141,6 +144,7 @@ final class IOSPhoneBridge: NSObject, URLSessionTaskDelegate {
         if status == 410 || request.expiresAt <= Date().timeIntervalSince1970 * 1000 {
           actions.cancel(request.id)
           browser.enteredBackground()
+          system.stopAsking()
         }
         return
       }
@@ -156,6 +160,20 @@ final class IOSPhoneBridge: NSObject, URLSessionTaskDelegate {
       operation = Task { [weak self] in
         guard let self else { return }
         let kind = request.action.kind
+        if kind.hasPrefix("system-") {
+          let current = { [weak self] in
+            self?.current(request) == true && request.expiresAt > Date().timeIntervalSince1970 * 1000
+          }
+          let result = await self.system.run(request, authorize: { [weak self] in
+            guard let self else { return false }
+            return (try? await self.post("begin", ["id": request.id]))?.0 == 200
+          }, current: current)
+          guard self.current(request) else { return }
+          _ = try? await self.post("result", ["id": request.id, "text": result.text, "isError": result.isError])
+          guard self.active?.id == request.id else { return }
+          self.active = nil; self.operation = nil
+          return
+        }
         if kind.hasPrefix("browser-") || kind.hasPrefix("runner-") {
           // The tool call has to still be waiting for this, now and after any question to the user.
           let current = { [weak self] in

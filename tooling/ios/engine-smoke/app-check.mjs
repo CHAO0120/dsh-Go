@@ -162,6 +162,8 @@ if (values.mode === 'launch') {
   // Without them the app runs fine and simply has no browser tools.
   const absent = ['agent.js', 'actions.mjs', 'catalog.json'].filter((name) => !existsSync(join(values.app, 'dsh-runtime/browser', name)));
   if (absent.length) fail('browser', `Not in the app bundle: ${absent.join(', ')}`);
+  const noSystem = ['actions.mjs', 'results.mjs', 'catalog.json'].filter((name) => !existsSync(join(values.app, 'dsh-runtime/system', name)));
+  if (noSystem.length) fail('system', `Not in the app bundle: ${noSystem.join(', ')}`);
   const passed = up && crashes().length === 0 && missing.length === 0 && absent.length === 0;
   if (passed) {
     notice('app launch', 'The real app is still running 30 seconds after launch.');

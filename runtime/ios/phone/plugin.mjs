@@ -8,6 +8,17 @@ export const name = 'dsh-go-ios-phone';
 export const inject = ['tools'];
 export const catalogSha256 = 'ec04e096af7d632e86f9b0e39a28fbf7f74042e1df7b46db825b5cb7bbfe810e';
 
+// What the system said is the user's data, and what's in it isn't an instruction. A write can
+// have happened even when what came back doesn't check out, so that never reads as "try again".
+export function systemAnswer(system, name, args, answer) {
+  try {
+    const data = system.resultFor(system.actionFor(name, args), JSON.parse(answer.content[0].text));
+    return { content: [{ type: 'text', text: JSON.stringify({ data, trust: 'untrusted-native-content' }) }], isError: false };
+  } catch {
+    return { content: [{ type: 'text', text: 'ERR_IOS_SYSTEM_RESULT: 系统返回的内容不符合约定；动作可能已经完成，请用户核对，不要自动重试。' }], isError: true };
+  }
+}
+
 export async function apply(ctx, config) {
   if (!isAbsolute(config.directory) || !/^[a-f0-9-]{36}$/.test(config.runId)) throw new Error('Invalid iOS phone endpoint directory/generation');
   const directory = await stat(config.directory);
@@ -22,7 +33,13 @@ export async function apply(ctx, config) {
   const browserCatalog = await readFile(new URL('../browser/catalog.json', import.meta.url))
     .then(JSON.parse, () => []);
   const browserAction = browserCatalog.length ? (await import('../browser/actions.mjs')).actionFor : undefined;
-  const bridge = await createPhoneBridge({ token, runId: config.runId, browserAction });
+  const systemCatalog = await readFile(new URL('../system/catalog.json', import.meta.url))
+    .then(JSON.parse, () => []);
+  const system = systemCatalog.length
+    ? { ...(await import('../system/actions.mjs')), ...(await import('../system/results.mjs')) }
+    : undefined;
+  const systemAction = (name, args) => ({ kind: `system-${name}`, params: JSON.stringify(system.actionFor(name, args).args) });
+  const bridge = await createPhoneBridge({ token, runId: config.runId, browserAction, systemAction });
   const disposers = [];
   const endpoint = join(config.directory, 'endpoint.json');
   const temporary = `${endpoint}.${randomUUID()}.tmp`;
@@ -39,6 +56,17 @@ export async function apply(ctx, config) {
         name: `mcp__browser__${tool.name}`, rawName: tool.name,
         description: tool.description, inputSchema: tool.inputSchema,
         call: (args, execution) => bridge.call(`browser:${tool.name}`, args, execution),
+      })));
+    }
+    for (const tool of systemCatalog) {
+      disposers.push(ctx.tools.register(createMcpToolDefinition(ctx, {
+        name: `mcp__system__${tool.name}`, rawName: tool.name,
+        description: tool.description, inputSchema: tool.inputSchema,
+        call: async (args, execution) => {
+          const answer = await bridge.call(`system:${tool.name}`, args, execution);
+          if (answer.isError) return answer;
+          return systemAnswer(system, tool.name, args, answer);
+        },
       })));
     }
     await writeFile(temporary, JSON.stringify(bridge.endpoint), { mode: 0o600, flag: 'wx' });

@@ -157,6 +157,14 @@
 	<string>Connects to DSH on a computer or server you choose.</string>
 	<key>NSCameraUsageDescription</key>
 	<string>Takes photos to send to DSH as attachments.</string>
+	<key>NSRemindersFullAccessUsageDescription</key>
+	<string>Reads or changes reminders when you approve a request from the on-device engine.</string>
+	<key>NSRemindersUsageDescription</key>
+	<string>Reads or changes reminders when you approve a request from the on-device engine.</string>
+	<key>NSContactsUsageDescription</key>
+	<string>Looks up or adds contacts when you approve a request from the on-device engine.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>Reads your location once when you approve a request from the on-device engine.</string>
 	<key>NSCalendarsUsageDescription</key>
 	<string>Opens the calendar editor when you approve adding an event.</string>
 	<key>NSMicrophoneUsageDescription</key>

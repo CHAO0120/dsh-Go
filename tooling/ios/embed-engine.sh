@@ -49,6 +49,12 @@ if [ -d "$ROOT/runtime/ios/browser" ]; then
     cp "$ROOT/runtime/ios/browser/$file" "$RESOURCES/dsh-runtime/browser/"
   done
 fi
+if [ -d "$ROOT/runtime/ios/system" ]; then
+  mkdir -p "$RESOURCES/dsh-runtime/system"
+  for file in actions.mjs results.mjs catalog.json; do
+    cp "$ROOT/runtime/ios/system/$file" "$RESOURCES/dsh-runtime/system/"
+  done
+fi
 
 if [ "${CODE_SIGNING_ALLOWED:-YES}" = "NO" ] || [ -z "${EXPANDED_CODE_SIGN_IDENTITY:-}" ]; then
   exit 0

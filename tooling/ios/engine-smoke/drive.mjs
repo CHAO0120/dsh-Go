@@ -50,6 +50,7 @@ mkdirSync(phoneDirectory, { mode: 0o700 });
 const phoneBackend = join(resolve(values.runtime), 'runtime/ios/phone');
 cpSync(join(repo, 'runtime/ios/phone'), phoneBackend, { recursive: true });
 cpSync(join(repo, 'runtime/ios/browser'), join(resolve(values.runtime), 'runtime/ios/browser'), { recursive: true });
+cpSync(join(repo, 'runtime/ios/system'), join(resolve(values.runtime), 'runtime/ios/system'), { recursive: true });
 writeFileSync(join(dshHome, 'ios-host.patch.json'), JSON.stringify([{ insert: [{
   id: 'dsh-go-ios-phone', name: join(phoneBackend, 'plugin.mjs'), config: { directory: phoneDirectory, runId: phoneRun },
 }] }]));
@@ -345,6 +346,7 @@ report.modelRequests = model.requests.map((row) => row.requestedTool);
 report.phoneEndpoint = existsSync(join(phoneDirectory, 'endpoint.json'));
 report.phoneTools = (model.requests[0]?.offeredTools ?? []).filter((name) => name?.startsWith('mcp__phone__')).length;
 report.browserTools = (model.requests[0]?.offeredTools ?? []).filter((name) => name?.startsWith('mcp__browser__')).length;
+report.systemTools = (model.requests[0]?.offeredTools ?? []).filter((name) => name?.startsWith('mcp__system__')).length;
 await model.close();
 report.nativeHost = existsSync(logFile) ? tail : [];
 writeFileSync(join(work, 'report.json'), JSON.stringify(report, null, 2) + '\n');

@@ -8,6 +8,8 @@ const failure = (code, text) => result(`${code}: ${text}`, true);
 // These need nobody on screen in DSH Go, and answer with a page or a screenshot, a good deal
 // larger than anything else here.
 const isBrowser = request => /^(browser|runner)-/.test(request.action.kind);
+const isSystem = request => request.action.kind.startsWith('system-');
+const SYSTEM_RESULT_BYTES = 32768;
 const RESULT_BYTES = 16384;
 const BROWSER_RESULT_BYTES = 512 * 1024;
 const BROWSER_IMAGE_BYTES = 1200 * 1024;
@@ -18,7 +20,7 @@ const HANDOFF_MS = 600000;
 
 // Swift owns the bootstrap secret and every actual confirmation/action. This server has
 // no approval endpoint; /begin only confirms that the already-confirmed call is still live.
-export async function createPhoneBridge({ token, runId, timeoutMs = 120000, browserAction }) {
+export async function createPhoneBridge({ token, runId, timeoutMs = 120000, browserAction, systemAction }) {
   if (!/^[0-9a-f]{64}$/.test(token) || typeof runId !== 'string' || !runId) throw new Error('Invalid iOS phone bootstrap');
   const secret = Buffer.from(`Bearer ${token}`);
   const pending = new Map();
@@ -73,7 +75,8 @@ export async function createPhoneBridge({ token, runId, timeoutMs = 120000, brow
         const browser = isBrowser(row.request);
         const image = body.image;
         if (!['claimed', 'executing'].includes(row.state) || typeof body.text !== 'string' ||
-            Buffer.byteLength(body.text) > (browser ? BROWSER_RESULT_BYTES : RESULT_BYTES) || typeof body.isError !== 'boolean' ||
+            Buffer.byteLength(body.text) > (browser ? BROWSER_RESULT_BYTES : isSystem(row.request) ? SYSTEM_RESULT_BYTES : RESULT_BYTES) ||
+            typeof body.isError !== 'boolean' ||
             (image !== undefined && (!browser || typeof image !== 'string' || image.length > BROWSER_IMAGE_BYTES))) {
           reply(res, 400, { error: 'result' }); return;
         }
@@ -97,7 +100,9 @@ export async function createPhoneBridge({ token, runId, timeoutMs = 120000, brow
       if (closed) return Promise.resolve(failure('ERR_IOS_PHONE_RETIRED', '本轮引擎已结束。'));
       let action;
       try {
-        action = name.startsWith('browser:') ? browserAction(name.slice('browser:'.length), args) : actionFor(name, args);
+        if (name.startsWith('browser:')) action = browserAction(name.slice('browser:'.length), args);
+        else if (name.startsWith('system:')) action = systemAction(name.slice('system:'.length), args);
+        else action = actionFor(name, args);
       } catch (error) { return Promise.resolve(failure(error.code, error.message)); }
       const { signal, callId, agent } = execution;
       if (!signal || signal.aborted || !callId || !agent?.session?.id) return Promise.resolve(failure('ERR_IOS_PHONE_OWNER', '没有仍有效的会话工具调用。'));
