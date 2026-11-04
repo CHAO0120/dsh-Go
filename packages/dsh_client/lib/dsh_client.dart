@@ -49,3 +49,5 @@ export 'src/terminal_api.dart';
 export 'src/transcript.dart';
 export 'src/workspace_api.dart';
 export 'src/workspaces_api.dart';
+
+export 'src/lifecycle_api.dart';
