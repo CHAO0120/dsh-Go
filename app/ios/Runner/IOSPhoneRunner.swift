@@ -94,7 +94,7 @@ final class IOSPhoneRunner {
       if let warning = result["warning"] as? String { text += "\n（注意：\(warning)）" }
       let image = (result["image"] as? String).flatMap { Data(base64Encoded: $0) }
       return IOSPhoneOutcome(text: text, isError: false, image: image)
-    } catch let error as URLError where error.code == .cannotConnectToHost || error.code == .networkConnectionLost {
+    } catch let error as URLError where error.code == .cannotConnectToHost {
       return .failure(Self.missing)
     } catch {
       return .failure("手机操控这一步的结果未知，请核对屏幕，不要自动重试。")
