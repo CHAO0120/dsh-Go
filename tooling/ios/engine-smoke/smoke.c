@@ -101,6 +101,7 @@ int main(int argc, char** argv) {
       drain();
       begin(argv);
     }
-    usleep(100000);
+    // Often enough that the host's bounded queue keeps the first lines of a burst.
+    usleep(10000);
   }
 }

@@ -56,6 +56,9 @@ int dsh_host_start(const char* runtime_root, const char* guest_root, const char*
   options.native_library_dir = native_library_dir;
   options.workspace_roots = {workspace};
   for (int i = 0; i < env_count; ++i) options.env[env_keys[i]] = env_values[i];
+  // The virtual shell finds its commands through this, in its own filesystem. What the
+  // process inherits varies (the Simulator's has no /bin), and nothing else runs from it.
+  options.env["PATH"] = "/usr/bin:/bin";
   std::lock_guard<std::mutex> lock(host_mutex);
   try {
     // A Host is good for one engine thread, so a new run gets a new one. Its destructor
