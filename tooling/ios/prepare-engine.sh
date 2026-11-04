@@ -119,9 +119,17 @@ FLOCK="$STEP/inputs/dsh/node_modules/@deepseek-ai/node-addon-system"
 cp "$FLOCK/src/flock.c" "$STAGE/addons/flock/"
 tar xzf "$WORK/require-builtin.tar.gz" --strip-components=3 -C "$STAGE/addons/require-builtin" \
   "dsh-node-addon-require-builtin-$ADDON_COMMIT/packages/native"
-API="$STEP/inputs/process/node_modules/node-addon-api"
-[[ -d "$API" ]] || API="$TOOLS/node_modules/node-addon-api"
-[[ -f "$API/napi.h" ]] || { printf 'node-addon-api headers are missing\n' >&2; exit 1; }
+# Build headers only, and an optional peer in the locks, so the install above leaves them out.
+API="$STEP/node-addon-api"
+mkdir -p "$API"
+(cd "$API" && "$NPM" pack --silent --cache "$WORK/npm" node-addon-api@8.9.2 >/dev/null && tar xzf node-addon-api-8.9.2.tgz --strip-components=1)
+"$PYTHON" -I -B -c '
+import hashlib, json, sys
+pins = json.load(open(sys.argv[1]))["nodeAddonApi"]["files"]
+for name, expected in pins.items():
+    if hashlib.sha256(open(sys.argv[2] + "/" + name, "rb").read()).hexdigest() != expected:
+        sys.exit("node-addon-api differs from its pin: " + name)
+' "$ROOT/runtime/ohos/native/loader/source-pins.json" "$API"
 mkdir -p "$STAGE/addons/node-addon-api"
 cp "$API"/*.h "$STAGE/addons/node-addon-api/"
 "$PYTHON" -I -B "$ROOT/runtime/ohos/host/generate-node-version.py" --output "$STAGE/include/dsh_node_version.h"
