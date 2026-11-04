@@ -174,7 +174,7 @@
           const option = el.options[index];
           const optionId = 'o' + index.toString(36);
           options.set(optionId, option);
-          item.options.push({ id: optionId, name: bounded(option.textContent), disabled: option.disabled || option.parentElement?.disabled === true, selected: option.selected });
+          item.options.push({ id: optionId, name: bounded(attr(option, 'label') || option.textContent), disabled: option.disabled || option.parentElement?.disabled === true, selected: option.selected });
         }
         if (el.options.length > 64) result.truncated = true;
       }
