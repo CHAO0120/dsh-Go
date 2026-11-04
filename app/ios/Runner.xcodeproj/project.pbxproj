@@ -13,6 +13,7 @@
 		74858FAF1ED2DC5600515810 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 74858FAE1ED2DC5600515810 /* AppDelegate.swift */; };
 		D5480000000000000000A001 /* DshPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5480000000000000000A002 /* DshPlugin.swift */; };
 		D5480000000000000000A003 /* VoiceChannel.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5480000000000000000A004 /* VoiceChannel.swift */; };
+		D5480000000000000000C071 /* IOSBrowser.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5480000000000000000C070 /* IOSBrowser.swift */; };
 		D5480000000000000000C061 /* ContinuedRun.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5480000000000000000C060 /* ContinuedRun.swift */; };
 		D5480000000000000000C051 /* SiriIntents.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5480000000000000000C050 /* SiriIntents.swift */; };
 		D5480000000000000000C041 /* IOSPhoneActions.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5480000000000000000C040 /* IOSPhoneActions.swift */; };
@@ -93,6 +94,7 @@
 		74858FAE1ED2DC5600515810 /* AppDelegate.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
 		D5480000000000000000A002 /* DshPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DshPlugin.swift; sourceTree = "<group>"; };
 		D5480000000000000000A004 /* VoiceChannel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceChannel.swift; sourceTree = "<group>"; };
+		D5480000000000000000C070 /* IOSBrowser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IOSBrowser.swift; sourceTree = "<group>"; };
 		D5480000000000000000C060 /* ContinuedRun.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContinuedRun.swift; sourceTree = "<group>"; };
 		D5480000000000000000C050 /* SiriIntents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SiriIntents.swift; sourceTree = "<group>"; };
 		D5480000000000000000C040 /* IOSPhoneActions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IOSPhoneActions.swift; sourceTree = "<group>"; };
@@ -204,6 +206,7 @@
 				74858FAE1ED2DC5600515810 /* AppDelegate.swift */,
 				D5480000000000000000A002 /* DshPlugin.swift */,
 				D5480000000000000000A004 /* VoiceChannel.swift */,
+				D5480000000000000000C070 /* IOSBrowser.swift */,
 				D5480000000000000000C060 /* ContinuedRun.swift */,
 				D5480000000000000000C050 /* SiriIntents.swift */,
 				D5480000000000000000C040 /* IOSPhoneActions.swift */,
@@ -440,6 +443,7 @@
 				74858FAF1ED2DC5600515810 /* AppDelegate.swift in Sources */,
 				D5480000000000000000A001 /* DshPlugin.swift in Sources */,
 				D5480000000000000000A003 /* VoiceChannel.swift in Sources */,
+				D5480000000000000000C071 /* IOSBrowser.swift in Sources */,
 				D5480000000000000000C061 /* ContinuedRun.swift in Sources */,
 				D5480000000000000000C051 /* SiriIntents.swift in Sources */,
 				D5480000000000000000C041 /* IOSPhoneActions.swift in Sources */,

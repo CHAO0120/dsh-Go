@@ -18,7 +18,11 @@ export async function apply(ctx, config) {
   // Swift arms the C memory slot. This linked binding consumes it once; there is
   // no token file, argv/environment secret, JS setter or serialized bootstrap.
   const token = process._linkedBinding('dsh_ios_phone').consume(config.runId);
-  const bridge = await createPhoneBridge({ token, runId: config.runId });
+  // The browser tools share this bridge and its one token. A build without them just has none.
+  const browserCatalog = await readFile(new URL('../browser/catalog.json', import.meta.url))
+    .then(JSON.parse, () => []);
+  const browserAction = browserCatalog.length ? (await import('../browser/actions.mjs')).actionFor : undefined;
+  const bridge = await createPhoneBridge({ token, runId: config.runId, browserAction });
   const disposers = [];
   const endpoint = join(config.directory, 'endpoint.json');
   const temporary = `${endpoint}.${randomUUID()}.tmp`;
@@ -28,6 +32,13 @@ export async function apply(ctx, config) {
         name: `mcp__phone__${tool.name}`, rawName: tool.name,
         description: tool.description, inputSchema: tool.inputSchema,
         call: (args, execution) => bridge.call(tool.name, args, execution),
+      })));
+    }
+    for (const tool of browserCatalog) {
+      disposers.push(ctx.tools.register(createMcpToolDefinition(ctx, {
+        name: `mcp__browser__${tool.name}`, rawName: tool.name,
+        description: tool.description, inputSchema: tool.inputSchema,
+        call: (args, execution) => bridge.call(`browser:${tool.name}`, args, execution),
       })));
     }
     await writeFile(temporary, JSON.stringify(bridge.endpoint), { mode: 0o600, flag: 'wx' });

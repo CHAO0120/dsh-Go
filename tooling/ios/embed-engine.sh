@@ -43,6 +43,12 @@ mkdir -p "$RESOURCES/dsh-runtime/phone"
 for file in actions.mjs bridge.mjs plugin.mjs catalog.json; do
   cp "$ROOT/runtime/ios/phone/$file" "$RESOURCES/dsh-runtime/phone/"
 done
+if [ -d "$ROOT/runtime/ios/browser" ]; then
+  mkdir -p "$RESOURCES/dsh-runtime/browser"
+  for file in actions.mjs catalog.json agent.js; do
+    cp "$ROOT/runtime/ios/browser/$file" "$RESOURCES/dsh-runtime/browser/"
+  done
+fi
 
 if [ "${CODE_SIGNING_ALLOWED:-YES}" = "NO" ] || [ -z "${EXPANDED_CODE_SIGN_IDENTITY:-}" ]; then
   exit 0

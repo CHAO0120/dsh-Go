@@ -1068,6 +1068,12 @@ final class EngineChannel: NSObject, FlutterStreamHandler {
       try? FileManager.default.removeItem(at: target)
       try FileManager.default.createDirectory(at: target.deletingLastPathComponent(), withIntermediateDirectories: true)
       try FileManager.default.copyItem(at: source, to: target)
+      // Beside it, where the plugin looks. A build without the browser tools simply has none.
+      let browserTarget = installer.root.appendingPathComponent("runtime/ios/browser", isDirectory: true)
+      try? FileManager.default.removeItem(at: browserTarget)
+      if let browser = Bundle.main.url(forResource: "browser", withExtension: nil, subdirectory: "dsh-runtime") {
+        try FileManager.default.copyItem(at: browser, to: browserTarget)
+      }
       let cache = self.cache
       let prepared: (directory: URL, runId: String)? = DispatchQueue.main.sync {
         MainActor.assumeIsolated {

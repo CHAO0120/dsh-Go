@@ -20,6 +20,12 @@ struct IOSPhoneRequest: Decodable {
     let number: String?
     let destination: String?
     let mode: String?
+    // The browser tools.
+    let ref: String?
+    let epoch: Int?
+    let key: String?
+    let direction: String?
+    let maxBytes: Int?
   }
   let v: Int
   let runId: String
@@ -31,16 +37,19 @@ struct IOSPhoneRequest: Decodable {
 struct IOSPhoneOutcome {
   let text: String
   let isError: Bool
+  /// A JPEG, for a tool whose answer is a picture.
+  var image: Data?
   static func failure(_ text: String) -> Self { Self(text: text, isError: true) }
   static func success(_ text: String) -> Self { Self(text: text, isError: false) }
 }
 
 @MainActor
 final class IOSPhoneApproval: UIViewController {
+  private let heading: String
   private let detail: String
   private let answer: (Bool) -> Void
-  init(detail: String, answer: @escaping (Bool) -> Void) {
-    self.detail = detail; self.answer = answer
+  init(heading: String = "允许这一次手机动作？", detail: String, answer: @escaping (Bool) -> Void) {
+    self.heading = heading; self.detail = detail; self.answer = answer
     super.init(nibName: nil, bundle: nil)
     modalPresentationStyle = .pageSheet
     isModalInPresentation = true
@@ -50,7 +59,7 @@ final class IOSPhoneApproval: UIViewController {
     super.viewDidLoad()
     view.backgroundColor = .systemBackground
     let title = UILabel()
-    title.text = "允许这一次手机动作？"
+    title.text = heading
     title.font = .preferredFont(forTextStyle: .headline)
     let text = UITextView()
     text.isEditable = false
@@ -142,6 +151,24 @@ final class IOSPhoneActions: NSObject, EKEventEditViewDelegate, MFMessageCompose
       return .failure("确认对应的原任务已经结束，未执行动作。")
     }
     return await perform(request.action, id: request.id, validate: validate)
+  }
+  /// The same real sheet, for a tool that decides what happens after the answer itself.
+  func confirm(_ request: IOSPhoneRequest, title: String, detail: String) async -> Bool {
+    guard foreground else { return false }
+    requestId = request.id
+    defer { if requestId == request.id { requestId = nil } }
+    let controller = IOSPhoneApproval(heading: title, detail: detail) { [weak self] allowed in
+      guard let self, self.requestId == request.id else { return }
+      self.finish(allowed ? .success("allowed-once") : .failure("declined"))
+    }
+    let expiry = Task { [weak self] in
+      try? await Task.sleep(nanoseconds: 30_000_000_000)
+      guard !Task.isCancelled, let self, self.requestId == request.id, self.modal === controller else { return }
+      self.finish(.failure("timed-out"))
+    }
+    let choice = await present(controller)
+    expiry.cancel()
+    return !choice.isError && requestId == request.id && foreground
   }
   private func required(_ value: String?, max: Int = 8192) throws -> String {
     guard let value, !value.isEmpty, value.utf8.count <= max, !value.contains("\0") else { throw CocoaError(.coderInvalidValue) }

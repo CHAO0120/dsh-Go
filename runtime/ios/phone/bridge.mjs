@@ -5,10 +5,19 @@ import { actionFor } from './actions.mjs';
 
 const result = (text, isError = false) => ({ content: [{ type: 'text', text }], isError });
 const failure = (code, text) => result(`${code}: ${text}`, true);
+const isBrowser = request => request.action.kind.startsWith('browser-');
+// A page or a screenshot is a good deal larger than anything a phone action answers with.
+const RESULT_BYTES = 16384;
+const BROWSER_RESULT_BYTES = 512 * 1024;
+const BROWSER_IMAGE_BYTES = 1200 * 1024;
+const BODY_BYTES = 32768;
+const RESULT_BODY_BYTES = 2 * 1024 * 1024;
+// Someone signing in to a site takes longer than someone answering a prompt.
+const HANDOFF_MS = 600000;
 
 // Swift owns the bootstrap secret and every actual confirmation/action. This server has
 // no approval endpoint; /begin only confirms that the already-confirmed call is still live.
-export async function createPhoneBridge({ token, runId, timeoutMs = 120000 }) {
+export async function createPhoneBridge({ token, runId, timeoutMs = 120000, browserAction }) {
   if (!/^[0-9a-f]{64}$/.test(token) || typeof runId !== 'string' || !runId) throw new Error('Invalid iOS phone bootstrap');
   const secret = Buffer.from(`Bearer ${token}`);
   const pending = new Map();
@@ -38,14 +47,16 @@ export async function createPhoneBridge({ token, runId, timeoutMs = 120000 }) {
       const chunks = [];
       for await (const chunk of req) {
         size += chunk.length;
-        if (size > 32768) { reply(res, 413, { error: 'size' }); req.destroy(); return; }
+        if (size > (req.url === '/result' ? RESULT_BODY_BYTES : BODY_BYTES)) { reply(res, 413, { error: 'size' }); req.destroy(); return; }
         chunks.push(chunk);
       }
       const body = JSON.parse(Buffer.concat(chunks).toString('utf8'));
       if (body?.runId !== runId || closed) { reply(res, 410, { error: 'retired' }); return; }
       if (req.url === '/claim') {
         const occupied = [...pending.values()].some(row => row.state !== 'pending');
-        const row = occupied ? undefined : [...pending.values()].find(row => row.state === 'pending');
+        // With the app away, only what can run with nobody on screen.
+        const row = occupied ? undefined : [...pending.values()].find(row =>
+          row.state === 'pending' && (body.background !== true || isBrowser(row.request)));
         if (row) row.state = 'claimed';
         reply(res, 200, { request: row?.request ?? null }); return;
       }
@@ -58,13 +69,18 @@ export async function createPhoneBridge({ token, runId, timeoutMs = 120000 }) {
         reply(res, 200, { started: true }); return;
       }
       if (req.url === '/result') {
+        const browser = isBrowser(row.request);
+        const image = body.image;
         if (!['claimed', 'executing'].includes(row.state) || typeof body.text !== 'string' ||
-            Buffer.byteLength(body.text) > 16384 || typeof body.isError !== 'boolean') {
+            Buffer.byteLength(body.text) > (browser ? BROWSER_RESULT_BYTES : RESULT_BYTES) || typeof body.isError !== 'boolean' ||
+            (image !== undefined && (!browser || typeof image !== 'string' || image.length > BROWSER_IMAGE_BYTES))) {
           reply(res, 400, { error: 'result' }); return;
         }
         // A declined prompt may finish in claimed state; success requires /begin.
         if (!body.isError && row.state !== 'executing') { reply(res, 409, { error: 'not-begun' }); return; }
-        finish(body.id, result(body.text, body.isError));
+        const value = result(body.text, body.isError);
+        if (image !== undefined) value.content.push({ type: 'image', data: image, mimeType: 'image/jpeg' });
+        finish(body.id, value);
         reply(res, 200, { accepted: true }); return;
       }
       reply(res, 404, { error: 'route' });
@@ -79,20 +95,23 @@ export async function createPhoneBridge({ token, runId, timeoutMs = 120000 }) {
     call(name, args, execution) {
       if (closed) return Promise.resolve(failure('ERR_IOS_PHONE_RETIRED', '本轮引擎已结束。'));
       let action;
-      try { action = actionFor(name, args); } catch (error) { return Promise.resolve(failure(error.code, error.message)); }
+      try {
+        action = name.startsWith('browser:') ? browserAction(name.slice('browser:'.length), args) : actionFor(name, args);
+      } catch (error) { return Promise.resolve(failure(error.code, error.message)); }
       const { signal, callId, agent } = execution;
       if (!signal || signal.aborted || !callId || !agent?.session?.id) return Promise.resolve(failure('ERR_IOS_PHONE_OWNER', '没有仍有效的会话工具调用。'));
       if (pending.size >= 8) return Promise.resolve(failure('ERR_IOS_PHONE_BUSY', '手机动作等待队列已满，请等用户处理。'));
       const id = randomUUID();
+      const limit = action.kind === 'browser-handoff' ? Math.max(timeoutMs, HANDOFF_MS) : timeoutMs;
       const request = Object.freeze({ v: 1, runId, id, owner: { sessionId: agent.session.id, callId },
-        action: JSON.parse(JSON.stringify(action)), expiresAt: Date.now() + timeoutMs });
+        action: JSON.parse(JSON.stringify(action)), expiresAt: Date.now() + limit });
       return new Promise(resolve => {
         const abort = () => finish(id, failure('ERR_IOS_PHONE_CANCELLED', '原工具调用已取消；已开始的系统动作可能无法撤销，不要自动重试。'));
         const timer = setTimeout(() => {
           const row = pending.get(id);
           finish(id, failure('ERR_IOS_PHONE_TIMEOUT', row?.state === 'executing'
             ? '系统动作结果未知；请用户核对，不能自动重试。' : '等待用户超时，没有获准执行动作。'));
-        }, timeoutMs);
+        }, limit);
         pending.set(id, { request, resolve, signal, abort, timer, state: 'pending' });
         signal.addEventListener('abort', abort, { once: true });
         if (signal.aborted) abort();

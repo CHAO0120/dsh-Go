@@ -12,6 +12,7 @@ final class IOSPhoneBridge: NSObject, URLSessionTaskDelegate {
   private let nativeArm: Arm
   private let nativeClear: Clear
   private let actions: IOSPhoneActions
+  private let browser: IOSBrowser
   private let runtimeCurrent: () -> Bool
   private var directory: URL?
   private var runId: String?
@@ -38,6 +39,7 @@ final class IOSPhoneBridge: NSObject, URLSessionTaskDelegate {
     nativeArm = unsafeBitCast(arm, to: Arm.self)
     nativeClear = unsafeBitCast(clear, to: Clear.self)
     self.actions = IOSPhoneActions(presenter: presenter)
+    self.browser = IOSBrowser(actions: actions, presenter: presenter)
     self.runtimeCurrent = runtimeCurrent
     super.init()
   }
@@ -82,6 +84,7 @@ final class IOSPhoneBridge: NSObject, URLSessionTaskDelegate {
   func retire() {
     poller?.cancel(); poller = nil
     session?.invalidateAndCancel(); session = nil
+    browser.retire()
     if let active { actions.cancel(active.id) }
     operation?.cancel(); operation = nil
     if let runId { nativeClear(runId) }
@@ -91,6 +94,7 @@ final class IOSPhoneBridge: NSObject, URLSessionTaskDelegate {
   }
   // Called directly from didEnterBackground. No pending consent crosses a background hop.
   func enteredBackground() {
+    browser.enteredBackground()
     guard let request = active else { return }
     actions.cancel(request.id)
   }
@@ -131,11 +135,16 @@ final class IOSPhoneBridge: NSObject, URLSessionTaskDelegate {
       if let request = active {
         let (status, _) = try await post("status", ["id": request.id])
         guard runId == generation, active?.id == request.id else { return }
-        if status == 410 || request.expiresAt <= Date().timeIntervalSince1970 * 1000 { actions.cancel(request.id) }
+        if status == 410 || request.expiresAt <= Date().timeIntervalSince1970 * 1000 {
+          actions.cancel(request.id)
+          browser.enteredBackground()
+        }
         return
       }
-      guard UIApplication.shared.applicationState == .active else { return }
-      let (status, bytes) = try await post("claim")
+      // With the app away, only what needs nobody on screen: a turn the system is letting go on
+      // can keep browsing a site already approved. The rest waits for the app to come back.
+      let inFront = UIApplication.shared.applicationState == .active
+      let (status, bytes) = try await post("claim", ["background": !inFront])
       guard runId == generation, runtimeCurrent(), status == 200,
         let request = try JSONDecoder().decode(Claimed.self, from: bytes).request else { return }
       guard request.v == 1, request.runId == generation, UUID(uuidString: request.id) != nil,
@@ -143,6 +152,17 @@ final class IOSPhoneBridge: NSObject, URLSessionTaskDelegate {
       active = request
       operation = Task { [weak self] in
         guard let self else { return }
+        if request.action.kind.hasPrefix("browser-") {
+          _ = try? await self.post("begin", ["id": request.id])
+          let result = await self.browser.run(request)
+          guard self.current(request) else { return }
+          var values: [String: Any] = ["id": request.id, "text": result.text, "isError": result.isError]
+          if let image = result.image { values["image"] = image.base64EncodedString() }
+          _ = try? await self.post("result", values)
+          guard self.active?.id == request.id else { return }
+          self.active = nil; self.operation = nil
+          return
+        }
         let result = await self.actions.run(request, current: { [weak self] in self?.current(request) == true }, authorize: { [weak self] in
           guard let self, self.current(request) else { return false }
           do {
