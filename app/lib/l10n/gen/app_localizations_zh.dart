@@ -6887,6 +6887,32 @@ class L10nZh extends L10n {
   String get fileChatFallback => '对话';
 
   @override
+  String get harmonyUnknownResults => '有工具调用没等到结果，可能已经执行，也可能没有。处理之前，这个对话不能再调用工具。';
+
+  @override
+  String get harmonyUnknownResultsReview => '处理';
+
+  @override
+  String get harmonyUnknownResultsTitle => '这些工具调用的结果未知';
+
+  @override
+  String harmonyUnknownResultsBody(String tools) {
+    return '$tools\n\n应用在等结果时中断了，它们可能已经执行，也可能没有。可以先看看实际情况，比如文件改了没有。\n\n继续之后，这些调用不会重新运行，记录也不会改成成功。';
+  }
+
+  @override
+  String get harmonyUnknownResultsContinue => '继续这个对话';
+
+  @override
+  String get harmonyUnknownResultsChanged => '情况变了，请再看一遍。';
+
+  @override
+  String get harmonyUnknownResultsFailed => '没有确认成功，请再试一次。';
+
+  @override
+  String get harmonyCallsNotRecorded => '本机引擎记不下工具调用的状态，工具调用已暂停。重启引擎后再试。';
+
+  @override
   String get harmonyAccessSubtitle => '各项功能用到的系统权限';
 
   @override

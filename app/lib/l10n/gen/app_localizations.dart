@@ -12614,6 +12614,54 @@ abstract class L10n {
   /// **'对话'**
   String get fileChatFallback;
 
+  /// No description provided for @harmonyUnknownResults.
+  ///
+  /// In zh, this message translates to:
+  /// **'有工具调用没等到结果，可能已经执行，也可能没有。处理之前，这个对话不能再调用工具。'**
+  String get harmonyUnknownResults;
+
+  /// No description provided for @harmonyUnknownResultsReview.
+  ///
+  /// In zh, this message translates to:
+  /// **'处理'**
+  String get harmonyUnknownResultsReview;
+
+  /// No description provided for @harmonyUnknownResultsTitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'这些工具调用的结果未知'**
+  String get harmonyUnknownResultsTitle;
+
+  /// No description provided for @harmonyUnknownResultsBody.
+  ///
+  /// In zh, this message translates to:
+  /// **'{tools}\n\n应用在等结果时中断了，它们可能已经执行，也可能没有。可以先看看实际情况，比如文件改了没有。\n\n继续之后，这些调用不会重新运行，记录也不会改成成功。'**
+  String harmonyUnknownResultsBody(String tools);
+
+  /// No description provided for @harmonyUnknownResultsContinue.
+  ///
+  /// In zh, this message translates to:
+  /// **'继续这个对话'**
+  String get harmonyUnknownResultsContinue;
+
+  /// No description provided for @harmonyUnknownResultsChanged.
+  ///
+  /// In zh, this message translates to:
+  /// **'情况变了，请再看一遍。'**
+  String get harmonyUnknownResultsChanged;
+
+  /// No description provided for @harmonyUnknownResultsFailed.
+  ///
+  /// In zh, this message translates to:
+  /// **'没有确认成功，请再试一次。'**
+  String get harmonyUnknownResultsFailed;
+
+  /// No description provided for @harmonyCallsNotRecorded.
+  ///
+  /// In zh, this message translates to:
+  /// **'本机引擎记不下工具调用的状态，工具调用已暂停。重启引擎后再试。'**
+  String get harmonyCallsNotRecorded;
+
   /// No description provided for @harmonyAccessSubtitle.
   ///
   /// In zh, this message translates to:

@@ -7279,6 +7279,34 @@ class L10nEn extends L10n {
   String get fileChatFallback => 'chat';
 
   @override
+  String get harmonyUnknownResults =>
+      'Some tool calls never got a result. They may or may not have run. This conversation can\'t call tools until you deal with them.';
+
+  @override
+  String get harmonyUnknownResultsReview => 'Review';
+
+  @override
+  String get harmonyUnknownResultsTitle => 'These tool calls have unknown results';
+
+  @override
+  String harmonyUnknownResultsBody(String tools) {
+    return '$tools\n\nThe app was interrupted while waiting for them, so they may or may not have run. You can check first, for example whether a file changed.\n\nIf you continue, they won\'t run again, and they won\'t be recorded as successful.';
+  }
+
+  @override
+  String get harmonyUnknownResultsContinue => 'Continue this conversation';
+
+  @override
+  String get harmonyUnknownResultsChanged => 'Something changed. Please look again.';
+
+  @override
+  String get harmonyUnknownResultsFailed => 'Couldn\'t confirm that. Try again.';
+
+  @override
+  String get harmonyCallsNotRecorded =>
+      'The local engine can\'t record the state of tool calls, so they\'re paused. Restart the engine and try again.';
+
+  @override
   String get harmonyAccessSubtitle => 'What each feature needs from HarmonyOS';
 
   @override
