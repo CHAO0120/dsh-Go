@@ -315,15 +315,21 @@ final class NativeMediaChannel: NSObject, FlutterStreamHandler, AVAudioPlayerDel
     }
   }
 
-  /// Dictation set its own category over the clip's, which leaves the clip silent.
+  /// Headphones gone: AVAudioPlayer would carry on through the speaker, unlike AVPlayer.
+  /// A category change is dictation setting its own over the clip's, which leaves it silent.
   @objc private func routeChanged(_ note: Notification) {
     guard
       let raw = note.userInfo?[AVAudioSessionRouteChangeReasonKey] as? UInt,
-      AVAudioSession.RouteChangeReason(rawValue: raw) == .categoryChange
+      let reason = AVAudioSession.RouteChangeReason(rawValue: raw),
+      reason == .oldDeviceUnavailable || reason == .categoryChange
     else { return }
     onMain { [weak self] in
-      guard let self, self.player != nil, AVAudioSession.sharedInstance().category != .playback else { return }
-      self.clipOver("audio.stopped", reason: "interrupted", keepSession: true)
+      guard let self else { return }
+      if reason == .oldDeviceUnavailable {
+        if self.player != nil || self.clipLoading { self.clipOver("audio.stopped", reason: "interrupted") }
+      } else if self.player != nil, AVAudioSession.sharedInstance().category != .playback {
+        self.clipOver("audio.stopped", reason: "interrupted", keepSession: true)
+      }
     }
   }
 

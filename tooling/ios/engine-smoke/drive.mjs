@@ -56,6 +56,7 @@ const engine = spawn('xcrun', ['simctl', 'spawn', values.simulator, resolve(valu
   env: { ...process.env, SIMCTL_CHILD_DSH_IOS_SMOKE_PATCH: overlay }, stdio: ['ignore', 'pipe', 'pipe'],
 });
 let exited = null;
+let engineEnded = null;
 const readyWaiters = [];
 const readies = [];
 let tail = [];
@@ -80,7 +81,13 @@ engine.stdout.on('data', (data) => {
         noteLine('[ready] ' + row.baseUrl);
         readies.push(row);
         for (const waiter of readyWaiters.splice(0)) waiter();
-      } else noteLine(JSON.stringify(row));
+      } else {
+        noteLine(JSON.stringify(row));
+        if (row.kind === 'exit' || row.kind === 'error' || row.kind === 'fatal') {
+          engineEnded = row;
+          for (const waiter of readyWaiters.splice(0)) waiter();
+        }
+      }
     }
   }
 });
@@ -94,6 +101,7 @@ async function waitReady(index, ms) {
   const deadline = Date.now() + ms;
   while (readies.length <= index) {
     if (exited) fail(`engine exited before readiness: ${exited.code ?? exited.signal}`);
+    if (engineEnded) fail(`engine ended before readiness: ${JSON.stringify(engineEnded)}`);
     if (Date.now() > deadline) fail('engine readiness deadline');
     await Promise.race([new Promise((done) => readyWaiters.push(done)), new Promise((done) => setTimeout(done, 1000))]);
   }
@@ -204,10 +212,12 @@ async function round(ready) {
 try {
   const startedAt = Date.now();
   const first = await waitReady(0, 240000);
+  engineEnded = null;
   report.readyMs = Date.now() - startedAt;
   await round(first);
   report.status = 'ROUND_PASSED';
   report.stage = 'restart';
+  engineEnded = null;
   writeFileSync(`${guest}/restart`, '');
   const restartedAt = Date.now();
   const second = await waitReady(1, 240000);

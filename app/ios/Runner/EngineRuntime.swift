@@ -296,17 +296,16 @@ final class RuntimeInstaller {
       schema: 1, runtimeVersion: manifest.runtimeVersion, ownedPaths: Array(owned), stagingHashes: Array(staged))
     try JSONEncoder().encode(journal).write(to: journalURL, options: .atomic)
 
+    // An upgrade can turn a file into a directory or the other way round, so what's gone
+    // takes its emptied parents with it. rmdir stops at anything this install doesn't own.
     let current = Set(manifest.files.map(\.path))
-    var directories = Set<String>()
-    for file in manifest.files {
-      var parent = Substring(file.path)
-      while let slash = parent.lastIndex(of: "/") {
-        parent = parent[..<slash]
-        directories.insert(String(parent))
+    for path in owned.sorted(by: { $0.count > $1.count }) where !current.contains(path) {
+      let file = root.appendingPathComponent(path)
+      unlink(file.path)
+      var parent = file.deletingLastPathComponent()
+      while parent.path != root.path, rmdir(parent.path) == 0 {
+        parent.deleteLastPathComponent()
       }
-    }
-    for path in owned.sorted(by: { $0.count > $1.count }) where !current.contains(path) && !directories.contains(path) {
-      try? files.removeItem(at: root.appendingPathComponent(path))
     }
 
     var changed: [RuntimeFile] = []

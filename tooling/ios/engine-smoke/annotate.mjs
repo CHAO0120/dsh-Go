@@ -9,8 +9,7 @@ console.log('::notice title=engine round::' + clean(JSON.stringify({
 })));
 if (report.status !== 'PASS') {
   console.log('::error title=engine round::' + clean(report.error));
-  // The cause is usually earlier than the last lines, and a step shows ten errors at most.
-  const lines = report.nativeHost ?? [];
-  const telling = lines.filter((line) => /error|Error|ERR_|cannot|Cannot|failed|fatal|throw|at .*:d+/.test(line));
-  for (const line of [...telling.slice(0, 5), ...lines.slice(-3)]) console.log('::error title=engine log::' + clean(line));
+  // One annotation holds it all: a step shows ten at most.
+  const tail = (report.nativeHost ?? []).join(' | ').replace(/%/g, '%25').replace(/\s+/g, ' ');
+  console.log('::error title=engine log::' + tail.slice(-20000));
 }

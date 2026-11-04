@@ -309,7 +309,7 @@ final class EngineSkills {
     guard path.hasPrefix(root + "/") else { return false }
     var walked = root
     for part in path.dropFirst(root.count + 1).split(separator: "/") {
-      walked += "/(part)"
+      walked += "/\(part)"
       var info = stat()
       if lstat(walked, &info) != 0 { return true }
       if info.st_mode & S_IFMT == S_IFLNK { return false }
@@ -330,7 +330,8 @@ final class EngineSkills {
     try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
     let temporary = directory.appendingPathComponent(".dsh-go-tmp-" + target.lastPathComponent)
     defer { unlink(temporary.path) }
-    try bytes.write(to: temporary, options: .completeFileProtectionUntilFirstUserAuthentication)
+    // Atomic, so a link left at the temporary name is replaced rather than written through.
+    try bytes.write(to: temporary, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
     guard current() else { throw Retired() }
     guard rename(temporary.path, path) == 0 else { throw POSIXError(.EIO) }
   }
