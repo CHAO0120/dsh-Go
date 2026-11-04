@@ -24,7 +24,7 @@ export async function until(check, description = 'condition') {
 export const manifestFixture = () => ({ schema:1, runtimeVersion:'fixture-runtime', dshVersion:'0.0.fixture', nodeVersion:'24.22.1',
   files: ['node_modules/@deepseek-ai/dsh/lib/bin.js', 'runtime/ohos/preload.mjs',
     'runtime/ohos/process/index.mjs', 'runtime/ohos/process/sandbox.mjs',
-    'runtime/ohos/lifecycle/index.mjs', 'runtime/ohos/capabilities/index.mjs',
+    'runtime/ohos/lifecycle/index.mjs', 'runtime/ohos/phone/index.mjs', 'runtime/ohos/capabilities/index.mjs',
     'runtime/bridge/dsh-go-bridge/lib/index.js', 'runtime/ohos/process/child-process.mjs'].map((path,i) => ({path,size:i+11,
       sha256:createHash('sha256').update(Buffer.alloc(i+11, i+1)).digest('hex')})) });
 function publicError(error) {
@@ -105,6 +105,8 @@ export async function diagnosticsFixture(t, options = {}) {
     '@ohos.file.fs':{default:api},
     '@ohos.zlib':{default:nativeZlib},
     '@ohos.file.hash':{default:{hash(){throw Error('hash outside diagnostics test scope');}}},
+    // Diagnostics never requests an OS background grant; actual task-owner code is loaded.
+    '@ohos.resourceschedule.backgroundTaskManager':{default:{requestSuspendDelay(){throw Error('background grant outside diagnostics scope');},cancelSuspendDelay(){throw Error('background cancel outside diagnostics scope');}}},
     '@ohos.net.connection':{default:{getDefaultNet(){throw Error('network outside diagnostics test scope');}}},
     '@ohos.util':{default:{TextEncoder:class {encodeInto(value){return new TextEncoder().encode(value);}},
       TextDecoder:{create:(label,options) => ({decodeToString:bytes => new TextDecoder(label,options).decode(bytes)})}}},

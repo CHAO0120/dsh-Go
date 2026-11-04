@@ -1,6 +1,7 @@
 #pragma once
 
 #include "lifecycle_state.h"
+#include "phone_state.h"
 #include <deque>
 #include <functional>
 #include <map>
@@ -43,12 +44,13 @@ using LogSink = std::function<void(const std::string&, const std::string&)>;
 // Own exactly one engine thread. Product lifetime is the whole application.
 class Host {
  public:
-  explicit Host(LogSink sink = {}) : sink_(std::move(sink)) {}
+  explicit Host(LogSink sink = {}) : phone_(lifecycle_), sink_(std::move(sink)) {}
   ~Host();
   void Start(HostOptions options, StartNode start_node, StopNode stop_node);
   void Stop();
   HostState State();
   LifecycleState& Lifecycle() { return lifecycle_; }
+  PhoneState& Phone() { return phone_; }
   std::vector<HostEvent> Drain();
   void Wait();
 
@@ -57,6 +59,7 @@ class Host {
   void Line(const std::string& stream, std::string line);
   void Push(HostEvent event);
   LifecycleState lifecycle_;
+  PhoneState phone_;
   std::mutex mutex_;
   std::mutex join_mutex_;
   HostState state_;

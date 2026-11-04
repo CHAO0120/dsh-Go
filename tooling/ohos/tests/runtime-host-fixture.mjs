@@ -79,3 +79,9 @@ export class FlutterAbility {
   onDestroy() { this.superCalls.push('destroy'); }
   configureFlutterEngine() {}
 }
+
+// Runtime channel's unrelated methods must never invoke phone SDK work. The
+// complete production phone chain has its own phone-bridge/effects test files.
+export const phoneCrypto = {createRandom(){throw Error('phone crypto outside runtime-channel fixture');}};
+export class PhoneEffectDenied extends Error {}
+export class PhoneEffects { execute(){throw Error('phone effect outside runtime-channel fixture');} }

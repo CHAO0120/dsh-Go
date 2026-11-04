@@ -1,5 +1,6 @@
 #include "publication_binding.h"
 #include "lifecycle_snapshot.h"
+#include "phone_contract.h"
 #include "dsh_node_version.h"
 
 #include <node.h>
@@ -268,6 +269,7 @@ struct LifecycleReader {
   std::string library;
   void* handle = nullptr;
   DshReadHostLifecycleV1 read = nullptr;
+  DshHostPhoneV1 phone = nullptr;
 };
 LifecycleReader& HostReader() { static LifecycleReader reader; return reader; }
 
@@ -303,6 +305,86 @@ napi_value GetHostLifecycleSnapshot(napi_env env, napi_callback_info) {
   return result;
 }
 
+
+bool PhoneText(napi_env env,napi_value value,char* output,size_t capacity) {
+  std::string text;if(!ReadPath(env,value,&text))return false;
+  if(text.size()>=capacity){napi_throw_range_error(env,"ERR_OHOS_PHONE_ARGUMENT","Phone identifier too long");return false;}
+  memcpy(output,text.data(),text.size());output[text.size()]=0;return true;
+}
+bool PhoneProperty(napi_env env,napi_value object,const char* key,napi_value* value) {
+  return napi_get_named_property(env,object,key,value)==napi_ok;
+}
+bool PhoneNumber(napi_env env,napi_value value,double* number) {
+  if(napi_get_value_double(env,value,number)!=napi_ok)return false;
+  if(!std::isfinite(*number)||*number<0||*number>9007199254740991.0||std::floor(*number)!=*number){
+    napi_throw_range_error(env,"ERR_OHOS_PHONE_ARGUMENT","Phone integer out of range");return false;}
+  return true;
+}
+bool PhoneJson(napi_env env,napi_value value,std::string* output,bool result) {
+  napi_value global,json,stringify,encoded,input=value;
+  if(result) {
+    if(napi_create_object(env,&input)!=napi_ok)return false;
+    for(const char* key:{"status","effect","evidence","dispatched","code","message"}) {
+      napi_value field;if(!PhoneProperty(env,value,key,&field)||napi_set_named_property(env,input,key,field)!=napi_ok)return false;
+    }
+  }
+  if(napi_get_global(env,&global)!=napi_ok||!PhoneProperty(env,global,"JSON",&json)||
+    !PhoneProperty(env,json,"stringify",&stringify)||napi_call_function(env,json,stringify,1,&input,&encoded)!=napi_ok)return false;
+  return ReadPath(env,encoded,output);
+}
+napi_value PhoneCall(napi_env env,napi_callback_info info) {
+ try {
+  size_t count=3;napi_value args[3];void* data=nullptr;
+  if(napi_get_cb_info(env,info,&count,args,nullptr,&data)!=napi_ok)return nullptr;
+  const auto operation=static_cast<uint32_t>(reinterpret_cast<uintptr_t>(data));
+  // This also performs the main-registration-thread and fixed NOLOAD checks.
+  if(!GetHostLifecycleSnapshot(env,nullptr))return nullptr;
+  if(!HostReader().phone) {
+    auto call=reinterpret_cast<DshHostPhoneV1>(dlsym(HostReader().handle,"dsh_host_phone_v1"));
+    Dl_info symbol{};char actual[PATH_MAX];
+    if(call&&dladdr(reinterpret_cast<void*>(call),&symbol)&&symbol.dli_fname&&
+        realpath(symbol.dli_fname,actual)&&HostReader().library==actual)HostReader().phone=call;
+  }
+  if(!HostReader().phone){napi_throw_error(env,"ERR_OHOS_PHONE_NATIVE","Trusted phone host unavailable");return nullptr;}
+  DshPhoneInputV1 in{};in.size=sizeof(in);in.version=1;in.operation=operation;std::string payload;
+  if(operation==DshPhoneBind) {
+    if(count!=1||!PhoneText(env,args[0],in.engine_id,sizeof(in.engine_id)))return nullptr;
+  }else if(operation!=DshPhoneSnapshot) {
+    if(count!=(operation==DshPhoneComplete?3u:2u)){napi_throw_type_error(env,"ERR_OHOS_PHONE_ARGUMENT","Phone request and nonce required");return nullptr;}
+    napi_value value;double number;
+    if(!PhoneProperty(env,args[0],"engineId",&value)||!PhoneText(env,value,in.engine_id,sizeof(in.engine_id))||
+       !PhoneProperty(env,args[0],"bridgeGeneration",&value)||!PhoneNumber(env,value,&number))return nullptr;
+    in.generation=static_cast<uint64_t>(number);
+    if(!PhoneProperty(env,args[0],"requestId",&value)||!PhoneText(env,value,in.request_id,sizeof(in.request_id))||
+       !PhoneText(env,args[1],in.nonce,sizeof(in.nonce)))return nullptr;
+    if(operation==DshPhoneClaim) {
+      if(!PhoneProperty(env,args[0],"tool",&value)||!PhoneText(env,value,in.tool,sizeof(in.tool))||
+         !PhoneProperty(env,args[0],"deadlineMs",&value)||!PhoneNumber(env,value,&number))return nullptr;
+      in.deadline_ms=static_cast<int64_t>(number);if(!PhoneJson(env,args[0],&payload,false))return nullptr;
+    }else if(operation==DshPhoneComplete) {if(!PhoneJson(env,args[2],&payload,true))return nullptr;}
+    if(payload.size()>4*1024*1024){napi_throw_range_error(env,"ERR_OHOS_PHONE_ARGUMENT","Phone payload too large");return nullptr;}
+    in.data=payload.data();in.data_size=static_cast<uint32_t>(payload.size());
+  }
+  DshPhoneSnapshotV1 snapshot{};
+  // Allocate boolean/null handles before a native state mutation.
+  napi_value yes,no,nil;if(napi_get_boolean(env,true,&yes)!=napi_ok||napi_get_boolean(env,false,&no)!=napi_ok||napi_get_null(env,&nil)!=napi_ok)return nullptr;
+  const int answer=HostReader().phone(&in,&snapshot);
+  if(answer<0){napi_throw_error(env,"ERR_OHOS_PHONE_NATIVE","Phone native operation unavailable");return nullptr;}
+  if(operation!=DshPhoneSnapshot)return answer==2?nil:(answer?yes:no);
+  if(answer!=1||snapshot.size!=sizeof(snapshot)||snapshot.version!=1||snapshot.generation>9007199254740991ULL||
+     !memchr(snapshot.engine_id,0,sizeof(snapshot.engine_id))||!memchr(snapshot.owner_hash,0,sizeof(snapshot.owner_hash))){
+    napi_throw_error(env,"ERR_OHOS_PHONE_NATIVE","Invalid phone snapshot");return nullptr;}
+  napi_value result,value;if(napi_create_object(env,&result)!=napi_ok)return nullptr;
+  const auto putText=[&](const char* key,const char* text){return napi_create_string_utf8(env,text,NAPI_AUTO_LENGTH,&value)==napi_ok&&napi_set_named_property(env,result,key,value)==napi_ok;};
+  const auto putNumber=[&](const char* key,double num){return napi_create_double(env,num,&value)==napi_ok&&napi_set_named_property(env,result,key,value)==napi_ok;};
+  if(napi_set_named_property(env,result,"available",snapshot.available?yes:no)!=napi_ok||
+     napi_set_named_property(env,result,"foreground",snapshot.foreground?yes:no)!=napi_ok||
+     !putText("engineId",snapshot.engine_id)||!putText("ownerHash",snapshot.owner_hash)||
+     !putNumber("bridgeGeneration",snapshot.generation)||!putNumber("nowMs",snapshot.now_ms))return nullptr;
+  return result;
+ }catch(...){napi_throw_error(env,"ERR_OHOS_PHONE_NATIVE","Phone native operation failed");return nullptr;}
+}
+
 napi_value Initialize(napi_env env, napi_value exports) {
   const napi_node_version* version;
   if (napi_get_node_version(env, &version) != napi_ok) return nullptr;
@@ -312,6 +394,11 @@ napi_value Initialize(napi_env env, napi_value exports) {
     return nullptr;
   }
   napi_value function;
+  const char* phoneNames[]={"bindPhoneEngine","getPhoneSnapshot","claimPhonePermit","revokePhonePermit","completePhonePermit"};
+  for(uint32_t i=0;i<5;++i) {
+    if(napi_create_function(env,phoneNames[i],NAPI_AUTO_LENGTH,PhoneCall,reinterpret_cast<void*>(static_cast<uintptr_t>(i+1)),&function)!=napi_ok||
+       napi_set_named_property(env,exports,phoneNames[i],function)!=napi_ok)return nullptr;
+  }
   if (napi_create_function(env, "renameNoReplace", NAPI_AUTO_LENGTH, RenameNoReplace,
                            nullptr, &function) != napi_ok ||
       napi_set_named_property(env, exports, "renameNoReplace", function) != napi_ok) return nullptr;

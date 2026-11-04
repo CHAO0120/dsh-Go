@@ -9,6 +9,8 @@ import { BusinessError } from '@ohos.base';
 import { RuntimeChannelError } from './RuntimeCore';
 import { RuntimeController } from './RuntimeController';
 import { ManagedSkillOwner } from './ManagedSkillService';
+import { PhoneBridge } from '../phone/PhoneBridge';
+import type { HostPhoneKey } from 'libdsh_host.so';
 
 export class RuntimePlugin implements FlutterPlugin, MethodCallHandler, StreamHandler, AbilityAware {
   private methods: MethodChannel | null = null;
@@ -18,6 +20,7 @@ export class RuntimePlugin implements FlutterPlugin, MethodCallHandler, StreamHa
   private engineBinding: FlutterPluginBinding | null = null;
   private ability: AbilityPluginBinding | null = null;
   private owner: ManagedSkillOwner | null = null;
+  private phone: PhoneBridge | null = null;
 
   getUniqueClassName(): string { return 'DshRuntimePlugin'; }
 
@@ -26,6 +29,7 @@ export class RuntimePlugin implements FlutterPlugin, MethodCallHandler, StreamHa
     this.engineBinding = binding;
     this.controller = RuntimeController.get(binding.getApplicationContext());
     this.owner = this.controller.managedSkills.attachOwner();
+    this.phone = new PhoneBridge(() => this.controller?.phoneContext(this.ability?.getAbility()) ?? null);
     this.methods = new MethodChannel(binding.getBinaryMessenger(), 'dsh/runtime');
     this.events = new EventChannel(binding.getBinaryMessenger(), 'dsh/runtime/events');
     this.methods.setMethodCallHandler(this);
@@ -35,6 +39,12 @@ export class RuntimePlugin implements FlutterPlugin, MethodCallHandler, StreamHa
   onDetachedFromEngine(binding: FlutterPluginBinding): void {
     if (this.engineBinding !== binding) return;
     this.onCancel(null);
+    try { this.phone?.retire(); } catch (_) {
+      // Detach must still remove the only local consume/finish channel. No raw
+      // owner is retained locally and the native record remains fail-closed at
+      // lifecycle retirement/deadline; do not report OS cancellation success.
+    }
+    this.phone = null;
     if (this.owner !== null) this.controller?.managedSkills.detachOwner(this.owner);
     this.methods?.setMethodCallHandler(null);
     binding.getBinaryMessenger().setMessageHandler('dsh/runtime/events', null);
@@ -42,8 +52,15 @@ export class RuntimePlugin implements FlutterPlugin, MethodCallHandler, StreamHa
     this.engineBinding = null; this.owner = null; this.ability = null;
   }
 
-  onAttachedToAbility(binding: AbilityPluginBinding): void { this.ability = binding; }
-  onDetachedFromAbility(): void { this.ability = null; }
+  onAttachedToAbility(binding: AbilityPluginBinding): void {
+    if (this.ability !== null && this.ability !== binding) this.onDetachedFromAbility();
+    this.ability = binding;
+  }
+  onDetachedFromAbility(): void {
+    try { this.phone?.retire(); }
+    catch (_) { console.error('[dsh/runtime] Phone owner retirement failed; local Ability detached.'); }
+    finally { this.ability = null; }
+  }
 
   onListen(_args: Any, events: EventSink): void {
     this.onCancel(null);
@@ -70,7 +87,7 @@ export class RuntimePlugin implements FlutterPlugin, MethodCallHandler, StreamHa
     if (call.method === 'reopenApp') {
       const ability = this.ability?.getAbility();
       if (ability === undefined) throw new RuntimeChannelError('ohos_no_ability', '请先回到应用窗口再重新打开 App。');
-      controller.stop();
+      try { this.phone?.retire(); } finally { controller.stop(); }
       const info = ability.context.abilityInfo;
       try {
         await ability.context.restartApp({ bundleName: info.bundleName, moduleName: info.moduleName, abilityName: info.name });
@@ -96,6 +113,33 @@ export class RuntimePlugin implements FlutterPlugin, MethodCallHandler, StreamHa
       }
       result.success(null); return;
     }
+    if (call.method === 'phoneAttach') {
+      if (this.phone === null) throw new RuntimeChannelError('ohos_detached', '手机工具通道已解除连接。');
+      result.success(await this.phone.attach(call.argument('enabled') === true)); return;
+    }
+    if (call.method === 'phoneRetire') {
+      const engine: Any = call.argument('engineId'); const generation: Any = call.argument('bridgeGeneration');
+      if (typeof engine === 'string' && typeof generation === 'number' && Number.isSafeInteger(generation)) {
+        this.phone?.retireScope(engine, generation);
+      }
+      result.success(null); return;
+    }
+    if (call.method === 'phoneExecute' || call.method === 'phoneHandoffContinue' || call.method === 'phoneCancel' || call.method === 'phoneCheck') {
+      if (this.phone === null) throw new RuntimeChannelError('ohos_detached', '手机工具通道已解除连接。');
+      const engine: Any = call.argument('engineId'); const generation: Any = call.argument('bridgeGeneration');
+      const id: Any = call.argument('requestId'); const nonce: Any = call.argument('executionNonce');
+      if (typeof engine !== 'string' || typeof generation !== 'number' || !Number.isSafeInteger(generation) ||
+        generation <= 0 || engine.length === 0 || engine.length > 128 || typeof id !== 'string' || typeof nonce !== 'string' ||
+        id.length === 0 || id.length > 64 || nonce.length === 0 || nonce.length > 64) {
+        throw new RuntimeChannelError('ohos_phone_request', '手机操作身份格式无效。');
+      }
+      const key: HostPhoneKey = { engineId: engine, bridgeGeneration: generation, requestId: id, executionNonce: nonce };
+      if (call.method === 'phoneExecute') result.success(await this.phone.execute(key));
+      else if (call.method === 'phoneCancel') result.success(this.phone.cancel(key));
+      else if (call.method === 'phoneCheck') result.success(this.phone.check(key));
+      else result.success(this.phone.handoffContinue(key));
+      return;
+    }
     await controller.initialize();
     switch (call.method) {
       case 'getStatus': controller.collect(); result.success(controller.snapshot()); return;
@@ -105,7 +149,9 @@ export class RuntimePlugin implements FlutterPlugin, MethodCallHandler, StreamHa
           call.argument('phoneStorage') === true, (call.argument('mode') ?? null) as string | null,
           call.argument('visualReplies') !== false);
         result.success(null); return;
-      case 'stop': controller.stop(); result.success(null); return;
+      case 'stop':
+        try { this.phone?.retire(); } finally { controller.stop(); }
+        result.success(null); return;
       case 'getLogs': result.success(controller.recentLogs((call.argument('lines') ?? 500) as number)); return;
       case 'getLogSnapshot': result.success(controller.logSnapshot((call.argument('lines') ?? 300) as number)); return;
       case 'clearFailure': controller.clearFailure(); result.success(null); return;

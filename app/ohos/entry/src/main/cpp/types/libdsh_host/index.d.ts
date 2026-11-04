@@ -48,3 +48,12 @@ export interface HostLifecycleSnapshot {
 }
 export const lifecycleUpdate: (operation: string, owner: number, grant: number, value: number) => number;
 export const lifecycleSnapshot: () => HostLifecycleSnapshot;
+
+export interface HostPhoneSnapshot {
+  available: boolean; foreground: boolean; engineId: string; bridgeGeneration: number; nowMs: number; ownerHash: string;
+}
+export interface HostPhoneKey { engineId: string; bridgeGeneration: number; requestId: string; executionNonce: string; }
+export const phoneAttach: (ownerHash: string, engine: number, owner: number) => number;
+export const phoneSnapshot: () => HostPhoneSnapshot;
+export const phoneRetire: (generation: number) => boolean;
+export const phoneOperation: (operation: string, key: HostPhoneKey, result?: string) => string | boolean | null;

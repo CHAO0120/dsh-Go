@@ -6,6 +6,8 @@
 #include <napi/native_api.h>
 #include <hilog/log.h>
 #include <cmath>
+#include <cstring>
+#include "../../../../../../runtime/ohos/host/phone_contract.h"
 
 extern "C" int dsh_node_start(int argc, char** argv);
 extern "C" int dsh_node_stop();
@@ -181,8 +183,65 @@ napi_value LifecycleSnapshot(napi_env env,napi_callback_info) {
   } catch(const std::exception& error) { return Throw(env,error); }
 }
 
+
+napi_value PhoneAttach(napi_env env,napi_callback_info info) {
+  try {
+    size_t count=3;napi_value a[3];Check(napi_get_cb_info(env,info,&count,a,nullptr,nullptr));
+    if(count!=3)throw dsh::HostError("ERR_OHOS_PHONE_ARGUMENT","Phone attach requires owner hash and native scope");
+    auto hash=String(env,a[0]);auto engine=static_cast<uint64_t>(SafeNumber(env,a[1]));auto owner=static_cast<uint64_t>(SafeNumber(env,a[2]));
+    auto generation=Host().Phone().Attach(hash,engine,owner);napi_value result;
+    Check(napi_create_double(env,static_cast<double>(generation),&result));return result;
+  }catch(const std::exception& error){return Throw(env,error);}
+}
+napi_value PhoneSnapshot(napi_env env,napi_callback_info) {
+  try{auto state=Host().Phone().Snapshot();napi_value result,value;Check(napi_create_object(env,&result));
+    Check(napi_get_boolean(env,state.available,&value));Put(env,result,"available",value);
+    Check(napi_get_boolean(env,state.foreground,&value));Put(env,result,"foreground",value);
+    Put(env,result,"engineId",Text(env,state.engine_id));Put(env,result,"ownerHash",Text(env,state.owner_hash));
+    Check(napi_create_double(env,static_cast<double>(state.generation),&value));Put(env,result,"bridgeGeneration",value);
+    Check(napi_create_double(env,static_cast<double>(state.now),&value));Put(env,result,"nowMs",value);return result;
+  }catch(const std::exception& error){return Throw(env,error);}
+}
+napi_value PhoneRetire(napi_env env,napi_callback_info info) {
+  try{size_t count=1;napi_value a;Check(napi_get_cb_info(env,info,&count,&a,nullptr,nullptr));
+    if(count!=1)throw dsh::HostError("ERR_OHOS_PHONE_ARGUMENT","Phone generation required");
+    auto generation=static_cast<uint64_t>(SafeNumber(env,a));napi_value yes,no;
+    Check(napi_get_boolean(env,true,&yes));Check(napi_get_boolean(env,false,&no));
+    return Host().Phone().Retire(generation)?yes:no;
+  }catch(const std::exception& error){return Throw(env,error);}
+}
+dsh::PhoneRequest PhoneKey(napi_env env,napi_value value) {
+  dsh::PhoneRequest key;key.scope.engine_id=String(env,Property(env,value,"engineId"));
+  key.scope.generation=static_cast<uint64_t>(SafeNumber(env,Property(env,value,"bridgeGeneration")));
+  key.request_id=String(env,Property(env,value,"requestId"));key.nonce=String(env,Property(env,value,"executionNonce"));return key;
+}
+napi_value PhoneOperation(napi_env env,napi_callback_info info) {
+  try {
+    size_t count=3;napi_value a[3];Check(napi_get_cb_info(env,info,&count,a,nullptr,nullptr));
+    if(count<2)throw dsh::HostError("ERR_OHOS_PHONE_ARGUMENT","Phone operation and scope required");
+    auto operation=String(env,a[0]);auto key=PhoneKey(env,a[1]);napi_value yes,no;
+    // Allocate all boolean return handles before the irreversible consume.
+    Check(napi_get_boolean(env,true,&yes));Check(napi_get_boolean(env,false,&no));
+    if(operation=="check") {
+      const auto state=Host().Phone().Check(key);
+      return Text(env,std::string("{\"pending\":")+(state.pending?"true":"false")+",\"foreground\":"+(state.foreground?"true":"false")+
+        ",\"nowMs\":"+std::to_string(state.now)+",\"deadlineMs\":"+std::to_string(state.deadline)+"}");
+    }
+    if(operation=="consume")return Host().Phone().Consume(key)?yes:no;
+    if(operation=="inspect") {auto request=Host().Phone().Inspect(key);return request?Text(env,request->json):Null(env);}
+    if(operation=="consumed") {auto consumed=Host().Phone().Consumed(key);return consumed?(*consumed?yes:no):Null(env);}
+    if(operation=="finish" && count==3) {auto result=String(env,a[2]);return Host().Phone().Finish(key,result)?yes:no;}
+    if(operation=="revoke") {auto answer=Host().Phone().Revoke(key);return answer<0?Null(env):(answer?yes:no);}
+    throw dsh::HostError("ERR_OHOS_PHONE_ARGUMENT","Unknown private phone operation");
+  }catch(const std::exception& error){return Throw(env,error);}
+}
+
 napi_value Initialize(napi_env env, napi_value exports) {
   const napi_property_descriptor properties[] = {
+    {"phoneSnapshot", nullptr, PhoneSnapshot, nullptr, nullptr, nullptr, napi_default, nullptr},
+    {"phoneAttach", nullptr, PhoneAttach, nullptr, nullptr, nullptr, napi_default, nullptr},
+    {"phoneRetire", nullptr, PhoneRetire, nullptr, nullptr, nullptr, napi_default, nullptr},
+    {"phoneOperation", nullptr, PhoneOperation, nullptr, nullptr, nullptr, napi_default, nullptr},
     {"start", nullptr, Start, nullptr, nullptr, nullptr, napi_default, nullptr},
     {"stop", nullptr, Stop, nullptr, nullptr, nullptr, napi_default, nullptr},
     {"getState", nullptr, GetState, nullptr, nullptr, nullptr, napi_default, nullptr},
@@ -191,7 +250,7 @@ napi_value Initialize(napi_env env, napi_value exports) {
     {"lifecycleUpdate", nullptr, LifecycleUpdate, nullptr, nullptr, nullptr, napi_default, nullptr},
     {"lifecycleSnapshot", nullptr, LifecycleSnapshot, nullptr, nullptr, nullptr, napi_default, nullptr},
   };
-  if (napi_define_properties(env, exports, 7, properties) != napi_ok) return nullptr;
+  if (napi_define_properties(env, exports, 11, properties) != napi_ok) return nullptr;
   return exports;
 }
 
@@ -204,4 +263,28 @@ extern "C" __attribute__((visibility("default")))
 int dsh_host_lifecycle_snapshot_v1(DshHostLifecycleSnapshotV1* output,uint32_t size) noexcept {
   try { return Host().Lifecycle().Snapshot(output,size); }
   catch (...) { return -2; }
+}
+
+extern "C" __attribute__((visibility("default")))
+int dsh_host_phone_v1(const DshPhoneInputV1* in,DshPhoneSnapshotV1* out) noexcept {
+  try {
+    if(!in || in->size!=sizeof(*in) || in->version!=1 || in->reserved!=0 ||
+       !memchr(in->engine_id,0,sizeof(in->engine_id)) || !memchr(in->request_id,0,sizeof(in->request_id)) ||
+       !memchr(in->nonce,0,sizeof(in->nonce)) || !memchr(in->tool,0,sizeof(in->tool)) ||
+       in->generation>9007199254740991ULL || in->data_size>4*1024*1024 || (in->data_size&&!in->data))return -1;
+    auto& phone=Host().Phone();
+    if(in->operation==DshPhoneBind)return phone.Bind(in->engine_id)?1:0;
+    if(in->operation==DshPhoneSnapshot) {
+      if(!out)return -1;
+      auto state=phone.Snapshot();*out={};out->size=sizeof(*out);out->version=1;
+      out->available=state.available;out->foreground=state.foreground;out->generation=state.generation;out->now_ms=state.now;
+      memcpy(out->engine_id,state.engine_id.data(),state.engine_id.size());memcpy(out->owner_hash,state.owner_hash.data(),state.owner_hash.size());return 1;
+    }
+    dsh::PhoneRequest request{{in->engine_id,in->generation},in->request_id,in->nonce,in->tool,
+      in->data_size?std::string(in->data,in->data_size):std::string(),in->deadline_ms};
+    if(in->operation==DshPhoneClaim)return phone.Claim(request)?1:0;
+    if(in->operation==DshPhoneRevoke){auto value=phone.Revoke(request);return value<0?2:value;}
+    if(in->operation==DshPhoneComplete)return phone.Complete(request,request.json)?1:0;
+    return -1;
+  }catch(...){return -2;}
 }

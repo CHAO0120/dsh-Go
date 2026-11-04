@@ -226,6 +226,7 @@ void Host::Start(HostOptions options, StartNode start_node, StopNode stop_node) 
   File(options.runtime_root, "runtime/ohos/process/index.mjs");
   File(options.runtime_root, "runtime/ohos/process/sandbox.mjs");
   File(options.runtime_root, "runtime/ohos/lifecycle/index.mjs");
+  File(options.runtime_root, "runtime/ohos/phone/index.mjs");
   File(options.runtime_root, "runtime/ohos/capabilities/index.mjs");
   File(options.runtime_root, "runtime/bridge/dsh-go-bridge/lib/index.js");
   File(options.runtime_root, "runtime/ohos/process/child-process.mjs");
@@ -275,6 +276,7 @@ void Host::Run(HostOptions options, StartNode start_node) {
         ",\"config\":{\"workspaceRoots\":[" + roots + "],\"temporaryRoot\":" + Json(temporary) + "}},"
         "{\"id\":\"ohos-sandbox\",\"name\":" + Json(File(options.runtime_root, "runtime/ohos/process/sandbox.mjs")) + "},"
         "{\"id\":\"ohos-lifecycle\",\"name\":" + Json(File(options.runtime_root, "runtime/ohos/lifecycle/index.mjs")) + "},"
+        "{\"id\":\"ohos-phone\",\"name\":" + Json(File(options.runtime_root, "runtime/ohos/phone/index.mjs")) + "},"
         "{\"id\":\"ohos-capabilities\",\"name\":" + Json(File(options.runtime_root, "runtime/ohos/capabilities/index.mjs")) + "},"
         "{\"id\":\"dsh-go-bridge\",\"name\":" + Json(File(options.runtime_root, "runtime/bridge/dsh-go-bridge/lib/index.js")) + "}]}]\n");
     int code;

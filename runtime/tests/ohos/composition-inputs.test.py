@@ -188,7 +188,8 @@ class RequiredTests(unittest.TestCase):
 
     def test_actual_host_requirements_include_bridge_and_match_manifest(self):
         entries = composition.required_entries(self.root)
-        self.assertEqual(len(entries), 8)
+        self.assertEqual(len(entries), 9)
+        self.assertIn('runtime/ohos/phone/index.mjs', entries)
         self.assertIn('runtime/bridge/dsh-go-bridge/lib/index.js', entries)
         self.assertIn('runtime/ohos/process/child-process.mjs', entries)
 

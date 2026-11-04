@@ -693,6 +693,11 @@ def main():
                          needs=('native-publication-build', 'prepared-inputs', 'android-targets'), extra=lambda: {**linked_env(), 'DSH_HOME': str(o / 'background-home'),
                              'DSH_LIFECYCLE_TEST_PREFIX': str(prefix()), 'DSH_BACKGROUND_OLD_PREFIX': str(o / 'targets/candidate-prefix'),
                              'NODE_PATH': str(p('android_pristine') / 'node_modules'), 'OHOS_ETS_FIXTURE_ARTIFACTS': str(o / 'ets-fixture-artifacts')}, timeout=240)
+    for mode in ['marker', 'strict']:
+        for name in ['phone-bridge', 'phone-callback', 'phone-effects', 'phone-http', 'phone-plugin-owner']:
+            g.node_tests(name + '-' + mode, [rt + name + '.test.mjs'], mode=mode, imports=['tooling/ohos/tests/ets-fixture-loader.mjs'] if mode == 'strict' else [],
+                         needs=('native-publication-build', 'prepared-inputs'), extra=lambda: {**linked_env(), 'DSH_HOME': str(o / 'phone-home'),
+                             'NODE_PATH': str(p('android_pristine') / 'node_modules'), 'OHOS_ETS_FIXTURE_ARTIFACTS': str(o / 'ets-fixture-artifacts')}, timeout=240)
     for label in ('crash', 'freeze'):
         def lifecycle_command(label=label):
             values = g.py(rt + 'lifecycle-' + label + '-controller.py', '--node', node(), '--prefix', prefix(), '--linked', native() / 'libpublication-test-linked.so', '--native-library-dir', p('native_library_dir'), '--out', o / ('lifecycle-' + label))
@@ -776,7 +781,7 @@ def main():
         return {'source': verify_flutter_inputs(g.flutter_source, g.flutter_original_inputs),
                 'localPackages': verify_flutter_packages(g.flutter_source)}
     g.internal('flutter-input-identity', flutter_identity, needs=('flutter-l10n',))
-    flutter_tests = ['test/secrets', 'test/ohos/attachment_files_test.dart',
+    flutter_tests = ['test/secrets', 'test/ohos/attachment_files_test.dart', 'test/runtime/phone_callback_bridge_test.dart',
                      'test/chat/attachment_file_budget_test.dart', 'test/remote/private_key_file_budget_test.dart',
                      'test/chat/attachment_owner_test.dart', 'test/remote/ssh_key_callback_lifetime_test.dart', 'test/share_hosted', 'test/share/share_panel_test.dart']
     g.run('flutter-consumers', lambda: g.flutter('test', '--no-pub', '--reporter', 'json', '--concurrency=1', *flutter_tests), cwd=g.flutter_source / 'app', env=g.flutter_env, needs=('flutter-input-identity',), timeout=300, tests=['app/' + x for x in flutter_tests], scope='Actual Linux Flutter engine and Dart consumers; not OHOS AOT/device')

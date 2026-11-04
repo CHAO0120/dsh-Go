@@ -1,9 +1,13 @@
 // 动态 Native 模块的 default 对象遵循公开 ArkTS import 约定；目标装载仍待真机核实。
-import type { HostState, HostEvent, HostOptions, HostLifecycleSnapshot } from 'libdsh_host.so';
+import type { HostState, HostEvent, HostOptions, HostLifecycleSnapshot, HostPhoneSnapshot, HostPhoneKey } from 'libdsh_host.so';
 import { RuntimeChannelError } from './RuntimeCore';
 
 export interface NativeHostModule {
   start(options: HostOptions): void;
+  phoneAttach(ownerHash: string, engine: number, owner: number): number;
+  phoneSnapshot(): HostPhoneSnapshot;
+  phoneRetire(generation: number): boolean;
+  phoneOperation(operation: string, key: HostPhoneKey, result?: string): string | boolean | null;
   lifecycleUpdate(operation: string, owner: number, grant: number, value: number): number;
   lifecycleSnapshot(): HostLifecycleSnapshot;
   stop(): void;

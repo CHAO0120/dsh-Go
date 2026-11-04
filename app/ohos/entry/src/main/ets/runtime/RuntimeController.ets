@@ -118,6 +118,12 @@ export class RuntimeController {
     this.taskOwner = null; this.ownerAbility = null;
   }
 
+  phoneContext(ability: UIAbility | undefined): common.UIAbilityContext | null {
+    if (ability === undefined || ability !== RuntimeController.ability || !RuntimeController.foreground ||
+      this.requestedStop || this.pending !== null) return null;
+    return ability.context;
+  }
+
   initialize(): Promise<void> {
     if (this.initialized === null) this.initialized = this.readInstallation();
     return this.initialized;

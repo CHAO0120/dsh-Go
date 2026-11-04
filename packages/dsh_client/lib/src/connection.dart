@@ -102,6 +102,39 @@ class DshTraceEntry {
 
 typedef DshTracer = void Function(DshTraceEntry entry);
 
+/// Explicit cancellation for one or more owned HTTP exchanges. Completed
+/// exchanges unsubscribe, so a long-lived owner does not retain old requests.
+final class DshHttpAbort {
+  bool _aborted = false;
+  final _listeners = <void Function()>{};
+  bool get isAborted => _aborted;
+
+  void abort() {
+    if (_aborted) return;
+    _aborted = true;
+    final listeners = _listeners.toList();
+    _listeners.clear();
+    for (final listener in listeners) {
+      try {
+        listener();
+      } catch (_) {
+        /* Continue cancelling the remaining requests. */
+      }
+    }
+  }
+
+  void Function() _listen(void Function() listener) {
+    if (_aborted) {
+      listener();
+      return () {};
+    }
+    _listeners.add(listener);
+    return () {
+      _listeners.remove(listener);
+    };
+  }
+}
+
 /// Raw HTTP response with the body fully read.
 class DshHttpResponse {
   const DshHttpResponse(
@@ -323,6 +356,7 @@ class DshConnection {
     Duration? timeout,
     bool followRedirects = true,
     int? maxResponseBytes,
+    DshHttpAbort? abort,
   }) {
     return _exchange(
       'POST',
@@ -332,6 +366,7 @@ class DshConnection {
       timeout: timeout,
       followRedirects: followRedirects,
       maxResponseBytes: maxResponseBytes,
+      abort: abort,
     );
   }
 
@@ -510,11 +545,30 @@ class DshConnection {
     bool followRedirects = true,
     int? maxResponseBytes,
     Duration? timeout,
+    DshHttpAbort? abort,
   }) async {
+    if (abort?.isAborted == true) throw const DshClosedException('HTTP request cancelled');
     HttpClientRequest? request;
+    final cancelled = Completer<DshHttpResponse>();
+    var settled = false;
+    final unsubscribe = abort?._listen(() {
+      if (settled) return;
+      try {
+        request?.abort(const DshClosedException('HTTP request cancelled'));
+      } catch (_) {
+        /* Already closed. */
+      }
+      if (!cancelled.isCompleted) cancelled.completeError(const DshClosedException('HTTP request cancelled'));
+    });
     Future<DshHttpResponse> run() async {
       request = await _http.openUrl(method, uri);
       final req = request!;
+      // A cancellation can win while openUrl is still pending. Never attach
+      // the cookie or body to the late request, and own its eventual socket.
+      if (abort != null && (abort.isAborted || settled)) {
+        req.abort(const DshClosedException('HTTP request cancelled'));
+        throw const DshClosedException('HTTP request cancelled');
+      }
       req.followRedirects = followRedirects;
       _applyHost(req.headers);
       if (cookie != null) req.headers.set(HttpHeaders.cookieHeader, cookie!.header);
@@ -545,7 +599,10 @@ class DshConnection {
     }
 
     try {
-      return await run().timeout(timeout ?? requestTimeout);
+      final exchange = run();
+      return await (abort == null ? exchange : Future.any([exchange, cancelled.future])).timeout(
+        timeout ?? requestTimeout,
+      );
     } on TimeoutException catch (error) {
       request?.abort(error);
       throw DshTransportException('$method ${uri.path} timed out', error);
@@ -555,6 +612,9 @@ class DshConnection {
       throw DshTransportException('$method ${uri.path} failed: ${error.message}', error);
     } on HandshakeException catch (error) {
       throw DshTransportException('TLS handshake failed: ${error.message}', error);
+    } finally {
+      settled = true;
+      unsubscribe?.call();
     }
   }
 

@@ -81,6 +81,16 @@ class LifecycleState {
   int Snapshot(DshHostLifecycleSnapshotV1* output, uint32_t size) {
     if (!output || size != sizeof(*output)) return -1;
     std::lock_guard<std::mutex> lock(mutex_);
+    return SnapshotLocked(output);
+  }
+  template<typename F> auto WithSnapshot(F&& fn) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    DshHostLifecycleSnapshotV1 snapshot{};
+    SnapshotLocked(&snapshot);
+    return fn(snapshot);
+  }
+ private:
+  int SnapshotLocked(DshHostLifecycleSnapshotV1* output) {
     const auto now = Now();
     auto phase = phase_;
     if (now < 0) phase = Unavailable;
@@ -91,7 +101,6 @@ class LifecycleState {
       static_cast<uint32_t>(foreground_), phase, static_cast<uint32_t>(clock_failed_)};
     return 0;
   }
- private:
   bool Current(uint64_t owner) const { return active_ && !retired_ && owner != 0 && owner == owner_; }
   int64_t Now() {
     const auto now = clock_();

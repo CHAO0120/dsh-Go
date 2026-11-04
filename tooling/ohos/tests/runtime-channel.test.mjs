@@ -123,8 +123,18 @@ await fs.writeFile(path.join(temp, 'EntryAbility.mts'),
   `const NativeFilesPlugin = { onForeground() {}, onBackground() {} };\n` +
   `const NativeMediaPlugin = { onForeground() {}, onBackground() {} };\n` + entryText);
 const { default: EntryAbility } = await import(pathToFileURL(path.join(temp, 'EntryAbility.mts')));
+let phoneText = (await fs.readFile(path.join(source, '../phone/PhoneBridge.ets'), 'utf8'))
+  .replace("import common from '@ohos.app.ability.common';", '')
+  .replace("import cryptoFramework from '@ohos.security.cryptoFramework';", `import { phoneCrypto as cryptoFramework } from '${hostFixtureUrl}';`)
+  .replace("import util from '@ohos.util';", `import { util } from '${fixtureUrl}';`)
+  .replace("NativeHostModule, loadNativeHost", "type NativeHostModule, loadNativeHost")
+  .replace("PhoneEffects, PhoneEffectDenied, PhoneEffectResult", "PhoneEffects, PhoneEffectDenied, type PhoneEffectResult")
+  .replace("from '../runtime/NativeHost'", "from './NativeHost.mts'")
+  .replace("from '../runtime/RuntimeCore'", "from './RuntimeCore.mts'")
+  .replace("from './PhoneEffects'", `from '${hostFixtureUrl}'`);
+await fs.writeFile(path.join(temp, 'PhoneBridge.mts'), phoneText);
 let pluginText = await fs.readFile(path.join(source, 'RuntimePlugin.ets'), 'utf8');
-pluginText = pluginText.replace(/^import .* from '@ohos\/flutter_ohos[^\n]+\n/gm, '')
+pluginText = pluginText.replace("from '../phone/PhoneBridge'", "from './PhoneBridge.mts'").replace(/^import .* from '@ohos\/flutter_ohos[^\n]+\n/gm, '')
   .replace("import { BusinessError } from '@ohos.base';", '')
   .replace("from './RuntimeCore'", "from './RuntimeCore.mts'")
   .replace("from './ManagedSkillService'", "from './ManagedSkillService.mts'")
@@ -148,6 +158,7 @@ const files = {
   'runtime/ohos/process/index.mjs': 'export function apply() {}',
   'runtime/ohos/process/sandbox.mjs': 'export function apply() {}',
   'runtime/ohos/lifecycle/index.mjs': 'export function apply() {}',
+  'runtime/ohos/phone/index.mjs': 'export function apply() {}',
   'runtime/ohos/capabilities/index.mjs': 'export function apply() {}',
   'runtime/bridge/dsh-go-bridge/lib/index.js': 'export function apply() {}',
   'runtime/ohos/process/child-process.mjs': 'export const childProcess = true;',

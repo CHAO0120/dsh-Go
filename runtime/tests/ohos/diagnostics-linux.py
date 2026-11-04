@@ -124,7 +124,7 @@ Future<void> main(List<String> args) async {
   final info=await channel.info();
   check(raw.method=='info' && info.app['versionCode']==42, 'actual native info maps into real Dart consumer');
   check(info.device['platform']=='ohos' && info.device['apiVersion']==26 && !info.device.containsKey('sdkInt') && !info.device.containsKey('android'), 'OH facts never become Android SDK metadata');
-  check(info.manifest['files']==8 && info.manifest['uncompressedBytes']==116, 'actual validated manifest summary survives the codec');
+  check(info.manifest['files']==9 && info.manifest['uncompressedBytes']==135, 'actual validated manifest summary survives the codec');
   final lines=await channel.engineLog(maxBytes:12345);
   check(raw.method=='engineLog' && (raw.arguments as Map)['maxBytes']==12345 && lines.join('|')=='第一行|tail', 'engineLog method, byte argument and UTF-8 list');
   final empty=await const DiagnosticsChannel().info();
