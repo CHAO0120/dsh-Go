@@ -18,6 +18,7 @@ import '../../phone/app_rules_page.dart';
 import '../../phone/dnd_mode_page.dart';
 import '../../phone/phone_control_screen.dart';
 import '../../phone/phone_unlock_page.dart';
+import '../../phone/system_actions_page.dart';
 import '../../plugins/plugin_inventory_page.dart';
 import '../../plugins/plugins_screen.dart';
 import '../../providers/providers_page.dart';
@@ -57,6 +58,7 @@ Widget settingsPage(SettingsPageId id, {String? sessionId}) => switch (id) {
   SettingsPageId.phoneAppRules => const PhoneAppRulesPage(),
   SettingsPageId.phoneDnd => const PhoneDndPage(),
   SettingsPageId.phoneUnlocks => const PhoneUnlockPage(),
+  SettingsPageId.systemActions => const SystemActionsPage(),
   SettingsPageId.engine => const EngineScreen(),
   SettingsPageId.background => const BackgroundGuidePage(),
   SettingsPageId.systemAccess => const SystemAccessPage(),

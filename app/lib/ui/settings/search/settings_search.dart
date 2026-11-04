@@ -106,7 +106,7 @@ const searchLimit = 20;
 /// people come for them, best first, [searchLimit] at most. Matches in [zh]
 /// and [en] alike. Without [androidFeatures], nothing that is Android's own
 /// ([SettingsIndex.androidOnly]), nor a word for what is only there
-/// ([SettingSpot.ohosKeywords]).
+/// ([SettingSpot.ohosKeywords]); with them, nothing that is HarmonyOS's own.
 List<SearchHit> searchSettings(
   String query, {
   required Iterable<SettingSpot> spots,
@@ -120,6 +120,7 @@ List<SearchHit> searchSettings(
   final hits = <SearchHit>[];
   for (final spot in spots) {
     if (!androidFeatures && SettingsIndex.androidOnly(spot)) continue;
+    if (androidFeatures && spot.ohosOnly) continue;
     final langs = [
       for (final l in [zh, en])
         _Words(spot.title(l), [

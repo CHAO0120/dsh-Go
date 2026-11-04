@@ -136,6 +136,13 @@ export class PhoneQueue {
     return pending.promise;
   }
 
+  /** Whether a call could start now: when it can't, asking first only wastes the answer. */
+  canRun() {
+    if (this.#closed) return false;
+    try { const state = this.native.snapshot(); return state?.available === true && state.foreground === true; }
+    catch { return false; }
+  }
+
   next(auth) {
     this.#authorize(auth, true);
     const row = [...this.#pending.values()].find(value => value.phase === 'queued');

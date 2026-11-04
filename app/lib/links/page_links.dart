@@ -64,7 +64,9 @@ typedef PageResolver = Widget? Function(String id, String? sessionId);
 /// [pageForId] (tests swap in light pages); on HarmonyOS, Android's own pages
 /// have none ([registerPageLinks] says so).
 final pageLinkResolverProvider = Provider<PageResolver>((ref) {
-  if (ref.watch(androidSystemFeaturesProvider)) return pageForId;
+  if (ref.watch(androidSystemFeaturesProvider)) {
+    return (id, sessionId) => SettingsIndex.ohosOnlyLink(id) ? null : pageForId(id, sessionId);
+  }
   return (id, sessionId) => SettingsIndex.androidOnlyLink(id) ? null : pageForId(id, sessionId);
 });
 

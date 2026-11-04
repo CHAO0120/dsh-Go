@@ -131,6 +131,10 @@ class _ToolStep extends StatelessWidget {
     final tool = view.item;
     final title = span.kind == TraceKind.question ? l10n.activityStepQuestion : view.verb;
     final status = switch (tool.status) {
+      _ when view.phoneResult != null => (
+        view.phoneResult!.word,
+        view.phoneResult!.isFault ? dsh.danger : dsh.textTertiary,
+      ),
       ToolStatus.succeeded => (l10n.activityStepSuccess, dsh.success),
       ToolStatus.failed when view.sandboxBlocked => (l10n.activityStepNeedsPermission, dsh.textTertiary),
       ToolStatus.failed => (l10n.commonFailed, dsh.danger),
@@ -245,7 +249,7 @@ class _ToolStep extends StatelessWidget {
     if (result.isNotEmpty) {
       out.add(
         CodeSection(
-          title: tool.status == ToolStatus.failed
+          title: tool.status == ToolStatus.failed && (view.phoneResult?.isFault ?? true)
               ? l10n.activityStepError
               : view.isTerminal
               ? l10n.activityOutput
@@ -255,7 +259,9 @@ class _ToolStep extends StatelessWidget {
             context,
             result,
             ansi: true,
-            color: tool.status == ToolStatus.failed && !view.sandboxBlocked ? DshColors.of(context).danger : null,
+            color: tool.status == ToolStatus.failed && !view.sandboxBlocked && (view.phoneResult?.isFault ?? true)
+                ? DshColors.of(context).danger
+                : null,
           ),
         ),
       );

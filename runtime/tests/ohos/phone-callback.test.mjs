@@ -5,6 +5,7 @@ import { getEventListeners } from 'node:events';
 import { Context } from '@deepseek-ai/cordis';
 import { SystemPrompt } from '@deepseek-ai/dsh-system-prompt';
 import { ToolRuntime } from '@deepseek-ai/dsh-tools';
+import { ApprovalService } from '@deepseek-ai/dsh-user-approval';
 import { PhoneQueue, PHONE_PENDING_LIMIT } from '../../ohos/phone/queue.mjs';
 import { registerPhoneTools } from '../../ohos/phone/tools.mjs';
 import { phoneCatalog } from '../../ohos/phone/catalog.mjs';
@@ -205,6 +206,65 @@ test('the real ToolRuntime rejects bad schemas and unsupported actions with isEr
   }
   assert.equal(f.counts().claims, 0);
 });
+
+// The engine's own ApprovalService; only the session log and the answerer are stand-ins.
+async function approvalFixture(t, policy, { auto = false } = {}) {
+  const f = fixture(t), ctx = new Context();
+  await ctx.plugin(SystemPrompt, {}); await ctx.plugin(ToolRuntime, { mode: 'native' });
+  await ctx.plugin(ApprovalService, { policy });
+  await ctx.inject(['approval'], () => {});
+  if (auto) ctx.provide('permissionPresets', { current: () => 'auto' });
+  const events = [{ type: 'turn/start' }], asks = [];
+  const session = { get seq() { return events.length; }, eventAt: seq => events[seq], append: (type, data) => { events.push({ type, data }); } };
+  let answer = 'allowed-once';
+  ctx.on('approval/request', async request => { asks.push(request); return answer; });
+  const dispose = registerPhoneTools(ctx, f.queue), agent = { id: 'approval-session', ctx, session };
+  t.after(async () => { dispose(); await ctx.fiber.dispose(); });
+  let calls = 0;
+  return { ...f, asks, answer: value => { answer = value; }, run: (name, args) => ctx.tools.execute({ name: `mcp__phone__${name}`,
+    callId: `approval-call-${++calls}`, agent, arguments: args, signal: new AbortController().signal }) };
+}
+
+test('a phone call asks through the engine approval first and a refusal never reaches the queue', async t => {
+  const f = await approvalFixture(t, 'ask');
+  f.answer('rejected');
+  const refused = await f.run('intent', { kind: 'dial', number: '10086' });
+  assert.equal(refused.isError, true);
+  assert.equal(f.asks.length, 1); assert.equal(f.asks[0].toolName, 'mcp__phone__intent');
+  assert.match(f.asks[0].displayReason.zh, /10086/);
+  assert.equal(f.queue.status().pending, 0); assert.equal(f.counts().claims, 0);
+});
+
+test('a call that cannot run now fails plainly instead of asking first', async t => {
+  const f = await approvalFixture(t, 'ask');
+  for (const change of [{ available: false }, { available: true, foreground: false }]) {
+    Object.assign(f.state, change);
+    const result = await f.run('open', { url: 'https://example.test' });
+    assert.equal(result.isError, true); assert.equal(f.asks.length, 0);
+    assert.equal(JSON.parse(result.error.message).dispatched, false);
+  }
+});
+
+test('an allowed phone call goes on to the queue; handoff is not asked about twice', async t => {
+  const f = await approvalFixture(t, 'ask'), call = await executing(f, 'open', { url: 'https://example.test' });
+  assert.equal(f.asks.length, 1); assert.equal(call.lease.request.tool, 'mcp__phone__open');
+  f.native.consume(call.lease); f.native.finish();
+  f.queue.result(f.auth, call.lease.request.requestId, call.lease.executionNonce, ok());
+  assert.equal((await call.result).isError, false);
+  const handoff = await executing(f, 'handoff', { reason: '请登录' });
+  assert.equal(f.asks.length, 1, 'handoff waits for continue or stop instead');
+  await f.queue.cancel(f.auth, handoff.lease.request.requestId); await handoff.result;
+});
+
+for (const [name, policy, options] of [['full access', 'never', {}], ['Auto review', 'ask', { auto: true }]]) {
+  test(`${name} decides by itself: the phone call does not add a prompt`, async t => {
+    const f = await approvalFixture(t, policy, options), call = await executing(f, 'open', { url: 'https://example.test' });
+    assert.equal(f.asks.length, 0);
+    f.native.consume(call.lease); f.native.finish();
+    f.queue.result(f.auth, call.lease.request.requestId, call.lease.executionNonce, ok());
+    assert.equal((await call.result).isError, false);
+  });
+}
 
 test('a registration conflict rolls back only this phone plugin contribution', async t => {
   const f = fixture(t), ctx = new Context();

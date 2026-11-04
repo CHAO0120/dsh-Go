@@ -756,6 +756,8 @@ Future<void> openNativePage(BuildContext context, WidgetRef ref, String page, {S
     _toast(context, context.l10n.harmonyPageUnavailable);
     return;
   }
+  // A page only HarmonyOS has is no page at all elsewhere.
+  if (ref.read(androidSystemFeaturesProvider) && SettingsIndex.ohosOnlyLink(page)) return;
   final navigator = Navigator.of(context);
   switch (page) {
     case 'new-chat':

@@ -199,6 +199,8 @@ void main() {
           ),
         ],
       ),
+      // HarmonyOS's own page: its row is there instead of 手机操控's.
+      absent: {'page:systemActions'},
     );
   });
 

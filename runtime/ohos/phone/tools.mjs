@@ -4,10 +4,34 @@ import { phoneCatalog, phoneResultSchema } from './catalog.mjs';
 
 const rejected = (code, message) => ({ status: 'failed', effect: 'none', evidence: 'unknown', dispatched: false, code, message });
 const render = value => [{ type: 'text', text: JSON.stringify(value) }];
+// handoff is itself a question to the person, so it isn't asked about first.
+const asked = {
+  mcp__phone__open: ['打开', 'Open'], mcp__phone__intent: ['系统动作', 'System action'],
+  mcp__phone__notify: ['发通知', 'Send a notification'], mcp__phone__clipboard: ['写入剪贴板', 'Write to the clipboard'],
+};
+const target = args => [args?.url, args?.app, args?.kind, args?.number, args?.title, args?.destination, args?.page, args?.text, args?.set]
+  .filter(value => typeof value === 'string' && value.trim()).join(' · ').slice(0, 300);
+
+// Nothing else in the engine asks about these tools outside Auto review, so they ask the
+// way it does: the session's policy and the chat's approval card decide, and a preset
+// that never prompts (full access) runs them unasked as it runs everything else.
+function askBeforeRunning(ctx, queue) {
+  return ctx.on('tools/pre-execute', async (exec, next) => {
+    const decision = await next();
+    const [zh, en] = asked[exec.name] ?? [];
+    const session = exec.agent?.session, approval = ctx.get('approval');
+    if (decision.kind !== 'allow' || !zh || !session || !approval || !queue.canRun()) return decision;
+    if (approval.effectivePolicy(session) === 'never' || ctx.get('permissionPresets')?.current(session) === 'auto') return decision;
+    const what = target(exec.arguments);
+    return { kind: 'ask', reason: `Phone action ${exec.name}: ${what}`,
+      displayReason: { zh: what ? `${zh}：${what}` : zh, en: what ? `${en}: ${what}` : en } };
+  });
+}
 
 export function registerPhoneTools(ctx, queue) {
   const disposers = [];
   try {
+  disposers.push(askBeforeRunning(ctx, queue));
   for (const definition of phoneCatalog) {
     const outcomes = new WeakMap();
     disposers.push(ctx.tools.register({ ...definition,

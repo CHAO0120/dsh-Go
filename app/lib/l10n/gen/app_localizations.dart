@@ -29882,6 +29882,426 @@ abstract class L10n {
   /// **'随时随刻，想go就Go！'**
   String get appSlogan;
 
+  /// No description provided for @systemActionsTitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'系统操作'**
+  String get systemActionsTitle;
+
+  /// No description provided for @systemActionsSubtitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'让 AI 帮你打开应用和系统页面，随时可以关'**
+  String get systemActionsSubtitle;
+
+  /// No description provided for @systemActionsReady.
+  ///
+  /// In zh, this message translates to:
+  /// **'已开启'**
+  String get systemActionsReady;
+
+  /// No description provided for @systemActionsWaitingEngine.
+  ///
+  /// In zh, this message translates to:
+  /// **'已开启，等本机引擎启动'**
+  String get systemActionsWaitingEngine;
+
+  /// No description provided for @systemActionsOffScreen.
+  ///
+  /// In zh, this message translates to:
+  /// **'已开启，回到 DSH Go 才能用'**
+  String get systemActionsOffScreen;
+
+  /// No description provided for @systemActionsConnecting.
+  ///
+  /// In zh, this message translates to:
+  /// **'正在连接'**
+  String get systemActionsConnecting;
+
+  /// No description provided for @systemActionsUnavailable.
+  ///
+  /// In zh, this message translates to:
+  /// **'已开启，暂时连不上，正在重试'**
+  String get systemActionsUnavailable;
+
+  /// No description provided for @systemActionsUnsupported.
+  ///
+  /// In zh, this message translates to:
+  /// **'这个版本用不了'**
+  String get systemActionsUnsupported;
+
+  /// No description provided for @systemActionsToggleFailed.
+  ///
+  /// In zh, this message translates to:
+  /// **'没能保存，再试一次'**
+  String get systemActionsToggleFailed;
+
+  /// No description provided for @systemActionsRemoteTitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'当前连的是远程主机'**
+  String get systemActionsRemoteTitle;
+
+  /// No description provided for @systemActionsRemoteHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'系统操作只在本机引擎的对话里有效'**
+  String get systemActionsRemoteHint;
+
+  /// No description provided for @systemActionsOnScreenTitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'只在 DSH Go 在屏幕上时有效'**
+  String get systemActionsOnScreenTitle;
+
+  /// No description provided for @systemActionsOnScreenBody.
+  ///
+  /// In zh, this message translates to:
+  /// **'系统不让后台应用做这些。AI 打开别的应用后，要等你回到 DSH Go 才能接着做。'**
+  String get systemActionsOnScreenBody;
+
+  /// No description provided for @systemActionsCanTitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'能做的'**
+  String get systemActionsCanTitle;
+
+  /// No description provided for @systemActionsCanOpen.
+  ///
+  /// In zh, this message translates to:
+  /// **'打开应用或链接'**
+  String get systemActionsCanOpen;
+
+  /// No description provided for @systemActionsCanOpenHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'应用要写包名，不能按名字找'**
+  String get systemActionsCanOpenHint;
+
+  /// No description provided for @systemActionsCanPages.
+  ///
+  /// In zh, this message translates to:
+  /// **'日历、拨号、分享、导航'**
+  String get systemActionsCanPages;
+
+  /// No description provided for @systemActionsCanPagesHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'打开系统界面，最后一步由你确认'**
+  String get systemActionsCanPagesHint;
+
+  /// No description provided for @systemActionsCanSettings.
+  ///
+  /// In zh, this message translates to:
+  /// **'部分系统设置页'**
+  String get systemActionsCanSettings;
+
+  /// No description provided for @systemActionsCanSettingsHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'移动网络、显示、声音、NFC 和本应用的通知'**
+  String get systemActionsCanSettingsHint;
+
+  /// No description provided for @systemActionsCanNotify.
+  ///
+  /// In zh, this message translates to:
+  /// **'发通知'**
+  String get systemActionsCanNotify;
+
+  /// No description provided for @systemActionsCanNotifyHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'发出去不代表你已经看到'**
+  String get systemActionsCanNotifyHint;
+
+  /// No description provided for @systemActionsCanClipboard.
+  ///
+  /// In zh, this message translates to:
+  /// **'写剪贴板'**
+  String get systemActionsCanClipboard;
+
+  /// No description provided for @systemActionsCanClipboardHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'只写不读'**
+  String get systemActionsCanClipboardHint;
+
+  /// No description provided for @systemActionsCanHandoff.
+  ///
+  /// In zh, this message translates to:
+  /// **'交还给你'**
+  String get systemActionsCanHandoff;
+
+  /// No description provided for @systemActionsCanHandoffHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'登录、验证码这类步骤你来做，做完点继续'**
+  String get systemActionsCanHandoffHint;
+
+  /// No description provided for @systemActionsCannotTitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'做不到的'**
+  String get systemActionsCannotTitle;
+
+  /// No description provided for @systemActionsCannotScreen.
+  ///
+  /// In zh, this message translates to:
+  /// **'看屏幕、点按其他应用'**
+  String get systemActionsCannotScreen;
+
+  /// No description provided for @systemActionsCannotScreenHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'系统不允许'**
+  String get systemActionsCannotScreenHint;
+
+  /// No description provided for @systemActionsCannotOther.
+  ///
+  /// In zh, this message translates to:
+  /// **'读剪贴板、按名字找应用、闹钟和计时器、短信'**
+  String get systemActionsCannotOther;
+
+  /// No description provided for @systemActionsCannotOtherHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'没有可靠的公开接口，AI 会直接告诉你不支持'**
+  String get systemActionsCannotOtherHint;
+
+  /// No description provided for @systemActionsConfirmTitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'确认方式'**
+  String get systemActionsConfirmTitle;
+
+  /// No description provided for @systemActionsConfirmValue.
+  ///
+  /// In zh, this message translates to:
+  /// **'跟随权限'**
+  String get systemActionsConfirmValue;
+
+  /// No description provided for @systemActionsConfirmHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'按对话的权限来：一般每次先问你，完全权限时不问'**
+  String get systemActionsConfirmHint;
+
+  /// No description provided for @systemActionsPermissionNote.
+  ///
+  /// In zh, this message translates to:
+  /// **'系统操作也按这里的权限询问：完全权限时不问，其他情况每次先问你。'**
+  String get systemActionsPermissionNote;
+
+  /// No description provided for @systemActionsLogHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'只记做了什么和结果，不记内容'**
+  String get systemActionsLogHint;
+
+  /// No description provided for @systemActionsLogEmptyHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'AI 用过的系统操作都会记在这里'**
+  String get systemActionsLogEmptyHint;
+
+  /// No description provided for @systemActionsOpenedUi.
+  ///
+  /// In zh, this message translates to:
+  /// **'已打开界面'**
+  String get systemActionsOpenedUi;
+
+  /// No description provided for @systemActionsResultUnknown.
+  ///
+  /// In zh, this message translates to:
+  /// **'结果未知'**
+  String get systemActionsResultUnknown;
+
+  /// No description provided for @systemActionsNotSupported.
+  ///
+  /// In zh, this message translates to:
+  /// **'不支持'**
+  String get systemActionsNotSupported;
+
+  /// No description provided for @systemActionsNotRun.
+  ///
+  /// In zh, this message translates to:
+  /// **'没有执行'**
+  String get systemActionsNotRun;
+
+  /// No description provided for @systemActionsDisclosureTitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'开启系统操作前'**
+  String get systemActionsDisclosureTitle;
+
+  /// No description provided for @systemActionsDisclosureIntro.
+  ///
+  /// In zh, this message translates to:
+  /// **'开启后，AI 可以在对话里替你打开应用和系统页面。先了解这几点：'**
+  String get systemActionsDisclosureIntro;
+
+  /// No description provided for @systemActionsDisclosureWhatTitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'能做什么'**
+  String get systemActionsDisclosureWhatTitle;
+
+  /// No description provided for @systemActionsDisclosureWhatBody.
+  ///
+  /// In zh, this message translates to:
+  /// **'打开应用或链接，打开日历、拨号、分享、导航界面，发通知，写剪贴板，把步骤交还给你。'**
+  String get systemActionsDisclosureWhatBody;
+
+  /// No description provided for @systemActionsDisclosureWhenTitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'什么时候做'**
+  String get systemActionsDisclosureWhenTitle;
+
+  /// No description provided for @systemActionsDisclosureWhenBody.
+  ///
+  /// In zh, this message translates to:
+  /// **'只在对话用到、DSH Go 在屏幕上时。默认每次先问你，选了完全权限的对话不问。'**
+  String get systemActionsDisclosureWhenBody;
+
+  /// No description provided for @systemActionsDisclosureWhoTitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'发给谁'**
+  String get systemActionsDisclosureWhoTitle;
+
+  /// No description provided for @systemActionsDisclosureWhoBody.
+  ///
+  /// In zh, this message translates to:
+  /// **'动作的结果会回到对话，发给你选的模型。'**
+  String get systemActionsDisclosureWhoBody;
+
+  /// No description provided for @systemActionsDisclosureNeverTitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'不会做什么'**
+  String get systemActionsDisclosureNeverTitle;
+
+  /// No description provided for @systemActionsDisclosureNeverBody.
+  ///
+  /// In zh, this message translates to:
+  /// **'不看屏幕，不点按其他应用，不读剪贴板。打电话、分享、建日程的最后一步由你确认。'**
+  String get systemActionsDisclosureNeverBody;
+
+  /// No description provided for @systemActionsDisclosureStopTitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'怎么停'**
+  String get systemActionsDisclosureStopTitle;
+
+  /// No description provided for @systemActionsDisclosureStopBody.
+  ///
+  /// In zh, this message translates to:
+  /// **'随时在这里关掉。交还提示可以点停止。'**
+  String get systemActionsDisclosureStopBody;
+
+  /// No description provided for @systemActionsHandoffTitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'轮到你来操作'**
+  String get systemActionsHandoffTitle;
+
+  /// No description provided for @systemActionsHandoffNote.
+  ///
+  /// In zh, this message translates to:
+  /// **'做完回到 DSH Go 点继续。继续只表示你确认了，AI 看不到其他应用里发生了什么。'**
+  String get systemActionsHandoffNote;
+
+  /// No description provided for @systemActionsHandoffFailed.
+  ///
+  /// In zh, this message translates to:
+  /// **'这次没算上，提示如果还在可以再点一次'**
+  String get systemActionsHandoffFailed;
+
+  /// No description provided for @systemActionsResultOpened.
+  ///
+  /// In zh, this message translates to:
+  /// **'已打开界面，还没确认里面的事办完。'**
+  String get systemActionsResultOpened;
+
+  /// No description provided for @systemActionsResultContinued.
+  ///
+  /// In zh, this message translates to:
+  /// **'你点了继续。这只说明你确认了，不代表其他应用里的操作完成了。'**
+  String get systemActionsResultContinued;
+
+  /// No description provided for @systemActionsResultNotified.
+  ///
+  /// In zh, this message translates to:
+  /// **'通知已发出，不确定你有没有看到。'**
+  String get systemActionsResultNotified;
+
+  /// No description provided for @systemActionsResultClipboard.
+  ///
+  /// In zh, this message translates to:
+  /// **'文字已写入剪贴板。'**
+  String get systemActionsResultClipboard;
+
+  /// No description provided for @systemActionsResultUnknownDetail.
+  ///
+  /// In zh, this message translates to:
+  /// **'系统调用可能已经发出，结果未知。不会自动重试，请自己看一下实际状态。'**
+  String get systemActionsResultUnknownDetail;
+
+  /// No description provided for @systemActionsResultUnsupported.
+  ///
+  /// In zh, this message translates to:
+  /// **'鸿蒙版不支持这个动作，没有执行。'**
+  String get systemActionsResultUnsupported;
+
+  /// No description provided for @systemActionsResultOffScreen.
+  ///
+  /// In zh, this message translates to:
+  /// **'DSH Go 不在屏幕上，没有执行。'**
+  String get systemActionsResultOffScreen;
+
+  /// No description provided for @systemActionsResultUnavailable.
+  ///
+  /// In zh, this message translates to:
+  /// **'系统操作没开或暂时连不上，没有执行。到「设置 → 系统操作」看看。'**
+  String get systemActionsResultUnavailable;
+
+  /// No description provided for @systemActionsResultStopped.
+  ///
+  /// In zh, this message translates to:
+  /// **'已停止。'**
+  String get systemActionsResultStopped;
+
+  /// No description provided for @systemActionsResultTimeout.
+  ///
+  /// In zh, this message translates to:
+  /// **'等待超时，没有结果。'**
+  String get systemActionsResultTimeout;
+
+  /// No description provided for @systemActionsResultNotRun.
+  ///
+  /// In zh, this message translates to:
+  /// **'没有执行。'**
+  String get systemActionsResultNotRun;
+
+  /// No description provided for @catalogSystemActions.
+  ///
+  /// In zh, this message translates to:
+  /// **'系统操作'**
+  String get catalogSystemActions;
+
+  /// No description provided for @catalogSystemActionsSummary.
+  ///
+  /// In zh, this message translates to:
+  /// **'打开应用和系统页面'**
+  String get catalogSystemActionsSummary;
+
+  /// No description provided for @searchKwSystemActions.
+  ///
+  /// In zh, this message translates to:
+  /// **'打开应用,打开链接,日历,拨号,分享,导航,发通知,写剪贴板,交还'**
+  String get searchKwSystemActions;
+
   /// No description provided for @updateCheck.
   ///
   /// In zh, this message translates to:
