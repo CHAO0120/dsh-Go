@@ -234,3 +234,44 @@ test('Service stop retires matching grant before delayed ready; invalid/stale re
   assert.deepEqual(result,{result:null,current:false,reason:'stale'});assert.equal(managedSkillIo.calls.length,0);
   service.install(owner,null,reply=>{result=plain(reply);});assert.deepEqual(result,{result:null,current:false,reason:'invalid'});
 });
+
+
+test('same live service retries root IO after one failed installation', async () => {
+  const c = await fixture();
+  const service = new ManagedSkillService(c.root, () => true);
+  const owner = service.attachOwner(); service.ready(1, TOKEN);
+  const install = id => new Promise(resolve => service.install(owner, wire(c.root, id), reply => resolve(plain(reply))));
+  let failed = false;
+  managedSkillIo.before = item => {
+    if (!failed && item.operation === 'open' && item.path === c.root) {
+      failed = true;
+      throw Object.assign(new Error('one transient root IO error'), { code:13900005 });
+    }
+  };
+  assert.deepEqual(await install('first'), { result:null, current:true, reason:'io' });
+  assert.equal(managedSkillIo.calls.filter(item => item.operation === 'open' && item.path === c.root).length, 1);
+  managedSkillIo.before = null;
+  assert.deepEqual(await install('retry'), { result:'installed', current:true, reason:null });
+  assert.equal(await fs.readFile(path.join(c.directory, 'SKILL.md'), 'utf8'), SKILL);
+  assert.deepEqual(await install('unchanged'), { result:'unchanged', current:true, reason:null });
+  await noTemps(c.directory);
+});
+
+test('root callers share a failed attempt and retry without losing the successful cache', async () => {
+  const c = await fixture(); const pending = deferred();
+  managedSkillIo.before = async item => {
+    if (item.operation === 'open' && item.path === c.root) {
+      await pending.promise;
+      throw Object.assign(new Error('temporary root unavailable'), { code:13900005 });
+    }
+  };
+  const first = c.storage.root(); const second = c.storage.root();
+  assert.equal(first, second);
+  const settled = Promise.allSettled([first, second]); pending.resolve();
+  assert((await settled).every(result => result.status === 'rejected'));
+  assert.equal(managedSkillIo.calls.filter(item => item.operation === 'open' && item.path === c.root).length, 1);
+  managedSkillIo.before = null;
+  assert.equal(await c.storage.root(), c.root);
+  assert.equal(await c.storage.root(), c.root);
+  assert.equal(managedSkillIo.calls.filter(item => item.operation === 'open' && item.path === c.root).length, 2);
+});

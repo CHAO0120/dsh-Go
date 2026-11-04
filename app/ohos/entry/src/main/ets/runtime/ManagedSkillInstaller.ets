@@ -17,6 +17,9 @@ export class OhosManagedSkillStorage implements ManagedSkillStorage {
       this.resolvedRoot = this.canonical(this.guestRoot).then((root: string) => {
         if (root.length === 0 || root === '/') throw new Error('Invalid managed skill root');
         return root;
+      }).catch((error: Error) => {
+        this.resolvedRoot = null;
+        throw error;
       });
     }
     return this.resolvedRoot;
