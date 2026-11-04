@@ -26,12 +26,13 @@ class SelectedNativeFile {
   ended: boolean = false;
   constructor(value: string) {
     this.handle = util.generateRandomUUID(false); this.uri = value;
-    this.name = nativeFileName(new fileUri.FileUri(value).name);
+    const sourceName = new fileUri.FileUri(value).name;
+    this.name = nativeFileName(sourceName);
     let mime = 'application/octet-stream';
-    const dot = this.name.lastIndexOf('.');
+    const dot = sourceName.lastIndexOf('.');
     if (dot > 0) {
       try {
-        const type = uniformTypeDescriptor.getUniformDataTypeByFilenameExtension(this.name.substring(dot));
+        const type = uniformTypeDescriptor.getUniformDataTypeByFilenameExtension(sourceName.substring(dot));
         mime = nativeFileMime(uniformTypeDescriptor.getTypeDescriptor(type)?.mimeTypes[0] ?? mime);
       } catch (_) { /* Unknown metadata remains application/octet-stream. */ }
     }
