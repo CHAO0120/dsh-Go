@@ -119,6 +119,9 @@ final class IOSSystemTools: NSObject, PHPickerViewControllerDelegate, CLLocation
   /// A system permission prompt can sit there longer than the tool call waits.
   private func stillWanted(_ current: () -> Bool) throws {
     guard current() else { throw Failure("这个工具调用已经结束，没有执行。") }
+    guard UIApplication.shared.applicationState == .active, UIApplication.shared.isProtectedDataAvailable else {
+      throw Failure("请先解锁并打开 DSH Go；没有继续读取或写入。")
+    }
   }
 
   /// The app stays inactive for a moment after a system prompt is answered, and what comes next
