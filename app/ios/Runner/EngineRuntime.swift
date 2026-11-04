@@ -342,10 +342,14 @@ final class RuntimeInstaller {
     defer { try? handle.close() }
     var hasher = SHA256()
     var size = 0
-    while let chunk = try? handle.read(upToCount: 256 * 1024), !chunk.isEmpty {
-      size += chunk.count
-      if size > file.size { return false }
-      hasher.update(data: chunk)
+    do {
+      while let chunk = try handle.read(upToCount: 256 * 1024), !chunk.isEmpty {
+        size += chunk.count
+        if size > file.size { return false }
+        hasher.update(data: chunk)
+      }
+    } catch {
+      return false
     }
     guard size == file.size else { return false }
     let hex = Array("0123456789abcdef".utf8)
