@@ -64,16 +64,18 @@ int64_t Integer(CFDictionaryRef properties, CFStringRef key) {
 }
 
 void Decode(CGImageSourceRef source, Job* job) {
+  // Making a small copy from the image itself still reads every byte of it, without holding a
+  // 48-megapixel photo's 180 MB in the same process as the engine.
+  int longEdge = 1024;
+  Held<CFNumberRef> edge(CFNumberCreate(kCFAllocatorDefault, kCFNumberIntType, &longEdge));
   Held<CFMutableDictionaryRef> options(NewDictionary());
+  CFDictionarySetValue(options.get(), kCGImageSourceCreateThumbnailFromImageAlways, kCFBooleanTrue);
+  CFDictionarySetValue(options.get(), kCGImageSourceThumbnailMaxPixelSize, edge.get());
   CFDictionarySetValue(options.get(), kCGImageSourceShouldCacheImmediately, kCFBooleanTrue);
-  Held<CGImageRef> image(CGImageSourceCreateImageAtIndex(source, 0, options.get()));
+  Held<CGImageRef> image(CGImageSourceCreateThumbnailAtIndex(source, 0, options.get()));
   if (!image || CGImageSourceGetStatusAtIndex(source, 0) != kCGImageStatusComplete) {
     job->failure = "The image doesn't decode.";
-    return;
   }
-  // Asking for the pixels is what makes the decoder read all of them.
-  Held<CFDataRef> pixels(CGDataProviderCopyData(CGImageGetDataProvider(image.get())));
-  if (!pixels || CFDataGetLength(pixels.get()) == 0) job->failure = "The image doesn't decode.";
 }
 
 void Encode(CGImageSourceRef source, Job* job) {

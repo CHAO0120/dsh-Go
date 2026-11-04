@@ -42,7 +42,7 @@ flutter build ios --release --no-codesign
 - CI 会在 iOS 模拟器上真跑：真 NodeMobile 的工具回合、取消、停止和恢复会话；停止时不误关别人的 fd；真 App 里的安装、启动、登录、停止、重启和重置；真 App 启动后 30 秒还活着。这些都是 Debug 构建。真机和 Release 一次都没跑过，下面的验收项都没做。
 - 本机引擎和鸿蒙是同一层（`runtime/ohos/`）：同进程的 Node（NodeMobile 24.22.1，`--jitless`），命令是 just-bash 模拟的。没有真正的 Linux，不能起子进程，没有 Python。首次安装解压约 160 MB。引擎第一次启动时才加载，只连远程的人不占这份内存。
 - 和鸿蒙不同：停止后能原地再启动，不用重开应用（`runtime/ios/host/node_runner.cc`）。
-- 和鸿蒙不同：本机引擎能处理图片。sharp 在这里装不了，所以 `runtime/ios/image/ios-sharp.cjs` 替代它，像素走系统的 ImageIO（`runtime/ios/host/image_binding.cc`），附件库自己的规则不变。ImageIO 写不了 WebP，所以带透明的图存 PNG，比目标大时压不下去（只影响透明图）。
+- 和鸿蒙不同：本机引擎能处理图片。sharp 在这里装不了，所以 `runtime/ios/image/ios-sharp.cjs` 替代它，像素走系统的 ImageIO（`runtime/ios/host/image_binding.cc`），附件库自己的规则不变。ImageIO 写不了 WebP，所以带透明的图存 PNG，比目标大时压不下去（只影响透明图）。校验和缩放都走缩略图路径，大图的像素不用全部放进内存，但实际峰值还没在设备上量过。
 - App 切到后台后，系统很快会暂停引擎；后台的本地监听被回收时，回到前台会自动重启引擎。iOS 26 以上，本机正在跑的一轮会向系统申请继续运行（`BGContinuedProcessingTask`），系统同意就接着跑并显示进度，也可能随时收回，收回后和暂停一样。这部分只编过、没在设备上跑过。
 - 引擎的堆上限是 `--max-old-space-size=256 --max-semi-space-size=4`，还没在设备上定过。它和 App 同进程，所以快撞上限时 runner 会停掉这次运行（退出码 70），App 留着，可以重新启动。这一轮不会接着跑。Buffer 和原生内存、系统的 jetsam 不在保护范围内。
 - NodeMobile 24.22.1-0 记录 fd 时增删用的哈希不一样，Environment 结束时会按旧号关掉别人的文件和 socket，所以主线程和 Worker 都关了 fd 跟踪。代价：一次运行留下没关的原始 fd，要到 App 退出才释放。

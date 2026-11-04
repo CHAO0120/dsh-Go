@@ -30,6 +30,9 @@ ATTACHMENT_EDITS = (
      'const mediaType = hasAlpha ? "image/png" : "image/jpeg";'),
     ('(mediaType === "image/webp" ? pipeline.webp({\n\t\tquality,\n\t\teffort: 0\n\t}) : pipeline.jpeg({ quality }))',
      '(mediaType === "image/png" ? pipeline.png() : pipeline.jpeg({ quality }))'),
+    # PNG has no quality ladder: repeat encodes would produce the same pixels and bytes.
+    ('return IMAGE_ENCODING_QUALITIES.map((quality) => (() => encode(prepared.clone(), mediaType, quality)));',
+     'return (hasAlpha ? IMAGE_ENCODING_QUALITIES.slice(0, 1) : IMAGE_ENCODING_QUALITIES).map((quality) => (() => encode(prepared.clone(), mediaType, quality)));'),
 )
 
 
