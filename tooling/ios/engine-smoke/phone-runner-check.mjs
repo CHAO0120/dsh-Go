@@ -17,8 +17,9 @@ const fail = (title, text) => console.log(`::error title=${title}::${clean(text)
 const logFile = join(work, 'xcodebuild.log');
 const log = openSync(logFile, 'a');
 const runner = spawn('xcodebuild', ['test', '-project', 'ios/Runner.xcodeproj', '-scheme', 'PhoneRunner',
-  '-destination', `id=${values.simulator}`, 'CODE_SIGNING_ALLOWED=NO', `TEST_RUNNER_DSH_PHONE_RUNNER_DIR=${work}`], {
-  cwd: 'app', stdio: ['ignore', log, log],
+  '-destination', `id=${values.simulator}`, 'CODE_SIGNING_ALLOWED=NO'], {
+  // xcodebuild passes these on to the test with the prefix removed. It only looks in its environment.
+  cwd: 'app', stdio: ['ignore', log, log], env: { ...process.env, TEST_RUNNER_DSH_PHONE_RUNNER_DIR: work },
 });
 let exited = null;
 runner.on('exit', (code, signal) => { exited = code ?? signal; });

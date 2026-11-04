@@ -9,18 +9,22 @@ import XCTest
 final class PhoneRunnerUITests: XCTestCase {
   /// The last thing XCTest objected to. A failure inside an action must not end the server.
   static var lastIssue: String?
+  private var serving = false
 
   func testServe() throws {
     continueAfterFailure = true
     let tools = PhoneTools()
     let server = try PhoneServer { method, params in tools.call(method, params) }
     try server.start()
+    serving = true
     while true {
       RunLoop.main.run(mode: .default, before: Date(timeIntervalSinceNow: 60))
     }
   }
 
   override func record(_ issue: XCTIssue) {
+    // Not starting at all is a real failure, and should look like one.
+    guard serving else { return super.record(issue) }
     PhoneRunnerUITests.lastIssue = issue.compactDescription
   }
 }
