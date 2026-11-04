@@ -68,7 +68,7 @@ final class IOSBrowser: NSObject, WKNavigationDelegate, WKUIDelegate {
 
   // MARK: Tools
 
-  func run(_ request: IOSPhoneRequest) async -> IOSPhoneOutcome {
+  func run(_ request: IOSPhoneRequest, current: () -> Bool) async -> IOSPhoneOutcome {
     let action = request.action
     switch action.kind {
     case "browser-open":
@@ -81,6 +81,8 @@ final class IOSBrowser: NSObject, WKNavigationDelegate, WKUIDelegate {
       guard await approve(url, request) else {
         return .failure("用户没有允许打开 \(url.host ?? "这个网站")。不要自动重试。")
       }
+      // The user can take a while to answer, and the call may have ended meanwhile.
+      guard current() else { return .failure("这个工具调用已经结束，没有执行。") }
       guard let view = makeWebView() else { return .failure("浏览器现在不可用，请回到 DSH Go 再试。") }
       return await load(view) { $0.load(URLRequest(url: url)) }
     case "browser-back":

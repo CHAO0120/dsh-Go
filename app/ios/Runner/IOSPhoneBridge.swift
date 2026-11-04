@@ -157,8 +157,20 @@ final class IOSPhoneBridge: NSObject, URLSessionTaskDelegate {
         guard let self else { return }
         let kind = request.action.kind
         if kind.hasPrefix("browser-") || kind.hasPrefix("runner-") {
-          _ = try? await self.post("begin", ["id": request.id])
-          let result = kind.hasPrefix("browser-") ? await self.browser.run(request) : await self.runner.run(request)
+          // The tool call has to still be waiting for this, now and after any question to the user.
+          let current = { [weak self] in
+            self?.current(request) == true && request.expiresAt > Date().timeIntervalSince1970 * 1000
+          }
+          let begun = (try? await self.post("begin", ["id": request.id]))?.0 == 200
+          guard begun, current() else {
+            if self.current(request) {
+              _ = try? await self.post("result", ["id": request.id, "text": "这个工具调用已经结束，没有执行。", "isError": true])
+              self.active = nil; self.operation = nil
+            }
+            return
+          }
+          let result = kind.hasPrefix("browser-")
+            ? await self.browser.run(request, current: current) : await self.runner.run(request, current: current)
           guard self.current(request) else { return }
           var values: [String: Any] = ["id": request.id, "text": result.text, "isError": result.isError]
           if let image = result.image { values["image"] = image.base64EncodedString() }

@@ -38,7 +38,7 @@ final class IOSPhoneRunner {
     grantedUntil = nil
   }
 
-  func run(_ request: IOSPhoneRequest) async -> IOSPhoneOutcome {
+  func run(_ request: IOSPhoneRequest, current: () -> Bool) async -> IOSPhoneOutcome {
     if request.action.kind == "runner-handoff" { return await handOver(request) }
     guard let endpoint = readEndpoint() else { return .failure(Self.missing) }
     guard await granted(request) else {
@@ -46,6 +46,8 @@ final class IOSPhoneRunner {
         ? "用户没有允许操控手机。不要自动重试。"
         : "操控手机的授权还没有或已经过期，要等用户回到 DSH Go 才能问。")
     }
+    // The user can take a while to answer, and the call may have ended meanwhile.
+    guard current() else { return .failure("这个工具调用已经结束，没有执行。") }
     return await call(endpoint, method: request.action.method ?? "", params: request.action.params ?? "{}")
   }
 
