@@ -21,13 +21,18 @@ Future<void> _report(String step, Map<String, Object?> data) async {
     request.headers.contentType = ContentType.json;
     request.write(jsonEncode({'step': step, ...data}));
     await (await request.close()).drain<void>();
-  } catch (_) {
-    // Nobody is listening: the check times out on the other side.
+  } catch (error) {
+    // The other side times out, and reads this from the app's output.
+    stderr.writeln('report "$step" failed: $error');
   }
 }
 
+/// A channel that never answers has to end in a report, not in a check that waits forever.
+Future<T> _answer<T>(String method, Future<T> call, [Duration limit = const Duration(seconds: 90)]) =>
+    call.timeout(limit, onTimeout: () => throw StateError('dsh/runtime $method: no answer after ${limit.inSeconds} s'));
+
 Future<Map<Object?, Object?>> _status() async =>
-    await _runtime.invokeMapMethod<Object?, Object?>('getStatus') ?? const {};
+    await _answer<Map<Object?, Object?>?>('getStatus', _runtime.invokeMapMethod<Object?, Object?>('getStatus')) ?? const {};
 
 Future<Map<Object?, Object?>> _until(String what, bool Function(Object? phase) done, Duration limit) async {
   final deadline = DateTime.now().add(limit);
@@ -68,10 +73,10 @@ Future<void> _check() async {
     if (map['type'] == 'progress') progress++;
   });
 
-  final root = await _runtime.invokeMethod<String>('guestRoot');
+  final root = await _answer('guestRoot', _runtime.invokeMethod<String>('guestRoot'));
+  await _report('guest root', {'real': root?.startsWith('/private/') ?? false});
   final before = await _status();
   await _report('status', {
-    'guestRootReal': root?.startsWith('/private/') ?? false,
     'phase': before['phase'],
     'bundled': before['bundledVersion'],
     'node': before['nodeVersion'],
@@ -79,16 +84,16 @@ Future<void> _check() async {
   });
 
   clock.reset();
-  await _runtime.invokeMethod<void>('install');
+  await _answer('install', _runtime.invokeMethod<void>('install'), const Duration(minutes: 10));
   final installed = await _status();
   await _report('install', {'ms': clock.elapsedMilliseconds, 'phase': installed['phase'], 'progressEvents': progress});
 
   clock.reset();
-  await _runtime.invokeMethod<void>('install');
+  await _answer('install', _runtime.invokeMethod<void>('install'), const Duration(minutes: 10));
   await _report('install again', {'ms': clock.elapsedMilliseconds, 'phase': (await _status())['phase']});
 
   clock.reset();
-  await _runtime.invokeMethod<void>('start', {'env': <String, String>{}, 'phoneStorage': false, 'visualReplies': true});
+  await _answer('start', _runtime.invokeMethod<void>('start', {'env': <String, String>{}, 'phoneStorage': false, 'visualReplies': true}));
   final first = await _until('first start', (phase) => phase == 'running', const Duration(minutes: 4));
   final firstUrl = first['baseUrl']! as String;
   final firstToken = first['token']! as String;
@@ -104,16 +109,16 @@ Future<void> _check() async {
     'nodeScripts': capabilities['nodeScripts'],
     'publication': capabilities['publication'],
   });
-  final logs = await _runtime.invokeMapMethod<Object?, Object?>('getLogSnapshot', {'lines': 50});
+  final logs = await _answer('getLogSnapshot', _runtime.invokeMapMethod<Object?, Object?>('getLogSnapshot', {'lines': 50}));
   await _report('logs', {'entries': (logs?['entries'] as List?)?.length, 'through': logs?['throughSeq']});
 
   clock.reset();
-  await _runtime.invokeMethod<void>('stop');
+  await _answer('stop', _runtime.invokeMethod<void>('stop'));
   final stopped = await _until('stop', (phase) => phase == 'installed', const Duration(minutes: 1));
   await _report('stop', {'ms': clock.elapsedMilliseconds, 'phase': stopped['phase']});
 
   clock.reset();
-  await _runtime.invokeMethod<void>('start', {'env': <String, String>{}, 'phoneStorage': false, 'visualReplies': true});
+  await _answer('start', _runtime.invokeMethod<void>('start', {'env': <String, String>{}, 'phoneStorage': false, 'visualReplies': true}));
   final second = await _until('second start', (phase) => phase == 'running', const Duration(minutes: 4));
   final secondUrl = second['baseUrl']! as String;
   final secondToken = second['token']! as String;
@@ -127,15 +132,17 @@ Future<void> _check() async {
   });
 
   const performance = MethodChannel('dsh/performance');
-  final snapshot = await performance.invokeMapMethod<Object?, Object?>('snapshot');
+  final snapshot = await _answer('snapshot', performance.invokeMapMethod<Object?, Object?>('snapshot'));
   await _report('performance', {'tier': (snapshot?['device'] as Map?)?['tier']});
 
-  await _runtime.invokeMethod<void>('stop');
+  await _answer('stop', _runtime.invokeMethod<void>('stop'));
   await events.cancel();
   await _report('events', {'seen': seen.toList()..sort()});
 }
 
 Future<void> main() async {
+  // First, so that silence later can't be mistaken for Dart never having run.
+  await _report('main', {'url': Platform.environment.containsKey('DSH_APP_CHECK_URL')});
   WidgetsFlutterBinding.ensureInitialized();
   runApp(const SizedBox.shrink());
   try {
