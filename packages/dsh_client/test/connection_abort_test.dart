@@ -35,6 +35,9 @@ class _Request implements HttpClientRequest {
   }
 
   @override
+  Future<HttpClientResponse> get done => Future.error(const HttpException('test request has no server'));
+
+  @override
   Future<HttpClientResponse> close() {
     closed++;
     return Future.error(const HttpException('test request has no server'));

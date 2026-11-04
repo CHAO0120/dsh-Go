@@ -385,6 +385,7 @@ class SharePanelModel extends ChangeNotifier {
     if (keys.isEmpty) return;
     _picked = {...keys};
     _scope = ShareScope.picked;
+    _export = null;
     _changed();
   }
 
@@ -635,7 +636,7 @@ class SharePanelModel extends ChangeNotifier {
   LinkExpiry _expiry = LinkExpiry.month;
   ConversationLink? _link;
   Object? _linkFor;
-  ConversationLink? _stopped;
+  ({ConversationLink link, Object key})? _stopped;
   Timer? _stopTimer;
 
   LinkExpiry get expiry => _expiry;
@@ -651,7 +652,7 @@ class SharePanelModel extends ChangeNotifier {
   ConversationLink? get link => _linkFor == (_contentKey, _expiry) ? _link : null;
 
   /// A link just stopped, while it can still be brought back.
-  ConversationLink? get stopped => _stopped;
+  ConversationLink? get stopped => _stopped?.link;
 
   Future<void> makeLink() => _busy(ShareWork.link, () async {
     final maker = linkMaker;
@@ -682,6 +683,7 @@ class SharePanelModel extends ChangeNotifier {
     final maker = linkMaker;
     final link = this.link;
     if (maker == null || link == null) return;
+    final key = _linkFor!;
     try {
       await maker.revoke(link);
     } catch (_) {
@@ -692,7 +694,7 @@ class SharePanelModel extends ChangeNotifier {
     _error = null;
     _link = null;
     _linkFor = null;
-    _stopped = link;
+    _stopped = (link: link, key: key);
     _stopTimer?.cancel();
     _stopTimer = Timer(maker.undoWindow, () {
       _stopped = null;
@@ -704,10 +706,10 @@ class SharePanelModel extends ChangeNotifier {
   /// Takes 「停止分享」 back.
   Future<void> restoreLink() async {
     final maker = linkMaker;
-    final link = _stopped;
-    if (maker == null || link == null) return;
+    final stopped = _stopped;
+    if (maker == null || stopped == null) return;
     try {
-      await maker.restore(link);
+      await maker.restore(stopped.link);
       _error = null;
     } on ConversationLinkRestoreUnsaved {
       _error = appL10n.remoteHostedUndoUnsaved;
@@ -718,8 +720,8 @@ class SharePanelModel extends ChangeNotifier {
     }
     _stopTimer?.cancel();
     _stopped = null;
-    _link = link;
-    _linkFor = (_contentKey, _expiry);
+    _link = stopped.link;
+    _linkFor = stopped.key;
     _notify();
   }
 

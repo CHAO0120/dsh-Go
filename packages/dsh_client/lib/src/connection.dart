@@ -549,10 +549,13 @@ class DshConnection {
   }) async {
     if (abort?.isAborted == true) throw const DshClosedException('HTTP request cancelled');
     HttpClientRequest? request;
+    StreamIterator<List<int>>? responseBody;
+    TimeoutException? expired;
     final cancelled = Completer<DshHttpResponse>();
     var settled = false;
     final unsubscribe = abort?._listen(() {
       if (settled) return;
+      unawaited(responseBody?.cancel().catchError((Object _) {}));
       try {
         request?.abort(const DshClosedException('HTTP request cancelled'));
       } catch (_) {
@@ -563,9 +566,18 @@ class DshConnection {
     Future<DshHttpResponse> run() async {
       request = await _http.openUrl(method, uri);
       final req = request!;
-      // A cancellation can win while openUrl is still pending. Never attach
-      // the cookie or body to the late request, and own its eventual socket.
+      final deadlineError = expired;
+      if (deadlineError != null) {
+        // openUrl can finish after the exchange deadline (for example, while
+        // queued for a connection). Own the aborted request without sending it.
+        unawaited(req.done.then<void>((_) {}, onError: (Object _, StackTrace _) {}));
+        req.abort(deadlineError);
+        throw deadlineError;
+      }
+      // A cancellation can win the same way. Never attach the cookie or body to
+      // the late request.
       if (abort != null && (abort.isAborted || settled)) {
+        unawaited(req.done.then<void>((_) {}, onError: (Object _, StackTrace _) {}));
         req.abort(const DshClosedException('HTTP request cancelled'));
         throw const DshClosedException('HTTP request cancelled');
       }
@@ -581,9 +593,12 @@ class DshConnection {
       final response = await req.close();
       final setCookies = response.headers[HttpHeaders.setCookieHeader] ?? const <String>[];
       final builder = BytesBuilder(copy: false);
-      await for (final chunk in response) {
+      final chunks = responseBody = StreamIterator(response);
+      while (await chunks.moveNext()) {
+        final chunk = chunks.current;
         if (maxResponseBytes != null && builder.length + chunk.length > maxResponseBytes) {
           request?.abort();
+          await chunks.cancel();
           throw DshProtocolException('$method ${uri.path}: response exceeds $maxResponseBytes bytes');
         }
         builder.add(chunk);
@@ -604,6 +619,10 @@ class DshConnection {
         timeout ?? requestTimeout,
       );
     } on TimeoutException catch (error) {
+      expired = error;
+      // Once headers arrived, request.abort no longer owns the response body.
+      // Start cancellation without extending the caller's total deadline.
+      unawaited(responseBody?.cancel().catchError((Object _) {}));
       request?.abort(error);
       throw DshTransportException('$method ${uri.path} timed out', error);
     } on SocketException catch (error) {
