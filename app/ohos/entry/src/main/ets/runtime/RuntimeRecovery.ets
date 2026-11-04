@@ -148,6 +148,18 @@ export class RuntimeRecovery {
     });
   }
 
+  // The current run got past starting up, so its end, whenever and however it comes,
+  // doesn't say the next start will fail. Only short runs in a row add up.
+  markHealthy(id: string): Promise<void> {
+    return this.serial(async (): Promise<void> => {
+      const boot = bootRecord(await this.storage.read(this.directory + '/boot.json'));
+      if (boot.active === null || boot.active.id !== id || (boot.strikes === 0 && boot.failure === null)) return;
+      boot.strikes = 0; boot.failure = null;
+      await this.storage.write(this.directory + '/boot.json', JSON.stringify(boot));
+      this.boot = boot;
+    });
+  }
+
   cancelBeforeStart(id: string): Promise<void> {
     return this.serial(async (): Promise<void> => {
       const boot = bootRecord(await this.storage.read(this.directory + '/boot.json'));

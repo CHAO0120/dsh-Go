@@ -12788,6 +12788,150 @@ abstract class L10n {
   /// **'没能更换。使用自定义主题或应用分身时不能换桌面图标'**
   String get harmonyIconChangeFailed;
 
+  /// No description provided for @harmonyEngineUnclean.
+  ///
+  /// In zh, this message translates to:
+  /// **'没有正常退出'**
+  String get harmonyEngineUnclean;
+
+  /// No description provided for @harmonyFailureUnclean.
+  ///
+  /// In zh, this message translates to:
+  /// **'引擎没有正常退出'**
+  String get harmonyFailureUnclean;
+
+  /// No description provided for @harmonyFailureUncleanHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'原因不明：可能是系统回收了应用或应用被关掉，也可能是引擎出了错。'**
+  String get harmonyFailureUncleanHint;
+
+  /// No description provided for @harmonyFailureHeld.
+  ///
+  /// In zh, this message translates to:
+  /// **'连续几次都这样，引擎不会自己启动了，点重试再启动。'**
+  String get harmonyFailureHeld;
+
+  /// No description provided for @harmonyResetKept.
+  ///
+  /// In zh, this message translates to:
+  /// **'主机列表、App 设置和已保存的密钥不受影响。确认后 App 会重新打开，在打开时完成重置。'**
+  String get harmonyResetKept;
+
+  /// No description provided for @harmonyResetReopening.
+  ///
+  /// In zh, this message translates to:
+  /// **'重置已记下，App 正在重新打开'**
+  String get harmonyResetReopening;
+
+  /// No description provided for @harmonyResetCommittedTitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'还差重新打开 App'**
+  String get harmonyResetCommittedTitle;
+
+  /// No description provided for @harmonyResetCommittedBody.
+  ///
+  /// In zh, this message translates to:
+  /// **'重置已经记下，下次打开 App 时完成。可以现在重新打开，也可以自己关掉再打开。'**
+  String get harmonyResetCommittedBody;
+
+  /// No description provided for @harmonyResetUnknownTitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'不确定重置有没有记下'**
+  String get harmonyResetUnknownTitle;
+
+  /// No description provided for @harmonyResetUnknownBody.
+  ///
+  /// In zh, this message translates to:
+  /// **'重新打开 App：记下了就会完成重置，没记下对话和文件都还在。'**
+  String get harmonyResetUnknownBody;
+
+  /// No description provided for @harmonyResetNotCommittedTitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'没有重置'**
+  String get harmonyResetNotCommittedTitle;
+
+  /// No description provided for @harmonyResetNotCommittedBody.
+  ///
+  /// In zh, this message translates to:
+  /// **'对话和文件都还在。引擎已经停了，重新打开 App 后恢复。'**
+  String get harmonyResetNotCommittedBody;
+
+  /// No description provided for @harmonyResetInstalling.
+  ///
+  /// In zh, this message translates to:
+  /// **'正在安装运行环境，装完再试'**
+  String get harmonyResetInstalling;
+
+  /// No description provided for @harmonyResetOlderPendingTitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'已经有一次重置在等'**
+  String get harmonyResetOlderPendingTitle;
+
+  /// No description provided for @harmonyResetOlderPendingBody.
+  ///
+  /// In zh, this message translates to:
+  /// **'重新打开 App 完成它。这次的选择没有生效。'**
+  String get harmonyResetOlderPendingBody;
+
+  /// No description provided for @harmonyReopenApp.
+  ///
+  /// In zh, this message translates to:
+  /// **'重新打开'**
+  String get harmonyReopenApp;
+
+  /// No description provided for @harmonyResetPendingTitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'重置还没完成'**
+  String get harmonyResetPendingTitle;
+
+  /// No description provided for @harmonyResetPendingBody.
+  ///
+  /// In zh, this message translates to:
+  /// **'重新打开 App 继续。在这之前本机引擎不会启动。'**
+  String get harmonyResetPendingBody;
+
+  /// No description provided for @harmonyResetFinishing.
+  ///
+  /// In zh, this message translates to:
+  /// **'正在完成重置'**
+  String get harmonyResetFinishing;
+
+  /// No description provided for @harmonyResetDone.
+  ///
+  /// In zh, this message translates to:
+  /// **'运行环境已重置'**
+  String get harmonyResetDone;
+
+  /// No description provided for @harmonyResetMaybeDone.
+  ///
+  /// In zh, this message translates to:
+  /// **'App 已重新打开。如果对话还在，说明这次重置没有生效，可以再试一次。'**
+  String get harmonyResetMaybeDone;
+
+  /// No description provided for @harmonyUninstallHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'删除已解压的运行环境和本机数据'**
+  String get harmonyUninstallHint;
+
+  /// No description provided for @harmonyUninstallBody.
+  ///
+  /// In zh, this message translates to:
+  /// **'本机的对话、工作区、插件、设置、界面配置和技能会一并删除，App 会重新打开。安装包里自带的那份运行环境还在，只有卸载 App 才会释放。'**
+  String get harmonyUninstallBody;
+
+  /// No description provided for @harmonyKwEngineUninstall.
+  ///
+  /// In zh, this message translates to:
+  /// **'卸载,删除运行环境,清理本机数据'**
+  String get harmonyKwEngineUninstall;
+
   /// No description provided for @hostDetailsConnectionType.
   ///
   /// In zh, this message translates to:

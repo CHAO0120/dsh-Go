@@ -5,12 +5,14 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../l10n/l10n.dart';
 import '../../launch/launch_state.dart';
 import '../../runtime/local_footprint.dart';
 import '../../diagnostics/diagnostics_publish.dart';
 import '../../runtime/runtime_bridge.dart';
 import '../../runtime/runtime_state.dart';
 import '../../share_code/guest_fs.dart';
+import '../../state/android_features.dart';
 import '../../state/engine_control.dart';
 import '../../state/hosts_state.dart';
 import '../../state/notify_state.dart';
@@ -249,7 +251,7 @@ class _RootGateState extends ConsumerState<RootGate> {
     final status = ref.read(localRuntimeProvider).status;
     // After repeated crashes with automatic safe mode off, the failure card
     // waits for the user instead of starting again.
-    if (status.phase == RuntimePhase.installed && EngineControl.shouldAutoStart(status)) {
+    if (EngineControl.startsAtLaunch(status)) {
       unawaited(ref.read(localRuntimeProvider.notifier).start());
     }
   }
@@ -396,6 +398,24 @@ class _Splash extends StatefulWidget {
   State<_Splash> createState() => _SplashState();
 }
 
+/// HarmonyOS finishes a reset as the app opens, before the first status: a
+/// reinstall can take a while under the mark.
+class _ResetFinishing extends ConsumerWidget {
+  const _ResetFinishing();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    if (ref.watch(operatingSystemProvider) != 'ohos' ||
+        ref.watch(localRuntimeProvider.select((s) => s.progress)) == null) {
+      return const SizedBox.shrink();
+    }
+    return Padding(
+      padding: const EdgeInsets.only(top: 16),
+      child: Text(context.l10n.harmonyResetFinishing, style: Theme.of(context).textTheme.bodySmall),
+    );
+  }
+}
+
 class _SplashState extends State<_Splash> {
   bool _visible = false;
   Timer? _timer;
@@ -423,7 +443,10 @@ class _SplashState extends State<_Splash> {
           child: AnimatedOpacity(
             opacity: _visible ? 1 : 0,
             duration: AppMotion.of(context, AppMotion.slow),
-            child: const BrandMark(size: 64, tile: true),
+            child: const Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [BrandMark(size: 64, tile: true), _ResetFinishing()],
+            ),
           ),
         ),
       ),

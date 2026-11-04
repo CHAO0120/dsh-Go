@@ -7373,6 +7373,86 @@ class L10nEn extends L10n {
       'Couldn’t change it. The launcher icon can’t change under a custom theme or in an app twin.';
 
   @override
+  String get harmonyEngineUnclean => 'Didn\'t exit cleanly';
+
+  @override
+  String get harmonyFailureUnclean => 'The engine didn\'t exit cleanly';
+
+  @override
+  String get harmonyFailureUncleanHint =>
+      'The cause isn\'t known: the system may have reclaimed the app, the app may have been closed, or the engine may have hit an error.';
+
+  @override
+  String get harmonyFailureHeld =>
+      'This has happened several times in a row, so the engine won\'t start by itself. Tap Retry to start it.';
+
+  @override
+  String get harmonyResetKept =>
+      'Your host list, app settings and saved keys aren\'t affected. The app reopens and finishes the reset as it opens.';
+
+  @override
+  String get harmonyResetReopening => 'Reset saved. The app is reopening';
+
+  @override
+  String get harmonyResetCommittedTitle => 'The app still needs to reopen';
+
+  @override
+  String get harmonyResetCommittedBody =>
+      'The reset is saved and finishes the next time the app opens. Reopen now, or close and open it yourself.';
+
+  @override
+  String get harmonyResetUnknownTitle => 'Not sure the reset was saved';
+
+  @override
+  String get harmonyResetUnknownBody =>
+      'Reopen the app. If it was saved, the reset finishes then. If not, your chats and files are still there.';
+
+  @override
+  String get harmonyResetNotCommittedTitle => 'Nothing was reset';
+
+  @override
+  String get harmonyResetNotCommittedBody =>
+      'Your chats and files are still there. The engine has stopped and comes back when the app reopens.';
+
+  @override
+  String get harmonyResetInstalling => 'The runtime is installing. Try again once it\'s done';
+
+  @override
+  String get harmonyResetOlderPendingTitle => 'A reset is already waiting';
+
+  @override
+  String get harmonyResetOlderPendingBody => 'Reopen the app to finish it. These choices weren\'t applied.';
+
+  @override
+  String get harmonyReopenApp => 'Reopen';
+
+  @override
+  String get harmonyResetPendingTitle => 'The reset isn\'t finished';
+
+  @override
+  String get harmonyResetPendingBody => 'Reopen the app to go on. The local engine won\'t start until then.';
+
+  @override
+  String get harmonyResetFinishing => 'Finishing the reset';
+
+  @override
+  String get harmonyResetDone => 'The runtime has been reset';
+
+  @override
+  String get harmonyResetMaybeDone =>
+      'The app reopened. If your chats are still there, this reset didn\'t take effect and you can try again.';
+
+  @override
+  String get harmonyUninstallHint => 'Deletes the unpacked runtime and local data';
+
+  @override
+  String get harmonyUninstallBody =>
+      'This phone\'s chats, workspaces, plugins, settings, interface config and skills are deleted too, and the app reopens. The copy of the runtime inside the app package stays; only uninstalling the app frees it.';
+
+  @override
+  String get harmonyKwEngineUninstall => 'uninstall,remove runtime,clear local data';
+
+  @override
   String get hostDetailsConnectionType => 'Connection type';
 
   @override

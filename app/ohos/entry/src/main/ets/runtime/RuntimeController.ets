@@ -20,6 +20,10 @@ import { backgroundComputePermission } from './BackgroundCompute';
 
 type RuntimeSink = (event: Map<string, Object | null>) => void;
 const LIFECYCLE_NOTICE = '前后台状态尚未同步，本机任务可能仍在暂停或运行；正在重试。';
+// Short of Android's two minutes: the system ending a suspended app is ordinary here,
+// and a phone app is often only on screen for a moment. Long enough to outlast a start
+// that crashes.
+const HEALTHY_MS = 30000;
 
 export class RuntimeController {
   private static shared: RuntimeController | null = null;
@@ -54,6 +58,8 @@ export class RuntimeController {
   private recovery: RuntimeRecovery;
   private resetRequested: boolean = false;
   private attempt: string | null = null;
+  private runningSince: number | null = null;
+  private markedHealthy: boolean = false;
 
   static get(context: common.Context): RuntimeController {
     if (RuntimeController.shared === null) RuntimeController.shared = new RuntimeController(context);
@@ -212,7 +218,7 @@ export class RuntimeController {
     if (recovery.failure !== null && phase === 'installed') phase = 'error';
     const recoveryFailure = recovery.failure === null ? null : new Map<string, Object | null>([
       ['kind', recovery.failure.kind], ['at', recovery.failure.at], ['exitCode', recovery.failure.exitCode],
-      ['safeMode', false], ['summary', recovery.failure.summary]
+      ['safeMode', false], ['summary', recovery.failure.summary], ['causeUnknown', true]
     ]);
     const active = native.phase === 'running';
     const failure = native.errorCode ?? (native.phase === 'exited' && !this.requestedStop ? 'ohos_node_exited' : null);
@@ -289,6 +295,7 @@ export class RuntimeController {
           });
       }
     }
+    this.noteHealthy(state);
     if (++this.lifecycleTicks >= 10) { this.lifecycleTicks = 0; this.lifecycle.refresh(); }
     this.syncManagedSkills(state);
     if (state.token !== null) this.logs.rememberSecret(state.token);
@@ -321,6 +328,16 @@ export class RuntimeController {
       clearInterval(this.timer);
       this.timer = null;
     }
+  }
+
+  private noteHealthy(state: HostState): void {
+    if (state.phase !== 'running' || this.attempt === null || this.markedHealthy) return;
+    const now = Date.now();
+    if (this.runningSince === null) this.runningSince = now;
+    if (now - this.runningSince < HEALTHY_MS) return;
+    this.markedHealthy = true;
+    // Unconfirmed, the run just stays counted as unclean: the safe side.
+    this.recovery.markHealthy(this.attempt).then((): void => this.emitStatus()).catch((): void => {});
   }
 
   async install(dropKept: boolean): Promise<void> {

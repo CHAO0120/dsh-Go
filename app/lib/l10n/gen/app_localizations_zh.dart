@@ -6975,6 +6975,78 @@ class L10nZh extends L10n {
   String get harmonyIconChangeFailed => '没能更换。使用自定义主题或应用分身时不能换桌面图标';
 
   @override
+  String get harmonyEngineUnclean => '没有正常退出';
+
+  @override
+  String get harmonyFailureUnclean => '引擎没有正常退出';
+
+  @override
+  String get harmonyFailureUncleanHint => '原因不明：可能是系统回收了应用或应用被关掉，也可能是引擎出了错。';
+
+  @override
+  String get harmonyFailureHeld => '连续几次都这样，引擎不会自己启动了，点重试再启动。';
+
+  @override
+  String get harmonyResetKept => '主机列表、App 设置和已保存的密钥不受影响。确认后 App 会重新打开，在打开时完成重置。';
+
+  @override
+  String get harmonyResetReopening => '重置已记下，App 正在重新打开';
+
+  @override
+  String get harmonyResetCommittedTitle => '还差重新打开 App';
+
+  @override
+  String get harmonyResetCommittedBody => '重置已经记下，下次打开 App 时完成。可以现在重新打开，也可以自己关掉再打开。';
+
+  @override
+  String get harmonyResetUnknownTitle => '不确定重置有没有记下';
+
+  @override
+  String get harmonyResetUnknownBody => '重新打开 App：记下了就会完成重置，没记下对话和文件都还在。';
+
+  @override
+  String get harmonyResetNotCommittedTitle => '没有重置';
+
+  @override
+  String get harmonyResetNotCommittedBody => '对话和文件都还在。引擎已经停了，重新打开 App 后恢复。';
+
+  @override
+  String get harmonyResetInstalling => '正在安装运行环境，装完再试';
+
+  @override
+  String get harmonyResetOlderPendingTitle => '已经有一次重置在等';
+
+  @override
+  String get harmonyResetOlderPendingBody => '重新打开 App 完成它。这次的选择没有生效。';
+
+  @override
+  String get harmonyReopenApp => '重新打开';
+
+  @override
+  String get harmonyResetPendingTitle => '重置还没完成';
+
+  @override
+  String get harmonyResetPendingBody => '重新打开 App 继续。在这之前本机引擎不会启动。';
+
+  @override
+  String get harmonyResetFinishing => '正在完成重置';
+
+  @override
+  String get harmonyResetDone => '运行环境已重置';
+
+  @override
+  String get harmonyResetMaybeDone => 'App 已重新打开。如果对话还在，说明这次重置没有生效，可以再试一次。';
+
+  @override
+  String get harmonyUninstallHint => '删除已解压的运行环境和本机数据';
+
+  @override
+  String get harmonyUninstallBody => '本机的对话、工作区、插件、设置、界面配置和技能会一并删除，App 会重新打开。安装包里自带的那份运行环境还在，只有卸载 App 才会释放。';
+
+  @override
+  String get harmonyKwEngineUninstall => '卸载,删除运行环境,清理本机数据';
+
+  @override
   String get hostDetailsConnectionType => '连接方式';
 
   @override

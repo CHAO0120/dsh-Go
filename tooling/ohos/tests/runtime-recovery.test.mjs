@@ -27,6 +27,14 @@ test('same attempt settles once; old completion cannot clear a new attempt; clea
  const c=await fixture(t);await c.r.initialize(1,async()=>{},()=>false);await c.r.arm(ids[0],2);await c.r.finish(ids[0],false,3,23);await c.r.finish(ids[0],false,4,23);assert.equal(c.r.status().strikes,1);await c.r.clearFailure();assert.equal(c.r.status().strikes,1);assert.equal(c.r.status().failure,null);
  await c.r.arm(ids[1],5);await c.r.finish(ids[0],true,6);assert.equal(JSON.parse(await c.store.read(c.r.directory+'/boot.json')).active.id,ids[1]);await c.r.finish(ids[1],true,7);assert.equal(c.r.status().strikes,0);
 });
+test('a run that got past starting up starts the count over; its own unclean end counts once',async t=>{
+ const c=await fixture(t);await c.r.initialize(1,async()=>{},()=>false);
+ await c.r.arm(ids[0],2);await c.r.finish(ids[0],false,3,23);await c.r.arm(ids[1],4);await c.r.finish(ids[1],false,5,23);assert.equal(c.r.status().strikes,2);
+ await c.r.arm(ids[2],6);await c.r.markHealthy(ids[0]);assert.equal(c.r.status().strikes,2,'an old run cannot speak for this one');
+ await c.r.markHealthy(ids[2]);assert.equal(c.r.status().strikes,0);assert.equal(c.r.status().failure,null);
+ const saved=JSON.parse(await c.store.read(c.r.directory+'/boot.json'));assert.equal(saved.strikes,0);assert.equal(saved.active.id,ids[2],'the mark stays: dying now is still unclean');
+ const next=new Recovery(new RecoveryFiles(c.root),c.root);await next.initialize(7,async()=>{},()=>false);assert.equal(next.status().strikes,1);assert.equal(next.status().failure.kind,'killed');
+});
 test('explicit reinstall reset removes only runtime trees and preserves app hosts and keys',async t=>{
  const c=await setup(t);await c.r.requestReset([],ids[0],true);assert.equal(await fs.readFile(join(c.root,'dsh-runtime/tree/old.js'),'utf8'),'old');
  await c.r.initialize(1,c.install,()=>false);await preserved(c);assert.equal(await fs.readFile(join(c.root,'dsh-runtime/tree/new.js'),'utf8'),'new');assert.equal(await c.store.kind(join(c.root,'runtime/rootfs')),'missing');assert.equal(await c.store.read(c.r.directory+'/reset.json'),null);

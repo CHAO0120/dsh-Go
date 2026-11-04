@@ -1012,14 +1012,13 @@ abstract final class Spots {
     page: SettingsPageId.engine,
     title: (l) => l.phoneEngineReset,
     keywords: (l) => l.searchKwEngineReset,
-    androidOnly: true,
   );
   static final engineUninstall = SettingSpot(
     'engine-uninstall',
     page: SettingsPageId.engine,
     title: (l) => l.localEnvUninstall,
     keywords: (l) => l.searchKwEngineUninstall,
-    androidOnly: true,
+    ohosKeywords: (l) => l.harmonyKwEngineUninstall,
   );
 
   // 远程主机.

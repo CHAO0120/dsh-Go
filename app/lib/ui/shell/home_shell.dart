@@ -21,6 +21,7 @@ import '../bots/bot_alerts.dart';
 import '../chat/chat_screen.dart';
 import '../chat/composer_toast.dart' show composerToastGap;
 import '../engine/engine_screen.dart';
+import '../engine/reset_outcome.dart';
 import '../features/all_features_page.dart';
 import '../forum/forum_link_host.dart';
 import '../notify/background_net_host.dart';
@@ -342,6 +343,8 @@ class _HomeShellState extends ConsumerState<HomeShell> with TickerProviderStateM
                         const BackgroundPauseHost(),
                         // 系统操作: its session and a handoff's prompt (draws nothing here).
                         const SystemActionsHost(),
+                        // How a reset asked for before the app reopened came out (draws nothing).
+                        const ResetReceiptHost(),
                       ],
                       // Daily update check + install resume (draws nothing).
                       const UpdateLaunchCheck(),
