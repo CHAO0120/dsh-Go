@@ -142,6 +142,8 @@ final class IOSPhoneBridge: NSObject, URLSessionTaskDelegate {
         let (status, _) = try await post("status", ["id": request.id])
         guard runId == generation, active?.id == request.id else { return }
         if status == 410 || request.expiresAt <= Date().timeIntervalSince1970 * 1000 {
+          active = nil
+          operation?.cancel(); operation = nil
           actions.cancel(request.id)
           browser.enteredBackground()
           system.stopAsking()
@@ -183,6 +185,7 @@ final class IOSPhoneBridge: NSObject, URLSessionTaskDelegate {
           guard begun, current() else {
             if self.current(request) {
               _ = try? await self.post("result", ["id": request.id, "text": "这个工具调用已经结束，没有执行。", "isError": true])
+              guard self.active?.id == request.id else { return }
               self.active = nil; self.operation = nil
             }
             return
