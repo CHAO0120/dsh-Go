@@ -147,3 +147,4 @@ test('an adapter without explicit metadata context remains readable but refuses 
 
 // Exercise real native ownership with the mounted Git link reader.
 import './process-git-link-first-hop.test.mjs';
+import './git-path-output.test.mjs';

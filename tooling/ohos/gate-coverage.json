@@ -46,6 +46,7 @@
     ],
     "git-client-*": [
       "runtime/tests/ohos/git-owned-client.test.mjs",
+      "runtime/tests/ohos/git-path-output.test.mjs",
       "runtime/tests/ohos/process-git-link-first-hop.test.mjs"
     ],
     "git-oracle-*": [
