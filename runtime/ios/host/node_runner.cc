@@ -15,6 +15,7 @@
 #include <vector>
 
 #include "publication_binding.h"
+#include "phone_binding.h"
 
 namespace {
 // Secondary threads get 512 KiB by default here, less than V8's stack limit assumes.
@@ -108,6 +109,7 @@ struct Run {
 void* RunOnEngineThread(void* raw) {
   auto* run = static_cast<Run*>(raw);
   if (!initialization) {
+    RegisterPhoneBinding();
     // Options parsed here hold for every later Environment. The host's argv is fixed
     // for this installation, so what later runs would parse is the same.
     RegisterPublicationBinding();
@@ -159,7 +161,11 @@ extern "C" __attribute__((visibility("default"))) int dsh_node_start(int argc, c
   Run run;
   // Node's defaults assume a server's memory: left alone, the heap grows until iOS ends
   // the app. These held a five-tool round with a large JSON worker; not yet set on a device.
-  run.arguments = {argv[0], argv[1], "--max-old-space-size=256", "--max-semi-space-size=4", kPlatformImport, argv[2], argv[3]};
+  run.arguments = {argv[0], argv[1], "--max-old-space-size=256", "--max-semi-space-size=4",
+                   // NodeMobile warns on every plain open and close ("File descriptor N
+                   // opened in unmanaged mode twice"), thousands at startup and into tool
+                   // output. The stacks are ordinary readFileSync calls.
+                   "--disable-warning=Warning", kPlatformImport, argv[2], argv[3]};
   run.arguments.insert(run.arguments.end(), argv + 4, argv + argc);
 #ifdef DSH_IOS_ENGINE_SMOKE
   // Test builds only: the smoke test's fake model has to reach the fixed command line,
@@ -167,11 +173,6 @@ extern "C" __attribute__((visibility("default"))) int dsh_node_start(int argc, c
   if (const char* patch = std::getenv("DSH_IOS_SMOKE_PATCH")) {
     const auto own = std::find(run.arguments.begin(), run.arguments.end(), "--patch");
     run.arguments.insert(own + 2, {"--patch", patch});
-  }
-  run.arguments.insert(run.arguments.begin() + 2, "--trace-warnings");
-  if (const char* probe = std::getenv("DSH_IOS_SMOKE_IMPORT")) {
-    const auto main_script = std::find(run.arguments.begin(), run.arguments.end(), argv[4]);
-    run.arguments.insert(main_script, {"--import", probe});
   }
 #endif
 

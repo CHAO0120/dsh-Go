@@ -53,16 +53,12 @@ writeFileSync(overlay, JSON.stringify([
 
 const engine = spawn('xcrun', ['simctl', 'spawn', values.simulator, resolve(values.smoke), resolve(values.frameworks),
   resolve(values.runtime), guest, cache], {
-  env: {
-    ...process.env,
-    SIMCTL_CHILD_DSH_IOS_SMOKE_PATCH: overlay,
-    SIMCTL_CHILD_DSH_IOS_SMOKE_IMPORT: join(repo, 'tooling/ios/engine-smoke/probe.mjs'),
-    SIMCTL_CHILD_DSH_IOS_SMOKE_MODEL: model.baseURL,
-  },
+  env: { ...process.env, SIMCTL_CHILD_DSH_IOS_SMOKE_PATCH: overlay },
   stdio: ['ignore', 'pipe', 'pipe'],
 });
 let exited = null;
 let engineEnded = null;
+let restarting = false;
 const readyWaiters = [];
 const readies = [];
 let tail = [];
@@ -98,7 +94,9 @@ engine.stdout.on('data', (data) => {
         for (const waiter of readyWaiters.splice(0)) waiter();
       } else {
         noteLine(JSON.stringify(row));
-        if (row.kind === 'exit' || row.kind === 'error' || row.kind === 'fatal') {
+        // The one exit a restart asks for isn't the engine ending by itself.
+        if (row.kind === 'exit' && restarting) restarting = false;
+        else if (row.kind === 'exit' || row.kind === 'error' || row.kind === 'fatal') {
           engineEnded = row;
           for (const waiter of readyWaiters.splice(0)) waiter();
         }
@@ -236,6 +234,7 @@ try {
   report.status = 'ROUND_PASSED';
   report.stage = 'restart';
   engineEnded = null;
+  restarting = true;
   writeFileSync(`${guest}/restart`, '');
   const restartedAt = Date.now();
   const second = await waitReady(1, 240000);

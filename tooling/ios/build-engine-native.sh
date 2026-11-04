@@ -40,6 +40,7 @@ mkdir -p "$FRAMEWORK"
 "$CLANGXX" "${COMMON[@]}" -std=c++20 -stdlib=libc++ -fexceptions -frtti -DNAPI_VERSION=8 \
   "-I$ENGINE/include" "-I$HOST_CORE" "-I$HOST_RUNTIME" "$@" \
   "$ROOT/runtime/ios/host/node_runner.cc" "$ROOT/runtime/ios/host/ios_host.cc" \
+  "$ROOT/runtime/ios/host/phone_binding.cc" \
   "$HOST_RUNTIME/publication_binding.cc" "$HOST_CORE/host_core.cpp" \
   "${LINK[@]}" -install_name @rpath/DshNodeHost.framework/DshNodeHost \
   -o "$FRAMEWORK/DshNodeHost"
