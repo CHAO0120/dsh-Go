@@ -585,7 +585,8 @@ final class EngineChannel: NSObject, FlutterStreamHandler {
   // MARK: Install
 
   private func install(done: @escaping () -> Void, failed: @escaping (Error) -> Void) throws {
-    guard pending == nil else { throw EngineFailure("install_busy", "运行时正在安装或启动。") }
+    // A queued start is a start already asked for; it would begin in the middle of this.
+    guard pending == nil, queuedStart == nil else { throw EngineFailure("install_busy", "运行时正在安装或启动。") }
     if let phase = native?.currentState()["phase"] as? String, ["starting", "running", "stopping"].contains(phase) {
       throw EngineFailure("install_busy", "请先停止本机引擎再安装。")
     }
@@ -649,6 +650,8 @@ final class EngineChannel: NSObject, FlutterStreamHandler {
       emitStatus()
       return
     }
+    // The latest request replaces one still queued from before the engine finished stopping.
+    queuedStart = nil
     try begin(environment, visualReplies: visualReplies)
   }
 
