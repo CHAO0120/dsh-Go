@@ -57,6 +57,15 @@ final class IOSSystemTools: NSObject, PHPickerViewControllerDelegate, CLLocation
     pickerShown = nil
     picking?.resume(returning: [])
     picking = nil
+    // Detach first so queued delegate callbacks cannot revive this call.
+    locationManager?.delegate = nil
+    locationManager = nil
+    let pendingLocation = locating
+    locating = nil
+    let pendingAuthorization = authorizing
+    authorizing = nil
+    pendingLocation?.resume(returning: nil)
+    pendingAuthorization?.resume()
   }
 
   /// Images the user picked are good for this run and no longer.
@@ -64,10 +73,6 @@ final class IOSSystemTools: NSObject, PHPickerViewControllerDelegate, CLLocation
     stopAsking()
     picked = [:]
     try? FileManager.default.removeItem(at: scratch)
-    locating?.resume(returning: nil)
-    locating = nil
-    authorizing?.resume()
-    authorizing = nil
   }
 
   func run(_ request: IOSPhoneRequest, authorize: () async -> Bool, current: () -> Bool) async -> IOSPhoneOutcome {
@@ -114,6 +119,16 @@ final class IOSSystemTools: NSObject, PHPickerViewControllerDelegate, CLLocation
   /// A system permission prompt can sit there longer than the tool call waits.
   private func stillWanted(_ current: () -> Bool) throws {
     guard current() else { throw Failure("这个工具调用已经结束，没有执行。") }
+  }
+
+  /// The app stays inactive for a moment after a system prompt is answered, and what comes next
+  /// only runs in front of the user. Someone who really left is still caught by those checks.
+  private func backInFront() async {
+    var tries = 0
+    while UIApplication.shared.applicationState != .active, tries < 40 {
+      try? await Task.sleep(nanoseconds: 50_000_000)
+      tries += 1
+    }
   }
 
   nonisolated private static func instant(_ date: Date) -> String {
@@ -172,6 +187,7 @@ final class IOSSystemTools: NSObject, PHPickerViewControllerDelegate, CLLocation
     } else {
       granted = (try? await eventStore.requestAccess(to: .reminder)) ?? false
     }
+    await backInFront()
     guard granted else { throw Failure("用户没有给提醒事项权限。可以到系统设置里打开。") }
   }
 
@@ -280,6 +296,7 @@ final class IOSSystemTools: NSObject, PHPickerViewControllerDelegate, CLLocation
 
   private func contactAccess() async throws -> String {
     let granted = (try? await contactStore.requestAccess(for: .contacts)) ?? false
+    await backInFront()
     guard granted else { throw Failure("用户没有给通讯录权限。可以到系统设置里打开。") }
     if #available(iOS 18.0, *), CNContactStore.authorizationStatus(for: .contacts) == .limited { return "limited" }
     return "full"
@@ -381,7 +398,7 @@ final class IOSSystemTools: NSObject, PHPickerViewControllerDelegate, CLLocation
     try FileManager.default.createDirectory(at: scratch, withIntermediateDirectories: true)
     var items: [[String: Any]] = []
     for result in results {
-      items.append(try await keep(result, session: request.owner.sessionId))
+      items.append(try await keep(result, session: request.owner.sessionId, current: current))
     }
     return ["items": items]
   }
@@ -406,7 +423,8 @@ final class IOSSystemTools: NSObject, PHPickerViewControllerDelegate, CLLocation
     }
   }
 
-  private func keep(_ result: PHPickerResult, session: String) async throws -> [String: Any] {
+  private func keep(_ result: PHPickerResult, session: String, current: () -> Bool) async throws -> [String: Any] {
+    guard !Task.isCancelled, current() else { throw Failure("这个工具调用已经结束，没有保留图片。") }
     var bytes = [UInt8](repeating: 0, count: 24)
     guard SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes) == errSecSuccess else { throw Failure("没有存下这张图片。") }
     let handle = Self.base64url(Data(bytes))
@@ -419,6 +437,10 @@ final class IOSSystemTools: NSObject, PHPickerViewControllerDelegate, CLLocation
       }
     }
     guard copied else { throw Failure("这张图片读不出来。可能还在 iCloud 上没有下载。") }
+    guard !Task.isCancelled, current() else {
+      try? FileManager.default.removeItem(at: target)
+      throw Failure("这个工具调用已经结束，没有保留图片。")
+    }
     let size = (try? FileManager.default.attributesOfItem(atPath: target.path)[.size] as? Int) ?? 0
     guard let source = CGImageSourceCreateWithURL(target as CFURL, nil),
       let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
@@ -443,14 +465,22 @@ final class IOSSystemTools: NSObject, PHPickerViewControllerDelegate, CLLocation
     manager.delegate = self
     manager.desiredAccuracy = kCLLocationAccuracyNearestTenMeters
     locationManager = manager
-    defer { locationManager = nil }
+    defer {
+      if locationManager === manager {
+        manager.delegate = nil
+        locationManager = nil
+      }
+    }
     if manager.authorizationStatus == .notDetermined {
       await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
         authorizing = continuation
         manager.requestWhenInUseAuthorization()
       }
+      await backInFront()
     }
-    try stillWanted(current)
+    guard !Task.isCancelled, current(), locationManager === manager,
+      UIApplication.shared.applicationState == .active
+    else { throw Failure("原定位调用已结束或 App 已离开前台，没有继续读取。") }
     guard [.authorizedWhenInUse, .authorizedAlways].contains(manager.authorizationStatus) else {
       throw Failure("用户没有给定位权限。可以到系统设置里打开。")
     }
@@ -458,6 +488,9 @@ final class IOSSystemTools: NSObject, PHPickerViewControllerDelegate, CLLocation
       locating = continuation
       manager.requestLocation()
     }
+    guard !Task.isCancelled, current(), locationManager === manager,
+      UIApplication.shared.applicationState == .active
+    else { throw Failure("原定位调用已结束或 App 已离开前台，没有继续读取。") }
     guard let fix = located else { throw Failure("这次没有定位到。") }
     return [
       "latitude": fix.coordinate.latitude, "longitude": fix.coordinate.longitude,
