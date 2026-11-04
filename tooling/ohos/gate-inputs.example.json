@@ -27,7 +27,8 @@
     "sdk_resources": "../gate-inputs/sdk-resources",
     "node_source": "../gate-inputs/node-source",
     "image_size": "../gate-inputs/image-size",
-    "lifecycle_before_route": "../gate-inputs/lifecycle-before-route"
+    "lifecycle_before_route": "../gate-inputs/lifecycle-before-route",
+    "market_modules": "../gate-inputs/market-node-modules"
   },
   "ownedHttpHost": "YOUR_OWNED_INTERFACE_IP",
   "flutterEnvironment": {

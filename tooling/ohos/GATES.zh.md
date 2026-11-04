@@ -46,6 +46,7 @@ CI现有 Python tooling 之后运行入口合同自测；runtime路径过滤含 
 | `node_source` | 同版本官方Node源码中的`src/node_version.h`及完整`deps/undici`；先核官方归档校验，入口只私拷这些输入，不编译或修改用户node源。 |
 | `lifecycle_before_route` | 原HTTP回归要求的真实530 lifecycle路由单文件前像；须保留出处/hash，不能用当前路由伪造前像。 |
 | `image_size` | 原r7全量/optional profile测试固定依赖。 |
+| `market_modules` | `market`既有锁的独立npm-ci安装的`node_modules`，供市场测试和`scripts/check.mjs`使用。 |
 | `dart` / `flutter` | 能实际运行Linux消费者的完整SDK。仅版本输出成功不是执行证明；ZIP恢复时需保留可执行权限。 |
 | `secure_fork` / `picker_fork` | 可选固定fork覆盖。未提供时按产品pubspec/lock正常解析；resolver产物保留。实际oh-flutter枚举存在ohos时才调用现有vendor生成器，普通Linux Flutter不注入不存在的枚举值。 |
 | `app_fonts` / Flutter环境 | 应用真实字体，以及`DSH_TEST_FONT_DIR`指定的Noto字体。保留原全局测试配置和asset/shader构建，不用`--no-test-assets`绕过。 |

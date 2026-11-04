@@ -96,14 +96,18 @@ def main():
         changes = helper.compare_trees(out / 'base-prefix', out / 'candidate-prefix', trees['base'], trees['candidate'])
         report['androidDifferences'] = changes
         assert not changes, changes
-        for label, wrong in [('candidate', 'ohos'), ('ohos', 'android')]:
-            run(label + '-wrong-target', candidate, out / (label + '-prefix'), wrong, expected=1)
-            assert helper.tree_manifest(out / (label + '-prefix')) == trees[label]
-            assert not (out / (label + '-wrong-target-target.json')).exists()
+        run('ohos-wrong-target', candidate, out / 'ohos-prefix', 'android', expected=1)
+        assert helper.tree_manifest(out / 'ohos-prefix') == trees['ohos']
+        assert not (out / 'ohos-wrong-target-target.json').exists()
+        # Every Android patch is in the OHOS chain, so the other direction is an upgrade.
+        upgraded = out / 'upgraded-prefix'
+        shutil.copytree(out / 'candidate-prefix', upgraded, symlinks=True, copy_function=shutil.copy2)
+        run('candidate-upgraded', candidate, upgraded, 'ohos')
+        assert helper.tree_manifest(upgraded) == trees['ohos'], 'upgrade differs from a fresh OHOS tree'
         assert helper.tree_manifest(pristine) == initial
         report.update(status='PASS', endedUTC=utc(), actualAndroidEntries=len(trees['base']),
                       actualOhosEntries=len(trees['ohos']), pristineUnchanged=True,
-                      wrongTargetRejectedWithoutWrites=True, idempotent=True)
+                      ohosRejectedForAndroidWithoutWrites=True, androidUpgradesToOhos=True, idempotent=True)
         save('report.json', report)
         print(json.dumps({k: report[k] for k in ('status', 'actualAndroidEntries', 'actualOhosEntries', 'recipeSha256')}))
     except BaseException as error:

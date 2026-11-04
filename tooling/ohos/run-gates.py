@@ -647,9 +647,19 @@ def main():
     g.run('host-core', lambda: g.py(rt + 'host-core.py', '--out', o / 'host-core'), needs=('tools',))
     g.run('host-profile', lambda: g.py(rt + 'host-lifecycle-profile.py', '--out', o / 'host-profile'), needs=('tools',))
     g.run('host-adapter', lambda: g.py(rt + 'host-adapter.py', '--node-root', p('node_root'), '--ohos-headers', p('ohos_headers'), '--out', o / 'host-adapter'), needs=('native-tools',))
-    g.run('host-layout', lambda: g.py(rt + 'host-layout.py', '--node', node(), '--native-library-dir', p('native_library_dir'), '--publication-fixture', native() / 'libpublication-test-linked.so', '--assembled-payload', payload(), '--out', o / 'host-layout'), needs=('compose', 'native-publication-build', 'native-static-resources'), timeout=240)
+    def round_libraries(_):
+        target = o / 'round-native'; target.mkdir()
+        for name in ('libdsh_flock.so', 'libdsh_require_builtin.so'):
+            shutil.copy2(p('native_library_dir') / name, target / name)
+        command = [str(p('cxx')), '-std=c++17', '-shared', '-fPIC', '-pthread', '-Wall', '-Wextra', '-Werror',
+                   '-I', str(s / 'app/ohos/entry/src/main/cpp'), '-I', str(s / 'runtime/ohos/host'),
+                   str(s / (rt + 'host-foreground-fixture.cc')), '-o', str(target / 'libdsh_host.so')]
+        subprocess.run(command, check=True, capture_output=True, text=True)
+        return {'scope': 'Test double of the Ark-hosted library; not a Host build', 'libdshHostSha256': sha(target / 'libdsh_host.so')}
+    g.internal('round-native-libraries', round_libraries, needs=('native-tools',))
+    g.run('host-layout', lambda: g.py(rt + 'host-layout.py', '--node', node(), '--native-library-dir', o / 'round-native', '--publication-fixture', native() / 'libpublication-test-linked.so', '--assembled-payload', payload(), '--out', o / 'host-layout'), needs=('compose', 'native-publication-build', 'native-static-resources', 'round-native-libraries'), timeout=240)
     for label, host in [('loopback', '127.0.0.1'), ('owned-http', g.config.get('ownedHttpHost', ''))]:
-        g.run('mcp-' + label, lambda h=host: g.py(rt + 'add13/host-gate.py', '--source', s, '--payload', payload(), '--manifest', o / 'composed/manifest.json', '--node', node(), '--native-library-dir', p('native_library_dir'), '--publication-fixture', native() / 'libpublication-test-linked.so', '--out', o / ('mcp-' + label), '--expect', 'complete', '--mcp-host', h if label == 'loopback' else owned_http_host(h)), needs=('compose', 'native-publication-build', 'native-static-resources'), timeout=240)
+        g.run('mcp-' + label, lambda h=host: g.py(rt + 'add13/host-gate.py', '--source', s, '--payload', payload(), '--manifest', o / 'composed/manifest.json', '--node', node(), '--native-library-dir', o / 'round-native', '--publication-fixture', native() / 'libpublication-test-linked.so', '--out', o / ('mcp-' + label), '--expect', 'complete', '--mcp-host', h if label == 'loopback' else owned_http_host(h)), needs=('compose', 'native-publication-build', 'native-static-resources', 'round-native-libraries'), timeout=240)
     g.node_tests('spawn-boundary', [rt + 'child-process-boundary.test.mjs'], needs=('tools',))
     for filename in ['test.sh', 'test-integration.sh', 'test-proxy-env.sh', 'test-dispatcher-errors.sh']:
         g.run('net-' + filename[:-3], lambda f=filename: ['bash', s / 'runtime/ohos/net' / f], needs=('prepared-inputs', *(['network-interface-tools'] if filename == 'test-proxy-env.sh' else [])), env=lambda f=filename: {**g.common(), **({'NODE': str(p('fetch_node'))} if f == 'test.sh' else {})}, timeout=300)
@@ -725,7 +735,7 @@ def main():
     g.run('performance-dart', lambda: g.py(rt + 'performance-linux.py', '--node', node(), '--dart', p('dart'), '--typescript-prefix', p('typescript_prefix'), '--out', o / 'performance-dart'), needs=('tools', 'dart-tools'), timeout=180)
     g.run('diagnostics-dart', lambda: g.py(rt + 'diagnostics-linux.py', '--node', node(), '--dart', p('dart'), '--typescript-prefix', p('typescript_prefix'), '--zlib-addon', o / 'zlib.node', '--output', o / 'diagnostics-dart'), needs=('tools', 'dart-tools', 'native-zlib-build'), timeout=240)
     g.internal('dart-consumer-evidence', lambda _: verify_dart_consumers(o), needs=('diagnostics-dart', 'performance-dart'))
-    channels = ['app-links-channel', 'connectivity-channel', 'notify-channel', 'files-media-channel', 'usage-channel']
+    channels = ['app-links-channel', 'connectivity-channel', 'notify-channel', 'files-media-channel', 'usage-channel', 'launch-channel', 'launcher-icon-channel', 'shortcuts-channel']
     g.node_tests('ets-channels', [rt + n + '.test.mjs' for n in channels], needs=('native-opener-build',), extra=lambda: {'OHOS_USER_FILE_ADDON': str(o / 'user-file-access.node')}, timeout=240)
     tooling = ['managed-skill', 'native-host-lazy', 'runtime-archive', 'runtime-channel', 'lifecycle-host', 'web-files', 'transient-task', 'runtime-recovery', 'recovery-storage', 'native-recovery-gate']
     g.node_tests('ets-runtime-tooling', [tools + n + '.test.mjs' for n in tooling], needs=('native-zlib-build',), extra=lambda: {'OHOS_TEST_ZLIB_ADDON': str(o / 'zlib.node')}, timeout=240)
@@ -818,8 +828,12 @@ def main():
     g.run('manifest-validate', lambda: g.node(s / 'runtime/ohos/package/validate-manifest.mjs', s / 'app/ohos/entry/src/main/ets/runtime/RuntimeCore.ets', o / 'composed/expanded/dsh-runtime/manifest.json'), needs=('compose',))
     g.run('node-build-contract', lambda: g.py(rt + 'node-build.py', '--source', p('node_source')), needs=('tools',), timeout=240)
     g.run('napi-rename-current', lambda: g.py('runtime/ohos/node/gen-napi-rename.py', '--source', p('node_source'), '--check'), needs=('tools',), timeout=120)
-    g.run('market-tests', lambda: g.node('--test', '--test-isolation=none', '--test-reporter=tap'), cwd=lambda: s / 'market', needs=('tools',), timeout=300)
-    g.run('market-check', lambda: g.node('scripts/check.mjs'), cwd=lambda: s / 'market', needs=('tools',), timeout=120)
+    def market_inputs(_):
+        (s / 'market/node_modules').symlink_to(p('market_modules'), target_is_directory=True)
+        return {'source': str(p('market_modules'))}
+    g.internal('market-inputs', market_inputs, needs=('tools',))
+    g.run('market-tests', lambda: g.node('--test', '--test-isolation=none', '--test-reporter=tap'), cwd=lambda: s / 'market', needs=('market-inputs',), timeout=300)
+    g.run('market-check', lambda: g.node('scripts/check.mjs'), cwd=lambda: s / 'market', needs=('market-inputs',), timeout=120)
     g.node_tests('file-upload-resolver', ['runtime/tests/file-upload-resolver.test.mjs'], needs=('android-targets',), extra=lambda: {'DSH_TEST_PREFIX': str(o / 'targets/ohos-prefix')}, timeout=240)
     g.node_tests('schedule-contract', ['runtime/tests/schedule-authorization.test.mjs'], needs=('android-targets',), extra=lambda: {'DSH_PREFIX': str(o / 'targets/ohos-prefix')}, timeout=240)
     def fetch_source(_):

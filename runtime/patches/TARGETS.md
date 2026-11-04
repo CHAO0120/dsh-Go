@@ -33,6 +33,8 @@ schema 1 不再用于新的补丁应用或记录。迁移前先为每个现有 d
 
 `runtime/tests/input-recovery.test.mjs` 从 agent-loop 里摘几个 region 来跑。鸿蒙的 agent 在领取输入前会调用 region 之外的 `ohosLifecycle()`，所以它要把这个函数一起摘进去，否则是 ReferenceError，而不是输入丢了。
 
+所以打过 Android 补丁的前缀再跑 `--target ohos` 不再被拒绝，它得到的树和全新前缀一样。反过来仍然被拒绝。真实构建都用全新前缀。
+
 ## 恢复被混入公共链的 OHOS 条件
 
 O3a 不仅新增鸿蒙文件：它也在公共 `fs-create-exclusive.diff` 中增加了 OHOS 的 `EACCES` 条件，因而改变后续 `zz-direct-runtime.diff` 对 `dsh-fs-local` 的输入和输出摘要。只排除独立 OHOS 文件无法恢复 Android 字节。

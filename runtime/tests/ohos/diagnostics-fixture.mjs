@@ -128,7 +128,7 @@ export async function diagnosticsFixture(t, options = {}) {
     vm.runInNewContext(source,{module,exports:module.exports,Map,Set,ArrayBuffer,Uint8Array,Promise,Error,console,
       setInterval:callback => { const timer={callback};timers.add(timer);return timer; },clearInterval:timer => timers.delete(timer),
       canIUse:cap => !(opt.missingCaps ?? []).includes(cap),
-      require(name){if(name==='./NativeHost')return {nativeHostState:()=>({...native.state}),peekNativeHost:()=>nativeModule,loadNativeHost:()=>{native.loads++;throw Error('native load forbidden');}};
+      require(name){if(name==='./NativeHost')return {configureNativeRecovery(){},nativeHostTouched:()=>false,nativeHostState:()=>({...native.state}),peekNativeHost:()=>nativeModule,loadNativeHost:()=>{native.loads++;throw Error('native load forbidden');}};
         // Lifecycle transport has its own real-socket suite. Keep this log test
         // local while executing the actual lifecycle model and Controller.
         if(name==='./OhosLifecycleTransport')return {OhosLifecycleTransport:class {cancel(){} async send(){}}};
