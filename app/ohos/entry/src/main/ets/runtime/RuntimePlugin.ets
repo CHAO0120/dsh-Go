@@ -140,6 +140,13 @@ export class RuntimePlugin implements FlutterPlugin, MethodCallHandler, StreamHa
       else result.success(this.phone.handoffContinue(key));
       return;
     }
+    if (call.method === 'reset') {
+      const keep: Any = call.argument('keep') ?? [];
+      const reinstall: Any = call.argument('reinstall') ?? false;
+      if (!Array.isArray(keep) || typeof reinstall !== 'boolean') throw new RuntimeChannelError('ohos_reset_arguments', '重置参数无效。');
+      try { this.phone?.retire(); } finally { await controller.reset(keep as string[], reinstall); }
+      return;
+    }
     await controller.initialize();
     switch (call.method) {
       case 'getStatus': controller.collect(); result.success(controller.snapshot()); return;
@@ -154,7 +161,7 @@ export class RuntimePlugin implements FlutterPlugin, MethodCallHandler, StreamHa
         result.success(null); return;
       case 'getLogs': result.success(controller.recentLogs((call.argument('lines') ?? 500) as number)); return;
       case 'getLogSnapshot': result.success(controller.logSnapshot((call.argument('lines') ?? 300) as number)); return;
-      case 'clearFailure': controller.clearFailure(); result.success(null); return;
+      case 'clearFailure': await controller.clearFailure(); result.success(null); return;
       case 'failureLog': result.success(controller.failureLog()); return;
       case 'lastKnownGood':
         result.success(new Map<string, Object | null>([['available', false], ['at', null], ['disable', []], ['enable', []],
@@ -170,7 +177,7 @@ export class RuntimePlugin implements FlutterPlugin, MethodCallHandler, StreamHa
           catch (_) { result.success(null); }
         }
         return;
-      case 'reset': case 'restoreLastKnownGood': case 'safePreflight': case 'moveAside': case 'setAutoSafe':
+      case 'restoreLastKnownGood': case 'safePreflight': case 'moveAside': case 'setAutoSafe':
       case 'setDirectEngine': case 'requestStorage':
       case 'openAllFilesAccess': case 'batteryExempt': case 'requestBatteryExempt': case 'backgroundSettings':
       case 'openBackgroundSettings': case 'openVendorSettings': case 'voiceModelLine':

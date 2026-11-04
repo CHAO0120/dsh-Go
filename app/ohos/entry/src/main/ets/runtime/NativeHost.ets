@@ -16,9 +16,24 @@ export interface NativeHostModule {
   openUserFile(root: string, relative: string): number;
 }
 
+// Configured synchronously by the process-wide RuntimeController. A consumer
+// that arrives earlier must fail closed, never bypass recovery initialization.
+export interface NativeRecoveryGate {
+  prepare: () => Promise<void>;
+  check: () => void;
+  begin: () => Promise<string>;
+  finish: (id: string, success: boolean) => Promise<void>;
+}
+let recovery: NativeRecoveryGate | null = null;
 let loaded: NativeHostModule | null = null;
 let loading: Promise<NativeHostModule> | null = null;
+let touched: boolean = false;
 
+export function configureNativeRecovery(gate: NativeRecoveryGate): void {
+  if (recovery !== null && recovery !== gate) throw new RuntimeChannelError('ohos_recovery_owner', '原生恢复门已配置，不能替换执行代际。');
+  recovery = gate;
+}
+export function nativeHostTouched(): boolean { return touched; }
 export function peekNativeHost(): NativeHostModule | null { return loaded; }
 
 export function nativeHostState(): HostState {
@@ -27,18 +42,36 @@ export function nativeHostState(): HostState {
     exitCode: null, errorCode: null, errorMessage: null };
 }
 
-export function loadNativeHost(): Promise<NativeHostModule> {
-  if (loading === null) {
-    loading = import('libdsh_host.so').then((module: ESObject): NativeHostModule => {
-      // A missing native library can resolve with an undefined default export.
-      const host: NativeHostModule | undefined = module.default;
-      if (host === undefined) throw new RuntimeChannelError('ohos_native_unavailable', '随包原生宿主无法加载，请检查安装包。');
-      loaded = host;
-      return host;
-    }).catch((error: Error): NativeHostModule => {
-      loading = null;
-      throw error as Error;
-    });
+async function importNative(gate: NativeRecoveryGate): Promise<NativeHostModule> {
+  await gate.prepare();
+  gate.check();
+  const id = await gate.begin();
+  let settled = false;
+  try {
+    // No await between this admission check and the only dynamic import.
+    gate.check();
+    touched = true;
+    const module: ESObject = await import('libdsh_host.so');
+    const host: NativeHostModule | undefined = module.default;
+    if (host === undefined) throw new RuntimeChannelError('ohos_native_unavailable', '随包原生宿主无法加载，请检查安装包。');
+    loaded = host;
+    await gate.finish(id, true);
+    settled = true;
+    gate.check();
+    return host;
+  } catch (error) {
+    if (!settled) await gate.finish(id, false);
+    throw error as Error;
   }
-  return loading;
+}
+
+export async function loadNativeHost(): Promise<NativeHostModule> {
+  const gate = recovery;
+  if (gate === null) throw new RuntimeChannelError('ohos_recovery_unconfigured', '原生恢复门尚未配置。');
+  gate.check();
+  if (loading === null) loading = importNative(gate);
+  // Keep a failed import promise: even a missing export can follow a loaded DSO.
+  const host = await loading;
+  gate.check();
+  return host;
 }

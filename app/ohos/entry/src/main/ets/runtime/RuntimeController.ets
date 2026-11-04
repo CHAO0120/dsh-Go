@@ -4,10 +4,12 @@ import util from '@ohos.util';
 import connection from '@ohos.net.connection';
 import UIAbility from '@ohos.app.ability.UIAbility';
 import type { HostState, HostEvent, HostOptions } from 'libdsh_host.so';
-import { loadNativeHost, peekNativeHost, nativeHostState } from './NativeHost';
+import { loadNativeHost, peekNativeHost, nativeHostState, nativeHostTouched, configureNativeRecovery, NativeRecoveryGate } from './NativeHost';
 import { RuntimeChannelError, RuntimeManifest, RuntimeFile, RuntimeInstaller, RuntimeLogs, RuntimeLogEntry,
   InstallProgress, validateEnvironment, validateStartOptions, resolveNativeLibraryDir } from './RuntimeCore';
 import { OhosRuntimeStorage } from './OhosRuntimeStorage';
+import { RuntimeRecovery } from './RuntimeRecovery';
+import { OhosRecoveryStorage } from './OhosRecoveryStorage';
 import { RuntimePaths } from './RuntimePaths';
 import { ManagedSkillService, ManagedSkillScope } from './ManagedSkillService';
 import { PersistedRuntimeLog } from './PersistedRuntimeLog';
@@ -49,6 +51,9 @@ export class RuntimeController {
   private timer: number | null = null;
   private lastNative: HostState | null = null;
   private runtimeGeneration: number = 0;
+  private recovery: RuntimeRecovery;
+  private resetRequested: boolean = false;
+  private attempt: string | null = null;
 
   static get(context: common.Context): RuntimeController {
     if (RuntimeController.shared === null) RuntimeController.shared = new RuntimeController(context);
@@ -76,6 +81,7 @@ export class RuntimeController {
 
   constructor(context: common.Context) {
     this.context = context;
+    this.recovery = new RuntimeRecovery(new OhosRecoveryStorage(context), context.filesDir);
     this.persistedLogs = PersistedRuntimeLog.get(context.filesDir);
     this.lifecycle = new RuntimeLifecycle(new OhosLifecycleTransport(),
       (): string => backgroundComputePermission(context.applicationInfo.accessTokenId),
@@ -91,7 +97,23 @@ export class RuntimeController {
     });
     this.storage = new OhosRuntimeStorage(context.resourceManager, context.filesDir);
     this.installer = new RuntimeInstaller(this.storage, context.filesDir + '/dsh-runtime');
+    const gate: NativeRecoveryGate = {
+      prepare: (): Promise<void> => this.initialize(),
+      check: (): void => this.checkRecovery(),
+      begin: async (): Promise<string> => {
+        const id = util.generateRandomUUID();
+        await this.recovery.arm(id, Date.now(), 'nativeLoad');
+        return id;
+      },
+      finish: (id: string, success: boolean): Promise<void> => this.recovery.finish(id, success, Date.now())
+    };
+    configureNativeRecovery(gate);
     this.startPolling();
+  }
+
+  private checkRecovery(): void {
+    if (this.recovery.status().waitingInstall) throw new RuntimeChannelError('ohos_install_required', '运行时已移除，请明确安装后继续。');
+    if (this.resetRequested || this.recovery.status().resetPending) throw new RuntimeChannelError('ohos_restart_required', '重置尚未完成，请重新打开应用。');
   }
 
   private abilityForeground(ability: UIAbility): void {
@@ -125,8 +147,32 @@ export class RuntimeController {
   }
 
   initialize(): Promise<void> {
-    if (this.initialized === null) this.initialized = this.readInstallation();
+    if (this.initialized === null) this.initialized = this.prepareRecovery().catch((error: Error): void => {
+      this.initialized = null;
+      this.setupError = error instanceof RuntimeChannelError ? error.message : '启动恢复未完成，未加载原生库。';
+      throw error;
+    });
     return this.initialized;
+  }
+
+  private async prepareRecovery(): Promise<void> {
+    if (this.resetRequested) throw new RuntimeChannelError('ohos_restart_required', '重置已请求，请重新打开应用后继续。');
+    await this.readInstallation();
+    await this.recovery.initialize(Date.now(), (): Promise<void> => this.installPayload(), nativeHostTouched);
+    if (this.manifest !== null) {
+      this.installed = await this.installer.installed();
+      if (this.current() && !(await this.storage.exists(this.installer.base + '/installing.json'))) this.setupError = null;
+    }
+  }
+
+  private async installPayload(): Promise<void> {
+    if (this.manifest === null) throw new RuntimeChannelError('ohos_payload_missing', this.setupError ?? 'HAP 中没有运行时载荷。');
+    const manifest: RuntimeManifest = this.manifest;
+    await this.storage.withBundledRuntime(async (): Promise<void> => {
+      await this.installer.install(manifest, (progress: InstallProgress) => this.emit(new Map<string, Object | null>([
+        ['type', 'progress'], ['step', progress.step], ['done', progress.done], ['total', progress.total]
+      ])));
+    });
   }
 
   private async readInstallation(): Promise<void> {
@@ -162,6 +208,12 @@ export class RuntimeController {
     else if (native.phase === 'starting' || native.phase === 'running' || native.phase === 'stopping') phase = native.phase;
     else if (native.phase === 'error' || (native.phase === 'exited' && !this.requestedStop)) phase = 'error';
     else if (this.lastError !== null || this.setupError !== null) phase = 'error';
+    const recovery = this.recovery.status();
+    if (recovery.failure !== null && phase === 'installed') phase = 'error';
+    const recoveryFailure = recovery.failure === null ? null : new Map<string, Object | null>([
+      ['kind', recovery.failure.kind], ['at', recovery.failure.at], ['exitCode', recovery.failure.exitCode],
+      ['safeMode', false], ['summary', recovery.failure.summary]
+    ]);
     const active = native.phase === 'running';
     const failure = native.errorCode ?? (native.phase === 'exited' && !this.requestedStop ? 'ohos_node_exited' : null);
     return new Map<string, Object | null>([
@@ -173,12 +225,12 @@ export class RuntimeController {
       ['error', this.lastError ?? this.setupError ?? native.errorMessage ??
         (native.phase === 'exited' && !this.requestedStop ? '本机引擎已退出；请关闭并重新打开 App 后再启动。' :
           this.lifecycle.failureCode() !== null ? LIFECYCLE_NOTICE : null)],
-      ['mode', 'normal'], ['safeState', 'off'], ['safeReason', null], ['strikes', 0], ['autoSafe', false],
-      ['failure', null], ['mainFailure', null], ['healthyAt', null], ['networkBlocked', false], ['networkBlockedAt', null],
+      ['mode', 'normal'], ['safeState', 'off'], ['safeReason', null], ['strikes', recovery.strikes], ['autoSafe', false],
+      ['failure', recoveryFailure], ['mainFailure', null], ['healthyAt', null], ['networkBlocked', false], ['networkBlockedAt', null],
       ['directEngineEnabled', false], ['directEngineAvailable', false], ['directEngineActive', false],
       ['directEngineFallbackReason', null], ['currentExecutionMode', active ? 'ohos-embedded' : null],
       ['launchSelectedMode', native.consumed ? 'ohos-embedded' : null], ['launchSpawned', native.consumed],
-      ['launchFailureReason', failure], ['tidyingFiles', false], ['lifecycle', this.lifecycle.status()],
+      ['launchFailureReason', failure], ['resetPending', recovery.resetPending], ['waitingInstall', recovery.waitingInstall], ['tidyingFiles', false], ['lifecycle', this.lifecycle.status()],
       ['transientTask', this.taskOwner?.status() ?? null],
       ['transientCleanup', this.retiredOwners.filter((owner: TransientTaskOwner): boolean => owner.cleanupPending())
         .map((owner: TransientTaskOwner): Map<string, Object | null> => owner.status())]
@@ -198,7 +250,7 @@ export class RuntimeController {
     this.sinks.push(sink);
     this.initialize().then(() => {
       if (this.sinks.includes(sink)) sink(new Map<string, Object | null>([['type', 'status'], ['status', this.snapshot()]]));
-    });
+    }).catch((): void => this.emitStatus());
   }
 
   unsubscribe(sink: RuntimeSink): void {
@@ -226,7 +278,17 @@ export class RuntimeController {
     const finished = (state.phase === 'exited' || state.phase === 'error') && this.lastNative?.phase !== state.phase;
     this.lifecycle.runtime(state.phase === 'running' && !this.requestedStop ? state.baseUrl : null,
       state.phase === 'running' && !this.requestedStop ? state.token : null);
-    if (finished) this.retireOwner();
+    if (finished) {
+      this.retireOwner();
+      const attempt = this.attempt;
+      if (attempt !== null) {
+        this.attempt = null;
+        this.recovery.finish(attempt, this.requestedStop && state.phase === 'exited' && state.exitCode === 0,
+          Date.now(), state.exitCode ?? 0, state.phase === 'error').then((): void => this.emitStatus()).catch((): void => {
+            this.lastError = '退出恢复记录未确认落盘，下次启动将保守报告未正常退出。'; this.emitStatus();
+          });
+      }
+    }
     if (++this.lifecycleTicks >= 10) { this.lifecycleTicks = 0; this.lifecycle.refresh(); }
     this.syncManagedSkills(state);
     if (state.token !== null) this.logs.rememberSecret(state.token);
@@ -262,9 +324,9 @@ export class RuntimeController {
   }
 
   async install(dropKept: boolean): Promise<void> {
-    if (dropKept) throw new RuntimeChannelError('ohos_unsupported', '鸿蒙没有 Android 的保留数据恢复事务。');
+    if (dropKept) throw new RuntimeChannelError('ohos_unsupported', '鸿蒙尚不支持丢弃已暂存的保留项，请先完成恢复。');
     if (this.pending !== null) throw new RuntimeChannelError('install_busy', '运行时正在安装或启动。');
-    if (nativeHostState().consumed) throw new RuntimeChannelError('ohos_restart_required', '本进程已经启动过 Node，请关闭并重新打开 App 后安装。');
+    if (nativeHostTouched()) throw new RuntimeChannelError('ohos_restart_required', '本进程已尝试加载原生库，请重开应用后安装。');
     this.pending = 'install'; this.lastError = null;
     this.emitStatus();
     try {
@@ -275,12 +337,12 @@ export class RuntimeController {
       }
       if (this.manifest === null) throw new RuntimeChannelError('ohos_payload_missing', this.setupError ?? 'HAP 中没有运行时载荷。');
       this.installed = null;
-      const manifest: RuntimeManifest = this.manifest;
-      await this.storage.withBundledRuntime(async (): Promise<void> => {
-        await this.installer.install(manifest, (progress: InstallProgress) => this.emit(new Map<string, Object | null>([
-          ['type', 'progress'], ['step', progress.step], ['done', progress.done], ['total', progress.total]
-        ])));
-      });
+      if (this.recovery.status().waitingInstall) {
+        await this.recovery.installPending((): Promise<void> => this.installPayload(), nativeHostTouched);
+      } else {
+        this.checkRecovery();
+        await this.installPayload();
+      }
       this.installed = await this.installer.installed();
       this.setupError = null;
     } catch (error) {
@@ -320,17 +382,39 @@ export class RuntimeController {
       this.requestedStop = false;
       this.runtimeGeneration++;
       const host = await loadNativeHost();
+      const attempt = util.generateRandomUUID();
+      await this.recovery.arm(attempt, Date.now(), 'engineRun');
+      this.attempt = attempt;
+      this.checkRecovery();
       if (this.startCancelled) throw new RuntimeChannelError('ohos_start_cancelled', '启动已取消。');
       host.start(options);
       this.bindOwner();
       this.startPolling();
     } catch (error) {
+      if (this.attempt !== null && !nativeHostState().consumed) {
+        const attempt = this.attempt; this.attempt = null;
+        if (error instanceof RuntimeChannelError && (error.code === 'ohos_start_cancelled' || this.resetRequested)) await this.recovery.cancelBeforeStart(attempt);
+        else await this.recovery.finish(attempt, false, Date.now(), 0, true);
+      }
       if (!(error instanceof RuntimeChannelError && error.code === 'ohos_start_cancelled')) {
         this.lastError = error instanceof RuntimeChannelError ? error.message : '本机引擎启动失败，请检查随包原生库和运行时。';
       }
       throw error as Error;
     } finally {
       this.pending = null; this.collect(); this.emitStatus();
+    }
+  }
+
+  async reset(keep: string[], reinstall: boolean): Promise<void> {
+    if (this.pending === 'install') throw new RuntimeChannelError('reset_busy', '安装进行中，未提交重置。');
+    // Stop admission synchronously, including a loader currently awaiting I/O.
+    this.resetRequested = true;
+    this.stop();
+    await this.recovery.requestReset(keep, util.generateRandomUUID(), reinstall);
+    try { this.emitStatus(); }
+    finally {
+      // Observer delivery cannot change the acknowledged durable transaction.
+      throw new RuntimeChannelError('ohos_reset_committed', '重置请求已持久保存，需重新打开应用后继续。');
     }
   }
 
@@ -368,7 +452,8 @@ export class RuntimeController {
 
   failureLog(): string[] { return this.failureLines.slice(); }
 
-  clearFailure(): void {
+  async clearFailure(): Promise<void> {
+    await this.recovery.clearFailure();
     this.failureLines = []; this.lastError = null; this.emitStatus();
   }
 

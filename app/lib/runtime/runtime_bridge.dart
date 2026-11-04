@@ -695,6 +695,10 @@ class RuntimeBridge {
   /// Deletes the runtime with everything in /root except [keep].
   Future<void> reset({ResetKeep keep = const ResetKeep()}) => _methods.invokeMethod<void>('reset', {'keep': keep.wire});
 
+  /// Explicit HarmonyOS reset intent. Existing uninstall calls keep the old wire.
+  Future<void> resetAndReinstall({ResetKeep keep = const ResetKeep()}) =>
+      _methods.invokeMethod<void>('reset', {'keep': keep.wire, 'reinstall': true});
+
   Future<List<String>> logs({int lines = 500}) async =>
       (await _methods.invokeListMethod<String>('getLogs', {'lines': lines})) ?? const [];
 

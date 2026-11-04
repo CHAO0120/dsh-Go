@@ -6,6 +6,7 @@ import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
+import { randomUUID } from 'node:crypto';
 import { makePack, fileIo, inflateActivity, activeInflaters, RUNTIME_ARCHIVE_ASSET } from './runtime-storage-fixture.mjs';
 import { native, MethodCall, nativeModuleLoads, nativeModuleControl, lifecycleControl } from './runtime-host-fixture.mjs';
 import { prepareManagedSkillModules } from './managed-skill-loader.mjs';
@@ -88,7 +89,28 @@ let nativeHostText = await fs.readFile(path.join(source, 'NativeHost.ets'), 'utf
 nativeHostText = nativeHostText.replace("from 'libdsh_host.so'", `from '${hostFixtureUrl}'`)
   .replace("import('libdsh_host.so')", `import('${pathToFileURL(nativeBoundary).href}')`)
   .replace("from './RuntimeCore'", "from './RuntimeCore.mts'");
+// Each test's synthetic Context is a separate app process; reset only the
+// module singleton state in this test transform, never production admission.
+nativeHostText += '\nexport function resetNativeFixture() { loaded = null; loading = null; touched = false; recovery = null; }\n';
 await fs.writeFile(path.join(temp, 'NativeHost.mts'), nativeHostText);
+const nativeHostModule = await import(pathToFileURL(path.join(temp, 'NativeHost.mts')));
+beforeEach(() => { nativeHostModule.resetNativeFixture(); RuntimeController.shared = null; });
+const recoveryFixtureUrl = pathToFileURL(path.join(temp, 'recovery-io.mjs')).href;
+await fs.writeFile(path.join(temp, 'recovery-io.mjs'), `import { fileIo } from '${fixtureUrl}';
+export const recoveryIo = {...fileIo, async lstat(path) { try { return await fileIo.lstat(path); } catch(error) { if(error.code==='ENOENT')error.code=13900002; throw error; } }};
+`);
+for (const name of ['RuntimeRecovery', 'OhosRecoveryStorage']) {
+  let text = await fs.readFile(path.join(source, name+'.ets'), 'utf8');
+  text = text.replace("import common from '@ohos.app.ability.common';", '')
+    .replace("import { BusinessError } from '@ohos.base';", '')
+    .replace("import fs from '@ohos.file.fs';", `import { recoveryIo as fs } from '${recoveryFixtureUrl}';`)
+    .replace("import { RecoveryStorage }", "import type { RecoveryStorage }")
+    .replace("from './RuntimeRecovery'", "from './RuntimeRecovery.mts'")
+    .replace("from './OhosRuntimeStorage'", "from './OhosRuntimeStorage.mts'")
+    .replace("from './RuntimeCore'", "from './RuntimeCore.mts'");
+  await fs.writeFile(path.join(temp, name+'.mts'), text);
+}
+
 controllerText = controllerText.replace("import common from '@ohos.app.ability.common';", '')
   .replace("import UIAbility from '@ohos.app.ability.UIAbility';", '')
   .replace("import util from '@ohos.util';", `import { util } from '${fixtureUrl}';`)
@@ -97,6 +119,9 @@ controllerText = controllerText.replace("import common from '@ohos.app.ability.c
   .replace('RuntimeChannelError, RuntimeManifest, RuntimeFile, RuntimeInstaller', 'RuntimeChannelError, type RuntimeManifest, type RuntimeFile, RuntimeInstaller')
   .replace('  InstallProgress,', '  type InstallProgress,')
   .replace("from './RuntimeCore'", "from './RuntimeCore.mts'")
+  .replace('configureNativeRecovery, NativeRecoveryGate', 'configureNativeRecovery, type NativeRecoveryGate')
+  .replace("from './RuntimeRecovery'", "from './RuntimeRecovery.mts'")
+  .replace("from './OhosRecoveryStorage'", "from './OhosRecoveryStorage.mts'")
   .replace("from './NativeHost'", "from './NativeHost.mts'")
   .replace("from './PersistedRuntimeLog'", "from './PersistedRuntimeLog.mts'")
   .replace("from './RuntimePaths'", "from './RuntimePaths.mts'")
@@ -115,6 +140,8 @@ await fs.writeFile(path.join(temp, 'TransientTaskOwner.mts'), transientText);
 const controllerPath = path.join(temp, 'RuntimeController.mts');
 await fs.writeFile(controllerPath, controllerText);
 const { RuntimeController } = await import(pathToFileURL(controllerPath));
+const { util: recoveryUtil } = await import(fixtureUrl);
+recoveryUtil.generateRandomUUID = randomUUID;
 let entryText = await fs.readFile(path.join(source, '../entryability/EntryAbility.ets'), 'utf8');
 entryText = entryText.replace(/^import .*;\n/gm, '');
 await fs.writeFile(path.join(temp, 'EntryAbility.mts'),
@@ -149,7 +176,9 @@ afterEach(async () => {
   for (const controller of controllers) {
     controller.collect();
     if (usesPersistedRuntimeLog) await controller.persistedLogs.flush();
+    await controller.recovery.pending;
   }
+  controllers.length = 0;
   RuntimeController.foreground = false; RuntimeController.ability = null;
 });
 const files = {
@@ -158,8 +187,8 @@ const files = {
   'runtime/ohos/process/index.mjs': 'export function apply() {}',
   'runtime/ohos/process/sandbox.mjs': 'export function apply() {}',
   'runtime/ohos/lifecycle/index.mjs': 'export function apply() {}',
-  'runtime/ohos/phone/index.mjs': 'export function apply() {}',
   'runtime/ohos/capabilities/index.mjs': 'export function apply() {}',
+  'runtime/ohos/phone/index.mjs': 'export function apply() {}',
   'runtime/bridge/dsh-go-bridge/lib/index.js': 'export function apply() {}',
   'runtime/ohos/process/child-process.mjs': 'export const childProcess = true;',
   'runtime/ohos/中文 空格.txt': '中文与 emoji 🐳\n',
@@ -440,7 +469,7 @@ async function controllerCase(name) {
   const cacheDir = path.join(c.dir, 'cache'); await fs.mkdir(cacheDir);
   const context = { filesDir: c.dir, cacheDir, resourceManager: c.resources,
     bundleCodeDir: '/private/安装包', applicationInfo: { nativeLibraryPath: 'libs/arm64/' } };
-  const controller = new RuntimeController(context); controllers.push(controller);
+  const controller = RuntimeController.get(context); controllers.push(controller);
   await controller.initialize();
   return { ...c, context, controller };
 }
@@ -463,7 +492,7 @@ test('初始化raw close瞬时失败后，同一Controller的安装可重试且�
     if (calls === 2) { enter(); await released; }
     return close(asset);
   };
-  const controller = new RuntimeController(context); controllers.push(controller);
+  const controller = RuntimeController.get(context); controllers.push(controller);
   await controller.initialize();
   assert.equal(controller.snapshot().get('bundledVersion'), null);
   assert.equal(c.resources.opened.size, 1);
@@ -533,7 +562,7 @@ test('懒加载：构造、状态、日志、路径、安装、诊断与未启�
     const sink = () => {}; c.controller.subscribe(sink); await Promise.resolve(); c.controller.unsubscribe(sink);
     await c.controller.install(false);
     await c.controller.publishDiagnostics('# fixture');
-    c.controller.stop(); c.controller.collect(); c.controller.clearFailure();
+    c.controller.stop(); c.controller.collect(); await c.controller.clearFailure();
     assert.equal(nativeModuleLoads, 0);
     assert.equal(native.starts.length, 0);
   } finally { plugin.onDetachedFromEngine(binding); RuntimeController.shared = previous; }
@@ -677,7 +706,7 @@ test('实际RuntimePlugin逐个处理28个Android方法，unknown才notImplement
   const diagnostic = await invoke('publishDiagnostics', {markdown: '# 测试\n'});
   assert.equal(diagnostic.kind, 'success'); assert.equal(diagnostic.value.get('bytes'), Buffer.byteLength('# 测试\n'));
   assert.equal((await invoke('publishDiagnostics', {markdown: ''})).value.get('bytes'), 0);
-  for (const method of ['reset', 'restoreLastKnownGood', 'safePreflight', 'moveAside', 'setAutoSafe', 'setDirectEngine',
+  for (const method of ['restoreLastKnownGood', 'safePreflight', 'moveAside', 'setAutoSafe', 'setDirectEngine',
     'requestStorage', 'openAllFilesAccess', 'batteryExempt',
     'requestBatteryExempt', 'backgroundSettings', 'openBackgroundSettings', 'openVendorSettings', 'voiceModelLine']) {
     assert.deepEqual((await invoke(method)).code, 'ohos_unsupported', method);
@@ -948,6 +977,7 @@ test('真实Entry回调在无本机引擎时只更新内存，迟到的旧Abilit
 
 test('真实Controller收集已就绪host后才同步当前前后台，stop后不再发晚到控制', async () => {
   const c = await controllerCase('lifecycle-ready-order');
+  await nativeHostModule.loadNativeHost(); // Explicit native presence; independent of earlier tests.
   const previous = RuntimeController.shared; RuntimeController.shared = c.controller;
   const ability = new EntryAbility(); const before = lifecycleControl.sends.length;
   try {
@@ -967,6 +997,7 @@ test('真实Controller收集已就绪host后才同步当前前后台，stop后�
 
 test('生命周期同步失败通过现有Dart可读error和notice事件暴露，同类重试不反复弹提示且恢复会清除', async () => {
   const c = await controllerCase('lifecycle-visible-error');
+  await nativeHostModule.loadNativeHost(); // Explicit native presence; independent of earlier tests.
   const previous = RuntimeController.shared; RuntimeController.shared = c.controller;
   const ability = new EntryAbility(), events = [];
   const sink = event => events.push(event);
@@ -998,6 +1029,7 @@ test('生命周期同步失败通过现有Dart可读error和notice事件暴露�
 
 test('真实Entry销毁只退休native owner，旧Ability销毁不撤新owner且不申请短时任务', async () => {
   const c = await controllerCase('transient-owner-destroy');
+  await nativeHostModule.loadNativeHost(); // Explicit native presence; independent of earlier tests.
   const previous = RuntimeController.shared; RuntimeController.shared = c.controller;
   const old = new EntryAbility(), current = new EntryAbility();
   try {
@@ -1012,4 +1044,77 @@ test('真实Entry销毁只退休native owner，旧Ability销毁不撤新owner且
     assert.equal(native.lifecycleWrites.some(row => row.operation === 'begin'), false);
     assert.equal(RuntimeController.ability, null);
   } finally { c.controller.stop(); RuntimeController.shared = previous; }
+});
+
+// A synthetic process restart resets only the fixture's native singletons;
+// durable product recovery records and the real installed filesystem remain.
+async function reopenCase(c) {
+  await c.controller.recovery.pending;
+  if(c.controller.timer!==null){clearInterval(c.controller.timer);c.controller.timer=null;}
+  nativeHostModule.resetNativeFixture();native.reset();RuntimeController.shared=null;
+  const controller=RuntimeController.get(c.context);controllers.push(controller);
+  await controller.initialize();return {...c,controller};
+}
+const recoveryReplies = [];
+async function recordRecoveryReply(commitState, reply) {
+  recoveryReplies.push({commitState, code:reply.code, message:reply.message});
+  if(process.env.DSH_RECOVERY_DART_WIRE) await fs.writeFile(process.env.DSH_RECOVERY_DART_WIRE, JSON.stringify(recoveryReplies));
+}
+function resetPlugin(c) {
+  RuntimeController.shared=c.controller;const plugin=new RuntimePlugin();
+  const binding={getApplicationContext:()=>c.context,getBinaryMessenger:()=>({setMessageHandler(){}})};
+  plugin.onAttachedToEngine(binding);
+  return {call:(args)=>new Promise(resolve=>plugin.onMethodCall(new MethodCall('reset',new Map(Object.entries(args))),{
+    success:value=>resolve({value}),error:(code,message)=>resolve({code,message}),notImplemented:()=>resolve({missing:true})})),close:()=>plugin.onDetachedFromEngine(binding)};
+}
+test('recovery: two unclean engine generations persist strikes/failure; clearing notice cannot reopen automatic-start budget',async()=>{
+ let c=await controllerCase('rescue-two-exits');await c.controller.install(false);
+ for(let i=0;i<2;i++){
+  await c.controller.start(null,false,null,false);native.state.phase='exited';native.state.exitCode=23;native.state.token=null;c.controller.collect();await c.controller.recovery.pending;
+  assert.equal(c.controller.snapshot().get('strikes'),i+1);c=await reopenCase(c);
+ }
+ const state=c.controller.snapshot();assert.equal(state.get('strikes'),2);assert.equal(state.get('failure').get('kind'),'killed');assert.equal(state.get('safeState'),'off');assert.equal(state.get('autoSafe'),false);
+ await c.controller.clearFailure();assert.equal(c.controller.snapshot().get('failure'),null);assert.equal(c.controller.snapshot().get('strikes'),2);
+});
+test('recovery: committed reset does not delete in old process; next process reinstalls and restores chosen bytes before native import',async()=>{
+ let c=await controllerCase('rescue-reset-reinstall');await c.controller.install(false);
+ const kept=c.dir+'/runtime/rootfs/root/.dsh/dsh-go/ui.json';await fs.mkdir(path.dirname(kept),{recursive:true});await fs.writeFile(kept,'user-ui');
+ const plugin=resetPlugin(c);try{assert.equal((await plugin.call({keep:['uiAndSkills'],reinstall:true})).code,'ohos_reset_committed');}finally{plugin.close();}
+ assert.equal(await fs.readFile(kept,'utf8'),'user-ui');await assert.rejects(nativeHostModule.loadNativeHost(),{code:'ohos_restart_required'});assert.equal(nativeHostModule.nativeHostTouched(),false);
+ c=await reopenCase(c);assert.equal(c.controller.snapshot().get('phase'),'installed');assert.equal(await fs.readFile(kept,'utf8'),'user-ui');assert.equal(c.controller.snapshot().get('resetPending'),false);assert.equal(nativeHostModule.nativeHostTouched(),false);
+});
+test('recovery: legacy reset is uninstall, repeated reopen does not install, explicit install restores kept bytes',async()=>{
+ let c=await controllerCase('rescue-uninstall');await c.controller.install(false);
+ const kept=c.dir+'/runtime/rootfs/root/.dsh/.env';await fs.mkdir(path.dirname(kept),{recursive:true});await fs.writeFile(kept,'synthetic-config');
+ const plugin=resetPlugin(c);try{assert.equal((await plugin.call({keep:['pluginsAndSettings']})).code,'ohos_reset_committed');}finally{plugin.close();}
+ for(let i=0;i<2;i++){c=await reopenCase(c);assert.equal(c.controller.snapshot().get('phase'),'notInstalled');assert.equal(c.controller.snapshot().get('waitingInstall'),true);await assert.rejects(nativeHostModule.loadNativeHost(),{code:'ohos_install_required'});}
+ await c.controller.install(false);assert.equal(c.controller.snapshot().get('phase'),'installed');assert.equal(await fs.readFile(kept,'utf8'),'synthetic-config');assert.equal(c.controller.snapshot().get('resetPending'),false);
+});
+test('recovery: damaged boot journal fails consumer admission; reset still commits without successful initialization',async()=>{
+ let c=await controllerCase('rescue-corrupt');await fs.writeFile(c.dir+'/dsh-recovery/boot.json','{"broken":true}');
+ nativeHostModule.resetNativeFixture();RuntimeController.shared=null;const controller=RuntimeController.get(c.context);controllers.push(controller);c={...c,controller};
+ await assert.rejects(nativeHostModule.loadNativeHost());assert.equal(nativeHostModule.nativeHostTouched(),false);
+ const plugin=resetPlugin(c);try{assert.equal((await plugin.call({keep:[],reinstall:true})).code,'ohos_reset_committed');}finally{plugin.close();}
+ c=await reopenCase(c);assert.equal(c.controller.snapshot().get('phase'),'installed');assert.equal(c.controller.snapshot().get('strikes'),0);
+});
+test('recovery: actual reset rename acknowledgement loss reaches Plugin as unknown commit and stays closed',async()=>{
+ const c=await controllerCase('rescue-commit-unknown');const plugin=resetPlugin(c);const rename=fileIo.rename;
+ fileIo.rename=async(from,to)=>{await rename(from,to);if(to===c.dir+'/dsh-recovery/reset.json')throw new Error('synthetic lost rename acknowledgement');};
+ try{
+  const reply=await plugin.call({keep:[]});assert.equal(reply.code,'ohos_reset_commit_unknown');await recordRecoveryReply('unknown',reply);
+  assert.equal(JSON.parse(await fs.readFile(c.dir+'/dsh-recovery/reset.json','utf8')).reinstall,false);
+  assert.equal(c.controller.snapshot().get('resetPending'),true);await assert.rejects(nativeHostModule.loadNativeHost(),{code:'ohos_restart_required'});
+ }finally{fileIo.rename=rename;plugin.close();}
+});
+test('recovery: status observer failure cannot downgrade a successful durable reset acknowledgement',async()=>{
+ const c=await controllerCase('rescue-commit-status-sink');const plugin=resetPlugin(c);const sink=()=>{throw new Error('status observer failed');};
+ c.controller.sinks.push(sink);
+ try{const reply=await plugin.call({keep:[]});assert.equal(reply.code,'ohos_reset_committed');await fs.access(c.dir+'/dsh-recovery/reset.json');await recordRecoveryReply('committed',reply);}
+ finally{c.controller.sinks=c.controller.sinks.filter(x=>x!==sink);plugin.close();}
+});
+
+test('recovery: rejected validation reports no submitted request and writes no reset marker',async()=>{
+ const c=await controllerCase('rescue-not-committed');const plugin=resetPlugin(c);
+ try{const reply=await plugin.call({keep:['../']});assert.equal(reply.code,'ohos_recovery_invalid');await assert.rejects(fs.access(c.dir+'/dsh-recovery/reset.json'));assert.equal(c.controller.snapshot().get('resetPending'),false);await recordRecoveryReply('notCommitted',reply);}
+ finally{plugin.close();}
 });

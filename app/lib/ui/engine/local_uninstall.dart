@@ -20,14 +20,30 @@ import '../theme/theme.dart';
 /// Deletes the runtime and everything in it (a reset that keeps nothing and
 /// does not reinstall): the app then runs without it until the next install.
 abstract final class LocalUninstall {
-  static Future<void> run(ProviderContainer container) async {
+  static final _inFlight = Expando<Future<void>>();
+
+  static Future<void> run(ProviderContainer container) {
+    final pending = _inFlight[container];
+    if (pending != null) return pending;
+    final operation = Future<void>.microtask(() => _run(container)).whenComplete(() { _inFlight[container] = null; });
+    _inFlight[container] = operation;
+    return operation;
+  }
+
+  static Future<void> _run(ProviderContainer container) async {
     final prefs = container.read(onboardingPrefsProvider.notifier);
+    final previousDeclined = container.read(onboardingPrefsProvider).localDeclined;
     // Before the phase reads 未安装, so the root gate stays home.
     await prefs.setLocalDeclined(true);
     try {
       await container.read(localRuntimeProvider.notifier).resetKeeping(const ResetKeep());
+    } on RuntimeResetFailure catch (error) {
+      // A committed or uncertain uninstall can still take effect on reopening.
+      // Only a confirmed pre-commit failure rolls back the remote-only choice.
+      if (error.commitState == RuntimeResetCommitState.notCommitted) await prefs.setLocalDeclined(previousDeclined);
+      rethrow;
     } catch (_) {
-      await prefs.setLocalDeclined(false);
+      await prefs.setLocalDeclined(previousDeclined);
       rethrow;
     }
     // Its conversations went with it: don't reopen one of them.
