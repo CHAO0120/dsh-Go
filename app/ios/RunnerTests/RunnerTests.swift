@@ -414,6 +414,17 @@ final class NativeToolsTests: XCTestCase {
     let kept = try await web(browser, "fill", secret, expect: .refused)
     XCTAssertEqual(kept.text, "SENSITIVE_TARGET")
 
+    // A person can't tap through a dialog, so neither can the model; off screen it has to scroll.
+    _ = try await script(view, "window.scrollTo(0, 0); document.body.insertAdjacentHTML('beforeend', '<div id=\"cover\" style=\"position:fixed;inset:0;background:#0003\"></div>'); 1")
+    page = try await read(browser)
+    let covered = try await web(browser, "click", try target(named("Go", page), page), expect: .refused)
+    XCTAssertEqual(covered.text, "TARGET_OBSCURED_OR_NOT_IN_VIEW")
+    _ = try await script(view, "document.getElementById('cover').remove(); window.scrollTo(0, 2500); 1")
+    page = try await read(browser)
+    let away = try await web(browser, "click", try target(named("Go", page), page), expect: .refused)
+    XCTAssertEqual(away.text, "TARGET_OBSCURED_OR_NOT_IN_VIEW")
+    _ = try await script(view, "window.scrollTo(0, 0); 1")
+
     // Another address in the same page is another page.
     page = try await read(browser)
     _ = try await script(view, "history.pushState({}, '', '#moved'); 1")

@@ -34,7 +34,7 @@
   },
   {
     "name": "click",
-    "description": "请求点击本次read的元素。成功只说明DOM调用已发出，不说明交易成功，也不能证明点击不会经JS提交数据。敏感目标拒绝，陈旧编号必须重新读取。",
+    "description": "请求点击本次read的元素。成功只说明DOM调用已发出，不说明交易成功，也不能证明点击不会经JS提交数据。敏感目标拒绝，陈旧编号必须重新读取。目标被遮挡或不在屏幕内时返回 TARGET_OBSCURED_OR_NOT_IN_VIEW：先关掉遮挡或用 scroll 滚到位，再重新 read。",
     "inputSchema": {
       "type": "object",
       "properties": {
