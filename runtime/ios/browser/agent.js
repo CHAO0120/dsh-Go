@@ -16,7 +16,6 @@
   let revision = 0;
   let current = null;
   let records = new Map();
-  let observers = [];
   let removeListeners = [];
   const invalidate = () => { revision++; };
   const bytes = value => encoder.encode(JSON.stringify(value)).byteLength;
@@ -25,30 +24,21 @@
   const attr = (el, key) => el.getAttribute(key) ?? '';
   const parent = el => el.parentElement || el.getRootNode()?.host || null;
   const tag = el => el.localName?.toLowerCase() ?? '';
-  function flush() {
-    for (const observer of observers) if (observer.takeRecords().length) invalidate();
-  }
-  function clearObservers() {
-    for (const observer of observers) observer.disconnect();
+  function clearListeners() {
     for (const remove of removeListeners) remove();
-    observers = [];
     removeListeners = [];
   }
   function listen(target, type) {
     target.addEventListener(type, invalidate, true);
     removeListeners.push(() => target.removeEventListener(type, invalidate, true));
   }
-  function watch(root) {
-    const observer = new MutationObserver(invalidate);
-    observer.observe(root, { subtree: true, childList: true, attributes: true, characterData: true });
-    observers.push(observer);
-    listen(root, 'scroll');
-  }
   function hidden(el) {
     for (let at = el; at; at = parent(at)) {
       if (at.hidden || at.inert || attr(at, 'aria-hidden') === 'true') return true;
       const style = at.ownerDocument.defaultView.getComputedStyle(at);
-      if (style.display === 'none' || style.visibility === 'hidden' || style.visibility === 'collapse' || style.contentVisibility === 'hidden' || Number(style.opacity) === 0) return true;
+      if (style.display === 'none' || style.visibility === 'hidden' || style.visibility === 'collapse' || style.contentVisibility === 'hidden') return true;
+      // A native control laid invisibly over something the page draws is still what a person taps.
+      if (Number(style.opacity) === 0 && !(at === el && ['input', 'select'].includes(tag(el)))) return true;
     }
     return false;
   }
@@ -134,15 +124,23 @@
     if (tag(el) === 'select') value.multiple = el.multiple;
     return value;
   }
-  function fingerprint(el) {
+  // What the model was told about an element, and so what has to still be true to act on it. The
+  // rest of a live page changes all the time, and that's no reason to refuse. Scrolling a region
+  // doesn't depend on what's in it, and neither scrolling nor a shifting layout changes a target.
+  function fingerprint(el, region = false) {
+    if (region) return JSON.stringify({ tag: tag(el), document: el.ownerDocument.location.href });
+    const { inViewport, ...steady } = state(el);
+    // A list can reuse a row's nodes for another item: the same Remove button, a different thing to remove.
+    const row = el.closest?.('li, tr, dialog, [role=row], [role=listitem], [role=dialog], [role=alertdialog]');
     return JSON.stringify({ tag: tag(el), role: role(el), name: name(el), type: el.type || '',
-      state: state(el), sensitive: sensitive(el),
+      state: steady, sensitive: sensitive(el), row: row ? textSnippet(row, 400) : null,
       // Values remain internal and are never returned/logged. Sensitive values aren't read.
       value: sensitive(el) ? null : (['input', 'textarea', 'select'].includes(tag(el)) ? el.value.slice(0, 16385) : null),
       selected: tag(el) === 'select' && !sensitive(el) ? Array.from(el.options).slice(0, 256).map(o => o.selected) : null,
       document: el.ownerDocument.location.href,
     });
   }
+  const isRegion = role => role === 'document' || role === 'scroll-region';
   function scrollable(el) {
     const style = el.ownerDocument.defaultView.getComputedStyle(el);
     return ((el.scrollHeight > el.clientHeight && /auto|scroll/u.test(style.overflowY)) ||
@@ -154,7 +152,7 @@
     const maxElements = options.maxElements ?? 128;
     if (!Number.isSafeInteger(maxBytes) || maxBytes < 2048 || maxBytes > 262144 ||
         !Number.isSafeInteger(maxElements) || maxElements < 1 || maxElements > 256) return error('INVALID_ARGUMENT');
-    clearObservers();
+    clearListeners();
     revision++;
     records = new Map();
     let nextEpoch; do { nextEpoch = publicEpoch(); } while (nextEpoch === current?.epoch);
@@ -181,7 +179,7 @@
       }
       result.elements.push(item);
       if (bytes(result) > maxBytes) { result.elements.pop(); result.truncated = true; return; }
-      records.set(id, { el, fingerprint: fingerprint(el), document: el.ownerDocument, specialRole, options });
+      records.set(id, { el, fingerprint: fingerprint(el, isRegion(specialRole)), document: el.ownerDocument, specialRole, options });
     }
     function text(value) {
       const chars = Array.from(String(value ?? '').replace(/\s+/gu, ' ').trim());
@@ -211,7 +209,6 @@
       if (rendered(el) && interactive) add(el, context, role(el) || 'focusable');
       else if (scrollable(el)) add(el, context, 'scroll-region');
       if (tag(el) === 'iframe') {
-        listen(el, 'load');
         try {
           // contentDocument is exposed only when SOP permits access; unlike
           // location.origin strings this also handles inherited srcdoc origins.
@@ -232,9 +229,9 @@
     function walkRoot(root, context) {
       if (seen.has(root)) return;
       seen.add(root);
-      watch(root);
       if (root.nodeType === Node.DOCUMENT_NODE) {
-        listen(root.defaultView, 'pagehide'); listen(root.defaultView, 'popstate');
+        // A frame reloading only matters to what's in it, and those targets check for themselves.
+        if (root === document) { listen(window, 'pagehide'); listen(window, 'popstate'); }
         if (root.scrollingElement) add(root.scrollingElement, context, 'document');
       }
       for (const child of root.childNodes) walk(child, context);
@@ -247,14 +244,13 @@
     if (!request || request.version !== VERSION || !['click', 'fill', 'select', 'scroll', 'key'].includes(request.kind)) return error('INVALID_ARGUMENT');
     const allowed = ['version', 'pageId', 'snapshotId', 'revision', 'target', 'kind', ...({ click: [], fill: ['value'], select: ['values'], scroll: ['dx', 'dy'], key: ['key'] })[request.kind]];
     if (Object.keys(request).some(key => !allowed.includes(key))) return error('INVALID_ARGUMENT');
-    flush();
     if (!current || request.pageId !== pageId || request.snapshotId !== current.snapshotId ||
         request.revision !== current.revision || revision !== current.revision || location.href !== current.href) return error('STALE_SNAPSHOT');
     const record = records.get(request.target);
     if (!record) return error('TARGET_UNAVAILABLE');
     const el = record.el;
     if (!el.isConnected || el.ownerDocument !== record.document || !rendered(el)) return error('TARGET_UNAVAILABLE');
-    if (fingerprint(el) !== record.fingerprint) return error('TARGET_CHANGED');
+    if (fingerprint(el, isRegion(record.specialRole)) !== record.fingerprint) return error('TARGET_CHANGED');
     if (sensitive(el)) return error('SENSITIVE_TARGET');
     if (state(el).disabled) return error('TARGET_DISABLED');
     const finish = result => { current = null; records.clear(); invalidate(); return result; };
@@ -308,7 +304,7 @@
   }
   function snapshot(options) {
     try { return capture(options); }
-    catch { current = null; records.clear(); clearObservers(); return error('SNAPSHOT_UNAVAILABLE'); }
+    catch { current = null; records.clear(); clearListeners(); return error('SNAPSHOT_UNAVAILABLE'); }
   }
   function action(request) {
     try { return perform(request); }
