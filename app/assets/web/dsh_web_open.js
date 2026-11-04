@@ -357,7 +357,9 @@
     await sleep(400);
     var probe = text.trim().slice(0, 24);
     var landed = function () { return !probe || (editor.textContent || '').indexOf(probe) >= 0; };
-    if (text && !landed() && (editor.textContent || '') === before) {
+    var canFallback = !draft || draft.guardTextFallback !== true ||
+      (editor.isConnected && document.activeElement === editor);
+    if (text && !landed() && (editor.textContent || '') === before && canFallback) {
       // No paste handling for text: type it in instead.
       try { document.execCommand('insertText', false, text); } catch (e) {}
       await sleep(200);

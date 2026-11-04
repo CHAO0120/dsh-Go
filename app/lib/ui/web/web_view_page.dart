@@ -1310,6 +1310,7 @@ class DshWebLink {
       'files': [
         for (final f in files) {'name': f.name, 'type': ?f.type, 'data': f.base64},
       ],
+      if (!kIsWeb && defaultTargetPlatform == TargetPlatform.iOS) 'guardTextFallback': true,
     };
     try {
       await _send('window.__dshAppCompose && window.__dshAppCompose(${jsonEncode(draft)});');

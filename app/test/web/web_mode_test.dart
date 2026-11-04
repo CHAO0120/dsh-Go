@@ -358,6 +358,8 @@ void main() {
         _page.post('DshAppCompose', jsonEncode({'text': true, 'files': 0, 'requestId': ?draft['requestId']}));
         await pumpFrames(tester, 2);
         expect(find.byType(SnackBar), findsNothing);
+        expect(draft.containsKey('guardTextFallback'), platform == TargetPlatform.iOS);
+        if (platform == TargetPlatform.iOS) expect(draft['guardTextFallback'], isTrue);
       } finally {
         await tester.pumpWidget(const SizedBox());
         await tester.pump(const Duration(milliseconds: 500));
