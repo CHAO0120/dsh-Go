@@ -183,7 +183,9 @@
       records.set(id, { el, fingerprint: fingerprint(el), document: el.ownerDocument, specialRole, options });
     }
     function text(value) {
-      const piece = bounded(value, 2000);
+      const chars = Array.from(String(value ?? '').replace(/\s+/gu, ' ').trim());
+      const piece = chars.slice(0, 2000).join('');
+      if (chars.length > 2000) result.truncated = true;
       if (!piece) return;
       const before = result.text;
       result.text += (before ? '\n' : '') + piece;
