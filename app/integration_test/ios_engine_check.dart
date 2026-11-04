@@ -1,7 +1,8 @@
 // A build target of its own (flutter build ios -t), run on the Simulator by
 // tooling/ios/engine-smoke/app-check.mjs: drives the engine through the real channels of
 // the real app bundle, which the smoke test beside it can't, since that one has no app.
-// Results go to DSH_APP_CHECK_URL. They never include the token.
+// Results go to a file in the app's temporary directory, which the Simulator shares with the
+// Mac. They never include the token.
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -12,20 +13,11 @@ import 'package:flutter/widgets.dart';
 const _runtime = MethodChannel('dsh/runtime');
 const _events = EventChannel('dsh/runtime/events');
 
-final _url = Uri.parse(Platform.environment['DSH_APP_CHECK_URL'] ?? 'http://127.0.0.1:9');
+final _reports = File('${Directory.systemTemp.path}/dsh-app-check.jsonl');
 final _client = HttpClient();
 
-Future<void> _report(String step, Map<String, Object?> data) async {
-  try {
-    final request = await _client.postUrl(_url);
-    request.headers.contentType = ContentType.json;
-    request.write(jsonEncode({'step': step, ...data}));
-    await (await request.close()).drain<void>();
-  } catch (error) {
-    // The other side times out, and reads this from the app's output.
-    stderr.writeln('report "$step" failed: $error');
-  }
-}
+Future<void> _report(String step, Map<String, Object?> data) =>
+    _reports.writeAsString('${jsonEncode({'step': step, ...data})}\n', mode: FileMode.append, flush: true);
 
 /// A channel that never answers has to end in a report, not in a check that waits forever.
 Future<T> _answer<T>(String method, Future<T> call, [Duration limit = const Duration(seconds: 90)]) =>
@@ -147,7 +139,7 @@ Future<void> _check() async {
 
 Future<void> main() async {
   // First, so that silence later can't be mistaken for Dart never having run.
-  await _report('main', {'url': Platform.environment.containsKey('DSH_APP_CHECK_URL')});
+  await _report('main', {});
   WidgetsFlutterBinding.ensureInitialized();
   runApp(const SizedBox.shrink());
   try {

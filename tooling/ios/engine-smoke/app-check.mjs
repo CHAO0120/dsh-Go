@@ -8,9 +8,7 @@
 // Failures become annotations, which can be read without signing in to GitHub. So does a
 // small copy of the screenshot, since the artifact can't be.
 import { execFileSync } from 'node:child_process';
-import { once } from 'node:events';
-import { existsSync, mkdtempSync, readdirSync, readFileSync, statSync } from 'node:fs';
-import http from 'node:http';
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { parseArgs } from 'node:util';
@@ -164,35 +162,34 @@ if (values.mode === 'launch') {
   process.exit(passed ? 0 : 1);
 }
 
-const steps = [];
-let lastStepAt = Date.now();
-let finish;
-const finished = new Promise((done) => { finish = done; });
-const server = http.createServer(async (request, response) => {
-  const chunks = [];
-  for await (const chunk of request) chunks.push(chunk);
-  response.end('ok');
-  const step = JSON.parse(Buffer.concat(chunks).toString('utf8'));
-  steps.push(step);
-  lastStepAt = Date.now();
-  console.log(JSON.stringify(step));
-  if (step.step === 'done' || step.step === 'failed') finish(step);
-});
-server.listen(0, '127.0.0.1');
-await once(server, 'listening');
-
-const pid = launch({ SIMCTL_CHILD_DSH_APP_CHECK_URL: `http://127.0.0.1:${server.address().port}/` });
+// The app writes one JSON line per step, into a container an earlier build may have used.
+const reports = join(simctl('get_app_container', values.simulator, bundleId, 'data').trim(), 'tmp', 'dsh-app-check.jsonl');
+rmSync(reports, { force: true });
+const pid = launch();
 console.log(`launched as ${pid}`);
 
-// The app's own limits are shorter, so this only ends a check that nothing else will.
-const watchdog = setInterval(() => {
+const steps = [];
+let lastStepAt = Date.now();
+let last = null;
+while (!last) {
+  await new Promise((done) => setTimeout(done, 1000));
+  const text = existsSync(reports) ? readFileSync(reports, 'utf8') : '';
+  // Only whole lines: the last one may still be being written.
+  const lines = text.slice(0, text.lastIndexOf('\n') + 1).split('\n').filter(Boolean);
+  for (const line of lines.slice(steps.length)) {
+    const step = JSON.parse(line);
+    steps.push(step);
+    lastStepAt = Date.now();
+    console.log(line);
+    if (step.step === 'done' || step.step === 'failed') last = step;
+  }
+  // The app's own limits are shorter, so these only end a check that nothing else will.
   const quiet = Date.now() - lastStepAt;
-  if (steps.length === 0 && quiet > 3 * 60 * 1000) finish({ step: 'failed', error: 'the app reported nothing within 3 minutes' });
-  if (quiet > 12 * 60 * 1000) finish({ step: 'failed', error: 'no further result from the app within 12 minutes' });
-}, 5000);
-const last = await finished;
-clearInterval(watchdog);
-server.close();
+  if (last) break;
+  if (!isAlive(pid)) last = { step: 'failed', error: 'the app exited before finishing' };
+  else if (steps.length === 0 && quiet > 3 * 60 * 1000) last = { step: 'failed', error: 'the app reported nothing within 3 minutes' };
+  else if (quiet > 12 * 60 * 1000) last = { step: 'failed', error: 'no further result from the app within 12 minutes' };
+}
 
 const summary = steps.filter((step) => step.step !== 'failed').map((step) => JSON.stringify(step)).join('\n');
 const problem = last.step === 'done' ? engineProblem(steps) : `${last.error ?? ''} ${last.stack ?? ''}`;
