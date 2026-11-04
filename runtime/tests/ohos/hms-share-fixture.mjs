@@ -184,7 +184,7 @@ export async function shareFixture(t, options = {}) {
         }
         if (name.startsWith('.')) {
           if (path.endsWith('EntryAbility.ets') && !name.includes('HmsShare')) {
-            return { default: class {}, GeneratedPluginRegistrant: { registerWith() {} }, RuntimePlugin: class {} };
+            return { default: class { static receive() { return false; } }, GeneratedPluginRegistrant: { registerWith() {} }, RuntimePlugin: class {} };
           }
           return load(resolve(dirname(path), name + '.ets'));
         }
@@ -195,6 +195,10 @@ export async function shareFixture(t, options = {}) {
   }
   const pluginPath = resolve(repo, 'app/ohos/entry/src/main/ets/plugins/HmsSharePlugin.ets');
   const Plugin = load(pluginPath).default;
+  // RuntimeController owns this gate in the app, and the fixture has no reset to wait for.
+  load(resolve(repo, 'app/ohos/entry/src/main/ets/runtime/NativeHost.ets')).configureNativeRecovery({
+    prepare: async () => {}, check() {}, begin: async () => 'load', finish: async () => {},
+  });
   const { HmsShareInbox: inbox } = load(resolve(dirname(pluginPath), 'HmsShareInbox.ets'));
   const policy = load(resolve(dirname(pluginPath), 'HmsSharePolicy.ets'));
   const entry = load(resolve(repo, 'app/ohos/entry/src/main/ets/entryability/EntryAbility.ets')).default;
