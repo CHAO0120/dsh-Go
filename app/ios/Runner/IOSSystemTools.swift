@@ -400,8 +400,17 @@ final class IOSSystemTools: NSObject, PHPickerViewControllerDelegate, CLLocation
     forgetExpired()
     try FileManager.default.createDirectory(at: scratch, withIntermediateDirectories: true)
     var items: [[String: Any]] = []
-    for result in results {
-      items.append(try await keep(result, session: request.owner.sessionId, current: current))
+    do {
+      for result in results {
+        items.append(try await keep(result, session: request.owner.sessionId, current: current))
+      }
+    } catch {
+      // No handles from this call were delivered. Keep earlier successful calls intact.
+      for item in items {
+        guard let handle = item["handle"] as? String, let image = picked.removeValue(forKey: handle) else { continue }
+        try? FileManager.default.removeItem(at: image.file)
+      }
+      throw error
     }
     return ["items": items]
   }
