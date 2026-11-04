@@ -108,3 +108,10 @@ test('public eligibility query distinguishes prerequisite denial from unsupporte
   assert.equal(backgroundComputePermission(42), 'unknown');
   reset(); permission.status = 999; assert.equal(backgroundComputePermission(42), 'unknown'); assert.equal(permission.modes, 0);
 });
+
+test('native acknowledgement callback failure is consumed and reported', async () => {
+  const transport = { cancel() {}, async send() { return {nativeHost:null,busy:false,manualPaused:false,confirmedPause:true}; } };
+  const model = new RuntimeLifecycle(transport, () => 'unknown', () => {}, () => { throw Error('native unavailable'); });
+  models.push(model); start(model); await flush();
+  assert.equal(model.failureCode(), 'ohos_lifecycle_native');
+});

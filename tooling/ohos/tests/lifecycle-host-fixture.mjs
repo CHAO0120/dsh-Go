@@ -43,7 +43,7 @@ export async function loadHostModules(sourceOverride) {
   const source = sourceOverride ?? path.join(repo, 'app/ohos/entry/src/main/ets/runtime');
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'dsh-lifecycle-host-'));
   const fixture = import.meta.url;
-  const model = await fs.readFile(path.join(source, 'RuntimeLifecycle.ets'), 'utf8');
+  const model = (await fs.readFile(path.join(source, 'RuntimeLifecycle.ets'), 'utf8')).replace(/import type[^\n]+libdsh_host.so[^\n]+\n/, '');
   await fs.writeFile(path.join(directory, 'RuntimeLifecycle.mts'),
     `import { testSetTimeout as setTimeout, testClearTimeout as clearTimeout } from '${fixture}';\n` + model);
   const permissionSource = (await fs.readFile(path.join(source, 'BackgroundCompute.ets'), 'utf8'))

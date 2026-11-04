@@ -1,9 +1,10 @@
 export const native = {
   state: { phase: 'idle', consumed: false, baseUrl: null, token: null, exitCode: null, errorCode: null, errorMessage: null },
-  events: [], starts: [], stops: 0, afterDrain: null,
+  events: [], starts: [], stops: 0, afterDrain: null, lifecycleWrites: [],
   reset() {
     this.state = { phase: 'idle', consumed: false, baseUrl: null, token: null, exitCode: null, errorCode: null, errorMessage: null };
-    this.events = []; this.starts = []; this.stops = 0; this.afterDrain = null;
+    this.events = []; this.starts = []; this.stops = 0; this.afterDrain = null; this.lifecycleWrites = [];
+    Object.assign(hostLifecycle,{ownerGeneration:0,revision:1,available:0,foreground:0,phase:0});
   },
 };
 export function getState() { return { ...native.state }; }
@@ -39,7 +40,19 @@ export class EventChannel {
 }
 
 // Actual Ark dynamic import exposes Native exports under default.
-export default { start, stop, getState, drainEvents };
+const hostLifecycle={version:1,engineGeneration:1,ownerGeneration:0,revision:1,grantGeneration:0,nowMs:10000,deadlineMs:0,drainAtMs:0,phase:0,available:0,foreground:0,clockFailed:0};
+export function lifecycleSnapshot(){return {...hostLifecycle};}
+export function lifecycleUpdate(operation,owner,grant,value){
+  native.lifecycleWrites.push({operation,owner,grant,value});
+  if(operation==='owner'){hostLifecycle.ownerGeneration++;hostLifecycle.foreground=value;hostLifecycle.available=1;hostLifecycle.revision++;return hostLifecycle.ownerGeneration;}
+  if(owner!==hostLifecycle.ownerGeneration)return 0;
+  if(operation==='foreground'){hostLifecycle.foreground=value;hostLifecycle.phase=4;hostLifecycle.revision++;return 1;}
+  if(operation==='retire'){hostLifecycle.available=0;hostLifecycle.phase=4;hostLifecycle.revision++;return 1;}
+  if(operation==='release'){hostLifecycle.phase=4;hostLifecycle.revision++;return 1;}
+  return 0;
+}
+export const backgroundTaskManager={requestSuspendDelay(){throw Error('runtime fixture grants no OS task');},cancelSuspendDelay(){}};
+export default { start, stop, getState, drainEvents, lifecycleSnapshot, lifecycleUpdate };
 
 export let nativeModuleLoads = 0;
 export function markNativeLoad() { nativeModuleLoads++; }
@@ -54,6 +67,7 @@ export class OhosLifecycleTransport {
   async send(baseUrl, token, observation) {
     lifecycleControl.sends.push({ baseUrl, token, observation });
     if (lifecycleControl.failure) throw lifecycleControl.failure;
+    return {nativeHost:lifecycleSnapshot(),busy:false,manualPaused:false,confirmedPause:hostLifecycle.foreground===0};
   }
   cancel() { lifecycleControl.cancels++; }
 }

@@ -49,7 +49,7 @@ for (const enabled of [false, true]) test(`actual LocalBashExecutor BASH_TIMEOUT
   assert.equal(clock.pendingCount, 0);
   if (enabled) {
     assert(performance.now() - start > 80);
-    assert.equal(result.stdout.text, 'complete'); assert.equal(result.exitCode, 0);
+    assert.equal(result.stdout.text, 'complete', JSON.stringify(result)); assert.equal(result.exitCode, 0);
     assert.equal(await fs.readFile(join(work, 'marker'), 'utf8'), 'complete');
   } else assert.equal(await fs.stat(join(work, 'marker')).then(() => true, () => false), false);
 });

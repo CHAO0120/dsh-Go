@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { createToolResultMessage } from '@deepseek-ai/dsh-llm';
 import { ActiveBudgetClock } from './budget.mjs';
+import { readNativeHost, validateHostSnapshot, nativeAllows } from './native-host.mjs';
 import { snapshot } from './journal.mjs';
 import { setImmediate as nextIoTurn } from 'node:timers/promises';
 
@@ -40,7 +41,6 @@ export class BoundaryCoordinator {
   #gate;
   #controlTail = Promise.resolve();
   #controlVersion = 0;
-  #host;
   #hostControl;
   #closing = false;
   #fault;
@@ -50,9 +50,16 @@ export class BoundaryCoordinator {
   #lastPause = false;
   #manualPaused = false;
   #lastManualPaused = false;
+  #readHost;
+  #nativeHost;
+  #nativeFailure;
+  #nativeTimer;
+  #admissionTarget = true;
   constructor({ journal, bootId, flushSession, readEvents, resolveAgent = () => undefined,
-    revalidateTransport = async () => {}, onStage = () => {} }) {
+    revalidateTransport = async () => {}, onStage = () => {}, readHost = readNativeHost, hasActiveRounds = () => false }) {
     if (!journal || !knownString(bootId) || typeof flushSession !== 'function' || typeof readEvents !== 'function') throw new TypeError('Lifecycle requires durable session adapters and boot identity');
+    this.#readHost = readHost;
+    this.hasActiveRounds = hasActiveRounds;
     this.#journal = journal;
     this.bootId = bootId;
     this.clock = new ActiveBudgetClock(bootId);
@@ -64,7 +71,13 @@ export class BoundaryCoordinator {
     try { for (const record of journal.records) this.#fold(record.body); }
     catch (error) { this.#fault = error; }
     this.#manualPaused = this.#lastManualPaused;
-    if (this.#lastPause) { this.#gate = Promise.withResolvers(); this.clock.pause(); }
+    if (this.#lastPause) { this.#gate = Promise.withResolvers(); this.clock.pause(); this.#admissionTarget = false; }
+    const poll = () => {
+      if (this.#closing) return;
+      this.#refreshNative();
+      this.#nativeTimer = setTimeout(poll, 250); this.#nativeTimer.unref?.();
+    };
+    this.#nativeTimer = setTimeout(poll, 250); this.#nativeTimer.unref?.();
   }
   get protocolVersion() { return 1; }
   #fold(body) {
@@ -147,9 +160,30 @@ export class BoundaryCoordinator {
       && (row.reconciliation?.blocking === true || row.phase !== 'committed')
       && !this.#pending.has(keyOf(row.identity)) && row.reconciliation?.blocking !== false);
   }
+  #refreshNative() {
+    try { this.#nativeHost = validateHostSnapshot(this.#readHost()); this.#nativeFailure = undefined; }
+    catch { this.#nativeHost = undefined; this.#nativeFailure = 'ERR_OHOS_LIFECYCLE_NATIVE'; }
+    const desired = !this.#manualPaused && nativeAllows(this.#nativeHost);
+    if (desired !== this.#admissionTarget) {
+      this.#admissionTarget = desired;
+      this.#hostControl = desired ? this.#resume() : this.#pause();
+      // Polling has no request caller to consume failure; #controlTail retains the fault.
+      this.#hostControl.catch(() => {});
+    }
+    return desired;
+  }
+  // Call after the caller's final await, then dispatch/claim synchronously.
+  admit(sessionId, signal) {
+    this.#check(); signal?.throwIfAborted();
+    if (this.#cancelling.has(sessionId)) throw fail('ERR_OHOS_LIFECYCLE_CANCELLED', 'Session cancellation has not finished joining');
+    if (this.#cancelled.has(sessionId) && [...this.#pending.keys()].some(key => JSON.parse(key)[0] === sessionId)) throw fail('ERR_OHOS_LIFECYCLE_CANCELLED', 'Session cancellation invalidated this admission');
+    if (this.#blocked.has(sessionId) || this.#unresolved(sessionId).length) throw fail('ERR_OHOS_LIFECYCLE_RESULT_UNKNOWN', 'Previous tool results require reconciliation');
+    return this.#refreshNative() && !this.#gate;
+  }
   async gate(sessionId, signal) {
     for (;;) {
       this.#check(); signal?.throwIfAborted();
+      this.#refreshNative();
       // Joining cancellation is an independent live admission boundary. The
       // historical cancelled flag also changes when older records are folded.
       if (this.#cancelling.has(sessionId)) throw fail('ERR_OHOS_LIFECYCLE_CANCELLED', 'Session cancellation has not finished joining');
@@ -197,7 +231,8 @@ export class BoundaryCoordinator {
     const settled = Promise.withResolvers();
     this.#active.set(key, settled.promise);
     try {
-      await this.gate(meta.session.id, meta.signal);
+      do { await this.gate(meta.session.id, meta.signal); }
+      while (!this.admit(meta.session.id, meta.signal));
       const outcome = await this.withinCall(meta, dispatch);
       await this.#record({ kind: 'returned', bootId: this.bootId, identity: row.identity,
         needsPost: outcome.kind === 'post-result' }, outcome.result);
@@ -333,24 +368,25 @@ export class BoundaryCoordinator {
   }
   observeHost(observation) {
     this.#check();
-    // A cancelled HTTP request may already be executing. An older foreground
-    // observation cannot reopen the gate after a newer background observation.
-    if (this.#host && observation.revision <= this.#host.revision) return this.#hostControl.then(() => this.status());
-    this.#host = { ...observation };
-    this.#hostControl = observation.foreground && !this.#manualPaused ? this.#resume() : this.#pause();
-    return this.#hostControl.then(() => this.status());
+    // This authenticated HTTP call is only a wake-up/correlation hint. Neither
+    // its foreground flag nor its revision is authority over native facts.
+    this.#refreshNative();
+    return Promise.resolve(this.#hostControl).then(() => this.status());
   }
   pause() {
     this.#check();
-    this.#manualPaused = true;
+    this.#manualPaused = true; this.#admissionTarget = false;
     return this.#pause();
   }
   resume() {
     this.#check();
     this.#manualPaused = false;
-    // An explicit resume releases only its own cause. Background still owns
-    // admission, and this durable pause records the released manual cause.
-    return this.#host?.foreground === false ? this.#pause() : this.#resume();
+    // Record releasing the manual cause even while native admission stays closed.
+    if (!this.#refreshNative()) {
+      this.#admissionTarget = false;
+      this.#hostControl = this.#pause();
+    }
+    return Promise.resolve(this.#hostControl).then(() => this.status());
   }
   #pause() {
     const version = ++this.#controlVersion;
@@ -430,11 +466,13 @@ export class BoundaryCoordinator {
     const state = blocked || unknown || (sessionId !== undefined && this.#blocked.has(sessionId)) ? 'result-unknown'
       : cancelled ? this.#cancelling.has(sessionId) || calls.some(row => row.active) ? 'cancelling' : 'terminated'
         : this.#gate ? 'paused' : calls.some(row => row.active) || (sessionId !== undefined && this.resolveAgent(sessionId)?.status === 'running') ? 'running' : calls.length ? 'completed' : 'running';
-    return { v: 1, bootId: this.bootId, state, closed: this.#closing, paused: !!this.#gate, confirmedPause: this.clock.paused,
-      manualPaused: this.#manualPaused,
+    return { v: 1, bootId: this.bootId, state, nativeHost: this.#nativeHost ?? null, nativeFailure: this.#nativeFailure ?? null, closed: this.#closing, paused: !!this.#gate, confirmedPause: this.clock.paused,
+      manualPaused: this.#manualPaused, busy: this.#pending.size > 0 || this.hasActiveRounds() === true,
       blocked: !!blocked, corruption: this.#journal.corruption, controlVersion: this.#controlVersion,
       activeBudgetCount: this.clock.pendingCount, calls,
-      ...(this.#host === undefined ? {} : { host: { ...this.#host } }) };
+      host: { revision: this.#nativeHost?.revision ?? 0,
+        foreground: this.#nativeHost?.available === 1 && this.#nativeHost?.foreground === 1,
+        computePermission: 'unknown' } };
   }
   async result(sessionId, callSeq) {
     const row = this.#rows.get(keyOf({ sessionId, callSeq }));
@@ -445,6 +483,7 @@ export class BoundaryCoordinator {
       ...(row.outcome ? { sessionData: saved.sessionData, resources: saved.resources ?? [] } : {}) };
   }
   async close() {
+    clearTimeout(this.#nativeTimer);
     this.#closing = true;
     const gate = this.#gate; this.#gate = undefined; gate?.resolve();
     const agents = new Set([...this.#pending.keys()].map(key => this.resolveAgent(JSON.parse(key)[0])).filter(Boolean));

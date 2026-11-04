@@ -5,7 +5,8 @@ import { dirname, join, resolve } from 'node:path';
 import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
 import { openBoundaryJournal } from '../../ohos/lifecycle/journal.mjs';
-import { BoundaryCoordinator, lifecycleSymbol } from '../../ohos/lifecycle/coordinator.mjs';
+import { lifecycleSymbol } from '../../ohos/lifecycle/coordinator.mjs';
+const { BoundaryCoordinator } = await import(process.env.DSH_BACKGROUND_COORDINATOR_BEFORE ?? new URL('../../ohos/lifecycle/coordinator.mjs', import.meta.url));
 
 const prefix = resolve(process.env.DSH_LIFECYCLE_TEST_PREFIX);
 const require = createRequire(join(prefix, 'package.json'));
@@ -34,8 +35,11 @@ export async function loadActualScheduler({ sourcePath, beforeResultAppend = '' 
   finally { await fs.unlink(exported); }
 }
 
+// Unit/engine fixture injects a trusted foreground snapshot explicitly. The
+// product DSO integration separately exercises the unmodified native default.
 export async function engineFixture({ root, bootId = randomUUID(), journalOptions, onStage, existing = false,
-  sourcePath, beforeResultAppend, useLifecycle = true, flushSession, revalidateTransport } = {}) {
+  sourcePath, beforeResultAppend, useLifecycle = true, flushSession, revalidateTransport, readHost = () => ({ version: 1, engineGeneration: 1, ownerGeneration: 1, revision: 1,
+    grantGeneration: 0, nowMs: 1000, deadlineMs: 0, drainAtMs: 0, phase: 0, available: 1, foreground: 1, clockFailed: 0 }) } = {}) {
   assert(root);
   await fs.mkdir(join(root, 'workspace'), { recursive: true });
   const ctx = new Context();
@@ -58,7 +62,7 @@ export async function engineFixture({ root, bootId = randomUUID(), journalOption
     lockExclusive: process._linkedBinding('dsh_ohos_publication').lockExclusive, ...journalOptions });
   const coordinator = new BoundaryCoordinator({ journal, bootId,
     flushSession: flushSession ?? (session => ctx.sessions.flush(session)), readEvents,
-    resolveAgent: id => owners.get(id), onStage, revalidateTransport });
+    resolveAgent: id => owners.get(id), onStage, revalidateTransport, readHost });
   if (useLifecycle) {
     assert.equal(globalThis[lifecycleSymbol], undefined);
     globalThis[lifecycleSymbol] = coordinator;

@@ -11,7 +11,8 @@ import { OhosRuntimeStorage } from './OhosRuntimeStorage';
 import { RuntimePaths } from './RuntimePaths';
 import { ManagedSkillService, ManagedSkillScope } from './ManagedSkillService';
 import { PersistedRuntimeLog } from './PersistedRuntimeLog';
-import { RuntimeLifecycle } from './RuntimeLifecycle';
+import { TransientTaskOwner } from './TransientTaskOwner';
+import { RuntimeLifecycle, HostLifecycleAck } from './RuntimeLifecycle';
 import { OhosLifecycleTransport } from './OhosLifecycleTransport';
 import { backgroundComputePermission } from './BackgroundCompute';
 
@@ -30,6 +31,10 @@ export class RuntimeController {
   private logs: RuntimeLogs = new RuntimeLogs();
   private persistedLogs: PersistedRuntimeLog;
   private lifecycle: RuntimeLifecycle;
+  private taskOwner: TransientTaskOwner | null = null;
+  private retiredOwners: TransientTaskOwner[] = [];
+  private ownerAbility: UIAbility | null = null;
+  private lifecycleTicks: number = 0;
   private lastLifecycleError: string | null = null;
   private sinks: RuntimeSink[] = [];
   private initialized: Promise<void> | null = null;
@@ -52,18 +57,21 @@ export class RuntimeController {
 
   static onForeground(ability: UIAbility): void {
     RuntimeController.ability = ability; RuntimeController.foreground = true;
-    RuntimeController.shared?.lifecycle.observe(true);
+    RuntimeController.shared?.abilityForeground(ability);
   }
 
   static onBackground(ability: UIAbility): void {
     if (RuntimeController.ability !== ability) return;
     RuntimeController.foreground = false;
+    RuntimeController.shared?.taskOwner?.observe(false);
     RuntimeController.shared?.lifecycle.observe(false);
   }
 
   static onDestroy(ability: UIAbility): void {
-    RuntimeController.onBackground(ability);
-    if (RuntimeController.ability === ability) RuntimeController.ability = null;
+    if (RuntimeController.ability !== ability) return;
+    RuntimeController.foreground = false; RuntimeController.ability = null;
+    RuntimeController.shared?.retireOwner();
+    RuntimeController.shared?.lifecycle.observe(false);
   }
 
   constructor(context: common.Context) {
@@ -71,7 +79,8 @@ export class RuntimeController {
     this.persistedLogs = PersistedRuntimeLog.get(context.filesDir);
     this.lifecycle = new RuntimeLifecycle(new OhosLifecycleTransport(),
       (): string => backgroundComputePermission(context.applicationInfo.accessTokenId),
-      (): void => this.lifecycleChanged());
+      (): void => this.lifecycleChanged(),
+      (ack: HostLifecycleAck): void => this.taskOwner?.acknowledge(ack));
     this.lifecycle.observe(RuntimeController.foreground);
     this.paths = new RuntimePaths(context.filesDir);
     this.runtimeGeneration = nativeHostState().consumed ? 1 : 0;
@@ -83,6 +92,30 @@ export class RuntimeController {
     this.storage = new OhosRuntimeStorage(context.resourceManager, context.filesDir);
     this.installer = new RuntimeInstaller(this.storage, context.filesDir + '/dsh-runtime');
     this.startPolling();
+  }
+
+  private abilityForeground(ability: UIAbility): void {
+    if (this.ownerAbility !== ability) this.bindOwner();
+    this.taskOwner?.observe(true);
+    this.lifecycle.observe(true);
+  }
+
+  private bindOwner(): void {
+    this.retireOwner();
+    const host = peekNativeHost();
+    if (host === null || RuntimeController.ability === null ||
+        !['starting', 'running'].includes(host.getState().phase)) return;
+    this.ownerAbility = RuntimeController.ability;
+    this.taskOwner = new TransientTaskOwner(host, RuntimeController.foreground,
+      (): void => this.lifecycle.observe(RuntimeController.foreground));
+  }
+
+  private retireOwner(): void {
+    if (this.taskOwner !== null) {
+      this.taskOwner.retire();
+      if (this.taskOwner.cleanupPending()) this.retiredOwners.push(this.taskOwner);
+    }
+    this.taskOwner = null; this.ownerAbility = null;
   }
 
   initialize(): Promise<void> {
@@ -139,7 +172,10 @@ export class RuntimeController {
       ['directEngineEnabled', false], ['directEngineAvailable', false], ['directEngineActive', false],
       ['directEngineFallbackReason', null], ['currentExecutionMode', active ? 'ohos-embedded' : null],
       ['launchSelectedMode', native.consumed ? 'ohos-embedded' : null], ['launchSpawned', native.consumed],
-      ['launchFailureReason', failure], ['tidyingFiles', false], ['lifecycle', this.lifecycle.status()]
+      ['launchFailureReason', failure], ['tidyingFiles', false], ['lifecycle', this.lifecycle.status()],
+      ['transientTask', this.taskOwner?.status() ?? null],
+      ['transientCleanup', this.retiredOwners.filter((owner: TransientTaskOwner): boolean => owner.cleanupPending())
+        .map((owner: TransientTaskOwner): Map<string, Object | null> => owner.status())]
     ]);
   }
 
@@ -180,9 +216,12 @@ export class RuntimeController {
 
   collect(): void {
     const state = nativeHostState();
+    this.retiredOwners = this.retiredOwners.filter((owner: TransientTaskOwner): boolean => owner.cleanupPending());
     const finished = (state.phase === 'exited' || state.phase === 'error') && this.lastNative?.phase !== state.phase;
     this.lifecycle.runtime(state.phase === 'running' && !this.requestedStop ? state.baseUrl : null,
       state.phase === 'running' && !this.requestedStop ? state.token : null);
+    if (finished) this.retireOwner();
+    if (++this.lifecycleTicks >= 10) { this.lifecycleTicks = 0; this.lifecycle.refresh(); }
     this.syncManagedSkills(state);
     if (state.token !== null) this.logs.rememberSecret(state.token);
     const batch: RuntimeLogEntry[] = [];
@@ -277,6 +316,7 @@ export class RuntimeController {
       const host = await loadNativeHost();
       if (this.startCancelled) throw new RuntimeChannelError('ohos_start_cancelled', '启动已取消。');
       host.start(options);
+      this.bindOwner();
       this.startPolling();
     } catch (error) {
       if (!(error instanceof RuntimeChannelError && error.code === 'ohos_start_cancelled')) {
@@ -291,6 +331,7 @@ export class RuntimeController {
   stop(): void {
     if (this.pending === 'start') this.startCancelled = true;
     this.requestedStop = true;
+    this.retireOwner();
     this.lifecycle.runtime(null, null);
     this.managedSkills.stop(this.runtimeGeneration);
     const state = nativeHostState();

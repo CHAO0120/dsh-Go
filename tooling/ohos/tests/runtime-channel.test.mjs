@@ -100,11 +100,18 @@ controllerText = controllerText.replace("import common from '@ohos.app.ability.c
   .replace("from './NativeHost'", "from './NativeHost.mts'")
   .replace("from './PersistedRuntimeLog'", "from './PersistedRuntimeLog.mts'")
   .replace("from './RuntimePaths'", "from './RuntimePaths.mts'")
+  .replace("RuntimeLifecycle, HostLifecycleAck", "RuntimeLifecycle, type HostLifecycleAck")
   .replace("from './RuntimeLifecycle'", "from './RuntimeLifecycle.mts'")
+  .replace("from './TransientTaskOwner'", "from './TransientTaskOwner.mts'")
   .replace("from './OhosLifecycleTransport'", `from '${hostFixtureUrl}'`)
   .replace("from './BackgroundCompute'", `from '${hostFixtureUrl}'`)
   .replace("from './ManagedSkillService'", "from './ManagedSkillService.mts'")
   .replace("from './OhosRuntimeStorage'", "from './OhosRuntimeStorage.mts'");
+let transientText = (await fs.readFile(path.join(source, 'TransientTaskOwner.ets'), 'utf8'))
+  .replace("import backgroundTaskManager from '@ohos.resourceschedule.backgroundTaskManager';", `import {backgroundTaskManager} from '${hostFixtureUrl}';`)
+  .replace("import { NativeHostModule } from './NativeHost';", '')
+  .replace("import { HostLifecycleAck } from './RuntimeLifecycle';", '');
+await fs.writeFile(path.join(temp, 'TransientTaskOwner.mts'), transientText);
 const controllerPath = path.join(temp, 'RuntimeController.mts');
 await fs.writeFile(controllerPath, controllerText);
 const { RuntimeController } = await import(pathToFileURL(controllerPath));
@@ -976,4 +983,22 @@ test('生命周期同步失败通过现有Dart可读error和notice事件暴露�
   } finally {
     lifecycleControl.failure = null; c.controller.unsubscribe(sink); c.controller.stop(); ability.onDestroy(); RuntimeController.shared = previous;
   }
+});
+
+test('真实Entry销毁只退休native owner，旧Ability销毁不撤新owner且不申请短时任务', async () => {
+  const c = await controllerCase('transient-owner-destroy');
+  const previous = RuntimeController.shared; RuntimeController.shared = c.controller;
+  const old = new EntryAbility(), current = new EntryAbility();
+  try {
+    native.state.phase = 'running'; native.state.baseUrl = 'http://127.0.0.1:3080'; native.state.token = 'owner-fixture';
+    old.onForeground(); const oldOwner = native.lifecycleWrites.findLast(row => row.operation === 'owner');
+    assert(oldOwner, 'actual foreground callback binds native owner');
+    current.onForeground(); const writes = native.lifecycleWrites.length;
+    old.onBackground(); old.onDestroy();
+    assert.equal(native.lifecycleWrites.length, writes, 'stale Ability cannot retire replacement');
+    current.onDestroy();
+    assert.equal(native.lifecycleWrites.at(-1).operation, 'retire');
+    assert.equal(native.lifecycleWrites.some(row => row.operation === 'begin'), false);
+    assert.equal(RuntimeController.ability, null);
+  } finally { c.controller.stop(); RuntimeController.shared = previous; }
 });

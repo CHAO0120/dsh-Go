@@ -5,6 +5,7 @@
 #include "file_access.h"
 #include <napi/native_api.h>
 #include <hilog/log.h>
+#include <cmath>
 
 extern "C" int dsh_node_start(int argc, char** argv);
 extern "C" int dsh_node_stop();
@@ -142,6 +143,44 @@ napi_value OpenUserFile(napi_env env, napi_callback_info info) {
   } catch (const std::exception& error) { return Throw(env, error); }
 }
 
+double SafeNumber(napi_env env, napi_value value) {
+  double number; Check(napi_get_value_double(env, value, &number));
+  if (!std::isfinite(number) || number < 0 || number > 9007199254740991.0 || std::floor(number) != number)
+    throw dsh::HostError("ERR_OHOS_HOST_ARGUMENT", "Lifecycle values must be safe nonnegative integers");
+  return number;
+}
+napi_value LifecycleUpdate(napi_env env, napi_callback_info info) {
+  try {
+    size_t count=4; napi_value args[4]; Check(napi_get_cb_info(env,info,&count,args,nullptr,nullptr));
+    if(count!=4) throw dsh::HostError("ERR_OHOS_HOST_ARGUMENT", "Lifecycle update needs four arguments");
+    const auto operation=String(env,args[0]); const auto owner=static_cast<uint64_t>(SafeNumber(env,args[1]));
+    const auto grant=static_cast<uint64_t>(SafeNumber(env,args[2])); const auto value=static_cast<int64_t>(SafeNumber(env,args[3]));
+    auto& state=Host().Lifecycle(); uint64_t answer=0;
+    if(operation=="owner" && value<=1 && owner==0 && grant==0) answer=state.BeginOwner(value==1);
+    else if(operation=="foreground" && value<=1) answer=state.Foreground(owner,value==1);
+    else if(operation=="begin") answer=state.BeginGrant(owner);
+    else if(operation=="activate") answer=state.Activate(owner,grant,value);
+    else if(operation=="drain") answer=state.Drain(owner,grant);
+    else if(operation=="release") answer=state.Release(owner,grant);
+    else if(operation=="retire") answer=state.Retire(owner);
+    else throw dsh::HostError("ERR_OHOS_HOST_ARGUMENT", "Unknown lifecycle update");
+    napi_value result;Check(napi_create_double(env,static_cast<double>(answer),&result));return result;
+  } catch(const std::exception& error) { return Throw(env,error); }
+}
+napi_value LifecycleSnapshot(napi_env env,napi_callback_info) {
+  try {
+    DshHostLifecycleSnapshotV1 data{};
+    if(Host().Lifecycle().Snapshot(&data,sizeof(data))!=0) throw dsh::HostError("ERR_OHOS_LIFECYCLE_NATIVE", "Lifecycle snapshot unavailable");
+    napi_value result;Check(napi_create_object(env,&result));
+    const auto put=[&](const char* key,double value){napi_value number;Check(napi_create_double(env,value,&number));Put(env,result,key,number);};
+    put("version",data.version);put("engineGeneration",data.engine_generation);put("ownerGeneration",data.owner_generation);
+    put("revision",data.revision);put("grantGeneration",data.grant_generation);put("nowMs",data.now_ms);
+    put("deadlineMs",data.deadline_ms);put("drainAtMs",data.drain_at_ms);put("phase",data.phase);
+    put("available",data.available);put("foreground",data.foreground);put("clockFailed",data.clock_failed);
+    return result;
+  } catch(const std::exception& error) { return Throw(env,error); }
+}
+
 napi_value Initialize(napi_env env, napi_value exports) {
   const napi_property_descriptor properties[] = {
     {"start", nullptr, Start, nullptr, nullptr, nullptr, napi_default, nullptr},
@@ -149,11 +188,20 @@ napi_value Initialize(napi_env env, napi_value exports) {
     {"getState", nullptr, GetState, nullptr, nullptr, nullptr, napi_default, nullptr},
     {"drainEvents", nullptr, Drain, nullptr, nullptr, nullptr, napi_default, nullptr},
     {"openUserFile", nullptr, OpenUserFile, nullptr, nullptr, nullptr, napi_default, nullptr},
+    {"lifecycleUpdate", nullptr, LifecycleUpdate, nullptr, nullptr, nullptr, napi_default, nullptr},
+    {"lifecycleSnapshot", nullptr, LifecycleSnapshot, nullptr, nullptr, nullptr, napi_default, nullptr},
   };
-  if (napi_define_properties(env, exports, 5, properties) != napi_ok) return nullptr;
+  if (napi_define_properties(env, exports, 7, properties) != napi_ok) return nullptr;
   return exports;
 }
 
 napi_module module = {1, 0, nullptr, Initialize, "dsh_host", nullptr, {nullptr, nullptr, nullptr, nullptr}};
 __attribute__((constructor)) void Register() { napi_module_register(&module); }
 }  // namespace
+
+// The only cross-DSO lifecycle entry is read-only. Ark NAPI owns all mutations.
+extern "C" __attribute__((visibility("default")))
+int dsh_host_lifecycle_snapshot_v1(DshHostLifecycleSnapshotV1* output,uint32_t size) noexcept {
+  try { return Host().Lifecycle().Snapshot(output,size); }
+  catch (...) { return -2; }
+}

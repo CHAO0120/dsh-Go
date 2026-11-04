@@ -685,6 +685,14 @@ def main():
             g.node_tests(name + '-' + mode, [rt + name + '.test.mjs'], mode=mode,
                          needs=('native-publication-build', 'compose'), extra=lambda m=mode: {**linked_env(),
                              'DSH_LIFECYCLE_TEST_PREFIX': str(payload() if m == 'strict' else prefix())}, timeout=240)
+    # The ETS fixtures are .mts: Node strips those with Wasm, which jitless doesn't have.
+    background = ['background-native-contract', 'background-admission', 'background-agent', 'background-owner-before', 'background-protocol']
+    for mode in ['marker', 'strict']:
+        for name in background:
+            g.node_tests(name + '-' + mode, [rt + name + '.test.mjs'], mode=mode, imports=['tooling/ohos/tests/ets-fixture-loader.mjs'] if mode == 'strict' else [],
+                         needs=('native-publication-build', 'prepared-inputs', 'android-targets'), extra=lambda: {**linked_env(), 'DSH_HOME': str(o / 'background-home'),
+                             'DSH_LIFECYCLE_TEST_PREFIX': str(prefix()), 'DSH_BACKGROUND_OLD_PREFIX': str(o / 'targets/candidate-prefix'),
+                             'NODE_PATH': str(p('android_pristine') / 'node_modules'), 'OHOS_ETS_FIXTURE_ARTIFACTS': str(o / 'ets-fixture-artifacts')}, timeout=240)
     for label in ('crash', 'freeze'):
         def lifecycle_command(label=label):
             values = g.py(rt + 'lifecycle-' + label + '-controller.py', '--node', node(), '--prefix', prefix(), '--linked', native() / 'libpublication-test-linked.so', '--native-library-dir', p('native_library_dir'), '--out', o / ('lifecycle-' + label))
@@ -712,7 +720,7 @@ def main():
     g.internal('dart-consumer-evidence', lambda _: verify_dart_consumers(o), needs=('diagnostics-dart', 'performance-dart'))
     channels = ['app-links-channel', 'connectivity-channel', 'notify-channel', 'files-media-channel']
     g.node_tests('ets-channels', [rt + n + '.test.mjs' for n in channels], needs=('native-opener-build',), extra=lambda: {'OHOS_USER_FILE_ADDON': str(o / 'user-file-access.node')}, timeout=240)
-    tooling = ['managed-skill', 'native-host-lazy', 'runtime-archive', 'runtime-channel', 'lifecycle-host', 'web-files']
+    tooling = ['managed-skill', 'native-host-lazy', 'runtime-archive', 'runtime-channel', 'lifecycle-host', 'web-files', 'transient-task']
     g.node_tests('ets-runtime-tooling', [tools + n + '.test.mjs' for n in tooling], needs=('native-zlib-build',), extra=lambda: {'OHOS_TEST_ZLIB_ADDON': str(o / 'zlib.node')}, timeout=240)
     for mode in ['plain', 'jitless']:
         g.node_tests('secrets-picker-' + mode, [rt + 'secrets.test.mjs', tools + 'attachment-files-channel.test.mjs'], mode=mode, needs=('tools',))

@@ -1,3 +1,4 @@
+import type { HostLifecycleSnapshot } from 'libdsh_host.so';
 // UI observations do not prove that the OS has frozen or granted CPU time.
 export interface HostLifecycleObservation {
   revision: number;
@@ -5,8 +6,15 @@ export interface HostLifecycleObservation {
   computePermission: string;
 }
 
+export interface HostLifecycleAck {
+  nativeHost: HostLifecycleSnapshot | null;
+  busy: boolean;
+  manualPaused: boolean;
+  confirmedPause: boolean;
+}
+
 export interface LifecycleTransport {
-  send(baseUrl: string, token: string, observation: HostLifecycleObservation): Promise<void>;
+  send(baseUrl: string, token: string, observation: HostLifecycleObservation): Promise<HostLifecycleAck>;
   cancel(): void;
 }
 
@@ -19,6 +27,7 @@ export class RuntimeLifecycle {
   private readonly transport: LifecycleTransport;
   private readonly permission: () => string;
   private readonly changed: () => void;
+  private readonly received: (ack: HostLifecycleAck) => void;
   private foreground: boolean = false;
   private revision: number = 1;
   private generation: number = 0;
@@ -31,8 +40,9 @@ export class RuntimeLifecycle {
   private retry: number | null = null;
   private retryDelay: number = 1000;
 
-  constructor(transport: LifecycleTransport, permission: () => string, changed: () => void = (): void => {}) {
-    this.transport = transport; this.permission = permission; this.changed = changed;
+  constructor(transport: LifecycleTransport, permission: () => string, changed: () => void = (): void => {},
+    received: (ack: HostLifecycleAck) => void = (_ack: HostLifecycleAck): void => {}) {
+    this.transport = transport; this.permission = permission; this.changed = changed; this.received = received;
   }
 
   observe(foreground: boolean): void {
@@ -48,6 +58,10 @@ export class RuntimeLifecycle {
     this.baseUrl = baseUrl; this.token = token; this.requested = -1; this.acknowledged = -1;
     this.failure = null; this.push();
     if (baseUrl === null) this.changed();
+  }
+
+  refresh(): void {
+    if (this.requested === this.acknowledged && this.failure === null) this.observe(this.foreground);
   }
 
   status(): Map<string, Object | null> {
@@ -72,9 +86,12 @@ export class RuntimeLifecycle {
       revision: revision, foreground: this.foreground, computePermission: this.permission()
     };
     this.requested = revision; this.transport.cancel();
-    this.transport.send(this.baseUrl, this.token, this.observation).then((): void => {
+    this.transport.send(this.baseUrl, this.token, this.observation).then((ack: HostLifecycleAck): void => {
       if (this.generation === generation && this.revision === revision) {
-        this.acknowledged = revision; this.failure = null; this.changed();
+        this.acknowledged = revision; this.failure = null;
+        try { this.received(ack); }
+        catch (_) { this.failure = 'ohos_lifecycle_native'; }
+        this.changed();
       }
     }, (error: Error): void => {
       if (this.generation === generation && this.revision === revision) {

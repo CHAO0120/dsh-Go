@@ -246,11 +246,12 @@ void Host::Start(HostOptions options, StartNode start_node, StopNode stop_node) 
       }
     }
   }
+  lifecycle_.BeginEngine();
   state_.phase = "starting";
   state_.consumed = true;
   stop_node_ = stop_node;
   try { engine_ = std::thread([this, options = std::move(options), start_node]() mutable { Run(std::move(options), start_node); }); }
-  catch (...) { state_.phase = "idle"; state_.consumed = false; stop_node_ = nullptr; secrets_.clear(); throw; }
+  catch (...) { lifecycle_.Stop(); state_.phase = "idle"; state_.consumed = false; stop_node_ = nullptr; secrets_.clear(); throw; }
 }
 
 void Host::Run(HostOptions options, StartNode start_node) {
@@ -309,6 +310,7 @@ void Host::Run(HostOptions options, StartNode start_node) {
       }
     }
     std::lock_guard<std::mutex> lock(mutex_);
+    lifecycle_.Stop();
     state_.phase = "exited";
     state_.exit_code = code;
     state_.base_url.clear(); state_.token.clear();
@@ -316,6 +318,7 @@ void Host::Run(HostOptions options, StartNode start_node) {
   } catch (const std::exception& error) {
     std::lock_guard<std::mutex> lock(mutex_);
     const auto* known = dynamic_cast<const HostError*>(&error);
+    lifecycle_.Stop();
     state_.phase = "error";
     state_.error_code = known ? known->code : "ERR_OHOS_HOST_START";
     state_.error_message = known ? error.what() : "The embedded runtime could not be started";
@@ -326,6 +329,7 @@ void Host::Run(HostOptions options, StartNode start_node) {
 }
 
 void Host::Stop() {
+  lifecycle_.Stop();
   std::lock_guard<std::mutex> lock(mutex_);
   if (state_.phase != "starting" && state_.phase != "running" && state_.phase != "stopping") return;
   stop_requested_ = true;

@@ -39,3 +39,12 @@ export const drainEvents: () => HostEvent[];
 
 // Ark supplies its trusted workspace/cache root. Caller owns and must close fd.
 export const openUserFile: (root: string, relative: string) => number;
+
+// Internal Ark bridge only; never expose these mutation methods on a Dart channel.
+export interface HostLifecycleSnapshot {
+  version: number; engineGeneration: number; ownerGeneration: number; revision: number;
+  grantGeneration: number; nowMs: number; deadlineMs: number; drainAtMs: number;
+  phase: number; available: number; foreground: number; clockFailed: number;
+}
+export const lifecycleUpdate: (operation: string, owner: number, grant: number, value: number) => number;
+export const lifecycleSnapshot: () => HostLifecycleSnapshot;

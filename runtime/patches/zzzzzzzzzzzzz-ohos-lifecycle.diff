@@ -1,10 +1,11 @@
 --- a/node_modules/@deepseek-ai/dsh-agent-loop/lib/index.js
 +++ b/node_modules/@deepseek-ai/dsh-agent-loop/lib/index.js
-@@ -503,6 +503,11 @@
+@@ -503,6 +503,12 @@
  * @param signal - abort signal shared by the step.
  * @param acceptContext - accepts committed result context for the next step boundary.
  */
 +const ohosLifecycleProtocol = 1;
++const ohosLifecycleAdmissionProtocol = 1;
 +function ohosLifecycle() {
 +	if (process.platform !== "openharmony" && globalThis[Symbol.for("dsh.go.ohos.sim")] !== true) return;
 +	return globalThis[Symbol.for("dsh.go.ohos.lifecycle")];
@@ -12,7 +13,7 @@
  async function executeToolCalls(ctx, turn, step, toolCalls, signal, acceptContext) {
  	const agent = ctx.agents.requireInitiator();
  	const { session } = agent;
-@@ -550,6 +555,8 @@
+@@ -550,6 +556,8 @@
  */
  async function runGroup(ctx, turn, step, group, mode, signal, acceptContext) {
  	const { session } = ctx.agents.requireInitiator();
@@ -21,7 +22,7 @@
  	const maxParallelToolCalls = ctx.agentLoop.config.maxParallelToolCalls.get();
  	const slots = group.map(() => void 0);
  	const callSeqs = group.map(() => void 0);
-@@ -567,23 +574,30 @@
+@@ -567,23 +575,32 @@
  			const slot = slots[committed];
  			if (slot === void 0) break;
  			const call = group[committed];
@@ -39,7 +40,9 @@
  	};
  	const inFlight = /* @__PURE__ */ new Map();
  	const startCall = async (index) => {
-+		if (lifecycle) await lifecycle.gate(session.id, signal);
++		if (lifecycle) {
++			do { await lifecycle.gate(session.id, signal); } while (!lifecycle.admit(session.id, signal));
++		}
  		const call = group[index];
  		callSeqs[index] = appendToolCall(session, turn, step, call.block);
  		started++;
@@ -56,7 +59,7 @@
  					slots[index] = {
  						exec: prepared.exec,
  						result: outcome.result,
-@@ -641,6 +655,7 @@
+@@ -641,6 +658,7 @@
  	} catch (error) {
  		schedulerFailure ??= { error };
  		await Promise.allSettled(inFlight.values());
@@ -64,7 +67,7 @@
  		throw schedulerFailure.error;
  	}
  	if (aborted) {
-@@ -688,7 +703,11 @@
+@@ -688,7 +706,11 @@
  	}).seq;
  }
  /** Append a model-ordered result linked to its call event. */
@@ -77,16 +80,18 @@
  	const message = createToolResultMessage({
  		callId: block.id,
  		content: result.content,
-@@ -909,6 +928,8 @@
+@@ -909,6 +931,10 @@
  		/* v8 ignore next -- private callers establish the running phase before proposing a step */
  		if (this.phase.kind !== "running") throw new Error(`agent "${this.id}": pre-step outside running phase`);
  		const signal = this.phase.abort.signal;
 +		const lifecycle = ohosLifecycle();
-+		if (lifecycle) await lifecycle.gate(this.session.id, signal);
++		if (lifecycle) {
++			do { await lifecycle.gate(this.session.id, signal); } while (!lifecycle.admit(this.session.id, signal));
++		}
  		const claimed = this.inbox.claim(target, position.turn);
  		const assembly = await this.loopCtx.systemPrompt.assemble(assembleContextFor(this, signal));
  		signal.throwIfAborted();
-@@ -2010,8 +2031,14 @@
+@@ -2010,8 +2036,14 @@
  					const coldRead = await handle.read(0, void 0, { signal: fused });
  					fused.throwIfAborted();
  					const persisted = coldRead.events;
@@ -102,12 +107,12 @@
  					preparation = SessionPreparation.create(this.runtime.ctx.sessions.prepare(id, {
  						seed: [...persisted, ...closers],
  						meta: structuredClone(handle.header),
-@@ -2041,4 +2068,4 @@
+@@ -2041,4 +2073,4 @@
  	}
  };
  //#endregion
 -export { AgentLoop, AgentLoop as default, CONFIGURED_AGENT_IDENTITIES_KEY, DEFAULT_MAX_PARALLEL_TOOL_CALLS, turnBoundaryProjectionDefinition };
-+export { ohosLifecycleProtocol, AgentLoop, AgentLoop as default, CONFIGURED_AGENT_IDENTITIES_KEY, DEFAULT_MAX_PARALLEL_TOOL_CALLS, turnBoundaryProjectionDefinition };
++export { ohosLifecycleAdmissionProtocol, ohosLifecycleProtocol, AgentLoop, AgentLoop as default, CONFIGURED_AGENT_IDENTITIES_KEY, DEFAULT_MAX_PARALLEL_TOOL_CALLS, turnBoundaryProjectionDefinition };
 --- a/node_modules/@deepseek-ai/dsh-timeout/lib/index.js
 +++ b/node_modules/@deepseek-ai/dsh-timeout/lib/index.js
 @@ -60,6 +60,8 @@

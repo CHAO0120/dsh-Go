@@ -1,4 +1,5 @@
 #include "publication_binding.h"
+#include "lifecycle_snapshot.h"
 #include "dsh_node_version.h"
 
 #include <node.h>
@@ -7,6 +8,10 @@
 #include <deviceinfo.h>
 
 #include <cerrno>
+#include <dlfcn.h>
+#include <cstdlib>
+#include <limits.h>
+#include <thread>
 #include <cmath>
 #include <cstring>
 #include <fcntl.h>
@@ -258,6 +263,46 @@ napi_value GetOwnershipMarker(napi_env env, napi_callback_info info) {
   return result;
 }
 
+struct LifecycleReader {
+  std::thread::id thread;
+  std::string library;
+  void* handle = nullptr;
+  DshReadHostLifecycleV1 read = nullptr;
+};
+LifecycleReader& HostReader() { static LifecycleReader reader; return reader; }
+
+napi_value GetHostLifecycleSnapshot(napi_env env, napi_callback_info) {
+  if (std::this_thread::get_id() != HostReader().thread) {
+    napi_throw_error(env,"ERR_OHOS_LIFECYCLE_MAIN_THREAD","Host lifecycle belongs to the main engine");return nullptr;
+  }
+  if (!HostReader().read && !HostReader().library.empty()) {
+    // Never load another owner. This must resolve the Ark module already hosting this engine.
+    void* handle=dlopen(HostReader().library.c_str(),RTLD_NOW|RTLD_NOLOAD|RTLD_LOCAL);
+    if(handle) {
+      auto read=reinterpret_cast<DshReadHostLifecycleV1>(dlsym(handle,"dsh_host_lifecycle_snapshot_v1"));
+      Dl_info info{};char actual[PATH_MAX];
+      if(read && dladdr(reinterpret_cast<void*>(read),&info) && info.dli_fname &&
+          realpath(info.dli_fname,actual) && HostReader().library==actual) {
+        HostReader().handle=handle;HostReader().read=read;
+      } else dlclose(handle);
+    }
+  }
+  DshHostLifecycleSnapshotV1 data{};
+  if(!HostReader().read || HostReader().read(&data,sizeof(data))!=0 || data.version!=1 || data.size!=sizeof(data) ||
+      data.engine_generation>9007199254740991ULL || data.owner_generation>9007199254740991ULL ||
+      data.revision>9007199254740991ULL || data.grant_generation>9007199254740991ULL ||
+      data.now_ms>9007199254740991LL || data.deadline_ms>9007199254740991LL || data.drain_at_ms>9007199254740991LL) {
+    napi_throw_error(env,"ERR_OHOS_LIFECYCLE_NATIVE","Trusted host lifecycle snapshot unavailable");return nullptr;
+  }
+  napi_value result;if(napi_create_object(env,&result)!=napi_ok)return nullptr;
+  const auto put=[&](const char* key,double value){napi_value number;return napi_create_double(env,value,&number)==napi_ok && napi_set_named_property(env,result,key,number)==napi_ok;};
+  if(!put("version",data.version)||!put("engineGeneration",data.engine_generation)||!put("ownerGeneration",data.owner_generation)||
+      !put("revision",data.revision)||!put("grantGeneration",data.grant_generation)||!put("nowMs",data.now_ms)||
+      !put("deadlineMs",data.deadline_ms)||!put("drainAtMs",data.drain_at_ms)||!put("phase",data.phase)||
+      !put("available",data.available)||!put("foreground",data.foreground)||!put("clockFailed",data.clock_failed))return nullptr;
+  return result;
+}
+
 napi_value Initialize(napi_env env, napi_value exports) {
   const napi_node_version* version;
   if (napi_get_node_version(env, &version) != napi_ok) return nullptr;
@@ -282,6 +327,9 @@ napi_value Initialize(napi_env env, napi_value exports) {
   if (napi_create_function(env, "getSystemBuildIdentity", NAPI_AUTO_LENGTH, GetSystemBuildIdentity,
                            nullptr, &function) != napi_ok ||
       napi_set_named_property(env, exports, "getSystemBuildIdentity", function) != napi_ok) return nullptr;
+  if (napi_create_function(env, "getHostLifecycleSnapshot", NAPI_AUTO_LENGTH, GetHostLifecycleSnapshot,
+                           nullptr, &function) != napi_ok ||
+      napi_set_named_property(env, exports, "getHostLifecycleSnapshot", function) != napi_ok) return nullptr;
   return exports;
 }
 
@@ -296,6 +344,12 @@ napi_module publication_module = {
 }  // namespace
 
 void RegisterPublicationBinding() {
+  HostReader().thread=std::this_thread::get_id();
+  const char* root=std::getenv("DSH_GO_OHOS_NATIVE_LIBRARY_DIR");char canonical[PATH_MAX];
+  if(root && root[0]=='/') {
+    const std::string path=std::string(root)+"/libdsh_host.so";
+    if(realpath(path.c_str(),canonical) && path==canonical) HostReader().library=path;
+  }
   napi_module_register(&publication_module);
 }
 

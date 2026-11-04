@@ -1,5 +1,6 @@
 #pragma once
 
+#include "lifecycle_state.h"
 #include <deque>
 #include <functional>
 #include <map>
@@ -47,6 +48,7 @@ class Host {
   void Start(HostOptions options, StartNode start_node, StopNode stop_node);
   void Stop();
   HostState State();
+  LifecycleState& Lifecycle() { return lifecycle_; }
   std::vector<HostEvent> Drain();
   void Wait();
 
@@ -54,6 +56,7 @@ class Host {
   void Run(HostOptions options, StartNode start_node);
   void Line(const std::string& stream, std::string line);
   void Push(HostEvent event);
+  LifecycleState lifecycle_;
   std::mutex mutex_;
   std::mutex join_mutex_;
   HostState state_;
