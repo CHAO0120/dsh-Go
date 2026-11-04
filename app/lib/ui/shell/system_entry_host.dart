@@ -26,6 +26,7 @@ import '../../l10n/l10n.dart';
 import '../../links/app_links.dart';
 import '../../links/launcher_entries.dart';
 import '../../links/share_intake.dart';
+import '../../state/android_features.dart';
 import '../../state/attachments.dart';
 import '../../state/compose_inbox.dart';
 import '../../state/draft_store.dart';
@@ -150,8 +151,12 @@ class _SystemEntryHostState extends ConsumerState<SystemEntryHost> {
   /// with unsaved edits open, it still lands there, ready for when they're
   /// back.
   Future<void> _compose(ComposeRequest request) async {
-    await _showChat();
-    if (mounted) ref.read(composeInboxProvider.notifier).push(request);
+    final revealed = await _showChat();
+    if (!mounted) return;
+    // Siri dictation needs the visible composer. Keeping an edit page open
+    // cancels this voice request; text and files may still wait in its draft.
+    if (!revealed && request.voice && ref.read(operatingSystemProvider) == 'ios') return;
+    ref.read(composeInboxProvider.notifier).push(request);
   }
 
   /// Back to the chat: pages and sheets above it closed (unsaved edits only

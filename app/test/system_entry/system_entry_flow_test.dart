@@ -9,6 +9,7 @@ import 'dart:io';
 
 import 'package:dsh_app/links/app_links.dart';
 import 'package:dsh_app/state/chat_state.dart';
+import 'package:dsh_app/state/android_features.dart';
 import 'package:dsh_app/state/hosts_state.dart';
 import 'package:dsh_app/state/sessions_state.dart';
 import 'package:dsh_app/state/ui_mode_state.dart';
@@ -19,8 +20,8 @@ import 'package:dsh_app/ui/chat/widgets/attachments.dart';
 import 'package:dsh_app/ui/common/discard_guard.dart';
 import 'package:dsh_app/ui/shell/system_entry_host.dart';
 import 'package:dsh_app/ui/web/web_home.dart';
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -88,11 +89,18 @@ late _Native _shares;
 late _Native _entries;
 late FakeVoiceBridge _voice;
 
-Future<ProviderContainer> _pump(WidgetTester tester, ChatHarness harness) async {
+Future<ProviderContainer> _pump(WidgetTester tester, ChatHarness harness, {String? operatingSystem}) async {
   usePhoneView(tester);
   mockClipboard(tester);
   await tester.pumpWidget(
-    testApp(const _Shell(), overrides: [...harness.overrides, voiceBridgeProvider.overrideWithValue(_voice)]),
+    testApp(
+      const _Shell(),
+      overrides: [
+        ...harness.overrides,
+        if (operatingSystem != null) operatingSystemProvider.overrideWithValue(operatingSystem),
+        voiceBridgeProvider.overrideWithValue(_voice),
+      ],
+    ),
   );
   await pumpFrames(tester);
   return ProviderScope.containerOf(tester.element(find.byType(ChatScreen)));
@@ -424,6 +432,79 @@ void main() {
     expect(_composerFocused(tester), isTrue);
     expect(_voice.calls, isEmpty);
     await _unmount(tester);
+  });
+
+  group('Siri navigation permission', () {
+    Future<Map<String, Object?>> afterAnswer(
+      WidgetTester tester, {
+      required bool discard,
+      String os = 'ios',
+      bool voice = true,
+    }) async {
+      debugDefaultTargetPlatformOverride = os == 'ios' ? TargetPlatform.iOS : TargetPlatform.android;
+      addTearDown(() => debugDefaultTargetPlatformOverride = null);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      natives(tester);
+      await _pump(tester, ChatHarness(), operatingSystem: os);
+      await openDirtyPage(tester, find.byType(ChatScreen));
+      await _entries.push(voice ? {'kind': 'voice'} : {'kind': 'new', 'text': '留到返回聊天时'});
+      await untilAsked(tester);
+      expect(_voice.calls, isEmpty);
+      await tester.tap(discard ? dialogButton<FilledButton>() : dialogButton<TextButton>());
+      await pumpFrames(tester);
+      final composer = tester.widget<Composer>(find.byType(Composer, skipOffstage: false));
+      final field = tester.widget<TextField>(
+        find.descendant(
+          of: find.byType(Composer, skipOffstage: false),
+          matching: find.byType(TextField, skipOffstage: false),
+        ),
+      );
+      final observed = <String, Object?>{
+        'calls': List.of(_voice.calls),
+        'voiceActive': composer.voice!.active,
+        'editing': find.byType(DiscardGuard).evaluate().isNotEmpty,
+        'text': field.controller!.text,
+      };
+      await _unmount(tester);
+      debugDefaultTargetPlatformOverride = null;
+      return observed;
+    }
+
+    testWidgets('iOS keeps editing without starting hidden dictation', (tester) async {
+      expect(await afterAnswer(tester, discard: false), {
+        'calls': <String>[],
+        'voiceActive': false,
+        'editing': true,
+        'text': '',
+      });
+    });
+
+    testWidgets('iOS discard opens the chat and starts dictation', (tester) async {
+      expect(await afterAnswer(tester, discard: true), {
+        'calls': ['permission', 'recognizer'],
+        'voiceActive': true,
+        'editing': false,
+        'text': '',
+      });
+    });
+
+    testWidgets('iOS text still fills the draft behind a kept page', (tester) async {
+      expect(await afterAnswer(tester, discard: false, voice: false), {
+        'calls': <String>[],
+        'voiceActive': false,
+        'editing': true,
+        'text': '留到返回聊天时',
+      });
+    });
+
+    testWidgets('Android shortcut retains its existing behavior', (tester) async {
+      expect(await afterAnswer(tester, discard: false, os: 'android'), {
+        'calls': ['permission', 'recognizer'],
+        'voiceActive': true,
+        'editing': true,
+        'text': '',
+      });
+    });
   });
 
   testWidgets('语音输入 opens 新对话 listening', (tester) async {
