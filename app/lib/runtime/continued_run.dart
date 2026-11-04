@@ -10,6 +10,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../state/android_features.dart';
 import '../state/chat_state.dart';
 import '../state/hosts_state.dart';
+import '../state/read_list_cache.dart';
+import '../state/read_list_identity.dart';
 import '../state/sessions_state.dart';
 import 'runtime_state.dart';
 
@@ -17,7 +19,19 @@ import 'runtime_state.dart';
 /// one, which a list doesn't show until it has its first message.
 final localTurnRunningProvider = Provider<bool>((ref) {
   if (!ref.watch(activeHostProvider).isLocal) return false;
-  final listed = ref.watch(sessionsProvider.select((sessions) => sessions.value?.any((s) => s.running) ?? false));
+  final sessions = ref.watch(sessionsProvider.select((state) => state.value));
+  final connection = ref.watch(readListLiveConnectionProvider);
+  final identity = ref.watch(readListIdentityProvider);
+  final cache = ref.watch(readListCacheProvider);
+  // AsyncValue may retain another host's rows while loading or after a failed
+  // read. Keep same-source refreshes, but never treat display carryover as a
+  // running turn on the current local client.
+  final listed =
+      sessions != null &&
+      connection != null &&
+      connection.isLocal &&
+      cache.current(sessions, identity, connection.client) &&
+      sessions.any((session) => session.running);
   if (listed) return true;
   final open = ref.watch(currentSessionProvider);
   return open != null && ref.watch(chatProvider(open).select((chat) => chat.running));
