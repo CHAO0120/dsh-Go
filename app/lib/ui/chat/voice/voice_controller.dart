@@ -76,7 +76,13 @@ class VoiceInputController extends ChangeNotifier with WidgetsBindingObserver {
   }) : _mode = mode ?? _automatic,
        _modelReady = modelReady ?? _noModel,
        _observing = observeLifecycle {
-    if (_observing) WidgetsBinding.instance.addObserver(this);
+    if (_observing) {
+      final binding = WidgetsBinding.instance;
+      if (!kIsWeb && defaultTargetPlatform == TargetPlatform.iOS) {
+        _foreground = binding.lifecycleState == AppLifecycleState.resumed;
+      }
+      binding.addObserver(this);
+    }
     unawaited(refresh());
   }
 
