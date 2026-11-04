@@ -223,14 +223,14 @@ final class IOSSystemTools: NSObject, PHPickerViewControllerDelegate, CLLocation
     if args["due"] != nil, due == nil { throw Failure("时间格式不对。") }
     // Asked first, so the sheet can say which list it's going in.
     try await reminderAccess()
-    let list: EKCalendar?
+    let target: EKCalendar?
     if let id = args["list_id"] as? String {
-      list = Self.unopaque(id).flatMap { eventStore.calendar(withIdentifier: $0) }
-      if list == nil { throw Failure("没有这个提醒列表，没有新建。") }
+      target = Self.unopaque(id).flatMap { eventStore.calendar(withIdentifier: $0) }
+      if target == nil { throw Failure("没有这个提醒列表，没有新建。") }
     } else {
-      list = eventStore.defaultCalendarForNewReminders()
+      target = eventStore.defaultCalendarForNewReminders()
     }
-    guard let list else { throw Failure("没有可用的提醒列表。") }
+    guard let list = target else { throw Failure("没有可用的提醒列表。") }
     var detail = "标题：\(title)\n列表：\(list.title)"
     if let due { detail += "\n时间：\(due.formatted(date: .abbreviated, time: .shortened))" }
     if let notes, !notes.isEmpty { detail += "\n备注：\(notes)" }
@@ -445,11 +445,11 @@ final class IOSSystemTools: NSObject, PHPickerViewControllerDelegate, CLLocation
     guard [.authorizedWhenInUse, .authorizedAlways].contains(manager.authorizationStatus) else {
       throw Failure("用户没有给定位权限。可以到系统设置里打开。")
     }
-    let fix: CLLocation? = await withCheckedContinuation { continuation in
+    let located: CLLocation? = await withCheckedContinuation { continuation in
       locating = continuation
       manager.requestLocation()
     }
-    guard let fix else { throw Failure("这次没有定位到。") }
+    guard let fix = located else { throw Failure("这次没有定位到。") }
     return [
       "latitude": fix.coordinate.latitude, "longitude": fix.coordinate.longitude,
       "horizontal_accuracy_m": max(fix.horizontalAccuracy, 0),
