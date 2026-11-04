@@ -67,15 +67,15 @@ final class ContinuedRun {
 
   @available(iOS 26.0, *)
   private func started(_ task: BGContinuedProcessingTask) {
-    submitted = nil
-    guard wanted else {
-      task.setTaskCompleted(success: true)
+    guard wanted, task.identifier == submitted else {
+      task.setTaskCompleted(success: false)
       return
     }
+    submitted = nil
     self.task = task
-    task.expirationHandler = { [weak self] in
+    task.expirationHandler = { [weak self, weak task] in
       DispatchQueue.main.async {
-        guard let self else { return }
+        guard let self, let task, self.task === task else { return }
         self.spent = true
         self.finish(success: false)
       }
