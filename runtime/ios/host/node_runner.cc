@@ -168,6 +168,10 @@ extern "C" __attribute__((visibility("default"))) int dsh_node_start(int argc, c
     const auto own = std::find(run.arguments.begin(), run.arguments.end(), "--patch");
     run.arguments.insert(own + 2, {"--patch", patch});
   }
+  if (const char* probe = std::getenv("DSH_IOS_SMOKE_IMPORT")) {
+    const auto main_script = std::find(run.arguments.begin(), run.arguments.end(), argv[4]);
+    run.arguments.insert(main_script, {"--import", probe});
+  }
 #endif
 
   pthread_attr_t attributes;

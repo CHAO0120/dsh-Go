@@ -53,7 +53,13 @@ writeFileSync(overlay, JSON.stringify([
 
 const engine = spawn('xcrun', ['simctl', 'spawn', values.simulator, resolve(values.smoke), resolve(values.frameworks),
   resolve(values.runtime), guest, cache], {
-  env: { ...process.env, SIMCTL_CHILD_DSH_IOS_SMOKE_PATCH: overlay }, stdio: ['ignore', 'pipe', 'pipe'],
+  env: {
+    ...process.env,
+    SIMCTL_CHILD_DSH_IOS_SMOKE_PATCH: overlay,
+    SIMCTL_CHILD_DSH_IOS_SMOKE_IMPORT: join(repo, 'tooling/ios/engine-smoke/probe.mjs'),
+    SIMCTL_CHILD_DSH_IOS_SMOKE_MODEL: model.baseURL,
+  },
+  stdio: ['ignore', 'pipe', 'pipe'],
 });
 let exited = null;
 let engineEnded = null;
@@ -209,7 +215,7 @@ async function round(ready) {
   await rpc('session/prompt', { request: { requestId: randomUUID(), sessionId, mode: 'queue', content: [{ type: 'text', text: 'iOS scripted file, search, shell and approval round.' }] } });
   const end = await waitFrame((frame) => frame.streamId === 'session' && frame.value?.event?.type === 'turn/end');
   const reason = end.value.event.data.reason;
-  if (reason?.kind !== 'completed') fail(`turn ended ${reason?.kind}: ${reason?.error?.code ?? ''} ${reason?.error?.message ?? ''}`);
+  if (reason?.kind !== 'completed') fail(`turn ended: ${JSON.stringify(reason).slice(0, 1500)}`);
   const results = events.slice(before).filter((event) => event.type === 'tool/result');
   if (results.length !== 5) fail(`expected five tool results, got ${results.length}`);
   const failed = results.findIndex((event) => event.data.message?.isError !== false);
