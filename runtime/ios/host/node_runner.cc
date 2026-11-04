@@ -5,7 +5,7 @@
 #include <pthread.h>
 #include <signal.h>
 
-#include <atomic>
+#include <algorithm>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -160,10 +160,11 @@ extern "C" __attribute__((visibility("default"))) int dsh_node_start(int argc, c
   run.arguments = {argv[0], argv[1], kPlatformImport, argv[2], argv[3]};
   run.arguments.insert(run.arguments.end(), argv + 4, argv + argc);
 #ifdef DSH_IOS_ENGINE_SMOKE
-  // Test builds only: the smoke test's fake model has to reach the fixed command line.
+  // Test builds only: the smoke test's fake model has to reach the fixed command line,
+  // next to the host's own --patch because the CLI takes it nowhere later.
   if (const char* patch = std::getenv("DSH_IOS_SMOKE_PATCH")) {
-    run.arguments.push_back("--patch");
-    run.arguments.push_back(patch);
+    const auto own = std::find(run.arguments.begin(), run.arguments.end(), "--patch");
+    run.arguments.insert(own + 2, {"--patch", patch});
   }
 #endif
 
