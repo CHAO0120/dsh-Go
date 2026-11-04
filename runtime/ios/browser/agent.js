@@ -136,7 +136,11 @@
       state: steady, sensitive: sensitive(el), row: row ? textSnippet(row, 400) : null,
       // Values remain internal and are never returned/logged. Sensitive values aren't read.
       value: sensitive(el) ? null : (['input', 'textarea', 'select'].includes(tag(el)) ? el.value.slice(0, 16385) : null),
-      selected: tag(el) === 'select' && !sensitive(el) ? Array.from(el.options).slice(0, 256).map(o => o.selected) : null,
+      href: tag(el) === 'a' ? el.href : null,
+      options: tag(el) === 'select' && !sensitive(el) ? Array.from(el.options).slice(0, 256).map(o => ({
+        name: bounded(attr(o, 'label') || o.textContent), value: o.value,
+        disabled: o.disabled || o.parentElement?.disabled === true, selected: o.selected,
+      })) : null,
       document: el.ownerDocument.location.href,
     });
   }
