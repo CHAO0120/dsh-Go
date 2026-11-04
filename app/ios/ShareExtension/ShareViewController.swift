@@ -150,18 +150,23 @@ final class ShareViewController: UIViewController {
   private func finish(open: Bool) {
     DispatchQueue.main.async { [self] in
       guard open else { return complete() }
-      // `UIApplication.shared` isn't available here; the responder chain still has it,
-      // and it's the one way an extension of this kind can bring its app forward.
-      var responder: UIResponder? = self
-      while let current = responder {
-        if let application = current as? UIApplication {
-          application.open(ShareInbox.wakeUp, options: [:]) { _ in self.complete() }
-          return
-        }
-        responder = current.next
-      }
-      complete()
+      bringAppForward { self.complete() }
     }
+  }
+
+  /// A share extension has no API for this and must build with extension-safe APIs
+  /// only, so UIApplication's method is found on the responder chain at run time. If
+  /// it isn't there or does nothing, the share still waits in the inbox.
+  private func bringAppForward(then done: @escaping () -> Void) {
+    typealias Open = @convention(c) (AnyObject, Selector, NSURL, NSDictionary, @convention(block) (Bool) -> Void) -> Void
+    let selector = NSSelectorFromString("openURL:options:completionHandler:")
+    var responder: UIResponder? = self
+    while let current = responder, !current.responds(to: selector) {
+      responder = current.next
+    }
+    guard let application = responder else { return done() }
+    let open = unsafeBitCast(application.method(for: selector), to: Open.self)
+    open(application, selector, ShareInbox.wakeUp as NSURL, NSDictionary()) { _ in done() }
   }
 
   private func complete() {
