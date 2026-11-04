@@ -6,7 +6,8 @@ const heapLimit = getHeapStatistics().heap_size_limit;
 const note = (kind, extra = {}) => console.log(JSON.stringify({kind, round, pid: process.pid, heapLimit, ...extra}));
 if (round !== 1 && round !== 2) throw new Error('HEAP_SMOKE_INVALID_ROUND');
 // Do not turn a misconfigured runner into an unbounded device-memory stress test.
-if (heapLimit !== 268 * 1024 * 1024) throw new Error('HEAP_SMOKE_UNEXPECTED_HEAP_LIMIT');
+// V8 adds its own overhead to 256/4, and how much depends on the build: 268 MiB on Linux.
+if (heapLimit < 256 * 1024 * 1024 || heapLimit > 300 * 1024 * 1024) throw new Error(`HEAP_SMOKE_UNEXPECTED_HEAP_LIMIT ${heapLimit}`);
 note('js-start');
 if (round === 1) {
   const retained = [];

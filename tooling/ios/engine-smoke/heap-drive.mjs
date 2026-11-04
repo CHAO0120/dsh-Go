@@ -25,7 +25,7 @@ let command, args;
 if (values['linux-preload']) { command = resolve(values.smoke); args = argv; env.LD_PRELOAD = resolve(values['linux-preload']); }
 else { command = 'xcrun'; args = ['simctl', 'spawn', values.simulator, resolve(values.smoke), ...argv]; }
 const report = {status: 'BLOCKED', scope: values['linux-preload'] ? 'Linux official Node; Apple NOT_RUN' : 'iOS Simulator prepared NodeMobile framework',
-  command: [command, ...args], nativeDirectory, rows: [], errors: [], exit: null};
+  rows: [], errors: [], exit: null, stderrTail: '', command: [command, ...args], nativeDirectory};
 const child = spawn(command, args, {env, stdio: ['ignore', 'pipe', 'pipe']});
 let stdout = '', stderr = '';
 const deadline = setTimeout(() => { report.errors.push('observer deadline'); child.kill('SIGKILL'); }, 150000);
@@ -47,12 +47,14 @@ clearTimeout(deadline);
 for (const line of stdout.split('\n').filter(Boolean)) {
   try { report.rows.push(JSON.parse(line)); } catch { report.errors.push('unexpected non-JSON stdout'); }
 }
+// The report is the only part of a failed run anyone can read without signing in.
+report.stderrTail = stderr.slice(-1500);
 const rows = report.rows;
 const expectedKinds = ['js-start', 'native-result', 'js-start', 'recovery-ok', 'native-result'];
 const valid = report.exit?.code === 0 && report.errors.length === 0 && rows.length === 5 &&
   rows.every((row, index) => row !== null && typeof row === 'object' && row.kind === expectedKinds[index] && row.pid > 0 && row.round === (index < 2 ? 1 : 2)) &&
   new Set(rows.map(row => row.pid)).size === 1 &&
-  rows.filter(row => row.kind !== 'native-result').every(row => row.heapLimit === 268 * 1024 * 1024) &&
+  rows.filter(row => row.kind !== 'native-result').every(row => row.heapLimit >= 256 * 1024 * 1024 && row.heapLimit <= 300 * 1024 * 1024) &&
   rows[1].engineCode === 70 && rows[1].expectedCode === 70 && rows[1].pass === true &&
   rows[3].workerCode === 0 && rows[3].workerValue === 42 &&
   rows[4].engineCode === 0 && rows[4].expectedCode === 0 && rows[4].pass === true &&
