@@ -27,18 +27,11 @@ Android 构建只应用 `targetSets.android` 里的公共补丁，现在是 15 �
 
 schema 1 不再用于新的补丁应用或记录。迁移前先为每个现有 diff 明确登记目标；不能通过改默认目标或跳过未登记检查继续执行。新增已审 O4 / 后续 OHOS diff 时，也要同步将其名字加入 OHOS 集合，并更新对应版本 pins；本包的集成附属差分绑定具体已审基底。
 
-## 暂不进 OHOS 的 Android 补丁
+## Android 集合是 OHOS 集合的子集
 
-有两个 Android 补丁不在 `targetSets.ohos`：
+`zzzzzzz-input-recovery.diff` 和 `zzzzzzzz-model-defaults.diff` 曾经不在 `targetSets.ohos`。前者和 `zzzzzzzzzzzzz-ohos-lifecycle.diff` 都改 `dsh-agent-loop`，后者的 before pin 接在前者之后。现在两个都在：lifecycle 的 agent-loop 前后 pin 按这条链重算，共享 diff 本身没变，Android 的 15 项和它们的 pin 也没变。
 
-| 补丁 | 为什么暂不进 |
-|---|---|
-| `zzzzzzz-input-recovery.diff` | 它和 `zzzzzzzzzzzzz-ohos-lifecycle.diff` 都改 `dsh-agent-loop`，两套恢复逻辑放在一起还没验证通过。试加进 OHOS 链时补丁能打上，lifecycle 套件通过，但 `runtime/tests/input-recovery.test.mjs` 有 9 项失败并超时，原因还没查。 |
-| `zzzzzzzz-model-defaults.diff` | 它对 `dsh-api-session-controller` 的 before pin 接在 input-recovery 之后，不能单独进。 |
-
-所以 Android 集合不是 OHOS 的子集：打过 Android 补丁的前缀切到 `--target ohos` 会被拒绝，真实构建都用全新前缀。
-
-鸿蒙上的结果：引擎不会恢复未被接纳的输入，App 走给旧 Host 的恢复路径；新对话默认模型不能固定。
+`runtime/tests/input-recovery.test.mjs` 从 agent-loop 里摘几个 region 来跑。鸿蒙的 agent 在领取输入前会调用 region 之外的 `ohosLifecycle()`，所以它要把这个函数一起摘进去，否则是 ReferenceError，而不是输入丢了。
 
 ## 恢复被混入公共链的 OHOS 条件
 

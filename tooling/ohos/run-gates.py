@@ -795,9 +795,8 @@ def main():
     # The shared suites, whole, on each selected tree. The groups around here pick
     # the files they need and would miss the rest of runtime/tests.
     shared = sorted('runtime/tests/' + f.name for f in (s / 'runtime/tests').glob('*.test.mjs'))
-    ohos_left_out = ('runtime/tests/input-recovery.test.mjs', 'runtime/tests/model-defaults.test.mjs')  # patches not in the OH set yet
-    for target, label, files in [('candidate', 'android', shared), ('ohos', 'ohos', [f for f in shared if f not in ohos_left_out])]:
-        g.run('shared-suite-' + label, lambda names=files: g.node('--test', '--test-reporter=tap', *[s / f for f in names]), env=lambda t=target: {'TZ': 'Asia/Shanghai', 'DSH_PREFIX': str(o / ('targets/' + t + '-prefix')), 'DSH_TEST_PREFIX': str(o / ('targets/' + t + '-prefix'))}, needs=('android-targets', 'native-static-resources'), timeout=600, tests=files, scope='Every shared runtime test against the installed target on Linux')
+    for target, label in (('candidate', 'android'), ('ohos', 'ohos')):
+        g.run('shared-suite-' + label, lambda: g.node('--test', '--test-reporter=tap', *[s / f for f in shared]), env=lambda t=target: {'TZ': 'Asia/Shanghai', 'DSH_PREFIX': str(o / ('targets/' + t + '-prefix')), 'DSH_TEST_PREFIX': str(o / ('targets/' + t + '-prefix'))}, needs=('android-targets', 'native-static-resources'), timeout=600, tests=shared, scope='Every shared runtime test against the installed target on Linux')
         g.run('route-guard-' + label, lambda t=target: ['bash', s / 'runtime/tests/run-guard-tests.sh', o / ('targets/' + t + '-prefix'), '--port', free_port()], needs=('android-targets',), timeout=300, tests=['runtime/tests/run-guard-tests.sh'])
     g.run('direct-inventory', lambda: g.py('runtime/tests/test_direct_inventory.py', '-v'), needs=('tools',), tests=['runtime/tests/test_direct_inventory.py'])
     g.run('publication-kill', lambda: g.node(s / (rt + 'publication-kill.mjs'), '--node', node(), '--simulation', s / 'runtime/ohos/sim/preload.mjs', '--publication', s / 'runtime/ohos/publication', '--linked-lib', native() / 'libpublication-test-linked.so', '--prefix', prefix(), '--out', o / 'publication-kill.json'), needs=('native-publication-build', 'prepared-inputs'), timeout=300, scope='Real SIGKILL and restart with the current publication preload')
