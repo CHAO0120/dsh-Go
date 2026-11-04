@@ -1252,6 +1252,9 @@ class _LoadErrorState extends State<_LoadError> {
 class DshWebLink {
   _WebViewPageState? _page;
   Completer<WebComposeResult>? _composing;
+  final _correlateComposeReplies = !kIsWeb && defaultTargetPlatform == TargetPlatform.iOS;
+  final _composeReplies = <String, Completer<WebComposeResult>>{};
+  int _composeNumber = 0;
 
   /// Calls made while no page is attached (the engine still starting, a
   /// host switch rebuilding the page): the next page runs them.
@@ -1292,19 +1295,42 @@ class DshWebLink {
     List<({String name, String? type, String base64})> files = const [],
     Duration timeout = const Duration(seconds: 30),
   }) async {
-    final done = _composing = Completer<WebComposeResult>();
+    final done = Completer<WebComposeResult>();
+    final requestId = _correlateComposeReplies ? '${++_composeNumber}' : null;
+    if (requestId == null) {
+      _composing = done;
+    } else {
+      _composeReplies[requestId] = done;
+    }
     final draft = {
+      'requestId': ?requestId,
+      if (!kIsWeb && defaultTargetPlatform == TargetPlatform.iOS) 'composerAttachmentCount': true,
       'text': text,
       'files': [
         for (final f in files) {'name': f.name, 'type': ?f.type, 'data': f.base64},
       ],
     };
-    await _send('window.__dshAppCompose && window.__dshAppCompose(${jsonEncode(draft)});');
-    return done.future.timeout(timeout, onTimeout: () => const WebComposeResult());
+    try {
+      await _send('window.__dshAppCompose && window.__dshAppCompose(${jsonEncode(draft)});');
+      return await done.future.timeout(timeout, onTimeout: () => const WebComposeResult());
+    } finally {
+      if (requestId != null) _composeReplies.remove(requestId);
+    }
   }
 
   void _composed(String message) {
-    final done = _composing;
+    Completer<WebComposeResult>? done;
+    if (_correlateComposeReplies) {
+      try {
+        final reply = jsonDecode(message);
+        if (reply is! Map || reply['requestId'] is! String) return;
+        done = _composeReplies.remove(reply['requestId']);
+      } on FormatException {
+        return;
+      }
+    } else {
+      done = _composing;
+    }
     if (done == null || done.isCompleted) return;
     done.complete(WebComposeResult.parse(message));
   }

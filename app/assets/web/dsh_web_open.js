@@ -308,12 +308,24 @@
     } catch (e) {}
   }
 
-  function attachmentCount() {
+  function attachmentCount(editor) {
+    if (editor) {
+      var card = editor.closest('[data-composer-card]');
+      if (!card) return 0;
+      // rc.4 renders one direct rail child per image or file. Keep the
+      // count inside this editor's composer, away from conversation history.
+      var rails = card.querySelectorAll('[role="group"][aria-label="Pending attachments"], [role="group"][aria-label="待发送附件"]');
+      var count = 0;
+      for (var i = 0; i < rails.length; i++) count += rails[i].children.length;
+      return count;
+    }
     return document.querySelectorAll('[data-attachment-id], [data-file-reference], [data-lexical-decorator="true"]').length;
   }
 
   window.__dshAppCompose = async function (draft) {
     var result = { text: false, files: 0 };
+    // iOS correlates overlapping replies; legacy callers keep the same shape.
+    if (draft && typeof draft.requestId === 'string') result.requestId = draft.requestId;
     // After whatever the app opened just before (a new conversation).
     try { await window.__dshAppOpening; } catch (e) {}
     var editor = await waitFor(composerEditor, 10000);
@@ -322,7 +334,8 @@
     var files = (draft && draft.files) || [];
     editor.focus();
     var before = editor.textContent || '';
-    var beforeFiles = attachmentCount();
+    var attachmentEditor = draft && draft.composerAttachmentCount === true ? editor : null;
+    var beforeFiles = attachmentCount(attachmentEditor);
     try {
       var data = new DataTransfer();
       if (text) data.setData('text/plain', text);
@@ -343,7 +356,7 @@
       await sleep(200);
     }
     result.text = !!text && landed();
-    result.files = Math.max(0, attachmentCount() - beforeFiles);
+    result.files = Math.max(0, attachmentCount(attachmentEditor) - beforeFiles);
     post('DshAppCompose', result);
   };
 
