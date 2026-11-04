@@ -24914,6 +24914,48 @@ abstract class L10n {
   /// **'最近观测'**
   String get remoteNetworkObservedAt;
 
+  /// No description provided for @remoteHostedLoadFailed.
+  ///
+  /// In zh, this message translates to:
+  /// **'无法读取已保存的分享链接，请重试。'**
+  String get remoteHostedLoadFailed;
+
+  /// No description provided for @remoteHostedSaveFailed.
+  ///
+  /// In zh, this message translates to:
+  /// **'分享链接的更改尚未保存，请重试。'**
+  String get remoteHostedSaveFailed;
+
+  /// No description provided for @remoteHostedDeleteSaveFailed.
+  ///
+  /// In zh, this message translates to:
+  /// **'删除未完成，链接仍然有效。请重试。'**
+  String get remoteHostedDeleteSaveFailed;
+
+  /// No description provided for @remoteHostedUndoUnsaved.
+  ///
+  /// In zh, this message translates to:
+  /// **'本次删除已取消，但撤销尚未保存。重启后可能继续删除，请到“我的分享链接”重试保存。'**
+  String get remoteHostedUndoUnsaved;
+
+  /// No description provided for @remoteHostedUndoFailed.
+  ///
+  /// In zh, this message translates to:
+  /// **'无法恢复分享，删除可能已开始。请检查“我的分享链接”。'**
+  String get remoteHostedUndoFailed;
+
+  /// No description provided for @remoteHostedCreatedUnsaved.
+  ///
+  /// In zh, this message translates to:
+  /// **'链接已创建，可以复制使用，但尚未保存到本机。请保留链接，并到“我的分享链接”重试保存。'**
+  String get remoteHostedCreatedUnsaved;
+
+  /// No description provided for @remoteHostedStopFailed.
+  ///
+  /// In zh, this message translates to:
+  /// **'未能停止分享，链接仍然有效。请重试。'**
+  String get remoteHostedStopFailed;
+
   /// No description provided for @stateWorkspaceFilesHint.
   ///
   /// In zh, this message translates to:

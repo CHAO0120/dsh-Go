@@ -87,6 +87,8 @@ class _Links implements ConversationLinkMaker {
   final revoked = <String>[];
   final restored = <String>[];
   bool fail = false;
+  bool unsaved = false;
+  bool undoUnsaved = false;
 
   @override
   Future<ConversationLink> upload(Uint8List fileBytes, LinkExpiry expiry, {required String title}) async {
@@ -96,14 +98,22 @@ class _Links implements ConversationLinkMaker {
       url: Uri.parse('https://go.example.cn/c/a1B2c3D4e5#k=${'K' * 43}'),
       expiresAt: expiry == LinkExpiry.forever ? null : DateTime.utc(2026, 11, 24, 12),
       id: 'a1B2c3D4e5',
+      locallySaved: !unsaved,
     );
   }
 
   @override
-  Future<void> revoke(ConversationLink link) async => revoked.add(link.id!);
+  Future<void> revoke(ConversationLink link) async {
+    if (fail) throw StateError('controlled failure');
+    revoked.add(link.id!);
+  }
 
   @override
-  Future<void> restore(ConversationLink link) async => restored.add(link.id!);
+  Future<void> restore(ConversationLink link) async {
+    if (fail) throw StateError('controlled failure');
+    if (undoUnsaved) throw const ConversationLinkRestoreUnsaved();
+    restored.add(link.id!);
+  }
 
   @override
   Duration get undoWindow => const Duration(seconds: 4);
@@ -477,6 +487,57 @@ void main() {
     expect(find.byKey(const ValueKey('share-link-make')), findsOneWidget);
   });
 
+  testWidgets('failed revoke remains an active link and reports an error without an unhandled future', (tester) async {
+    final panel = await _open(tester, state: _fixture(), reply: 'a6');
+    await _key(tester, 'share-to-link');
+    await _key(tester, 'share-link-make');
+    final model = tester.widget<SharePanelScope>(find.byType(SharePanelScope)).notifier!;
+    final original = model.link;
+    panel.links.fail = true;
+    await model.stopLink();
+    expect(model.link, same(original));
+    expect(model.error, isNot(contains('生成')));
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('failed restore keeps the stopped state and its expiry timer', (tester) async {
+    final panel = await _open(tester, state: _fixture(), reply: 'a6');
+    await _key(tester, 'share-to-link');
+    await _key(tester, 'share-link-make');
+    final model = tester.widget<SharePanelScope>(find.byType(SharePanelScope)).notifier!;
+    await model.stopLink();
+    panel.links.fail = true;
+    await model.restoreLink();
+    expect(model.link, isNull);
+    expect(model.error, isNot(contains('生成')));
+    await tester.pump(const Duration(seconds: 5));
+    expect(model.stopped, isNull);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('an uploaded unsaved link stays copyable and explains the save failure', (tester) async {
+    final panel = await _open(tester, state: _fixture(), reply: 'a6');
+    panel.links.unsaved = true;
+    await _key(tester, 'share-to-link');
+    await _key(tester, 'share-link-make');
+    expect(find.byKey(const ValueKey('share-link-copy')), findsOneWidget);
+    expect(find.textContaining('链接已创建'), findsOneWidget);
+  });
+  testWidgets('session-only undo restores the link and displays restart warning', (tester) async {
+    final panel = await _open(tester, state: _fixture(), reply: 'a6');
+    await _key(tester, 'share-to-link');
+    await _key(tester, 'share-link-make');
+    final model = tester.widget<SharePanelScope>(find.byType(SharePanelScope)).notifier!;
+    await model.stopLink();
+    panel.links.undoUnsaved = true;
+    await model.restoreLink();
+    await tester.pump();
+    expect(model.link, isNotNull);
+    expect(model.stopped, isNull);
+    expect(find.textContaining('重启后可能继续删除'), findsOneWidget);
+    await tester.pump(const Duration(seconds: 5));
+    expect(model.link, isNotNull);
+  });
   testWidgets('a new scope or privacy asks for a new link; the old one stays in 我的分享链接', (tester) async {
     await _open(tester, state: _fixture(), reply: 'a6');
     await _key(tester, 'share-to-link');
@@ -547,9 +608,7 @@ void main() {
     expect(tester.widget<ReplayPage>(find.byType(ReplayPage)).preview, isTrue);
   });
 
-  testWidgets('over the limit: the file and the link say so and nothing goes out; Markdown still does', (
-    tester,
-  ) async {
+  testWidgets('over the limit: the file and the link say so and nothing goes out; Markdown still does', (tester) async {
     final random = Random(7);
     const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
     final noise = String.fromCharCodes(List.generate(5200000, (_) => alphabet.codeUnitAt(random.nextInt(64))));
@@ -676,7 +735,8 @@ void main() {
     await _open(tester);
     final sheet = tester.getRect(find.byType(SharePanel));
     final keys = [
-      for (final k in ['share-to-link', 'share-to-image', 'share-to-file', 'share-to-text']) tester.getRect(find.byKey(ValueKey(k))),
+      for (final k in ['share-to-link', 'share-to-image', 'share-to-file', 'share-to-text'])
+        tester.getRect(find.byKey(ValueKey(k))),
     ];
     for (final cell in keys) {
       expect(cell.width, moreOrLessEquals(keys.first.width));
@@ -703,7 +763,9 @@ void main() {
     for (final label in ['思考过程', '工具调用', '图片']) {
       final capsule = tester.getRect(find.byKey(ValueKey('share-toggle-$label')));
       final check = tester.getRect(find.byKey(ValueKey('share-toggle-check-$label')));
-      final text = tester.getRect(find.descendant(of: find.byKey(ValueKey('share-privacy')), matching: find.text(label)));
+      final text = tester.getRect(
+        find.descendant(of: find.byKey(ValueKey('share-privacy')), matching: find.text(label)),
+      );
       expect(capsule.height, ShareToggle.height);
       expect(check.left - capsule.left, moreOrLessEquals(ShareToggle.padding));
       expect(capsule.right - text.right, moreOrLessEquals(ShareToggle.padding));
@@ -717,7 +779,9 @@ void main() {
     // Off: no check, the same air.
     await _tap(tester, find.byKey(const ValueKey('share-toggle-图片')));
     final capsule = tester.getRect(find.byKey(const ValueKey('share-toggle-图片')));
-    final text = tester.getRect(find.descendant(of: find.byKey(const ValueKey('share-privacy')), matching: find.text('图片')));
+    final text = tester.getRect(
+      find.descendant(of: find.byKey(const ValueKey('share-privacy')), matching: find.text('图片')),
+    );
     expect(text.left - capsule.left, moreOrLessEquals(ShareToggle.padding));
     expect(capsule.right - text.right, moreOrLessEquals(ShareToggle.padding));
   });
@@ -737,9 +801,7 @@ void main() {
     expect(adjust.center.dy, moreOrLessEquals(after.center.dy, epsilon: 0.5));
   });
 
-  testWidgets('文件 and 链接 buttons: equal halves 12 apart on the 20 gutter; the make button full width', (
-    tester,
-  ) async {
+  testWidgets('文件 and 链接 buttons: equal halves 12 apart on the 20 gutter; the make button full width', (tester) async {
     await _open(tester, state: _fixture(), reply: 'a6');
     final sheet = tester.getRect(find.byType(SharePanel));
     await _key(tester, 'share-to-file');

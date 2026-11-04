@@ -14332,6 +14332,29 @@ class L10nEn extends L10n {
   String get remoteNetworkObservedAt => 'Last checked';
 
   @override
+  String get remoteHostedLoadFailed => 'Couldn’t read saved links. Please retry.';
+
+  @override
+  String get remoteHostedSaveFailed => 'Changes to your shared links haven’t been saved. Please retry.';
+
+  @override
+  String get remoteHostedDeleteSaveFailed => 'Deletion wasn’t scheduled. The link is still active. Please retry.';
+
+  @override
+  String get remoteHostedUndoUnsaved =>
+      'Deletion is cancelled for this session, but the undo wasn’t saved. It may resume after restart. Retry saving in My shared links.';
+
+  @override
+  String get remoteHostedUndoFailed => 'Couldn’t restore sharing. Deletion may have started. Check My shared links.';
+
+  @override
+  String get remoteHostedCreatedUnsaved =>
+      'Your link is ready to copy and use, but wasn’t saved on this device. Keep a copy and retry saving in My shared links.';
+
+  @override
+  String get remoteHostedStopFailed => 'Couldn’t stop sharing. The link is still active. Please retry.';
+
+  @override
   String get stateWorkspaceFilesHint => 'Files uploaded to the current workspace:';
 
   @override

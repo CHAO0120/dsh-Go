@@ -13623,6 +13623,27 @@ class L10nZh extends L10n {
   String get remoteNetworkObservedAt => '最近观测';
 
   @override
+  String get remoteHostedLoadFailed => '无法读取已保存的分享链接，请重试。';
+
+  @override
+  String get remoteHostedSaveFailed => '分享链接的更改尚未保存，请重试。';
+
+  @override
+  String get remoteHostedDeleteSaveFailed => '删除未完成，链接仍然有效。请重试。';
+
+  @override
+  String get remoteHostedUndoUnsaved => '本次删除已取消，但撤销尚未保存。重启后可能继续删除，请到“我的分享链接”重试保存。';
+
+  @override
+  String get remoteHostedUndoFailed => '无法恢复分享，删除可能已开始。请检查“我的分享链接”。';
+
+  @override
+  String get remoteHostedCreatedUnsaved => '链接已创建，可以复制使用，但尚未保存到本机。请保留链接，并到“我的分享链接”重试保存。';
+
+  @override
+  String get remoteHostedStopFailed => '未能停止分享，链接仍然有效。请重试。';
+
+  @override
   String get stateWorkspaceFilesHint => '已上传到当前工作区的文件：';
 
   @override
