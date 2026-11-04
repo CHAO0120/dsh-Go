@@ -235,8 +235,8 @@ final class IOSSystemTools: NSObject, PHPickerViewControllerDelegate, CLLocation
     }
     let matching = found.filter { reminder in
       (completed || !reminder.isCompleted) && (query.map { (reminder.title ?? "").localizedCaseInsensitiveContains($0) } ?? true)
-    }.sorted { (Self.due($0) ?? .distantFuture) < (Self.due($1) ?? .distantFuture) }
-    return ["scope": "full", "items": matching.prefix(limit).map { Self.row($0) }, "truncated": matching.count > limit]
+    }.map { (reminder: $0, due: Self.due($0) ?? .distantFuture) }.sorted { $0.due < $1.due }
+    return ["scope": "full", "items": matching.prefix(limit).map { Self.row($0.reminder) }, "truncated": matching.count > limit]
   }
 
   private func remindersCreate(
