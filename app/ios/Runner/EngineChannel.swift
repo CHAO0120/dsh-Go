@@ -527,8 +527,9 @@ final class EngineChannel: NSObject, FlutterStreamHandler {
         throw EngineFailure("ios_payload_missing", "App 里没有运行时载荷。")
       }
       archive = try RuntimeArchive(url: url)
-      installed = try installer.installed()
-      if installer.interrupted { setupError = "上次运行时安装未完成，请重新安装以继续。" }
+      installed = resetting ? nil : try installer.installed()
+      if resetting { setupError = "上次重置未完成，请重新安装以继续。" }
+      else if installer.interrupted { setupError = "上次运行时安装未完成，请重新安装以继续。" }
     } catch let failure as EngineFailure {
       setupError = failure.message
     } catch {
@@ -644,6 +645,7 @@ final class EngineChannel: NSObject, FlutterStreamHandler {
       var lastStep = ""
       var lastPercent = -1
       do {
+        if let kept = try resetSelection() { try wipe(keeping: kept) }
         try installer.install(archive) { step, done, total in
           let percent = total == 0 ? 100 : done * 100 / total
           if step != lastStep || percent != lastPercent {
@@ -711,8 +713,8 @@ final class EngineChannel: NSObject, FlutterStreamHandler {
       let outcome = Result { try wipe(keeping: kept) }
       queue.async { [self] in
         pending = nil
-        installed = try? installer.installed()
-        setupError = nil
+        installed = resetting ? nil : try? installer.installed()
+        setupError = resetting ? "上次重置未完成，请重新安装以继续。" : nil
         failureLines = []
         emitStatus()
         switch outcome {
@@ -723,12 +725,27 @@ final class EngineChannel: NSObject, FlutterStreamHandler {
     }
   }
 
+  private var resetFile: URL { filesDirectory.appendingPathComponent("dsh-runtime-reset.json") }
+  private var resetting: Bool { FileManager.default.fileExists(atPath: resetFile.path) }
+
+  private func resetSelection() throws -> Set<String>? {
+    guard resetting else { return nil }
+    let kept = Set(try JSONDecoder().decode([String].self, from: Data(contentsOf: resetFile)))
+    guard kept.isSubset(of: Set(EngineChannel.keepable.values.flatMap { $0 })) else {
+      throw EngineFailure("ios_reset_record_invalid", "重置记录损坏，未按未知路径处理文件。")
+    }
+    return kept
+  }
+
   private func wipe(keeping kept: Set<String>) throws {
     let files = FileManager.default
+    // Outside both trees: an interrupted reset must finish before the next install.
+    try JSONEncoder().encode(kept.sorted()).write(to: resetFile, options: .atomic)
     // First, so that a wipe cut short can't read as a working install.
     if files.fileExists(atPath: installer.base.path) { try files.removeItem(at: installer.base) }
     if files.fileExists(atPath: cache.path) { try files.removeItem(at: cache) }
     try remove(in: guestRoot, relative: "", keeping: kept)
+    try files.removeItem(at: resetFile)
   }
 
   private func remove(in folder: URL, relative: String, keeping kept: Set<String>) throws {
@@ -782,7 +799,7 @@ final class EngineChannel: NSObject, FlutterStreamHandler {
       emitStatus()
     }
     do {
-      installed = try installer.installed()
+      installed = resetting ? nil : try installer.installed()
       guard current else { throw EngineFailure("ios_install_required", "运行时尚未完整安装到当前版本，请先安装。") }
       for directory in [dshHome, agentsHome, outputs, cache] {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
