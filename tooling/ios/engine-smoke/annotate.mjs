@@ -6,7 +6,8 @@ const clean = (text) => String(text).replace(/%/g, '%25').replace(/\s+/g, ' ').s
 console.log('::notice title=engine round::' + clean(JSON.stringify({
   status: report.status, stage: report.stage, readyMs: report.readyMs,
   restart: report.restart, restartReadyMs: report.restartReadyMs, approvals: report.approvals,
-  modelRequests: report.modelRequests, events: report.eventTypes?.slice(-12),
+  modelRequests: report.modelRequests, phoneEndpoint: report.phoneEndpoint, phoneTools: report.phoneTools,
+  events: report.eventTypes?.slice(-8),
 })));
 if (report.status !== 'PASS') {
   console.log('::error title=engine round::' + clean(report.error));

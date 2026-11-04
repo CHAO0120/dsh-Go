@@ -22,6 +22,7 @@ private final class NativeEngine {
   private let free: Free
 
   let frameworks: String
+  let library: UnsafeMutableRawPointer
 
   init() throws {
     guard let frameworks = Bundle.main.privateFrameworksPath else {
@@ -32,6 +33,7 @@ private final class NativeEngine {
       let detail = dlerror().map { String(cString: $0) } ?? ""
       throw EngineFailure("ios_native_unavailable", "本机引擎加载失败：\(detail)")
     }
+    self.library = library
     func symbol<T>(_ name: String, as type: T.Type) throws -> T {
       guard let found = dlsym(library, name) else {
         throw EngineFailure("ios_native_unavailable", "本机引擎缺少 \(name)。")
@@ -302,6 +304,9 @@ final class EngineChannel: NSObject, FlutterStreamHandler {
   private var requestedStop = false
   private var runtimeGeneration = 0
   private var native: NativeEngine?
+  /// Both on the main thread only.
+  private var phone: IOSPhoneBridge?
+  private var phoneLive = false
   private var timer: DispatchSourceTimer?
   private var lastPhase = "idle"
   private var lastToken = ""
@@ -670,10 +675,14 @@ final class EngineChannel: NSObject, FlutterStreamHandler {
       requestedStop = false
       runtimeGeneration += 1
       lastStart = (environment, visualReplies)
+      if (try? preparePhone()) == nil {
+        try Data("[]".utf8).write(to: dshHome.appendingPathComponent("ios-host.patch.json"), options: .atomic)
+      }
       try native?.begin(
         runtime: installer.root.path, guest: guestRoot.path, home: dshHome.path, cache: cache.path,
         workspace: workspace.path, env: environment)
       startPolling()
+      startPhone()
     } catch {
       lastError = (error as? EngineFailure)?.message ?? "本机引擎启动失败。"
       throw error
@@ -700,6 +709,7 @@ final class EngineChannel: NSObject, FlutterStreamHandler {
   private func stop() {
     queuedStart = nil
     requestedStop = true
+    retirePhone()
     lifecycle.runtime(baseUrl: nil, token: nil)
     skills.stop(runtimeGeneration: runtimeGeneration)
     let phase = native?.currentState()["phase"] as? String ?? "idle"
@@ -715,6 +725,7 @@ final class EngineChannel: NSObject, FlutterStreamHandler {
       native?.currentState()["phase"] as? String == "running"
     else { return }
     appendLog("本机引擎的本地服务在后台被系统回收，正在重新启动。", stream: "system")
+    retirePhone()
     lifecycle.runtime(baseUrl: nil, token: nil)
     skills.stop(runtimeGeneration: runtimeGeneration)
     queuedStart = lastStart
@@ -767,6 +778,7 @@ final class EngineChannel: NSObject, FlutterStreamHandler {
       if phase == "error" || (phase == "exited" && !requestedStop && queuedStart == nil) {
         failureLines = recent(300).compactMap { $0["line"] as? String }
       }
+      if phase == "error" || phase == "exited" { retirePhone() }
       lastPhase = phase
       lastToken = token
       lastExitCode = exitCode
@@ -863,6 +875,7 @@ final class EngineChannel: NSObject, FlutterStreamHandler {
       - bash、rg 和 git 等能力以引擎当前能力清单为准；没有 Ubuntu、PRoot、apt，也不能启动子进程。
       - 对不支持的命令说明限制，可请用户交给已连接的电脑执行；不能声称命令已经成功。
       - 手机文件通过 App 的系统选择器导入或导出；不能遍历其他应用的数据。
+      - `mcp__phone__*` 工具在 iOS 上只能用 clipboard、open（链接）、notify，以及 intent 的 calendar、dial、sms_draft、share、navigate（目的地文字）、settings（本 App）。每次都要用户在系统确认；读屏和点击其他 App 的工具不可用。
       - App 切到后台后，系统会很快暂停本机引擎；长任务可能要等用户回到 App 才继续。
       - App 使用 Flutter 原生界面；不要把修改 Harness 网页当作修改 App 界面。
 
@@ -886,13 +899,16 @@ final class EngineChannel: NSObject, FlutterStreamHandler {
   /// A little time to record the pause: the engine stops dispatching tools before the
   /// system stops the process. Nothing here tries to keep running past that.
   @objc private func enteredBackground() {
+    // A confirmation doesn't survive leaving the app: it would come back stale.
+    MainActor.assumeIsolated { phone?.enteredBackground() }
     queue.async { [self] in
       guard native?.currentState()["phase"] as? String == "running" else {
         lifecycle.observe(foreground: false)
         return
       }
       DispatchQueue.main.async { [self] in
-        if backgroundTask == .invalid {
+        // The queue can be behind the app: it may be back in front by now.
+        if backgroundTask == .invalid, UIApplication.shared.applicationState == .background {
           backgroundTask = UIApplication.shared.beginBackgroundTask(withName: "dsh.engine.pause") { [weak self] in
             self?.endBackgroundTask()
           }
@@ -910,11 +926,70 @@ final class EngineChannel: NSObject, FlutterStreamHandler {
     endBackgroundTask()
   }
 
+  /// The expiration handler runs on the main thread and the task has to be over when it returns.
   private func endBackgroundTask() {
+    guard Thread.isMainThread else {
+      DispatchQueue.main.async { [self] in endBackgroundTask() }
+      return
+    }
+    guard backgroundTask != .invalid else { return }
+    UIApplication.shared.endBackgroundTask(backgroundTask)
+    backgroundTask = .invalid
+  }
+
+  // MARK: Phone actions
+
+  /// The phone tools' backend for this run, on the main thread where it does its work. A
+  /// failure leaves the engine without phone tools rather than without an engine.
+  private func preparePhone() throws {
+    var entries: [[String: Any]] = []
+    if let library = native?.library, let source = Bundle.main.url(forResource: "phone", withExtension: nil, subdirectory: "dsh-runtime") {
+      let target = installer.root.appendingPathComponent("runtime/ios/phone", isDirectory: true)
+      try? FileManager.default.removeItem(at: target)
+      try FileManager.default.createDirectory(at: target.deletingLastPathComponent(), withIntermediateDirectories: true)
+      try FileManager.default.copyItem(at: source, to: target)
+      let cache = self.cache
+      let prepared: (directory: URL, runId: String)? = DispatchQueue.main.sync {
+        MainActor.assumeIsolated {
+          if phone == nil {
+            phone = try? IOSPhoneBridge(
+              presenter: { topViewController() },
+              runtimeCurrent: { [weak self] in self?.phoneLive == true },
+              nativeLibrary: library)
+          }
+          return try? phone?.prepare(in: cache)
+        }
+      }
+      if let prepared {
+        entries = [[
+          "insert": [[
+            "id": "dsh-go-ios-phone",
+            "name": target.appendingPathComponent("plugin.mjs").path,
+            "config": ["directory": prepared.directory.path, "runId": prepared.runId],
+          ]],
+        ]]
+      }
+    }
+    // node_runner.cc passes this file on every run: an empty one means no phone tools.
+    let patch = try JSONSerialization.data(withJSONObject: entries, options: .withoutEscapingSlashes)
+    try patch.write(to: dshHome.appendingPathComponent("ios-host.patch.json"), options: .atomic)
+  }
+
+  private func startPhone() {
     DispatchQueue.main.async { [self] in
-      guard backgroundTask != .invalid else { return }
-      UIApplication.shared.endBackgroundTask(backgroundTask)
-      backgroundTask = .invalid
+      MainActor.assumeIsolated {
+        phoneLive = true
+        phone?.startPolling()
+      }
+    }
+  }
+
+  private func retirePhone() {
+    DispatchQueue.main.async { [self] in
+      MainActor.assumeIsolated {
+        phoneLive = false
+        phone?.retire()
+      }
     }
   }
 }

@@ -1,5 +1,3 @@
-// DRAFT: not compiled with the iOS SDK or tested on an iPhone. Copy into the app
-// target only after reviewing the companion integration notes and Info.plist keys.
 import Foundation
 import UIKit
 import EventKit

@@ -1,6 +1,3 @@
-// DRAFT: not compiled with the iOS SDK or tested on an iPhone.
-// EngineChannel owns this object. Call prepare before starting Node and retire
-// before every stop/restart or Flutter owner detach. No notification callback calls begin.
 import Foundation
 import UIKit
 import Security

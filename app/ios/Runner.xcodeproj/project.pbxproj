@@ -13,6 +13,8 @@
 		74858FAF1ED2DC5600515810 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 74858FAE1ED2DC5600515810 /* AppDelegate.swift */; };
 		D5480000000000000000A001 /* DshPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5480000000000000000A002 /* DshPlugin.swift */; };
 		D5480000000000000000A003 /* VoiceChannel.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5480000000000000000A004 /* VoiceChannel.swift */; };
+		D5480000000000000000C041 /* IOSPhoneActions.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5480000000000000000C040 /* IOSPhoneActions.swift */; };
+		D5480000000000000000C043 /* IOSPhoneBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5480000000000000000C042 /* IOSPhoneBridge.swift */; };
 		D5480000000000000000C021 /* PerformanceChannel.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5480000000000000000C020 /* PerformanceChannel.swift */; };
 		D5480000000000000000C023 /* DiagnosticsChannel.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5480000000000000000C022 /* DiagnosticsChannel.swift */; };
 		D5480000000000000000C025 /* UsageChannel.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5480000000000000000C024 /* UsageChannel.swift */; };
@@ -87,6 +89,8 @@
 		74858FAE1ED2DC5600515810 /* AppDelegate.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
 		D5480000000000000000A002 /* DshPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DshPlugin.swift; sourceTree = "<group>"; };
 		D5480000000000000000A004 /* VoiceChannel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceChannel.swift; sourceTree = "<group>"; };
+		D5480000000000000000C040 /* IOSPhoneActions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IOSPhoneActions.swift; sourceTree = "<group>"; };
+		D5480000000000000000C042 /* IOSPhoneBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IOSPhoneBridge.swift; sourceTree = "<group>"; };
 		D5480000000000000000C020 /* PerformanceChannel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PerformanceChannel.swift; sourceTree = "<group>"; };
 		D5480000000000000000C022 /* DiagnosticsChannel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiagnosticsChannel.swift; sourceTree = "<group>"; };
 		D5480000000000000000C024 /* UsageChannel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UsageChannel.swift; sourceTree = "<group>"; };
@@ -190,6 +194,8 @@
 				74858FAE1ED2DC5600515810 /* AppDelegate.swift */,
 				D5480000000000000000A002 /* DshPlugin.swift */,
 				D5480000000000000000A004 /* VoiceChannel.swift */,
+				D5480000000000000000C040 /* IOSPhoneActions.swift */,
+				D5480000000000000000C042 /* IOSPhoneBridge.swift */,
 				D5480000000000000000C020 /* PerformanceChannel.swift */,
 				D5480000000000000000C022 /* DiagnosticsChannel.swift */,
 				D5480000000000000000C024 /* UsageChannel.swift */,
@@ -420,6 +426,8 @@
 				74858FAF1ED2DC5600515810 /* AppDelegate.swift in Sources */,
 				D5480000000000000000A001 /* DshPlugin.swift in Sources */,
 				D5480000000000000000A003 /* VoiceChannel.swift in Sources */,
+				D5480000000000000000C041 /* IOSPhoneActions.swift in Sources */,
+				D5480000000000000000C043 /* IOSPhoneBridge.swift in Sources */,
 				D5480000000000000000C021 /* PerformanceChannel.swift in Sources */,
 				D5480000000000000000C023 /* DiagnosticsChannel.swift in Sources */,
 				D5480000000000000000C025 /* UsageChannel.swift in Sources */,

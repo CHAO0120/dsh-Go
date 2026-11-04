@@ -38,6 +38,11 @@ rm -rf "$FRAMEWORKS/NodeMobile.framework/Headers" "$FRAMEWORKS/NodeMobile.framew
 cp -R "$BUILT/DshNodeHost.framework" "$FRAMEWORKS/"
 cp "$BUILT/libdsh_flock.so" "$BUILT/libdsh_require_builtin.so" "$FRAMEWORKS/"
 cp "$ENGINE/runtime.zip" "$RESOURCES/dsh-runtime/runtime.zip"
+# The phone tools' backend is iOS's own, so it isn't in the archive runtime/ohos composes.
+mkdir -p "$RESOURCES/dsh-runtime/phone"
+for file in actions.mjs bridge.mjs plugin.mjs catalog.json; do
+  cp "$ROOT/runtime/ios/phone/$file" "$RESOURCES/dsh-runtime/phone/"
+done
 
 if [ "${CODE_SIGNING_ALLOWED:-YES}" = "NO" ] || [ -z "${EXPANDED_CODE_SIGN_IDENTITY:-}" ]; then
   exit 0

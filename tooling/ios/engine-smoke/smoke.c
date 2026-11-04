@@ -59,7 +59,20 @@ static int phase_is(const char* phase) {
   return matches;
 }
 
+typedef int (*ArmFn)(const char*, const char*);
+typedef void (*ClearFn)(const char*);
+static ArmFn phone_arm;
+static ClearFn phone_clear;
+
 static void begin(char** argv) {
+  // What IOSPhoneBridge does before each run: the backend takes this token from memory.
+  const char* run = getenv("DSH_IOS_SMOKE_PHONE_RUN");
+  if (run != NULL) {
+    phone_clear(run);
+    if (phone_arm(run, "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef") != 0) {
+      die("phone arm", run);
+    }
+  }
   const char* keys[] = {"DSH_OHOS_TEST_KEY", "DSH_PERMISSION_MODE"};
   const char* values[] = {"ohos-local-fixture-only", "workspace-write"};
   char* code = NULL;
@@ -81,7 +94,11 @@ int main(int argc, char** argv) {
   host_state = (TextFn)dlsym(host, "dsh_host_state");
   host_drain = (TextFn)dlsym(host, "dsh_host_drain");
   host_free = (FreeFn)dlsym(host, "dsh_host_free");
-  if (!start_engine || !stop_engine || !host_state || !host_drain || !host_free) die("dlsym", dlerror());
+  phone_arm = (ArmFn)dlsym(host, "dsh_ios_phone_arm");
+  phone_clear = (ClearFn)dlsym(host, "dsh_ios_phone_clear");
+  if (!start_engine || !stop_engine || !host_state || !host_drain || !host_free || !phone_arm || !phone_clear) {
+    die("dlsym", dlerror());
+  }
   snprintf(dsh_home, sizeof dsh_home, "%s/root/.dsh", argv[3]);
   snprintf(workspace, sizeof workspace, "%s/root/workspace", argv[3]);
 

@@ -10,7 +10,7 @@ import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { once } from 'node:events';
 import http from 'node:http';
-import { appendFileSync, existsSync, mkdirSync, realpathSync, writeFileSync } from 'node:fs';
+import { appendFileSync, cpSync, existsSync, mkdirSync, realpathSync, writeFileSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { join, resolve } from 'node:path';
@@ -40,6 +40,17 @@ const report = { status: 'BLOCKED', stage: 'startup', approvals: 0, restart: 'no
 const fail = (message) => { throw new Error(message); };
 
 const model = await startFakeModel(workspace);
+// The phone tools' backend, wired the way EngineChannel.preparePhone does it. Only the
+// system actions themselves need the app.
+const phoneRun = randomUUID();
+const phoneDirectory = join(realpathSync(work), 'phone');
+mkdirSync(phoneDirectory, { mode: 0o700 });
+const phoneBackend = join(resolve(values.runtime), 'runtime/ios/phone');
+cpSync(join(repo, 'runtime/ios/phone'), phoneBackend, { recursive: true });
+writeFileSync(join(dshHome, 'ios-host.patch.json'), JSON.stringify([{ insert: [{
+  id: 'dsh-go-ios-phone', name: join(phoneBackend, 'plugin.mjs'), config: { directory: phoneDirectory, runId: phoneRun },
+}] }]));
+
 const overlay = join(work, 'model.patch.yml');
 writeFileSync(overlay, JSON.stringify([
   { id: 'llm-pi-ai', config: { providers: { 'ohos-fake': {
@@ -53,7 +64,12 @@ writeFileSync(overlay, JSON.stringify([
 
 const engine = spawn('xcrun', ['simctl', 'spawn', values.simulator, resolve(values.smoke), resolve(values.frameworks),
   resolve(values.runtime), guest, cache], {
-  env: { ...process.env, SIMCTL_CHILD_DSH_IOS_SMOKE_PATCH: overlay },
+  env: {
+    ...process.env,
+    SIMCTL_CHILD_DSH_IOS_SMOKE_PATCH: overlay,
+    SIMCTL_CHILD_DSH_IOS_SMOKE_PHONE_RUN: phoneRun,
+    SIMCTL_CHILD_DSH_IOS_SMOKE_IMPORT: join(repo, 'tooling/ios/engine-smoke/probe.mjs'),
+  },
   stdio: ['ignore', 'pipe', 'pipe'],
 });
 let exited = null;
@@ -253,6 +269,8 @@ if (!exited) {
   if (!exited) engine.kill();
 }
 report.modelRequests = model.requests.map((row) => row.requestedTool);
+report.phoneEndpoint = existsSync(join(phoneDirectory, 'endpoint.json'));
+report.phoneTools = (model.requests[0]?.offeredTools ?? []).filter((name) => name?.startsWith('mcp__phone__')).length;
 await model.close();
 report.nativeHost = existsSync(logFile) ? tail : [];
 writeFileSync(join(work, 'report.json'), JSON.stringify(report, null, 2) + '\n');

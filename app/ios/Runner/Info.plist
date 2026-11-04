@@ -153,6 +153,8 @@
 	<string>Connects to DSH on a computer or server you choose.</string>
 	<key>NSCameraUsageDescription</key>
 	<string>Takes photos to send to DSH as attachments.</string>
+	<key>NSCalendarsUsageDescription</key>
+	<string>Opens the calendar editor when you approve adding an event.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Used for voice input.</string>
 	<key>NSSpeechRecognitionUsageDescription</key>

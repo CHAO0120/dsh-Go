@@ -20,6 +20,10 @@ final class ShareChannel {
   /// Shares on their way to Dart, by folder. Only touched on [work].
   private var delivering = Set<String>()
 
+  /// Dart acknowledges queueing, before the composer reads and removes the files.
+  /// Keep this channel's nonempty slots until consumption, even across later shares.
+  private var readingSlots = Set<String>()
+
   init(messenger: any FlutterBinaryMessenger) {
     channel = FlutterMethodChannel(name: "dsh/share", binaryMessenger: messenger)
     channel.setMethodCallHandler { [weak self] call, result in
@@ -41,19 +45,24 @@ final class ShareChannel {
         if name.hasPrefix(ShareInbox.unfinishedPrefix) {
           Self.removeIfAbandoned(folder)
         } else if self.delivering.insert(name).inserted {
-          let share = Self.read(folder)
-          onMain { self.deliver(share, from: folder) }
+          let (share, slot) = self.read(folder)
+          onMain { self.deliver(share, from: folder, slot: slot) }
         }
       }
     }
   }
 
-  private func deliver(_ share: [String: Any?], from folder: URL) {
+  private func deliver(_ share: [String: Any?], from folder: URL, slot: URL?) {
     channel.invokeMethod("share", arguments: share) { [weak self] answer in
       self?.work.async {
         self?.delivering.remove(folder.lastPathComponent)
         let refused = answer is FlutterError || (answer as? NSObject) === FlutterMethodNotImplemented
-        if !refused { try? FileManager.default.removeItem(at: folder) }
+        if !refused {
+          try? FileManager.default.removeItem(at: folder)
+        } else if let slot {
+          try? FileManager.default.removeItem(at: slot)
+          self?.readingSlots.remove(slot.lastPathComponent)
+        }
       }
     }
   }
@@ -74,27 +83,27 @@ final class ShareChannel {
     try? FileManager.default.removeItem(at: folder)
   }
 
-  private static func read(_ folder: URL) -> [String: Any?] {
+  private func read(_ folder: URL) -> (share: [String: Any?], slot: URL?) {
     let manifestFile = folder.appendingPathComponent(ShareInbox.manifestName)
     guard let data = try? Data(contentsOf: manifestFile),
       let manifest = try? JSONDecoder().decode(ShareInbox.Manifest.self, from: data)
     else {
-      return ["skipped": [["reason": "unreadable"]]]
+      return (["skipped": [["reason": "unreadable"]]], nil)
     }
     var files: [[String: Any?]] = []
     var skipped: [[String: String?]] = manifest.skipped.map { ["name": $0.name, "reason": $0.reason] }
     let slot = manifest.files.isEmpty ? nil : newSlot()
     for file in manifest.files {
-      if let slot, let copied = copy(folder.appendingPathComponent(file.name), mime: file.mime, to: slot) {
+      if let slot, let copied = Self.copy(folder.appendingPathComponent(file.name), mime: file.mime, to: slot) {
         files.append(copied)
       } else {
         skipped.append(["name": file.name, "reason": "unreadable"])
       }
     }
-    return ["text": manifest.text, "subject": manifest.subject, "files": files, "skipped": skipped]
+    return (["text": manifest.text, "subject": manifest.subject, "files": files, "skipped": skipped], slot)
   }
 
-  private static func newSlot() -> URL? {
+  private func newSlot() -> URL? {
     let manager = FileManager.default
     guard let caches = manager.urls(for: .cachesDirectory, in: .userDomainMask).first else { return nil }
     let root = caches.appendingPathComponent("share", isDirectory: true)
@@ -102,15 +111,28 @@ final class ShareChannel {
     let slot = root.appendingPathComponent(UUID().uuidString, isDirectory: true)
     do {
       try manager.createDirectory(at: slot, withIntermediateDirectories: true)
+      readingSlots.insert(slot.lastPathComponent)
       return slot
     } catch {
       return nil
     }
   }
 
-  /// The composer may still be reading the latest ones.
-  private static func prune(_ root: URL) {
-    oldestFirst(in: root).dropLast(keepSlots - 1).forEach { try? FileManager.default.removeItem(at: $0) }
+  /// Only previous-channel leftovers are subject to the slot-count limit. A live
+  /// share can wait behind a page with unsaved edits after its delivery was ACKed.
+  private func prune(_ root: URL) {
+    let manager = FileManager.default
+    let slots = Self.oldestFirst(in: root)
+    readingSlots.formIntersection(slots.map(\.lastPathComponent))
+    let leftovers = slots.filter { slot in
+      guard readingSlots.contains(slot.lastPathComponent) else { return true }
+      if let files = try? manager.contentsOfDirectory(atPath: slot.path), files.isEmpty {
+        try? manager.removeItem(at: slot)
+        readingSlots.remove(slot.lastPathComponent)
+      }
+      return false
+    }
+    leftovers.dropLast(Self.keepSlots - 1).forEach { try? manager.removeItem(at: $0) }
   }
 
   private static func copy(_ source: URL, mime: String?, to slot: URL) -> [String: Any?]? {

@@ -4,6 +4,7 @@
 #include <node.h>
 #include <pthread.h>
 #include <signal.h>
+#include <unistd.h>
 
 #include <algorithm>
 #include <cstdio>
@@ -167,12 +168,23 @@ extern "C" __attribute__((visibility("default"))) int dsh_node_start(int argc, c
                    // output. The stacks are ordinary readFileSync calls.
                    "--disable-warning=Warning", kPlatformImport, argv[2], argv[3]};
   run.arguments.insert(run.arguments.end(), argv + 4, argv + argc);
+  // The shared host fixes its own profile. What iOS adds (the phone tools) sits next to
+  // it, written by the app for this run, and the CLI only takes --patch here.
+  const auto host_patch = std::find(run.arguments.begin(), run.arguments.end(), "--patch");
+  if (host_patch != run.arguments.end() && host_patch + 1 != run.arguments.end()) {
+    const std::string profile = *(host_patch + 1);
+    const std::string ios_patch = profile.substr(0, profile.rfind('/') + 1) + "ios-host.patch.json";
+    if (access(ios_patch.c_str(), R_OK) == 0) run.arguments.insert(host_patch + 2, {"--patch", ios_patch});
+  }
 #ifdef DSH_IOS_ENGINE_SMOKE
   // Test builds only: the smoke test's fake model has to reach the fixed command line,
   // next to the host's own --patch because the CLI takes it nowhere later.
   if (const char* patch = std::getenv("DSH_IOS_SMOKE_PATCH")) {
     const auto own = std::find(run.arguments.begin(), run.arguments.end(), "--patch");
     run.arguments.insert(own + 2, {"--patch", patch});
+  }
+  if (const char* probe = std::getenv("DSH_IOS_SMOKE_IMPORT")) {
+    run.arguments.insert(std::find(run.arguments.begin(), run.arguments.end(), argv[4]), {"--import", probe});
   }
 #endif
 
