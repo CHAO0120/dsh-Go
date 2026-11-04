@@ -365,9 +365,9 @@ final class EngineChannel: NSObject, FlutterStreamHandler {
           self?.endBackgroundTask()
         }
       }
-      queue.async { [self] in
-        lifecycle.observe(continued: running)
-        emitStatus()
+      queue.async {
+        self.lifecycle.observe(continued: running)
+        self.emitStatus()
       }
     }
     let center = NotificationCenter.default
