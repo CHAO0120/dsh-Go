@@ -114,14 +114,14 @@ export function formatChanges(rows, { numstat = false, nul = false, nameOnly = f
   return rows.map(row => {
     const oldName = row.before ? `a/${row.oldPath ?? row.path}` : '/dev/null';
     const newName = row.after ? `b/${row.path}` : '/dev/null';
-    let header = `diff --git a/${row.oldPath ?? row.path} b/${row.path}\n`;
+    let header = `diff --git ${quoteGitPath(`a/${row.oldPath ?? row.path}`, quoteHighBytes)} ${quoteGitPath(`b/${row.path}`, quoteHighBytes)}\n`;
     if (!row.before) header += `new file mode ${row.after.mode.toString(8)}\n`;
     else if (!row.after) header += `deleted file mode ${row.before.mode.toString(8)}\n`;
     else if (row.before.mode !== row.after.mode) header += `old mode ${row.before.mode.toString(8)}\nnew mode ${row.after.mode.toString(8)}\n`;
     if (row.oldPath) header += `rename from ${row.oldPath}\nrename to ${row.path}\n`;
     if (row.added === '-') return header + `Binary files ${oldName} and ${newName} differ\n`;
     if (row.oldBytes.equals(row.newBytes)) return header;
-    const patch = createTwoFilesPatch(oldName, newName, row.oldBytes.toString('utf8'), row.newBytes.toString('utf8'), '', '', { context: 3 });
+    const patch = createTwoFilesPatch(quoteGitPath(oldName, quoteHighBytes), quoteGitPath(newName, quoteHighBytes), row.oldBytes.toString('utf8'), row.newBytes.toString('utf8'), '', '', { context: 3 });
     return header + patch.replace(/^(?:Index:.*\n)?={3,}\n/, '');
   }).join('');
 }

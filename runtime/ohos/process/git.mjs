@@ -256,7 +256,7 @@ async function gitDiff(args, ctx, options, treesOnly = false) {
   }
   const rows = await changes(git, options, before, after, { renames });
   return output(formatChanges(rows, { numstat, nul, nameOnly,
-    quoteHighBytes: (numstat || nameOnly) ? await quoteHighBytes(options) : true }));
+    quoteHighBytes: await quoteHighBytes(options) }));
 }
 
 function authorFrom(ctx, kind) {
