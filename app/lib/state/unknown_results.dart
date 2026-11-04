@@ -48,11 +48,15 @@ enum AbandonOutcome { done, changed }
 ///
 /// The engine's acknowledgement covers whatever is unknown in the session at that moment.
 /// So this reads again first, and stops if that's no longer what the user saw. It still
-/// can't rule out a change between that read and the acknowledgement.
-Future<AbandonOutcome> abandonUnknownResults(UnknownResults seen) async {
+/// can't rule out a change between that read and the acknowledgement. [isCurrent]
+/// must stay false once the connection or confirmation owner has changed.
+Future<AbandonOutcome> abandonUnknownResults(UnknownResults seen, {required bool Function() isCurrent}) async {
+  if (!isCurrent()) return AbandonOutcome.changed;
   final sessionId = seen.snapshot.sessionId;
   final now = await seen.client.getLifecycleStatus(sessionId);
-  if (now.bootId != seen.snapshot.bootId || !_sameCalls(now, seen.snapshot)) return AbandonOutcome.changed;
+  if (!isCurrent() || now.bootId != seen.snapshot.bootId || !_sameCalls(now, seen.snapshot)) {
+    return AbandonOutcome.changed;
+  }
   await seen.client.acknowledgeLifecycleUnknown(sessionId, userConfirmed: true);
   return AbandonOutcome.done;
 }

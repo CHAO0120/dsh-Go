@@ -8,9 +8,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 /// What the engine reported for a real interrupted bash call.
-final _fixture =
-    jsonDecode(File('../packages/dsh_client/test/fixtures/lifecycle-real-unknown.json').readAsStringSync())
-        as Map<String, dynamic>;
+final _fixture = jsonDecode(
+  File('../packages/dsh_client/test/fixtures/lifecycle-real-unknown.json').readAsStringSync(),
+) as Map<String, dynamic>;
 final _session = _fixture['sessionId'] as String;
 
 Map<String, dynamic> _state(String key) => jsonDecode(jsonEncode(_fixture[key])) as Map<String, dynamic>;
@@ -57,7 +57,7 @@ void main() {
 
   test('goes on when the calls are still the ones the user saw', () async {
     answer = (request) => request.method == 'GET' ? _state('unknown') : _state('acknowledged');
-    expect(await abandonUnknownResults(await read()), AbandonOutcome.done);
+    expect(await abandonUnknownResults(await read(), isCurrent: () => true), AbandonOutcome.done);
     expect(requests, ['GET', 'GET', 'POST']);
   });
 
@@ -72,7 +72,7 @@ void main() {
       calls.add(added);
       return state;
     };
-    expect(await abandonUnknownResults(seen), AbandonOutcome.changed);
+    expect(await abandonUnknownResults(seen, isCurrent: () => true), AbandonOutcome.changed);
     expect(requests, isNot(contains('POST')));
   });
 
@@ -80,7 +80,7 @@ void main() {
     answer = (_) => _state('unknown');
     final seen = await read();
     answer = (_) => _state('unknown')..['bootId'] = 'another-boot';
-    expect(await abandonUnknownResults(seen), AbandonOutcome.changed);
+    expect(await abandonUnknownResults(seen, isCurrent: () => true), AbandonOutcome.changed);
     expect(requests, isNot(contains('POST')));
   });
 
