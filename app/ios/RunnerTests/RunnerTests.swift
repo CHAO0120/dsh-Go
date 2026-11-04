@@ -85,18 +85,20 @@ final class NativeToolsTests: XCTestCase {
     return try JSONDecoder().decode(IOSPhoneRequest.self, from: JSONSerialization.data(withJSONObject: body))
   }
 
-  private func note(_ row: [String: Any]) {
-    guard let directory = ProcessInfo.processInfo.environment["DSH_TOOLS_CHECK_DIR"],
-      let data = try? JSONSerialization.data(withJSONObject: row)
-    else { return }
+  private func note(_ row: [String: Any]) throws {
+    guard let directory = ProcessInfo.processInfo.environment["DSH_TOOLS_CHECK_DIR"] else { return }
+    let data = try JSONSerialization.data(withJSONObject: row)
     let file = URL(fileURLWithPath: directory).appendingPathComponent("rows.jsonl")
     if !FileManager.default.fileExists(atPath: file.path) {
-      FileManager.default.createFile(atPath: file.path, contents: nil)
+      guard FileManager.default.createFile(atPath: file.path, contents: nil) else {
+        throw CocoaError(.fileWriteUnknown)
+      }
     }
-    guard let handle = try? FileHandle(forWritingTo: file) else { return }
+    let handle = try FileHandle(forWritingTo: file)
     defer { try? handle.close() }
-    _ = try? handle.seekToEnd()
-    try? handle.write(contentsOf: data + Data("\n".utf8))
+    _ = try handle.seekToEnd()
+    try handle.write(contentsOf: data + Data("\n".utf8))
+    try handle.close()
   }
 
   /// A permission prompt nobody is there for would otherwise hold the whole run. Running out of
@@ -124,8 +126,12 @@ final class NativeToolsTests: XCTestCase {
         }
         if race.take() {
           race.call?.cancel()
-          self.note(["group": group, "name": name, "args": args, "expect": expect.rawValue, "isError": true,
+          do {
+            try self.note(["group": group, "name": name, "args": args, "expect": expect.rawValue, "isError": true,
             "timedOut": true, "text": "timed out after \(Int(seconds)) s", "ms": Int(seconds * 1000)])
+          } catch {
+            XCTFail("could not record \(group) \(name): \(error)")
+          }
           continuation.resume(throwing: CancellationError())
         }
       }
@@ -135,7 +141,8 @@ final class NativeToolsTests: XCTestCase {
       "text": String(answer.text.prefix(8000)), "ms": Int(Date().timeIntervalSince(started) * 1000),
     ]
     if let image = answer.image { row["imageBytes"] = image.count }
-    note(row)
+    do { try note(row) }
+    catch { XCTFail("could not record \(group) \(name): \(error)") }
     switch expect {
     case .ok: XCTAssertFalse(answer.isError, "\(name): \(answer.text)")
     case .refused: XCTAssertTrue(answer.isError, "\(name) should have been refused: \(answer.text)")
