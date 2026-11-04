@@ -7333,14 +7333,14 @@ class L10nEn extends L10n {
       'Tasks on this phone only fire while the app is running: they won\'t run on time while the system has it suspended';
 
   @override
-  String get harmonyPageUnavailable => 'This page isn\'t available on HarmonyOS yet';
+  String get harmonyPageUnavailable => 'This page isn\'t available in this version yet';
 
   @override
   String get harmonyNotificationSettingsFailed =>
       'Couldn’t open system settings. Turn on notifications in Settings → Notifications & status bar → DSH Go.';
 
   @override
-  String get harmonySearchUnavailable => 'This isn\'t available on HarmonyOS yet';
+  String get harmonySearchUnavailable => 'This isn\'t available in this version yet';
 
   @override
   String get harmonyCredentialsSection => 'Keys';

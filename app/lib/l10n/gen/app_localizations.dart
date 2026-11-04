@@ -12719,7 +12719,7 @@ abstract class L10n {
   /// No description provided for @harmonyPageUnavailable.
   ///
   /// In zh, this message translates to:
-  /// **'鸿蒙版暂时没有这个页面'**
+  /// **'这个版本暂时没有这个页面'**
   String get harmonyPageUnavailable;
 
   /// No description provided for @harmonyNotificationSettingsFailed.
@@ -12731,7 +12731,7 @@ abstract class L10n {
   /// No description provided for @harmonySearchUnavailable.
   ///
   /// In zh, this message translates to:
-  /// **'鸿蒙版暂时没有这项功能'**
+  /// **'这个版本暂时没有这项功能'**
   String get harmonySearchUnavailable;
 
   /// No description provided for @harmonyCredentialsSection.

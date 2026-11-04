@@ -1,0 +1,905 @@
+import Flutter
+import Foundation
+import Network
+import UIKit
+
+/// The native side of the engine, loaded on first start: someone who only uses remote
+/// hosts never maps 90 MB of Node into the process.
+private final class NativeEngine {
+  private typealias Start = @convention(c) (
+    UnsafePointer<CChar>, UnsafePointer<CChar>, UnsafePointer<CChar>, UnsafePointer<CChar>, UnsafePointer<CChar>,
+    UnsafePointer<CChar>, Int32, UnsafePointer<UnsafePointer<CChar>?>?, UnsafePointer<UnsafePointer<CChar>?>?,
+    UnsafeMutablePointer<UnsafeMutablePointer<CChar>?>?, UnsafeMutablePointer<UnsafeMutablePointer<CChar>?>?
+  ) -> Int32
+  private typealias Stop = @convention(c) () -> Void
+  private typealias Text = @convention(c) () -> UnsafeMutablePointer<CChar>?
+  private typealias Free = @convention(c) (UnsafeMutablePointer<CChar>?) -> Void
+
+  private let start: Start
+  private let stopEngine: Stop
+  private let state: Text
+  private let drain: Text
+  private let free: Free
+
+  let frameworks: String
+
+  init() throws {
+    guard let frameworks = Bundle.main.privateFrameworksPath else {
+      throw EngineFailure("ios_native_unavailable", "App 里没有本机引擎。")
+    }
+    self.frameworks = frameworks
+    guard let library = dlopen(frameworks + "/DshNodeHost.framework/DshNodeHost", RTLD_NOW | RTLD_GLOBAL) else {
+      let detail = dlerror().map { String(cString: $0) } ?? ""
+      throw EngineFailure("ios_native_unavailable", "本机引擎加载失败：\(detail)")
+    }
+    func symbol<T>(_ name: String, as type: T.Type) throws -> T {
+      guard let found = dlsym(library, name) else {
+        throw EngineFailure("ios_native_unavailable", "本机引擎缺少 \(name)。")
+      }
+      return unsafeBitCast(found, to: type)
+    }
+    start = try symbol("dsh_host_start", as: Start.self)
+    stopEngine = try symbol("dsh_host_stop", as: Stop.self)
+    state = try symbol("dsh_host_state", as: Text.self)
+    drain = try symbol("dsh_host_drain", as: Text.self)
+    free = try symbol("dsh_host_free", as: Free.self)
+  }
+
+  func begin(runtime: String, guest: String, home: String, cache: String, workspace: String, env: [String: String]) throws {
+    let keys = env.keys.map { strdup($0) }
+    let values = env.keys.map { strdup(env[$0] ?? "") }
+    defer {
+      keys.forEach { Foundation.free($0) }
+      values.forEach { Foundation.free($0) }
+    }
+    var code: UnsafeMutablePointer<CChar>?
+    var message: UnsafeMutablePointer<CChar>?
+    let keyPointers = keys.map { UnsafePointer<CChar>($0) }
+    let valuePointers = values.map { UnsafePointer<CChar>($0) }
+    let result = keyPointers.withUnsafeBufferPointer { keyBuffer in
+      valuePointers.withUnsafeBufferPointer { valueBuffer in
+        start(
+          runtime, guest, home, cache, frameworks, workspace, Int32(env.count), keyBuffer.baseAddress,
+          valueBuffer.baseAddress, &code, &message)
+      }
+    }
+    if result != 0 {
+      let failure = EngineFailure(
+        code.map { String(cString: $0) } ?? "ios_native_start", message.map { String(cString: $0) } ?? "本机引擎启动失败。")
+      free(code)
+      free(message)
+      throw failure
+    }
+  }
+
+  func stop() { stopEngine() }
+
+  func currentState() -> [String: Any] { (read(state) as? [String: Any]) ?? [:] }
+
+  func events() -> [[String: Any]] { (read(drain) as? [[String: Any]]) ?? [] }
+
+  private func read(_ source: Text) -> Any? {
+    guard let text = source() else { return nil }
+    defer { free(text) }
+    return try? JSONSerialization.jsonObject(with: Data(bytesNoCopy: text, count: strlen(text), deallocator: .none))
+  }
+}
+
+/// Tells the engine when the app moves between foreground and background. It only ever
+/// repeats this idempotent observation, never a tool or a prompt.
+private final class EngineLifecycle: NSObject, URLSessionTaskDelegate {
+  private var foreground = false
+  private var revision = 1
+  private var generation = 0
+  private var origin: String?
+  private var token: String?
+  private var cookie: String?
+  private var requested = -1
+  private var acknowledged = -1
+  private(set) var failure: String?
+  private var retryDelay = 1.0
+  private var retry: DispatchWorkItem?
+  private var task: URLSessionTask?
+  private var failures = 0
+
+  private let queue: DispatchQueue
+  private let changed: () -> Void
+  private let lostServer: () -> Void
+  private lazy var session: URLSession = {
+    let configuration = URLSessionConfiguration.ephemeral
+    configuration.httpCookieStorage = nil
+    configuration.httpShouldSetCookies = false
+    configuration.connectionProxyDictionary = [:]
+    configuration.timeoutIntervalForRequest = 4
+    let delegateQueue = OperationQueue()
+    delegateQueue.underlyingQueue = queue
+    return URLSession(configuration: configuration, delegate: self, delegateQueue: delegateQueue)
+  }()
+
+  init(queue: DispatchQueue, changed: @escaping () -> Void, lostServer: @escaping () -> Void) {
+    self.queue = queue
+    self.changed = changed
+    self.lostServer = lostServer
+  }
+
+  func urlSession(
+    _ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
+    newRequest request: URLRequest, completionHandler: @escaping (URLRequest?) -> Void
+  ) {
+    completionHandler(nil)
+  }
+
+  func observe(foreground: Bool) {
+    resetRetry()
+    self.foreground = foreground
+    revision += 1
+    failures = 0
+    push()
+  }
+
+  func runtime(baseUrl: String?, token: String?) {
+    if origin == baseUrl && self.token == token { return }
+    resetRetry()
+    generation += 1
+    task?.cancel()
+    origin = baseUrl
+    self.token = token
+    cookie = nil
+    requested = -1
+    acknowledged = -1
+    failure = nil
+    failures = 0
+    push()
+    if baseUrl == nil { changed() }
+  }
+
+  func status() -> [String: Any?] {
+    ["foreground": foreground, "revision": revision, "acknowledgedRevision": acknowledged < 0 ? nil : acknowledged, "error": failure]
+  }
+
+  private func resetRetry() {
+    retry?.cancel()
+    retry = nil
+    retryDelay = 1
+  }
+
+  private func push() {
+    guard let origin, let token, requested != revision else { return }
+    requested = revision
+    task?.cancel()
+    let revision = self.revision
+    let generation = self.generation
+    let current = { [weak self] in self?.generation == generation && self?.revision == revision }
+    let done: (String?) -> Void = { [weak self] code in
+      guard let self, current() else { return }
+      if let code {
+        self.failure = code
+        self.failures += 1
+        // Sockets don't always survive a long suspension. When the listener is gone and
+        // the person is looking at the app, the only way back is a new run.
+        if code == "ios_lifecycle_unavailable", self.foreground, self.failures >= 2 {
+          self.lostServer()
+          return
+        }
+        let item = DispatchWorkItem { [weak self] in
+          guard let self else { return }
+          self.retry = nil
+          self.requested = -1
+          self.push()
+        }
+        self.retry = item
+        self.queue.asyncAfter(deadline: .now() + self.retryDelay, execute: item)
+        self.retryDelay = min(self.retryDelay * 2, 30)
+      } else {
+        self.acknowledged = revision
+        self.failure = nil
+        self.failures = 0
+      }
+      self.changed()
+    }
+    if cookie == nil {
+      authenticate(origin: origin, token: token, current: current) { [weak self] code in
+        guard let self else { return }
+        if let code { done(code) } else { self.send(origin: origin, revision: revision, done: done) }
+      }
+    } else {
+      send(origin: origin, revision: revision, done: done)
+    }
+  }
+
+  private func authenticate(origin: String, token: String, current: @escaping () -> Bool, done: @escaping (String?) -> Void) {
+    var allowed = CharacterSet.alphanumerics
+    allowed.insert(charactersIn: "-_")
+    guard let encoded = token.addingPercentEncoding(withAllowedCharacters: allowed),
+      let url = URL(string: origin + "/?token=" + encoded)
+    else { return done("ios_lifecycle_endpoint") }
+    let request = URLRequest(url: url)
+    task = session.dataTask(with: request) { [weak self] _, response, error in
+      guard let self, current() else { return }
+      guard error == nil, let http = response as? HTTPURLResponse else { return done("ios_lifecycle_unavailable") }
+      let header = http.value(forHTTPHeaderField: "Set-Cookie") ?? ""
+      let matches = header.matches(of: #"dsh-auth-[A-Za-z0-9_-]+=[A-Za-z0-9_.-]+"#)
+      guard http.statusCode == 303, matches.count == 1 else { return done("ios_lifecycle_auth") }
+      self.cookie = matches[0]
+      done(nil)
+    }
+    task?.resume()
+  }
+
+  private func send(origin: String, revision: Int, done: @escaping (String?) -> Void) {
+    guard let url = URL(string: origin + "/dsh-go/v1/lifecycle"), let cookie else { return done("ios_lifecycle_endpoint") }
+    var request = URLRequest(url: url)
+    request.httpMethod = "POST"
+    request.setValue(cookie, forHTTPHeaderField: "Cookie")
+    request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+    // iOS gives no continuing compute in the background: the engine pauses new tool calls.
+    let body: [String: Any] = ["operation": "host", "revision": revision, "foreground": foreground, "computePermission": "denied"]
+    request.httpBody = try? JSONSerialization.data(withJSONObject: body)
+    let foreground = self.foreground
+    task = session.dataTask(with: request) { [weak self] data, response, error in
+      guard let self else { return }
+      guard error == nil, let http = response as? HTTPURLResponse else { return done("ios_lifecycle_unavailable") }
+      if http.statusCode == 401 { self.cookie = nil }
+      guard http.statusCode == 200, let data,
+        let ack = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+        (ack["v"] as? Int) == 1, let host = ack["host"] as? [String: Any],
+        (host["revision"] as? Int) == revision, (host["foreground"] as? Bool) == foreground,
+        (ack["closed"] as? Bool) == false, (ack["blocked"] as? Bool) == false
+      else { return done(http.statusCode == 200 ? "ios_lifecycle_ack" : "ios_lifecycle_control") }
+      done(nil)
+    }
+    task?.resume()
+  }
+}
+
+extension String {
+  fileprivate func matches(of pattern: String) -> [String] {
+    guard let expression = try? NSRegularExpression(pattern: pattern) else { return [] }
+    let range = NSRange(startIndex..., in: self)
+    return expression.matches(in: self, range: range).compactMap { Range($0.range, in: self).map { String(self[$0]) } }
+  }
+}
+
+/// dsh/runtime: the engine on this phone. The same runtime as HarmonyOS, except that
+/// stop and start work in place, since each run has its own Node Environment.
+final class EngineChannel: NSObject, FlutterStreamHandler {
+  static var isBundled: Bool {
+    Bundle.main.url(forResource: "runtime", withExtension: "zip", subdirectory: "dsh-runtime") != nil
+      && Bundle.main.privateFrameworksPath.map {
+        FileManager.default.fileExists(atPath: $0 + "/DshNodeHost.framework/DshNodeHost")
+      } == true
+  }
+
+  private static let notice = "前后台状态尚未同步，本机任务可能仍在暂停或运行；正在重试。"
+
+  private let methods: FlutterMethodChannel
+  private let events: FlutterEventChannel
+  private let queue = DispatchQueue(label: "dsh.engine", qos: .userInitiated)
+
+  private let filesDirectory: URL
+  private let guestRoot: URL
+  private let installer: RuntimeInstaller
+  private lazy var skills = EngineSkills(guestRoot: guestRoot, queue: queue) { [weak self] generation, token in
+    guard let self else { return false }
+    let state = self.native?.currentState()
+    return !self.requestedStop && self.pending == nil && state?["phase"] as? String == "running"
+      && generation == self.runtimeGeneration && state?["token"] as? String == token
+  }
+  private var skillOwner: EngineSkills.Owner?
+  private lazy var lifecycle = EngineLifecycle(
+    queue: queue,
+    changed: { [weak self] in self?.lifecycleChanged() },
+    lostServer: { [weak self] in self?.restartAfterLostServer() })
+
+  private var sink: FlutterEventSink?
+  private var archive: RuntimeArchive?
+  private var installed: RuntimeManifest?
+  private var setupError: String?
+  private var lastError: String?
+  private var lastLifecycleError: String?
+  private var failureLines: [String] = []
+  private var pending: String?
+  private var requestedStop = false
+  private var runtimeGeneration = 0
+  private var native: NativeEngine?
+  private var timer: DispatchSourceTimer?
+  private var lastPhase = "idle"
+  private var lastToken = ""
+  private var lastExitCode: Int?
+  private var lastErrorCode = ""
+  private var queuedStart: (env: [String: String], visualReplies: Bool)?
+  private var lastStart: (env: [String: String], visualReplies: Bool)?
+  private var initialized = false
+
+  private var logSequence = 0
+  private var logs: [[String: Any]] = []
+  private var secrets: [String] = []
+
+  private var backgroundTask = UIBackgroundTaskIdentifier.invalid
+  private let pathMonitor = NWPathMonitor()
+  private var pathStarted = false
+
+  init(messenger: any FlutterBinaryMessenger) {
+    methods = FlutterMethodChannel(name: "dsh/runtime", binaryMessenger: messenger)
+    events = FlutterEventChannel(name: "dsh/runtime/events", binaryMessenger: messenger)
+    filesDirectory =
+      (try? FileManager.default.url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true))
+      ?? URL(fileURLWithPath: NSTemporaryDirectory())
+    guestRoot = EngineChannel.prepared(filesDirectory.appendingPathComponent("runtime/rootfs", isDirectory: true))
+    installer = RuntimeInstaller(base: filesDirectory.appendingPathComponent("dsh-runtime", isDirectory: true))
+    super.init()
+    excludeFromBackup(filesDirectory.appendingPathComponent("runtime", isDirectory: true))
+    methods.setMethodCallHandler { [weak self] call, result in
+      self?.handle(call, result: result) ?? result(FlutterMethodNotImplemented)
+    }
+    events.setStreamHandler(self)
+    queue.async { [self] in
+      skillOwner = skills.attachOwner()
+    }
+    let center = NotificationCenter.default
+    center.addObserver(
+      self, selector: #selector(enteredBackground), name: UIApplication.didEnterBackgroundNotification, object: nil)
+    center.addObserver(
+      self, selector: #selector(enteringForeground), name: UIApplication.willEnterForegroundNotification, object: nil)
+    let foreground = UIApplication.shared.applicationState != .background
+    queue.async { [self] in lifecycle.observe(foreground: foreground) }
+  }
+
+  /// The engine sees real paths (`/private/var/...`). Dart has to use the same spelling,
+  /// or a session's folder reads as outside the workspace.
+  private static func prepared(_ url: URL) -> URL {
+    try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+    guard let resolved = realpath(url.path, nil) else { return url }
+    defer { free(resolved) }
+    return URL(fileURLWithPath: String(cString: resolved), isDirectory: true)
+  }
+
+  /// DSH keeps its own credentials under the home directory, and they stay on this phone.
+  private func excludeFromBackup(_ url: URL) {
+    var target = url
+    var values = URLResourceValues()
+    values.isExcludedFromBackup = true
+    try? FileManager.default.createDirectory(at: target, withIntermediateDirectories: true)
+    try? target.setResourceValues(values)
+  }
+
+  // MARK: Paths
+
+  private var home: URL { guestRoot.appendingPathComponent("root", isDirectory: true) }
+  private var dshHome: URL { home.appendingPathComponent(".dsh", isDirectory: true) }
+  private var agentsHome: URL { home.appendingPathComponent(".agents", isDirectory: true) }
+  private var workspace: URL { home.appendingPathComponent("workspace", isDirectory: true) }
+  private var outputs: URL { workspace.appendingPathComponent("DSH-Go", isDirectory: true) }
+  private var cache: URL {
+    (FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first
+      ?? URL(fileURLWithPath: NSTemporaryDirectory()))
+      .appendingPathComponent("dsh-runtime", isDirectory: true)
+  }
+
+  // MARK: Flutter
+
+  func onListen(withArguments arguments: Any?, eventSink: @escaping FlutterEventSink) -> FlutterError? {
+    sink = eventSink
+    queue.async { [self] in
+      initialize()
+      emitStatus()
+    }
+    return nil
+  }
+
+  func onCancel(withArguments arguments: Any?) -> FlutterError? {
+    sink = nil
+    return nil
+  }
+
+  private func emit(_ event: [String: Any?]) {
+    DispatchQueue.main.async { [weak self] in self?.sink?(event) }
+  }
+
+  private func emitStatus() { emit(["type": "status", "status": snapshot()]) }
+
+  private func handle(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
+    let reply: (Any?) -> Void = { value in DispatchQueue.main.async { result(value) } }
+    let arguments = call.arguments as? [String: Any] ?? [:]
+    // guestRoot is read before the first frame and touches no engine state.
+    if call.method == "guestRoot" { return result(guestRoot.path) }
+    queue.async { [self] in
+      do {
+        initialize()
+        switch call.method {
+        case "getStatus":
+          collect()
+          reply(snapshot())
+        case "install":
+          if arguments["dropKept"] as? Bool == true {
+            throw EngineFailure("ios_unsupported", "iOS 没有保留数据恢复事务。")
+          }
+          try install { reply(nil) } failed: { reply(self.flutterError($0)) }
+        case "start":
+          try start(
+            env: arguments["env"] as? [String: Any], phoneStorage: arguments["phoneStorage"] as? Bool ?? false,
+            mode: arguments["mode"] as? String, visualReplies: arguments["visualReplies"] as? Bool ?? true)
+          reply(nil)
+        case "stop":
+          stop()
+          reply(nil)
+        case "reopenApp":
+          reply(nil)
+        case "getLogs":
+          reply(recent(arguments["lines"] as? Int ?? 500).map { $0["line"] ?? "" })
+        case "getLogSnapshot":
+          reply(["entries": recent(arguments["lines"] as? Int ?? 300), "throughSeq": logSequence])
+        case "clearFailure":
+          failureLines = []
+          lastError = nil
+          emitStatus()
+          reply(nil)
+        case "failureLog":
+          reply(failureLines)
+        case "lastKnownGood":
+          reply(["available": false, "at": nil, "disable": [], "enable": [], "changed": [], "patchChanged": false, "empty": true] as [String: Any?])
+        case "storageStatus":
+          reply(["granted": false, "permission": false, "legacy": false, "guestPath": ""] as [String: Any])
+        case "networkMetered":
+          networkMetered(reply)
+        case "publishDiagnostics":
+          reply(publishDiagnostics(arguments["markdown"] as? String))
+        case "installManagedSkill":
+          guard let owner = skillOwner else { throw EngineFailure("ios_detached", "运行时通道已解除连接。") }
+          skills.install(owner: owner, arguments: arguments) { reply($0) }
+        case "cancelManagedSkill":
+          if let owner = skillOwner, let id = arguments["requestId"] as? String, !id.isEmpty, id.utf16.count <= 200 {
+            skills.cancel(owner, requestId: id)
+          }
+          reply(nil)
+        case "reset", "restoreLastKnownGood", "safePreflight", "moveAside", "setAutoSafe", "setDirectEngine",
+          "requestStorage", "openAllFilesAccess", "batteryExempt", "requestBatteryExempt", "backgroundSettings",
+          "openBackgroundSettings", "openVendorSettings", "voiceModelLine":
+          throw EngineFailure("ios_unsupported", "iOS 本机尚不支持 \(call.method)；文件请用系统选择器，其他任务可交给已连接的电脑。")
+        default:
+          DispatchQueue.main.async { result(FlutterMethodNotImplemented) }
+        }
+      } catch {
+        reply(flutterError(error))
+      }
+    }
+  }
+
+  private func flutterError(_ error: Error) -> FlutterError {
+    if let failure = error as? EngineFailure {
+      return FlutterError(code: failure.code, message: failure.message, details: nil)
+    }
+    return FlutterError(code: "ios_runtime_error", message: "iOS 本机运行时操作失败，请查看状态或重新打开 App。", details: nil)
+  }
+
+  // MARK: State
+
+  private func initialize() {
+    guard !initialized else { return }
+    initialized = true
+    readInstallation()
+  }
+
+  private func readInstallation() {
+    do {
+      guard let url = Bundle.main.url(forResource: "runtime", withExtension: "zip", subdirectory: "dsh-runtime") else {
+        throw EngineFailure("ios_payload_missing", "App 里没有运行时载荷。")
+      }
+      archive = try RuntimeArchive(url: url)
+      installed = try installer.installed()
+      if installer.interrupted { setupError = "上次运行时安装未完成，请重新安装以继续。" }
+    } catch let failure as EngineFailure {
+      setupError = failure.message
+    } catch {
+      setupError = "无法读取随包运行时或安装记录。"
+    }
+  }
+
+  private var current: Bool {
+    guard let bundled = archive?.manifest, let installed else { return false }
+    return bundled.runtimeVersion == installed.runtimeVersion && bundled.dshVersion == installed.dshVersion
+      && bundled.nodeVersion == installed.nodeVersion && bundled.files == installed.files
+  }
+
+  private func snapshot() -> [String: Any?] {
+    let state = native?.currentState() ?? [:]
+    let nativePhase = state["phase"] as? String ?? "idle"
+    let errorMessage = (state["errorMessage"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+    let errorCode = (state["errorCode"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+    let token = (state["token"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+    let baseUrl = (state["baseUrl"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+    syncSkills(phase: nativePhase, token: token)
+    let exitedUnasked = nativePhase == "exited" && !requestedStop
+
+    var phase = current ? "installed" : "notInstalled"
+    if pending == "install" {
+      phase = "installing"
+    } else if pending == "start" || queuedStart != nil {
+      phase = "starting"
+    } else if ["starting", "running", "stopping"].contains(nativePhase) {
+      phase = nativePhase
+    } else if nativePhase == "error" || exitedUnasked {
+      phase = "error"
+    } else if lastError != nil || setupError != nil {
+      phase = "error"
+    }
+    let active = nativePhase == "running"
+    let bundled = archive?.manifest
+    let exitedMessage = exitedUnasked ? "本机引擎已退出，可以重新启动。" : nil
+    return [
+      "abi": "arm64-v8a",
+      "bundledVersion": bundled?.runtimeVersion,
+      "installedVersion": installed?.runtimeVersion,
+      "dshVersion": bundled?.dshVersion,
+      "nodeVersion": bundled?.nodeVersion,
+      "phase": phase,
+      "baseUrl": active ? baseUrl : nil,
+      "token": active ? token : nil,
+      "managedSkillGeneration": active ? skills.generation(for: token) : nil,
+      "error": lastError ?? setupError ?? errorMessage ?? exitedMessage
+        ?? (lifecycle.failure != nil ? EngineChannel.notice : nil),
+      "mode": "normal", "safeState": "off", "safeReason": nil, "strikes": 0, "autoSafe": false,
+      "failure": nil, "mainFailure": nil, "healthyAt": nil, "networkBlocked": false, "networkBlockedAt": nil,
+      "directEngineEnabled": false, "directEngineAvailable": false, "directEngineActive": false,
+      "directEngineFallbackReason": nil,
+      "currentExecutionMode": active ? "ios-embedded" : nil,
+      "launchSelectedMode": nativePhase != "idle" ? "ios-embedded" : nil,
+      "launchSpawned": nativePhase != "idle",
+      "launchFailureReason": errorCode ?? (exitedUnasked ? "ios_node_exited" : nil),
+      "tidyingFiles": false,
+      "lifecycle": lifecycle.status(),
+    ]
+  }
+
+  private func syncSkills(phase: String, token: String?) {
+    if phase == "running", let token, !requestedStop, pending == nil {
+      skills.ready(runtimeGeneration: runtimeGeneration, token: token)
+    } else if phase == "stopping" || requestedStop {
+      skills.stop(runtimeGeneration: runtimeGeneration)
+    } else if ["idle", "exited", "error"].contains(phase) {
+      skills.retire()
+    }
+  }
+
+  private func lifecycleChanged() {
+    let error = lifecycle.failure
+    if error != nil, error != lastLifecycleError { emit(["type": "notice", "text": EngineChannel.notice]) }
+    lastLifecycleError = error
+    emitStatus()
+    if error == nil { endBackgroundTask() }
+  }
+
+  // MARK: Install
+
+  private func install(done: @escaping () -> Void, failed: @escaping (Error) -> Void) throws {
+    guard pending == nil else { throw EngineFailure("install_busy", "运行时正在安装或启动。") }
+    if let phase = native?.currentState()["phase"] as? String, ["starting", "running", "stopping"].contains(phase) {
+      throw EngineFailure("install_busy", "请先停止本机引擎再安装。")
+    }
+    if archive == nil { readInstallation() }
+    guard let archive else { throw EngineFailure("ios_payload_missing", setupError ?? "App 里没有运行时载荷。") }
+    pending = "install"
+    lastError = nil
+    installed = nil
+    emitStatus()
+    // Install takes a while and the status must keep answering meanwhile.
+    DispatchQueue.global(qos: .userInitiated).async { [self] in
+      var failure: Error?
+      do {
+        try installer.install(archive) { step, done, total in
+          // At most one event per percent, so 14,000 files don't flood the channel.
+          if step != "extract" || done == total || done % max(total / 100, 1) < 16384 {
+            emit(["type": "progress", "step": step, "done": done, "total": total])
+          }
+        }
+      } catch {
+        failure = error
+      }
+      queue.async { [self] in
+        pending = nil
+        if let failure {
+          lastError = (failure as? EngineFailure)?.message ?? "运行时安装失败，保留中断记录；请重试安装。"
+          emitStatus()
+          failed(failure)
+        } else {
+          installed = try? installer.installed()
+          setupError = nil
+          excludeFromBackup(installer.base)
+          emitStatus()
+          done()
+        }
+      }
+    }
+  }
+
+  // MARK: Start and stop
+
+  private func start(env: [String: Any]?, phoneStorage: Bool, mode: String?, visualReplies: Bool) throws {
+    if phoneStorage {
+      throw EngineFailure("ios_unsupported", "iOS 不提供全盘挂载，请用系统文件选择器导入或导出。")
+    }
+    if let mode, mode != "normal" {
+      throw EngineFailure("ios_unsupported", "iOS 宿主没有安全模式。")
+    }
+    let environment = try validated(env)
+    let phase = native?.currentState()["phase"] as? String ?? "idle"
+    if phase == "starting" || phase == "running" || pending == "start" { return }
+    if pending != nil { throw EngineFailure("start_busy", "运行时正在安装。") }
+    if phase == "stopping" {
+      // Started right after a stop: the Environment has to finish going away first.
+      queuedStart = (environment, visualReplies)
+      emitStatus()
+      return
+    }
+    try begin(environment, visualReplies: visualReplies)
+  }
+
+  private func begin(_ environment: [String: String], visualReplies: Bool) throws {
+    pending = "start"
+    lastError = nil
+    emitStatus()
+    defer {
+      pending = nil
+      collect()
+      emitStatus()
+    }
+    do {
+      installed = try installer.installed()
+      guard current else { throw EngineFailure("ios_install_required", "运行时尚未完整安装到当前版本，请先安装。") }
+      for directory in [dshHome, agentsHome, outputs, cache] {
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+      }
+      try writeInstructions(visualReplies: visualReplies)
+      if native == nil { native = try NativeEngine() }
+      environment.values.forEach(rememberSecret)
+      requestedStop = false
+      runtimeGeneration += 1
+      lastStart = (environment, visualReplies)
+      try native?.begin(
+        runtime: installer.root.path, guest: guestRoot.path, home: dshHome.path, cache: cache.path,
+        workspace: workspace.path, env: environment)
+      startPolling()
+    } catch {
+      lastError = (error as? EngineFailure)?.message ?? "本机引擎启动失败。"
+      throw error
+    }
+  }
+
+  private func validated(_ env: [String: Any]?) throws -> [String: String] {
+    let reserved: Set<String> = [
+      "NODE_OPTIONS", "NODE_PATH", "LD_PRELOAD", "LD_LIBRARY_PATH", "DYLD_INSERT_LIBRARIES", "DSH_HOME", "DSH_AGENTS_HOME",
+      "NODE_COMPILE_CACHE", "HOME", "TMPDIR",
+    ]
+    var result: [String: String] = [:]
+    for (key, value) in env ?? [:] {
+      guard let text = value as? String, !text.contains("\0"), !reserved.contains(key), !key.hasPrefix("DSH_GO_"),
+        key.range(of: #"^[A-Za-z_][A-Za-z0-9_]*$"#, options: .regularExpression) != nil
+      else {
+        throw EngineFailure("ios_invalid_env", "环境变量无效或试图覆盖宿主的固定配置。")
+      }
+      result[key] = text
+    }
+    return result
+  }
+
+  private func stop() {
+    queuedStart = nil
+    requestedStop = true
+    lifecycle.runtime(baseUrl: nil, token: nil)
+    skills.stop(runtimeGeneration: runtimeGeneration)
+    let phase = native?.currentState()["phase"] as? String ?? "idle"
+    if ["starting", "running", "stopping"].contains(phase) {
+      native?.stop()
+      startPolling()
+    }
+    emitStatus()
+  }
+
+  private func restartAfterLostServer() {
+    guard let lastStart, !requestedStop, pending == nil,
+      native?.currentState()["phase"] as? String == "running"
+    else { return }
+    appendLog("本机引擎的本地服务在后台被系统回收，正在重新启动。", stream: "system")
+    lifecycle.runtime(baseUrl: nil, token: nil)
+    skills.stop(runtimeGeneration: runtimeGeneration)
+    queuedStart = lastStart
+    native?.stop()
+    startPolling()
+    emitStatus()
+  }
+
+  private func startPolling() {
+    guard timer == nil else { return }
+    let source = DispatchSource.makeTimerSource(queue: queue)
+    source.schedule(deadline: .now() + 0.1, repeating: 0.1)
+    source.setEventHandler { [weak self] in self?.collect() }
+    timer = source
+    source.resume()
+  }
+
+  private func collect() {
+    guard let native else { return }
+    // State first, then the queue: a final state read before this batch can't outrun it.
+    let state = native.currentState()
+    let phase = state["phase"] as? String ?? "idle"
+    let token = state["token"] as? String ?? ""
+    let baseUrl = state["baseUrl"] as? String ?? ""
+    let running = phase == "running" && !requestedStop
+    lifecycle.runtime(baseUrl: running ? baseUrl : nil, token: running ? token : nil)
+    if !token.isEmpty { rememberSecret(token) }
+
+    var batch: [[String: Any]] = []
+    for event in native.events() {
+      switch event["kind"] as? String {
+      case "ready":
+        if let ready = event["token"] as? String { rememberSecret(ready) }
+      case "log":
+        if let line = event["line"] as? String { batch.append(appendLog(line, stream: event["stream"] as? String ?? "stdout", emit: false)) }
+      case "exit":
+        let code = event["exitCode"] as? Int ?? -1
+        batch.append(appendLog("Node 已退出（code=\(code)）。", stream: "system", emit: false))
+      case "error":
+        lastError = "\(event["errorCode"] as? String ?? "ios_native_error"): \(event["message"] as? String ?? "本机引擎出错。")"
+      default:
+        break
+      }
+    }
+    if !batch.isEmpty { emit(["type": "logs", "entries": batch]) }
+
+    let exitCode = state["exitCode"] as? Int
+    let errorCode = state["errorCode"] as? String ?? ""
+    if phase != lastPhase || token != lastToken || exitCode != lastExitCode || errorCode != lastErrorCode {
+      if phase == "error" || (phase == "exited" && !requestedStop && queuedStart == nil) {
+        failureLines = recent(300).compactMap { $0["line"] as? String }
+      }
+      lastPhase = phase
+      lastToken = token
+      lastExitCode = exitCode
+      lastErrorCode = errorCode
+      emitStatus()
+    }
+    if phase == "exited" || phase == "error", let next = queuedStart {
+      queuedStart = nil
+      do {
+        try begin(next.env, visualReplies: next.visualReplies)
+      } catch {
+        emitStatus()
+      }
+      return
+    }
+    if !["starting", "running", "stopping"].contains(phase), let source = timer {
+      source.cancel()
+      timer = nil
+    }
+  }
+
+  // MARK: Logs
+
+  private func rememberSecret(_ value: String) {
+    if !value.isEmpty, !secrets.contains(value) { secrets.append(value) }
+  }
+
+  @discardableResult
+  private func appendLog(_ line: String, stream: String, emit shouldEmit: Bool = true) -> [String: Any] {
+    var safe = line
+    for pattern in [
+      #"([?&](?:token|key|api_key)=)[^\s&#]+"#,
+      #"((?i:authorization)\s*[:=]\s*(?:(?i:bearer)\s+)?)[^\s,;]+"#,
+      #"((?i:api[_-]?key|access[_-]?token|refresh[_-]?token)\s*[:=]\s*)[^\s,;]+"#,
+    ] {
+      safe = safe.replacingOccurrences(of: pattern, with: "$1[REDACTED]", options: .regularExpression)
+    }
+    for secret in secrets { safe = safe.replacingOccurrences(of: secret, with: "[REDACTED]") }
+    if safe.count > 8192 { safe = String(safe.prefix(8192)) + " [日志行已截断]" }
+    logSequence += 1
+    let entry: [String: Any] = ["seq": logSequence, "line": safe, "stream": stream]
+    logs.append(entry)
+    if logs.count > 2000 { logs.removeFirst(logs.count - 2000) }
+    if shouldEmit { emit(["type": "logs", "entries": [entry]]) }
+    return entry
+  }
+
+  private func recent(_ lines: Int) -> [[String: Any]] {
+    let count = max(0, min(2000, lines))
+    return count == 0 ? [] : Array(logs.suffix(count))
+  }
+
+  // MARK: Others
+
+  private func networkMetered(_ reply: @escaping (Any?) -> Void) {
+    if !pathStarted {
+      pathStarted = true
+      pathMonitor.start(queue: queue)
+      // The first path arrives shortly after starting.
+      queue.asyncAfter(deadline: .now() + 0.2) { [self] in reply(metered()) }
+      return
+    }
+    reply(metered())
+  }
+
+  private func metered() -> Bool? {
+    let path = pathMonitor.currentPath
+    return path.status == .satisfied ? path.isExpensive : nil
+  }
+
+  private func publishDiagnostics(_ markdown: String?) -> [String: Any]? {
+    guard let markdown, current, markdown.utf8.count <= 256 * 1024 else { return nil }
+    let directory = dshHome.appendingPathComponent("dsh-app", isDirectory: true)
+    let file = directory.appendingPathComponent("diagnostics.md")
+    do {
+      try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+      try Data(markdown.utf8).write(to: file, options: .atomic)
+      return ["path": file.path, "bytes": markdown.utf8.count]
+    } catch {
+      return nil
+    }
+  }
+
+  private func writeInstructions(visualReplies: Bool) throws {
+    let file = dshHome.appendingPathComponent("AGENTS.md")
+    let marker = "<!-- dsh-app:managed"
+    if let existing = try? String(contentsOf: file, encoding: .utf8), !existing.hasPrefix(marker) { return }
+    var text = """
+      \(marker) — 删除这一行后，DSH App 不再覆盖本文件 -->
+      # 运行环境（DSH iOS 版）
+
+      - 你运行在 iOS App 进程内的 Node 中，默认工作区是 `\(workspace.path)`。
+      - 要交给用户的文件放在 `\(outputs.path)`；App 的产出列表只显示这个目录中的文件。
+      - bash、rg 和 git 等能力以引擎当前能力清单为准；没有 Ubuntu、PRoot、apt，也不能启动子进程。
+      - 对不支持的命令说明限制，可请用户交给已连接的电脑执行；不能声称命令已经成功。
+      - 手机文件通过 App 的系统选择器导入或导出；不能遍历其他应用的数据。
+      - App 切到后台后，系统会很快暂停本机引擎；长任务可能要等用户回到 App 才继续。
+      - App 使用 Flutter 原生界面；不要把修改 Harness 网页当作修改 App 界面。
+
+      """
+    if visualReplies {
+      text += """
+
+        ## 可视化回复（dsh-ui）
+
+        - 适合图表或卡片的真实数据可用 dsh-ui 围栏代码块，内容为单个 JSON 对象；普通对话用文字即可。
+        - 已支持的 type 包括 text、metric、chart、compare、steps、callout、options、confirm、stack、row；不知道字段时先查随包 dsh-go-ui 技能，不要猜。
+        - 不在卡片收集密码、密钥或验证码；options/confirm 放在回复末尾，等待用户反馈后再继续。
+
+        """
+    }
+    try Data(text.utf8).write(to: file, options: .atomic)
+  }
+
+  // MARK: App lifecycle
+
+  /// A little time to record the pause: the engine stops dispatching tools before the
+  /// system stops the process. Nothing here tries to keep running past that.
+  @objc private func enteredBackground() {
+    queue.async { [self] in
+      guard native?.currentState()["phase"] as? String == "running" else {
+        lifecycle.observe(foreground: false)
+        return
+      }
+      DispatchQueue.main.async { [self] in
+        if backgroundTask == .invalid {
+          backgroundTask = UIApplication.shared.beginBackgroundTask(withName: "dsh.engine.pause") { [weak self] in
+            self?.endBackgroundTask()
+          }
+        }
+      }
+      lifecycle.observe(foreground: false)
+    }
+  }
+
+  @objc private func enteringForeground() {
+    queue.async { [self] in
+      lifecycle.observe(foreground: true)
+      collect()
+    }
+    endBackgroundTask()
+  }
+
+  private func endBackgroundTask() {
+    DispatchQueue.main.async { [self] in
+      guard backgroundTask != .invalid else { return }
+      UIApplication.shared.endBackgroundTask(backgroundTask)
+      backgroundTask = .invalid
+    }
+  }
+}

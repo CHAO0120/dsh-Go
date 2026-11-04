@@ -71,6 +71,9 @@ jobs:
   engine:
     runs-on: macos-26
     timeout-minutes: 60
+    defaults:
+      run:
+        shell: bash
     env:
       DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
       DSH_IOS_ENGINE_WORK: ${{ github.workspace }}/../engine-work

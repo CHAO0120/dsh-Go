@@ -13,6 +13,9 @@
 		74858FAF1ED2DC5600515810 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 74858FAE1ED2DC5600515810 /* AppDelegate.swift */; };
 		D5480000000000000000A001 /* DshPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5480000000000000000A002 /* DshPlugin.swift */; };
 		D5480000000000000000A003 /* VoiceChannel.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5480000000000000000A004 /* VoiceChannel.swift */; };
+		D5480000000000000000C011 /* EngineChannel.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5480000000000000000C010 /* EngineChannel.swift */; };
+		D5480000000000000000C013 /* EngineRuntime.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5480000000000000000C012 /* EngineRuntime.swift */; };
+		D5480000000000000000C015 /* EngineSkills.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5480000000000000000C014 /* EngineSkills.swift */; };
 		D5480000000000000000A005 /* InfoPlist.strings in Resources */ = {isa = PBXBuildFile; fileRef = D5480000000000000000A006 /* InfoPlist.strings */; };
 		7884E8682EC3CC0700C636F2 /* SceneDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7884E8672EC3CC0400C636F2 /* SceneDelegate.swift */; };
 		78A318202AECB46A00862997 /* FlutterGeneratedPluginSwiftPackage in Frameworks */ = {isa = PBXBuildFile; productRef = 78A3181F2AECB46A00862997 /* FlutterGeneratedPluginSwiftPackage */; };
@@ -77,6 +80,9 @@
 		74858FAE1ED2DC5600515810 /* AppDelegate.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
 		D5480000000000000000A002 /* DshPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DshPlugin.swift; sourceTree = "<group>"; };
 		D5480000000000000000A004 /* VoiceChannel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceChannel.swift; sourceTree = "<group>"; };
+		D5480000000000000000C010 /* EngineChannel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EngineChannel.swift; sourceTree = "<group>"; };
+		D5480000000000000000C012 /* EngineRuntime.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EngineRuntime.swift; sourceTree = "<group>"; };
+		D5480000000000000000C014 /* EngineSkills.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EngineSkills.swift; sourceTree = "<group>"; };
 		D5480000000000000000A007 /* zh-Hans */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = "zh-Hans"; path = "zh-Hans.lproj/InfoPlist.strings"; sourceTree = "<group>"; };
 		7884E8672EC3CC0400C636F2 /* SceneDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SceneDelegate.swift; sourceTree = "<group>"; };
 		78E0A7A72DC9AD7400C4905E /* FlutterGeneratedPluginSwiftPackage */ = {isa = PBXFileReference; lastKnownFileType = wrapper; name = FlutterGeneratedPluginSwiftPackage; path = Flutter/ephemeral/Packages/FlutterGeneratedPluginSwiftPackage; sourceTree = "<group>"; };
@@ -170,6 +176,9 @@
 				74858FAE1ED2DC5600515810 /* AppDelegate.swift */,
 				D5480000000000000000A002 /* DshPlugin.swift */,
 				D5480000000000000000A004 /* VoiceChannel.swift */,
+				D5480000000000000000C010 /* EngineChannel.swift */,
+				D5480000000000000000C012 /* EngineRuntime.swift */,
+				D5480000000000000000C014 /* EngineSkills.swift */,
 				D5480000000000000000B007 /* ShareChannel.swift */,
 				D5480000000000000000B00E /* Runner.entitlements */,
 				7884E8672EC3CC0400C636F2 /* SceneDelegate.swift */,
@@ -390,6 +399,9 @@
 				74858FAF1ED2DC5600515810 /* AppDelegate.swift in Sources */,
 				D5480000000000000000A001 /* DshPlugin.swift in Sources */,
 				D5480000000000000000A003 /* VoiceChannel.swift in Sources */,
+				D5480000000000000000C011 /* EngineChannel.swift in Sources */,
+				D5480000000000000000C013 /* EngineRuntime.swift in Sources */,
+				D5480000000000000000C015 /* EngineSkills.swift in Sources */,
 				D5480000000000000000B005 /* ShareInbox.swift in Sources */,
 				D5480000000000000000B006 /* ShareChannel.swift in Sources */,
 				1498D2341E8E89220040F4C2 /* GeneratedPluginRegistrant.m in Sources */,

@@ -6938,13 +6938,13 @@ class L10nZh extends L10n {
   String get harmonySchedulesLocal => '本机的任务只在应用运行时触发：应用被系统挂起时，到点不会运行';
 
   @override
-  String get harmonyPageUnavailable => '鸿蒙版暂时没有这个页面';
+  String get harmonyPageUnavailable => '这个版本暂时没有这个页面';
 
   @override
   String get harmonyNotificationSettingsFailed => '没能打开系统设置。到「设置 → 通知和状态栏 → DSH Go」里开启';
 
   @override
-  String get harmonySearchUnavailable => '鸿蒙版暂时没有这项功能';
+  String get harmonySearchUnavailable => '这个版本暂时没有这项功能';
 
   @override
   String get harmonyCredentialsSection => '密钥';

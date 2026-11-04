@@ -121,7 +121,8 @@ class EngineScreen extends ConsumerWidget {
                 padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
                 child: EngineActions(phase: status.phase),
               ),
-            if (!guest && !missing)
+            // iOS gives each run a new Environment, so only HarmonyOS has this limit.
+            if (ref.watch(operatingSystemProvider) == 'ohos' && !missing)
               Padding(
                 padding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
                 child: Text(l10n.engineStartReopensApp, style: Theme.of(context).textTheme.bodySmall),
