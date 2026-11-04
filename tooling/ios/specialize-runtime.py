@@ -16,6 +16,31 @@ BEFORE = 'let e=y.encode(t),o="";for(let r=0;r<e.length;r++)o+=String.fromCharCo
 # output bytes unchanged; only bound per-byte cons-string amplification.
 AFTER = 'let e=y.encode(t),o=[];for(let r=0;r<e.length;r+=8192)o.push(String.fromCharCode(...e.subarray(r,r+8192)));return o.join("")'
 
+# The shared composition refuses every image, for want of a decoder on HarmonyOS. iOS has one,
+# so the attachment store loads runtime/ios/image/ios-sharp.cjs in place of sharp. ImageIO can't
+# write WebP, so alpha stays in PNG. Each has to match exactly once, or the build stops.
+ATTACHMENTS = 'node_modules/@deepseek-ai/dsh-attachment-local/lib/index.js'
+IMAGE_CODEC = 'node_modules/@deepseek-ai/dsh-attachment-local/lib/ios-sharp.cjs'
+ATTACHMENT_EDITS = (
+    ('const loadSharp = createLazyRequire("sharp", import.meta.url);',
+     'const loadSharp = createLazyRequire("./ios-sharp.cjs", import.meta.url);'),
+    ('\tif (process.platform === "openharmony") throw new AttachmentError("鸿蒙本机尚无可用的图像解码/重编码库；请连接电脑处理图像。普通文件仍可上传或保存。", "OHOS_IMAGE_CODEC_UNAVAILABLE");\n',
+     ''),
+    ('const mediaType = hasAlpha ? "image/webp" : "image/jpeg";',
+     'const mediaType = hasAlpha ? "image/png" : "image/jpeg";'),
+    ('(mediaType === "image/webp" ? pipeline.webp({\n\t\tquality,\n\t\teffort: 0\n\t}) : pipeline.jpeg({ quality }))',
+     '(mediaType === "image/png" ? pipeline.png() : pipeline.jpeg({ quality }))'),
+)
+
+
+def attachments_for_ios(original):
+    text = original.decode()
+    for before, after in ATTACHMENT_EDITS:
+        if text.count(before) != 1:
+            raise ValueError('iOS attachment edit differs from the composed store: ' + before[:60])
+        text = text.replace(before, after)
+    return text.encode()
+
 
 def specialize(expanded, out, composer):
     expanded = expanded.resolve(strict=True)
@@ -29,7 +54,9 @@ def specialize(expanded, out, composer):
         raise ValueError('iOS byte encoder differs from pinned just-bash 3.6.0 input')
     manifest = json.loads((expanded / 'manifest.json').read_bytes())
     entries = {row['path']: row for row in manifest['files']}
-    for name in (HELPER, PROVENANCE):
+    attachments = attachments_for_ios((expanded / 'files' / ATTACHMENTS).read_bytes())
+    codec = (Path(__file__).resolve().parents[2] / 'runtime/ios/image/ios-sharp.cjs').read_bytes()
+    for name in (HELPER, PROVENANCE, ATTACHMENTS):
         data = (expanded / 'files' / name).read_bytes()
         if entries[name]['sha256'] != composer.digest(data) or entries[name]['size'] != len(data):
             raise ValueError('iOS specialization input differs from shared manifest: ' + name)
@@ -51,7 +78,13 @@ def specialize(expanded, out, composer):
         stage = Path(temp) / 'result'
         tree = stage / 'expanded/dsh-runtime'
         shutil.copytree(expanded, tree)
-        for name, data in ((HELPER, changed), (PROVENANCE, composer.json_bytes(provenance))):
+        if IMAGE_CODEC in entries:
+            raise ValueError('The shared composition already has an iOS image codec')
+        row = {'path': IMAGE_CODEC, 'size': len(codec), 'sha256': composer.digest(codec)}
+        entries[IMAGE_CODEC] = row
+        manifest['files'] = sorted([*manifest['files'], row], key=lambda item: item['path'])
+        (tree / 'files' / IMAGE_CODEC).write_bytes(codec)
+        for name, data in ((HELPER, changed), (PROVENANCE, composer.json_bytes(provenance)), (ATTACHMENTS, attachments)):
             (tree / 'files' / name).write_bytes(data)
             entries[name]['sha256'] = composer.digest(data)
             entries[name]['size'] = len(data)

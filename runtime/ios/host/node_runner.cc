@@ -17,6 +17,7 @@
 #include <vector>
 
 #include "publication_binding.h"
+#include "image_binding.h"
 #include "phone_binding.h"
 
 namespace {
@@ -147,6 +148,7 @@ void* RunOnEngineThread(void* raw) {
   auto* run = static_cast<Run*>(raw);
   if (!initialization) {
     RegisterPhoneBinding();
+    RegisterImageBinding();
     // Options parsed here hold for every later Environment. The host's argv is fixed
     // for this installation, so what later runs would parse is the same.
     RegisterPublicationBinding();

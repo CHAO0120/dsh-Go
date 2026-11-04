@@ -157,6 +157,21 @@ jobs:
           fi
           exit "$status"
 
+      - name: Check images on Apple's decoder, through the real store
+        if: ${{ !cancelled() && steps.prepare.outcome == 'success' }}
+        run: |
+          xcrun --sdk iphonesimulator clang -std=c11 -target arm64-apple-ios15.0-simulator -O2 -pthread tooling/ios/engine-smoke/image-smoke.c -o "$RUNNER_TEMP/image-smoke"
+          node="$(ls -d "$DSH_IOS_ENGINE_WORK"/node-v*-darwin-arm64/bin/node)"
+          status=0
+          "$node" tooling/ios/engine-smoke/image-drive.mjs --simulator "$DSH_SIMULATOR" --smoke "$RUNNER_TEMP/image-smoke" --frameworks "$RUNNER_TEMP/sim" --runtime "$RUNNER_TEMP/tree/files" --work "$RUNNER_TEMP/image-smoke-work" || status=$?
+          report="$RUNNER_TEMP/image-smoke-work/report.json"
+          if [ -f "$report" ]; then
+            echo "::notice title=image smoke::$(tr -d '\n' < "$report" | tr -s ' ' | cut -c1-6000 | sed -e 's/%/%25/g')"
+          else
+            echo "::error title=image smoke::no report, status $status"
+          fi
+          exit "$status"
+
       - name: Install Flutter
         if: ${{ !cancelled() && steps.prepare.outcome == 'success' }}
         run: |
