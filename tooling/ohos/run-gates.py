@@ -654,6 +654,8 @@ def main():
     for filename in ['test.sh', 'test-integration.sh', 'test-proxy-env.sh', 'test-dispatcher-errors.sh']:
         g.run('net-' + filename[:-3], lambda f=filename: ['bash', s / 'runtime/ohos/net' / f], needs=('prepared-inputs', *(['network-interface-tools'] if filename == 'test-proxy-env.sh' else [])), env=lambda f=filename: {**g.common(), **({'NODE': str(p('fetch_node'))} if f == 'test.sh' else {})}, timeout=300)
     g.node_tests('net-bootstrap', [rt + 'net-bootstrap.test.mjs'], needs=('prepared-inputs',))
+    for mode in ['marker', 'strict']:
+        g.node_tests('net-body-types-' + mode, [rt + 'net-body-types.test.mjs'], mode=mode, needs=('prepared-inputs',), extra={'DSH_GO_OHOS_SIM_PLATFORM': 'openharmony', 'DSH_GO_OHOS_SIM_ADDONS': '[]'})
     for filename in ['test.sh', 'test-roots.sh']:
         g.run('process-' + filename[:-3], lambda f=filename: ['bash', s / 'runtime/ohos/process' / f], needs=('build-bash', 'build-regex'), env=g.common, timeout=360)
     for mode in ['marker', 'strict']:
