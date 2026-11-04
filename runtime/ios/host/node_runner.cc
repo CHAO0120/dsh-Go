@@ -4,6 +4,7 @@
 #include <node.h>
 #include <pthread.h>
 #include <signal.h>
+#include <sys/resource.h>
 #include <unistd.h>
 
 #include <algorithm>
@@ -44,6 +45,18 @@ bool stop_requested = false;
 
 std::shared_ptr<node::InitializationResult> initialization;
 std::unique_ptr<node::MultiIsolatePlatform> platform;
+
+// Node raises this only when it owns the process, and kNoAdjustResourceLimits says it
+// doesn't. An iOS app starts at 256, shared with everything else in the app.
+void RaiseFileLimit() {
+  rlimit limit{};
+  if (getrlimit(RLIMIT_NOFILE, &limit) != 0) return;
+  // Darwin refuses more than OPEN_MAX, even with the hard limit at infinity.
+  const rlim_t wanted = std::min<rlim_t>(limit.rlim_max, 10240);
+  if (limit.rlim_cur >= wanted) return;
+  limit.rlim_cur = wanted;
+  setrlimit(RLIMIT_NOFILE, &limit);
+}
 
 int RejectStartup(const char* code) {
   // Never echo paths, DSH arguments or environment values.
@@ -166,6 +179,7 @@ extern "C" __attribute__((visibility("default"))) int dsh_node_start(int argc, c
   // A dying write to a closed socket would otherwise take the whole app: Node's own
   // signal setup is off, since the process isn't Node's.
   signal(SIGPIPE, SIG_IGN);
+  RaiseFileLimit();
 
   Run run;
   // Node's defaults assume a server's memory: left alone, the heap grows until iOS ends
