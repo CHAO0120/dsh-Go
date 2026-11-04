@@ -195,12 +195,19 @@
   // What the model was told about an element, and so what has to still be true to act on it. The
   // rest of a live page changes all the time, and that's no reason to refuse. Scrolling a region
   // doesn't depend on what's in it, and neither scrolling nor a shifting layout changes a target.
+  function submissionAction(el) {
+    const submitter = (tag(el) === 'button' && el.type === 'submit') ||
+      (tag(el) === 'input' && ['submit', 'image'].includes(el.type));
+    if (!submitter || !el.form) return null;
+    // Compare the effective destination, including a submitter override. Kept internal.
+    return el.hasAttribute('formaction') ? el.formAction : el.form.action;
+  }
   function fingerprint(el, region = false) {
     if (region) return JSON.stringify({ tag: tag(el), document: el.ownerDocument.location.href });
     const { inViewport, ...steady } = state(el);
     // A list can reuse a row's nodes for another item: the same Remove button, a different thing to remove.
     const row = el.closest?.('li, tr, dialog, [role=row], [role=listitem], [role=dialog], [role=alertdialog]');
-    return JSON.stringify({ tag: tag(el), role: role(el), name: name(el), type: el.type || '',
+    return JSON.stringify({ submissionAction: submissionAction(el), tag: tag(el), role: role(el), name: name(el), type: el.type || '',
       state: steady, sensitive: sensitive(el), row: row ? textSnippet(row, 400) : null,
       // Values remain internal and are never returned/logged. Sensitive values aren't read.
       value: sensitive(el) ? null : (['input', 'textarea', 'select'].includes(tag(el)) ? el.value.slice(0, 16385) : null),
