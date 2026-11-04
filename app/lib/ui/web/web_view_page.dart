@@ -1305,6 +1305,7 @@ class DshWebLink {
     final draft = {
       'requestId': ?requestId,
       if (!kIsWeb && defaultTargetPlatform == TargetPlatform.iOS) 'composerAttachmentCount': true,
+      if (!kIsWeb && defaultTargetPlatform == TargetPlatform.iOS) 'requireOpenedTarget': true,
       'text': text,
       'files': [
         for (final f in files) {'name': f.name, 'type': ?f.type, 'data': f.base64},

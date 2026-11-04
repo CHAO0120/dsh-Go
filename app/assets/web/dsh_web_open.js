@@ -327,7 +327,14 @@
     // iOS correlates overlapping replies; legacy callers keep the same shape.
     if (draft && typeof draft.requestId === 'string') result.requestId = draft.requestId;
     // After whatever the app opened just before (a new conversation).
-    try { await window.__dshAppOpening; } catch (e) {}
+    var opening = window.__dshAppOpening;
+    var opened;
+    try { opened = await opening; } catch (e) { opened = false; }
+    if (draft && draft.requireOpenedTarget === true) {
+      // That opening is answered for now: one that failed mustn't refuse every later compose.
+      if (window.__dshAppOpening === opening) window.__dshAppOpening = undefined;
+      if (opening !== undefined && opened !== true) return post('DshAppCompose', result);
+    }
     var editor = await waitFor(composerEditor, 10000);
     if (!editor) return post('DshAppCompose', result);
     var text = (draft && draft.text) || '';
@@ -395,6 +402,7 @@
   function finish(r, ok, step) {
     if (current === r) current = null;
     if (!r.stopped) report(ok, ok ? null : step);
+    return !r.stopped && ok;
   }
 
   // [target] as the one open that acts from now on.
@@ -452,7 +460,7 @@
         press(r, byName(sidebar(), 'button', LABELS.openSidebar));
       }
     }
-    finish(r, ok, step);
+    return finish(r, ok, step);
   }
 
   window.__dshAppOpen = function (target) {

@@ -353,6 +353,8 @@ void main() {
         expect(draft['text'], 'ordinary receipt control');
         expect(draft.containsKey('composerAttachmentCount'), platform == TargetPlatform.iOS);
         if (platform == TargetPlatform.iOS) expect(draft['composerAttachmentCount'], isTrue);
+        expect(draft.containsKey('requireOpenedTarget'), platform == TargetPlatform.iOS);
+        if (platform == TargetPlatform.iOS) expect(draft['requireOpenedTarget'], isTrue);
         _page.post('DshAppCompose', jsonEncode({'text': true, 'files': 0, 'requestId': ?draft['requestId']}));
         await pumpFrames(tester, 2);
         expect(find.byType(SnackBar), findsNothing);
