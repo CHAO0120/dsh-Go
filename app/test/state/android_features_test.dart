@@ -380,6 +380,7 @@ void main() {
     testWidgets('on Android: the refresh rate choice', (tester) async {
       await _pump(tester, const PerformancePage(), android: true);
       expect(refreshRate(), findsOneWidget);
+      expect(find.byKey(const ValueKey('performance-frame-cache')), findsNothing);
     });
 
     testWidgets('on HarmonyOS: the refresh rate choice too, and what max costs', (tester) async {
@@ -387,6 +388,18 @@ void main() {
       expect(refreshRate(), findsOneWidget);
       expect(find.text(_zh.performanceRefreshHintOhos), findsOneWidget);
       expect(find.byKey(const ValueKey('performance-blur')), findsOneWidget);
+    });
+
+    testWidgets('on HarmonyOS: the frame cache, on until it is turned off', (tester) async {
+      await _pump(tester, const PerformancePage(), android: false);
+      final row = find.byKey(const ValueKey('performance-frame-cache'));
+      expect(row, findsOneWidget);
+      expect(find.text(_zh.performanceFrameCache), findsOneWidget);
+      expect(find.text(_zh.performanceFrameCacheHint), findsOneWidget);
+      expect(tester.widget<Switch>(find.descendant(of: row, matching: find.byType(Switch))).value, isTrue);
+      await tester.tap(row);
+      await tester.pumpAndSettle();
+      expect(tester.widget<Switch>(find.descendant(of: row, matching: find.byType(Switch))).value, isFalse);
     });
   });
 

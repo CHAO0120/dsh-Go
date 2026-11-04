@@ -12,7 +12,7 @@ export const plain = value => value instanceof Map ? Object.fromEntries([...valu
 
 export function performanceFixture(options = {}) {
   let opt = options, currentLevel = opt.level ?? 0, clock = 1000, wall = 1762084800000, timerId = 0, registered = null;
-  const modules = new Map(), timers = new Map(), channels = [], callbacks = [], calls = [], instances = [];
+  const modules = new Map(), timers = new Map(), channels = [], callbacks = [], calls = [], instances = [], views = new Map();
   const thermal = {
     ThermalLevel: { COOL:0, NORMAL:1, WARM:2, HOT:3, OVERHEATED:4, WARNING:5, EMERGENCY:6, ESCAPE:7 },
     registerThermalLevelCallback(callback) { calls.push('register'); if (opt.registerError) throw Error('register'); registered = callback; callbacks.push(callback); },
@@ -26,7 +26,7 @@ export function performanceFixture(options = {}) {
     '@ohos.systemDateTime': {default:{TimeType:{ACTIVE:1},getUptime(type){assert.equal(type,1);calls.push('clock');if(opt.clockError)throw Error('clock');return clock;}}},
     '@ohos.hidebug': {default:{getSystemMemInfo(){calls.push('memory');if(opt.memoryError)throw Error('memory');return {totalMem:opt.memoryKb ?? 8n*1024n*1024n};}}},
     '@ohos.deviceInfo': {default:{sdkApiVersion:26,manufacture:'fixture maker',brand:'fixture brand',productModel:'fixture model',osFullName:'OpenHarmony fixture',abiList:'arm64-v8a,x86_64'}},
-    '@ohos/flutter_ohos': {MethodChannel,EventChannel},
+    '@ohos/flutter_ohos': {MethodChannel,EventChannel,FlutterManager:{getInstance:()=>({getFlutterViewList:()=>views})}},
   };
   class ClockDate extends Date { static now() { return wall; } }
   function load(path) {
@@ -50,9 +50,9 @@ export function performanceFixture(options = {}) {
       cancel(){stream.handler.onCancel(null);}, detach(){plugin.onDetachedFromEngine(engine);}};
     instances.push(instance);return instance;
   }
-  function invoke(instance,method='snapshot') {
+  function invoke(instance,method='snapshot',args={}) {
     const replies=[];
-    instance.methods.handler.onMethodCall({method,argument(){return null;}},{
+    instance.methods.handler.onMethodCall({method,argument(name){return args[name] ?? null;}},{
       success:value=>replies.push({value:plain(value)}),error:(error,message)=>replies.push({error,message}),notImplemented:()=>replies.push({missing:true})});
     assert.equal(replies.length,1);return replies[0];
   }
@@ -64,7 +64,8 @@ export function performanceFixture(options = {}) {
     }
     throw Error('timer loop');
   }
-  return {Plugin,Policy,attach,invoke,calls,timers,callbacks,
+  const addView=id=>{const view={frameCache:[],enableFrameCache(value){if(opt.viewError)throw Error('view');this.frameCache.push(value);}};views.set(id,view);return view;};
+  return {Plugin,Policy,attach,invoke,calls,timers,callbacks,addView,
     change:next=>{opt={...opt,...next};},level:value=>{currentLevel=value;registered?.(value);},setLevel:value=>{currentLevel=value;},
     advance,setClock:value=>{clock=value;},setWall:value=>{wall=value;},dispose:()=>instances.forEach(i=>i.detach())};
 }

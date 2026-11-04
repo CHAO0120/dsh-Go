@@ -18,6 +18,12 @@
 
 5 GiB 和 30 秒都是既有产品策略值，不是本轮测量结果。OH API 26 不参与 Android MPC 的 high 判断；本通道不输出 high。未知内存的 medium 是原消费者的保守默认分类，不是硬件性能已确认的结论。新通道也不把 NODE_OPTIONS 填成 Android 的内存策略，因为嵌入 Node 的启动约束由宿主负责。
 
+## 帧缓存
+
+`setFrameCache {enabled}` 把设置 → 性能里的「帧缓存」写给 `FlutterManager` 列出的每个 `FlutterView`。引擎默认开：多缓存一帧换帧率切换时的顺滑（`vsync_waiter_ohos.cpp` 的 `target_time` 加 4 ms）。开关留给真机对比，判断不了就不猜。
+
+默认开所以启动时只有存过「关」才发。Dart 启动早于窗口（`FlutterAbility.onCreate` 里就跑 Dart，`onWindowStageCreate` 才建 view），选择会留在模块里，由 EntryAbility 在建好 view 后再写一次。
+
 ## 热状态与生命周期
 
 公开 OH 声明把 WARM 描述为需要停止或延后部分非感知服务；当前产品在 WARM 起进入轻量默认。ESCAPE=7 同样保持轻量，不能复用 Android 0–6 的范围检查而漏掉它。未知数值、读取失败、时钟不可用均不能作为降温证据。
@@ -32,7 +38,7 @@
 
 ## 接线
 
-Entry 注册 `new PerformancePlugin()` 即可。它是 FlutterPlugin，不需要 Ability、前后台、WindowStage 或权限钩子。公开 OH imports 与 DSH NativeHost 无关。Diagnostics 后继可复用 `OhosDeviceFacts.ets` 的无标识信息 helper，但不能借此改动本检查点冻结字节。
+Entry 注册 `new PerformancePlugin()`，并在 `onWindowStageCreate` 里补上帧缓存；不需要 Ability、前后台或权限钩子。公开 OH imports 与 DSH NativeHost 无关。Diagnostics 后继可复用 `OhosDeviceFacts.ets` 的无标识信息 helper，但不能借此改动本检查点冻结字节。
 
 ## 已执行验证
 

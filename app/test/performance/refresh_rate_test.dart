@@ -2,6 +2,7 @@ import 'dart:io' show Platform;
 
 import 'package:dsh_app/performance/performance_state.dart';
 import 'package:dsh_app/performance/refresh_rate.dart';
+import 'package:dsh_app/state/android_features.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -269,4 +270,73 @@ void main() {
       expect(calls.length, 4);
     });
   });
+
+  group('frame cache', () {
+    /// A channel that only records; the OS is the provider's, as the app reads it.
+    (ProviderContainer, List<bool>) app(String os) {
+      final sent = <bool>[];
+      final container = ProviderContainer(
+        overrides: [
+          operatingSystemProvider.overrideWithValue(os),
+          performanceChannelProvider.overrideWithValue(_RecordingChannel(sent)),
+        ],
+      );
+      addTearDown(container.dispose);
+      return (container, sent);
+    }
+
+    test('on HarmonyOS it defaults on and says nothing at startup', () async {
+      final (container, sent) = app('ohos');
+      await waitLoaded(container);
+      expect(container.read(performancePrefsProvider).frameCache, isTrue);
+      expect(sent, isEmpty);
+    });
+
+    test('on HarmonyOS a stored off applies at startup', () async {
+      SharedPreferences.setMockInitialValues({'performance.frame_cache': false});
+      final (container, sent) = app('ohos');
+      await waitLoaded(container);
+      expect(container.read(performancePrefsProvider).frameCache, isFalse);
+      expect(sent, [false]);
+    });
+
+    test('on HarmonyOS a change is stored and applied', () async {
+      final (container, sent) = app('ohos');
+      await waitLoaded(container);
+      final notifier = container.read(performancePrefsProvider.notifier);
+      await notifier.setFrameCache(false);
+      await notifier.setFrameCache(true);
+      expect(sent, [false, true]);
+      expect((await SharedPreferences.getInstance()).getBool('performance.frame_cache'), isTrue);
+    });
+
+    test('on HarmonyOS diagnostics say which way it was', () async {
+      final holder = Provider<Map<String, Object?>>(performanceDiagnostics);
+      final (container, _) = app('ohos');
+      await waitLoaded(container);
+      expect((container.read(holder)['preferences'] as Map)['frameCache'], isTrue);
+    });
+
+    test('on Android nothing reaches the channel and diagnostics keep their shape', () async {
+      SharedPreferences.setMockInitialValues({'performance.frame_cache': false});
+      final holder = Provider<Map<String, Object?>>(performanceDiagnostics);
+      final (container, sent) = app('android');
+      await waitLoaded(container);
+      await container.read(performancePrefsProvider.notifier).setFrameCache(true);
+      expect(sent, isEmpty);
+      expect(container.read(holder)['preferences'], isNot(contains('frameCache')));
+    });
+  });
+}
+
+class _RecordingChannel extends PerformanceChannel {
+  _RecordingChannel(this.sent);
+  final List<bool> sent;
+
+  @override
+  Future<PerformanceSnapshot> snapshot() async => const PerformanceSnapshot(loaded: true);
+  @override
+  Stream<PerformanceSnapshot> get changes => const Stream.empty();
+  @override
+  Future<void> setFrameCache(bool enabled) async => sent.add(enabled);
 }

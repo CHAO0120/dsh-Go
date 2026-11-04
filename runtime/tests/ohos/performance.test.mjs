@@ -88,3 +88,27 @@ test('thermal observation gap never counts as verified cool recovery',t=>{
  const f=fixture(t,{level:3}),a=f.attach();snapshot(f,a);a.listen();f.level(0);f.advance(10000);a.detach();assert.equal(f.timers.size,0);f.advance(60000);
  const b=f.attach(),value=snapshot(f,b);assert.equal(value.thermal.lightweight,true);b.listen();f.advance(30000);assert.equal(b.events.at(-1).thermal.lightweight,false);
 });
+test('setFrameCache reaches every view and only what is boolean counts',t=>{
+ const f=fixture(t),p=f.attach(),a=f.addView('a'),b=f.addView('b');
+ assert.deepEqual(f.invoke(p,'setFrameCache',{enabled:false}),{value:null});
+ assert.deepEqual(a.frameCache,[false]);assert.deepEqual(b.frameCache,[false]);
+ assert.deepEqual(f.invoke(p,'setFrameCache',{enabled:true}),{value:null});
+ assert.deepEqual(a.frameCache,[false,true]);
+ assert.equal(f.invoke(p,'setFrameCache',{enabled:'no'}).error,'bad_args');assert.equal(f.invoke(p,'setFrameCache').error,'bad_args');
+ assert.deepEqual(a.frameCache,[false,true]);
+});
+test('a frame cache chosen before the window exists reaches the view created later',t=>{
+ const f=fixture(t),p=f.attach();
+ assert.deepEqual(f.invoke(p,'setFrameCache',{enabled:false}),{value:null});
+ const late=f.addView('late');assert.deepEqual(late.frameCache,[]);
+ f.Plugin.applyFrameCache();assert.deepEqual(late.frameCache,[false]);
+});
+test('with no choice made the views keep the engine default',t=>{
+ const f=fixture(t),view=f.addView('a');f.attach();f.Plugin.applyFrameCache();assert.deepEqual(view.frameCache,[]);
+});
+test('a view that refuses is a channel error, not a crash; a retired binding is refused',t=>{
+ const f=fixture(t,{viewError:true}),p=f.attach();f.addView('a');
+ assert.equal(f.invoke(p,'setFrameCache',{enabled:false}).error,'frame_cache');
+ f.change({viewError:false});const handler=p.methods.handler,replies=[];p.detach();
+ handler.onMethodCall({method:'setFrameCache',argument:()=>false},{error:code=>replies.push(code)});assert.deepEqual(replies,['detached']);
+});

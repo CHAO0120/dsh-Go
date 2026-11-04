@@ -24,6 +24,7 @@ import LaunchPlugin from '../plugins/LaunchPlugin';
 import VoicePlugin from '../plugins/VoicePlugin';
 import Want from '@ohos.app.ability.Want';
 import AbilityConstant from '@ohos.app.ability.AbilityConstant';
+import window from '@ohos.window';
 
 export default class EntryAbility extends FlutterAbility {
   onCreate(want: Want, launch: AbilityConstant.LaunchParam): void {
@@ -36,6 +37,11 @@ export default class EntryAbility extends FlutterAbility {
     HmsShareInbox.receive(this.context, want, launch);
     ShortcutsPlugin.receive(want, launch);
     super.onNewWant(want, launch);
+  }
+
+  onWindowStageCreate(windowStage: window.WindowStage): void {
+    super.onWindowStageCreate(windowStage);
+    PerformancePlugin.applyFrameCache();
   }
 
   onForeground(): void {

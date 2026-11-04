@@ -85,6 +85,18 @@ class PerformancePage extends ConsumerWidget {
             ),
           ],
         ),
+        if (ohos)
+          SettingsSection(
+            children: [
+              SettingsSwitchTile(
+                key: const ValueKey('performance-frame-cache'),
+                title: l10n.performanceFrameCache,
+                subtitle: l10n.performanceFrameCacheHint,
+                value: prefs.frameCache,
+                onChanged: (value) => unawaited(notifier.setFrameCache(value)),
+              ),
+            ],
+          ),
         SettingsSection(
           title: l10n.performanceEffects,
           children: [
