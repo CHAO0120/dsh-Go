@@ -1,4 +1,5 @@
 import UIKit
+import WebKit
 import XCTest
 
 /// The browser and the system tools on the real frameworks, in the app's own process, with nothing
@@ -12,8 +13,11 @@ final class NativeToolsTests: XCTestCase {
     case ok, refused, either
   }
 
-  private final class Once {
+  /// A call and its deadline: whichever finishes first decides.
+  private final class Race {
     private var taken = false
+    var call: Task<Void, Never>?
+    var deadline: Task<Void, Never>?
     func take() -> Bool {
       if taken { return false }
       taken = true
@@ -95,21 +99,35 @@ final class NativeToolsTests: XCTestCase {
     try? handle.write(contentsOf: data + Data("\n".utf8))
   }
 
-  /// A permission prompt nobody is there for would otherwise hold the whole run.
+  /// A permission prompt nobody is there for would otherwise hold the whole run. Running out of
+  /// time fails the test whatever answer it wanted, since a refusal can't be told from a hang.
   private func timed(
     _ group: String, _ name: String, _ args: [String: Any], _ expect: Expect, seconds: Double = 60,
     _ body: @escaping @MainActor () async -> IOSPhoneOutcome
-  ) async -> IOSPhoneOutcome {
+  ) async throws -> IOSPhoneOutcome {
     let started = Date()
-    let once = Once()
-    let answer: IOSPhoneOutcome = await withCheckedContinuation { continuation in
-      Task { @MainActor in
+    let race = Race()
+    defer {
+      race.call?.cancel()
+      race.deadline?.cancel()
+    }
+    let answer: IOSPhoneOutcome = try await withCheckedThrowingContinuation { continuation in
+      race.call = Task { @MainActor in
         let value = await body()
-        if once.take() { continuation.resume(returning: value) }
+        if race.take() { continuation.resume(returning: value) }
       }
-      Task { @MainActor in
-        try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
-        if once.take() { continuation.resume(returning: .failure("timed out after \(Int(seconds)) s")) }
+      race.deadline = Task { @MainActor in
+        do {
+          try await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
+        } catch {
+          return
+        }
+        if race.take() {
+          race.call?.cancel()
+          self.note(["group": group, "name": name, "args": args, "expect": expect.rawValue, "isError": true,
+            "timedOut": true, "text": "timed out after \(Int(seconds)) s", "ms": Int(seconds * 1000)])
+          continuation.resume(throwing: CancellationError())
+        }
       }
     }
     var row: [String: Any] = [
@@ -142,8 +160,8 @@ final class NativeToolsTests: XCTestCase {
   ) async throws -> [String: Any] {
     let params = String(decoding: try JSONSerialization.data(withJSONObject: args), as: UTF8.self)
     let call = try request("system-\(name)", ["params": params], session: session)
-    let answer = await timed("system", name, args, expect) {
-      await tools.run(call, authorize: { true }, current: { true })
+    let answer = try await timed("system", name, args, expect) {
+      await tools.run(call, authorize: { true }, current: { !Task.isCancelled })
     }
     return parsed(answer)
   }
@@ -229,8 +247,8 @@ final class NativeToolsTests: XCTestCase {
     _ browser: IOSBrowser, _ name: String, _ args: [String: Any] = [:], expect: Expect = .ok, seconds: Double = 90
   ) async throws -> IOSPhoneOutcome {
     let call = try request("browser-\(name)", args, session: "session-a")
-    return await timed("browser", name, args, expect, seconds: seconds) {
-      await browser.run(call, current: { true })
+    return try await timed("browser", name, args, expect, seconds: seconds) {
+      await browser.run(call, current: { !Task.isCancelled })
     }
   }
 
@@ -247,6 +265,53 @@ final class NativeToolsTests: XCTestCase {
       "ref": try XCTUnwrap(element?["ref"] as? String, "no such element in \(page["url"] ?? "?")"),
       "epoch": try XCTUnwrap(page["epoch"] as? Int, "no epoch"),
     ]
+  }
+
+  private func named(_ name: String, _ page: [String: Any]) -> [String: Any]? {
+    element(page) { $0["name"] as? String == name }
+  }
+
+  /// Picks the second choice in a list, by what the model is told to call it.
+  private func choose(_ browser: IOSBrowser, _ name: String, in page: [String: Any]) async throws {
+    let list = named(name, page)
+    let options = (list?["state"] as? [String: Any])?["options"] as? [[String: Any]] ?? []
+    XCTAssertEqual(options.count, 2, "\(name): \(list ?? [:])")
+    var select = try target(list, page)
+    select["text"] = try XCTUnwrap(options.last?["ref"] as? String, "no option to choose")
+    try await web(browser, "select", select)
+  }
+
+  private func script(_ view: WKWebView, _ source: String) async throws -> Any? {
+    try await view.callAsyncJavaScript("return eval(source)", arguments: ["source": source], in: nil, contentWorld: .page)
+  }
+
+  private func fixture(_ browser: IOSBrowser) async throws {
+    let view = try XCTUnwrap(browser.webView)
+    let html = """
+      <!doctype html><html><head><title>Tools fixture</title><meta name="viewport" content="width=device-width"></head><body>
+      <h1>Fixture</h1><p id="tick">0</p>
+      <p style="display:none">hidden-text-one</p><p style="opacity:0">hidden-text-two</p>
+      <label for="q">Search</label><input id="q" type="text">
+      <select id="plain" aria-label="Plain"><option value="a">Alpha</option><option value="b">Beta</option></select>
+      <div style="position:relative;height:40px"><span>Language</span>
+      <select id="veiled" aria-label="Veiled" style="opacity:0;position:absolute;left:0;top:0;width:100%;height:100%">
+      <option value="x">Xray</option><option value="y">Yankee</option></select></div>
+      <label><input id="box" type="checkbox" style="opacity:0">Agree</label>
+      <button id="go" onclick="document.title='clicked'">Go</button>
+      <button id="renamed">Before</button>
+      <ul><li><span id="who">Row A</span><button>Remove</button></li></ul>
+      <form><label for="pw">Code</label><input id="pw" type="password"><label for="other">Other</label><input id="other" type="text"></form>
+      <div style="height:3000px"></div>
+      <script>setInterval(() => { tick.textContent = Date.now(); document.body.dataset.tick = tick.textContent; }, 40);</script>
+      </body></html>
+      """
+    view.loadHTMLString(html, baseURL: URL(string: "https://example.com/fixture"))
+    for _ in 0..<50 {
+      try await Task.sleep(nanoseconds: 200_000_000)
+      let title = try await script(view, "document.title") as? String
+      if title == "Tools fixture" { return }
+    }
+    XCTFail("the fixture never loaded")
   }
 
   func testBrowser() async throws {
@@ -270,6 +335,7 @@ final class NativeToolsTests: XCTestCase {
 
     let shot = try await web(browser, "screenshot")
     XCTAssertGreaterThan(shot.image?.count ?? 0, 1000)
+    XCTAssertLessThanOrEqual(shot.image.flatMap { UIImage(data: $0)?.cgImage?.width } ?? .max, 720)
 
     let document = element(page) { $0["role"] as? String == "document" }
     var scroll = try target(document, page)
@@ -284,36 +350,84 @@ final class NativeToolsTests: XCTestCase {
     XCTAssertTrue(answer.text.contains("还没有批准"), "no note about the blocked link: \(answer.text.prefix(600))")
     XCTAssertEqual(parsed(answer)["title"] as? String, "Example Domain")
 
-    // A page with a form. It's someone else's site, so being unable to reach it isn't a failure.
+    // A page of ours, with a clock ticking in it the way ads and tickers do.
+    try await fixture(browser)
+    let view = try XCTUnwrap(browser.webView)
+    page = try await read(browser)
+    let seen = page["text"] as? String ?? ""
+    XCTAssertTrue(seen.contains("Fixture"))
+    XCTAssertFalse(seen.contains("hidden-text"), "text nobody can see reached the model: \(seen.prefix(400))")
+
+    var fill = try target(named("Search", page), page)
+    fill["text"] = "hello"
+    try await web(browser, "fill", fill)
+    let typed = try await script(view, "document.getElementById('q').value") as? String
+    XCTAssertEqual(typed, "hello")
+
+    page = try await read(browser)
+    try await choose(browser, "Plain", in: page)
+    let plain = try await script(view, "document.getElementById('plain').value") as? String
+    XCTAssertEqual(plain, "b")
+
+    // Native controls laid invisibly over something the page draws are what a person taps.
+    page = try await read(browser)
+    try await choose(browser, "Veiled", in: page)
+    let veiled = try await script(view, "document.getElementById('veiled').value") as? String
+    XCTAssertEqual(veiled, "y")
+    page = try await read(browser)
+    try await web(browser, "click", try target(named("Agree", page), page))
+    let checked = try await script(view, "document.getElementById('box').checked") as? Bool
+    XCTAssertEqual(checked, true)
+
+    // Something else on the page changing, and scrolling, leave the rest of it usable.
+    page = try await read(browser)
+    _ = try await script(view, "document.body.insertAdjacentHTML('beforeend', '<p>arrived late</p>'); window.scrollTo(0, 40); 1")
+    try await web(browser, "click", try target(named("Go", page), page))
+    let title = try await script(view, "document.title") as? String
+    XCTAssertEqual(title, "clicked")
+    page = try await read(browser)
+    var down = try target(element(page) { $0["role"] as? String == "document" }, page)
+    down["direction"] = "down"
+    try await web(browser, "scroll", down)
+
+    // What the model was told about the thing it's acting on has to still be true.
+    page = try await read(browser)
+    _ = try await script(view, "document.getElementById('renamed').textContent = 'After'; 1")
+    let renamed = try await web(browser, "click", try target(named("Before", page), page), expect: .refused)
+    XCTAssertEqual(renamed.text, "TARGET_CHANGED")
+    page = try await read(browser)
+    _ = try await script(view, "document.getElementById('who').textContent = 'Row B'; 1")
+    let reused = try await web(browser, "click", try target(named("Remove", page), page), expect: .refused)
+    XCTAssertEqual(reused.text, "TARGET_CHANGED")
+
+    page = try await read(browser)
+    var secret = try target(named("Other", page), page)
+    secret["text"] = "x"
+    let kept = try await web(browser, "fill", secret, expect: .refused)
+    XCTAssertEqual(kept.text, "SENSITIVE_TARGET")
+
+    // Another address in the same page is another page.
+    page = try await read(browser)
+    _ = try await script(view, "history.pushState({}, '', '#moved'); 1")
+    let moved = try await web(browser, "click", try target(named("Go", page), page), expect: .refused)
+    XCTAssertEqual(moved.text, "STALE_SNAPSHOT")
+
+    // Someone else's site, live. Being unable to reach it isn't a failure.
     let opened = try await web(browser, "open", ["url": "https://www.wikipedia.org/"], expect: .either)
     if !opened.isError {
+      let isBox: ([String: Any]) -> Bool = { ($0["role"] as? String) == "searchbox" || ($0["role"] as? String) == "textbox" }
       page = try await read(browser)
-      let box = element(page) { ($0["role"] as? String) == "searchbox" || ($0["role"] as? String) == "textbox" }
-      var fill = try target(box, page)
-      fill["text"] = "Swift"
-      try await web(browser, "fill", fill)
-
-      page = try await read(browser)
-      let list = element(page) { (($0["state"] as? [String: Any])?["options"] as? [[String: Any]])?.isEmpty == false }
-      let options = (list?["state"] as? [String: Any])?["options"] as? [[String: Any]] ?? []
-      let other = options.first { $0["selected"] as? Bool != true }
-      var select = try target(list, page)
-      select["text"] = try XCTUnwrap(other?["ref"] as? String, "no option to choose")
-      try await web(browser, "select", select)
-
-      page = try await read(browser)
-      let chosen = element(page) { $0["ref"] as? String == list?["ref"] as? String }
-      let now = (chosen?["state"] as? [String: Any])?["options"] as? [[String: Any]] ?? []
-      XCTAssertEqual(now.first { $0["selected"] as? Bool == true }?["ref"] as? String, other?["ref"] as? String)
-
-      let again = element(page) { ($0["role"] as? String) == "searchbox" || ($0["role"] as? String) == "textbox" }
-      var press = try target(again, page)
-      press["key"] = "Escape"
-      try await web(browser, "press", press)
-
+      if let box = element(page, isBox) {
+        var search = try target(box, page)
+        search["text"] = "Swift"
+        try await web(browser, "fill", search)
+        page = try await read(browser)
+        var press = try target(element(page, isBox), page)
+        press["key"] = "Escape"
+        try await web(browser, "press", press)
+      }
       try await web(browser, "back")
-      page = try await read(browser)
-      XCTAssertEqual(page["title"] as? String, "Example Domain")
+      try await web(browser, "read", ["maxBytes": 49152])
     }
 
     try await web(browser, "close")

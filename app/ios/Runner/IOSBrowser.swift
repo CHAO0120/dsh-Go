@@ -19,7 +19,7 @@ final class IOSBrowser: NSObject, WKNavigationDelegate, WKUIDelegate {
 
   private let actions: IOSPhoneActions
   private let presenter: () -> UIViewController?
-  private var webView: WKWebView?
+  private(set) var webView: WKWebView?
   private var approvedHosts: Set<String> = []
   private var loading: CheckedContinuation<String?, Never>?
   private var loadingID: UUID?
@@ -181,7 +181,8 @@ final class IOSBrowser: NSObject, WKNavigationDelegate, WKUIDelegate {
 
   private func screenshot(_ view: WKWebView) async -> IOSPhoneOutcome {
     let configuration = WKSnapshotConfiguration()
-    configuration.snapshotWidth = NSNumber(value: 720)
+    // In points, and a phone has three pixels to the point: this is 720 pixels across.
+    configuration.snapshotWidth = NSNumber(value: 720 / Double(view.window?.screen.scale ?? 3))
     guard let image = try? await view.takeSnapshot(configuration: configuration) else {
       return .failure("截图失败。App 在后台时可能截不了图。")
     }
