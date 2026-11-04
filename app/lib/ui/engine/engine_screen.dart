@@ -180,7 +180,7 @@ class EngineScreen extends ConsumerWidget {
                 ...engineCapabilityRows(l10n, ref.watch(runtimeCapabilitiesProvider).value),
               ],
             ),
-            if (!missing && guest)
+            if (!missing && ref.watch(engineResetProvider))
               SettingsSection(
                 children: [
                   _ResetRow(enabled: !status.phase.isBusy),

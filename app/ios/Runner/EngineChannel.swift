@@ -428,6 +428,8 @@ final class EngineChannel: NSObject, FlutterStreamHandler {
         case "stop":
           stop()
           reply(nil)
+        case "reset":
+          try reset(keep: arguments["keep"] as? [String] ?? []) { reply(nil) } failed: { reply(self.flutterError($0)) }
         case "reopenApp":
           reply(nil)
         case "getLogs":
@@ -458,7 +460,7 @@ final class EngineChannel: NSObject, FlutterStreamHandler {
             skills.cancel(owner, requestId: id)
           }
           reply(nil)
-        case "reset", "restoreLastKnownGood", "safePreflight", "moveAside", "setAutoSafe", "setDirectEngine",
+        case "restoreLastKnownGood", "safePreflight", "moveAside", "setAutoSafe", "setDirectEngine",
           "requestStorage", "openAllFilesAccess", "batteryExempt", "requestBatteryExempt", "backgroundSettings",
           "openBackgroundSettings", "openVendorSettings", "voiceModelLine":
           throw EngineFailure("ios_unsupported", "iOS 本机尚不支持 \(call.method)；文件请用系统选择器，其他任务可交给已连接的电脑。")
@@ -520,6 +522,8 @@ final class EngineChannel: NSObject, FlutterStreamHandler {
     var phase = current ? "installed" : "notInstalled"
     if pending == "install" {
       phase = "installing"
+    } else if pending == "reset" {
+      phase = "stopping"
     } else if pending == "start" || queuedStart != nil {
       phase = "starting"
     } else if ["starting", "running", "stopping"].contains(nativePhase) {
@@ -627,6 +631,82 @@ final class EngineChannel: NSObject, FlutterStreamHandler {
           emitStatus()
           done()
         }
+      }
+    }
+  }
+
+  // MARK: Reset
+
+  /// Relative to the guest root, as on Android. None lies inside another.
+  private static let keepable = [
+    "uiAndSkills": ["root/.dsh/dsh-go", "root/.dsh/skills", "root/.agents/skills"],
+    "pluginsAndSettings": ["root/.dsh/profiles", "root/.dsh/cordis.patch.yml", "root/.dsh/.env"],
+  ]
+
+  /// Deletes what was unpacked and what the engine wrote, apart from what the user chose to
+  /// keep. The app stays usable with remote hosts until the next install.
+  private func reset(keep: [String], done: @escaping () -> Void, failed: @escaping (Error) -> Void) throws {
+    guard pending == nil else { throw EngineFailure("reset_busy", "运行时正在安装或启动。") }
+    pending = "reset"
+    lastError = nil
+    stop()
+    let kept = Set(keep.flatMap { EngineChannel.keepable[$0] ?? [] })
+    wipeOnceStopped(keeping: kept, deadline: .now() + 15, done: done, failed: failed)
+  }
+
+  private func wipeOnceStopped(
+    keeping kept: Set<String>, deadline: DispatchTime, done: @escaping () -> Void, failed: @escaping (Error) -> Void
+  ) {
+    let phase = native?.currentState()["phase"] as? String ?? "idle"
+    if ["starting", "running", "stopping"].contains(phase) {
+      guard DispatchTime.now() < deadline else {
+        pending = nil
+        emitStatus()
+        return failed(EngineFailure("reset_busy", "本机引擎还没有停下，请稍后再试。"))
+      }
+      queue.asyncAfter(deadline: .now() + 0.1) { [self] in
+        wipeOnceStopped(keeping: kept, deadline: deadline, done: done, failed: failed)
+      }
+      return
+    }
+    // Deleting 14,000 files takes a while and the status must keep answering meanwhile.
+    DispatchQueue.global(qos: .userInitiated).async { [self] in
+      let outcome = Result { try wipe(keeping: kept) }
+      queue.async { [self] in
+        pending = nil
+        installed = try? installer.installed()
+        setupError = nil
+        failureLines = []
+        emitStatus()
+        switch outcome {
+        case .success: done()
+        case .failure(let error): failed(error)
+        }
+      }
+    }
+  }
+
+  private func wipe(keeping kept: Set<String>) throws {
+    let files = FileManager.default
+    // First, so that a wipe cut short can't read as a working install.
+    if files.fileExists(atPath: installer.base.path) { try files.removeItem(at: installer.base) }
+    if files.fileExists(atPath: cache.path) { try files.removeItem(at: cache) }
+    try remove(in: guestRoot, relative: "", keeping: kept)
+  }
+
+  private func remove(in folder: URL, relative: String, keeping kept: Set<String>) throws {
+    let files = FileManager.default
+    for name in try files.contentsOfDirectory(atPath: folder.path) {
+      let path = relative + name
+      if kept.contains(path) { continue }
+      let entry = folder.appendingPathComponent(name)
+      // The attributes are the link's own, so a link is removed rather than walked.
+      if kept.contains(where: { $0.hasPrefix(path + "/") }),
+        try files.attributesOfItem(atPath: entry.path)[.type] as? FileAttributeType == .typeDirectory
+      {
+        try remove(in: entry, relative: path + "/", keeping: kept)
+      } else {
+        try files.removeItem(at: entry)
       }
     }
   }

@@ -996,6 +996,7 @@ abstract final class Spots {
     title: (l) => l.phoneEngineReset,
     keywords: (l) => l.searchKwEngineReset,
     androidOnly: true,
+    iosToo: true,
   );
   static final engineUninstall = SettingSpot(
     'engine-uninstall',
@@ -1003,6 +1004,7 @@ abstract final class Spots {
     title: (l) => l.localEnvUninstall,
     keywords: (l) => l.searchKwEngineUninstall,
     androidOnly: true,
+    iosToo: true,
   );
 
   // 远程主机.

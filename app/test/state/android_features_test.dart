@@ -422,6 +422,11 @@ void main() {
       expect(ownLaunchScreenOn('ios'), isTrue);
       expect(ownLaunchScreenOn('android'), isTrue);
       expect(ownLaunchScreenOn('ohos'), isFalse);
+      expect(ids(_zh.phoneEngineReset, ios: true), contains('engine-reset'));
+      expect(ids(_zh.localEnvUninstall, ios: true), contains('engine-uninstall'));
+      expect(engineResetOn('ios'), isTrue);
+      expect(engineResetOn('android'), isTrue);
+      expect(engineResetOn('ohos'), isFalse);
     });
   });
 

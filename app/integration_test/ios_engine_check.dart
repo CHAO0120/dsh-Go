@@ -133,6 +133,30 @@ Future<void> _check() async {
   await _answer('stop', _runtime.invokeMethod<void>('stop'));
   final finalStop = await _until('second stop', (phase) => phase == 'installed', const Duration(minutes: 1));
   await _report('stop again', {'phase': finalStop['phase']});
+
+  // A reset keeps what it's told to and nothing else, and the engine comes back from it.
+  final kept = File('$root/root/.dsh/skills/dsh-app-check.txt')..createSync(recursive: true);
+  final gone = File('$root/root/workspace/dsh-app-check.txt')..createSync(recursive: true);
+  clock.reset();
+  await _answer('reset', _runtime.invokeMethod<void>('reset', {'keep': ['uiAndSkills']}), const Duration(minutes: 3));
+  await _report('reset', {
+    'ms': clock.elapsedMilliseconds,
+    'phase': (await _status())['phase'],
+    'kept': kept.existsSync(),
+    'gone': !gone.existsSync(),
+  });
+  clock.reset();
+  await _answer('install', _runtime.invokeMethod<void>('install'), const Duration(minutes: 10));
+  await _report('install after reset', {'ms': clock.elapsedMilliseconds, 'phase': (await _status())['phase']});
+  clock.reset();
+  await _answer('start', _runtime.invokeMethod<void>('start', {'env': <String, String>{}, 'phoneStorage': false, 'visualReplies': true}));
+  final third = await _until('start after reset', (phase) => phase == 'running', const Duration(minutes: 4));
+  final thirdLogin = await _login(third['baseUrl']! as String, third['token']! as String);
+  await _report('start after reset', {'ms': clock.elapsedMilliseconds, 'login': thirdLogin.status});
+  await _answer('stop', _runtime.invokeMethod<void>('stop'));
+  final thirdStop = await _until('stop after reset', (phase) => phase == 'installed', const Duration(minutes: 1));
+  await _report('stop after reset', {'phase': thirdStop['phase']});
+
   await events.cancel();
   await _report('events', {'seen': seen.toList()..sort()});
 }

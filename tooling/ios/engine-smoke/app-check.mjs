@@ -119,7 +119,8 @@ function screenshot(file) {
 /** Every reported observation is a gate: "done" alone says only that Dart got to the end. */
 function engineProblem(steps) {
   const expected = ['main', 'guest root', 'status', 'install', 'install again', 'start', 'login', 'capabilities',
-    'logs', 'stop', 'restart', 'performance', 'stop again', 'events', 'done'];
+    'logs', 'stop', 'restart', 'performance', 'stop again', 'reset', 'install after reset', 'start after reset',
+    'stop after reset', 'events', 'done'];
   if (steps.length !== expected.length || steps.some((step, index) => step.step !== expected[index])) {
     return 'The app did not report the whole check, in order.';
   }
@@ -136,6 +137,9 @@ function engineProblem(steps) {
     ['stop', by.stop.phase === 'installed' && by['stop again'].phase === 'installed'],
     ['restart', by.restart.newToken === true && by.restart.login === 303 && by.restart.cookie === true &&
       by.restart.oldTokenLogin === 401 && by.restart.oldTokenCookie === false],
+    ['reset', by.reset.phase === 'notInstalled' && by.reset.kept === true && by.reset.gone === true],
+    ['back after reset', by['install after reset'].phase === 'installed' && by['start after reset'].login === 303 &&
+      by['stop after reset'].phase === 'installed'],
     ['performance', ['low', 'medium'].includes(by.performance.tier)],
     ['events', Array.isArray(by.events.seen) && by.events.seen.includes('status')],
   ];

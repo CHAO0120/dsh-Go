@@ -9,8 +9,7 @@ final operatingSystemProvider = Provider<String>((ref) => Platform.operatingSyst
 /// Whether this OS has what only Android has today: 手机操控 (an accessibility
 /// service to drive the phone), the pet's windows over other apps, refresh-rate
 /// caps, a picture as a launcher shortcut, the rescue tools that work on its Linux
-/// guest (安全模式, 重置和卸载运行环境, Direct 引擎), and the line about a maker
-/// cutting the network.
+/// guest (安全模式, Direct 引擎), and the line about a maker cutting the network.
 ///
 /// This hides only what has no HarmonyOS or iOS form yet, in the hub, search and
 /// links alike (a link says the page isn't available here); each moves out of here
@@ -25,6 +24,11 @@ final androidSystemFeaturesProvider = Provider<bool>((ref) => androidSystemFeatu
 final ownLaunchScreenProvider = Provider<bool>((ref) => ownLaunchScreenOn(ref.watch(operatingSystemProvider)));
 
 bool ownLaunchScreenOn(String os) => os != 'ohos';
+
+/// Whether 重置和卸载运行环境 is on offer: not yet on HarmonyOS, whose channel refuses it.
+final engineResetProvider = Provider<bool>((ref) => engineResetOn(ref.watch(operatingSystemProvider)));
+
+bool engineResetOn(String os) => os != 'ohos';
 
 /// Whether flutter_webrtc has an implementation here, for DSH Remote's direct path.
 final webRtcAvailableProvider = Provider<bool>((ref) => webRtcOn(ref.watch(operatingSystemProvider)));
