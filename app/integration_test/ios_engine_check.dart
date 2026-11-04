@@ -74,7 +74,7 @@ Future<void> _check() async {
   });
 
   final root = await _answer('guestRoot', _runtime.invokeMethod<String>('guestRoot'));
-  await _report('guest root', {'real': root?.startsWith('/private/') ?? false});
+  await _report('guest root', {'absolute': root?.startsWith('/') ?? false});
   final before = await _status();
   await _report('status', {
     'phase': before['phase'],
@@ -104,6 +104,7 @@ Future<void> _check() async {
   final capabilities = await _capabilities(firstUrl, login.cookie!);
   await _report('capabilities', {
     'status': capabilities['status'],
+    'v': capabilities['v'],
     'platform': capabilities['platform'],
     'shell': capabilities['shell'],
     'nodeScripts': capabilities['nodeScripts'],
@@ -128,7 +129,9 @@ Future<void> _check() async {
     'ms': clock.elapsedMilliseconds,
     'newToken': secondToken != firstToken,
     'login': again.status,
+    'cookie': again.cookie != null,
     'oldTokenLogin': stale.status,
+    'oldTokenCookie': stale.cookie != null,
   });
 
   const performance = MethodChannel('dsh/performance');
@@ -136,6 +139,8 @@ Future<void> _check() async {
   await _report('performance', {'tier': (snapshot?['device'] as Map?)?['tier']});
 
   await _answer('stop', _runtime.invokeMethod<void>('stop'));
+  final finalStop = await _until('second stop', (phase) => phase == 'installed', const Duration(minutes: 1));
+  await _report('stop again', {'phase': finalStop['phase']});
   await events.cancel();
   await _report('events', {'seen': seen.toList()..sort()});
 }

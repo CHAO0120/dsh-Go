@@ -118,6 +118,33 @@ function screenshot(file) {
   }
 }
 
+/** Every reported observation is a gate: "done" alone says only that Dart got to the end. */
+function engineProblem(steps) {
+  const expected = ['main', 'guest root', 'status', 'install', 'install again', 'start', 'login', 'capabilities',
+    'logs', 'stop', 'restart', 'performance', 'stop again', 'events', 'done'];
+  if (steps.length !== expected.length || steps.some((step, index) => step.step !== expected[index])) {
+    return 'The app did not report the whole check, in order.';
+  }
+  const by = Object.fromEntries(steps.map((step) => [step.step, step]));
+  const checks = [
+    ['absolute guest root', by['guest root'].absolute === true],
+    ['install', by.install.phase === 'installed' && by['install again'].phase === 'installed'],
+    ['start', by.start.phase === 'running' && by.start.mode === 'ios-embedded'],
+    ['login', by.login.status === 303 && by.login.cookie === true],
+    ['capabilities', by.capabilities.status === 200 && by.capabilities.v === 1 &&
+      by.capabilities.platform === 'openharmony'],
+    ['logs', Number.isSafeInteger(by.logs.entries) && by.logs.entries >= 0 &&
+      Number.isSafeInteger(by.logs.through) && by.logs.through >= 0],
+    ['stop', by.stop.phase === 'installed' && by['stop again'].phase === 'installed'],
+    ['restart', by.restart.newToken === true && by.restart.login === 303 && by.restart.cookie === true &&
+      by.restart.oldTokenLogin === 401 && by.restart.oldTokenCookie === false],
+    ['performance', ['low', 'medium'].includes(by.performance.tier)],
+    ['events', Array.isArray(by.events.seen) && by.events.seen.includes('status')],
+  ];
+  const failed = checks.find(([, passed]) => !passed);
+  return failed ? `The app check failed: ${failed[0]}.` : null;
+}
+
 simctl('install', values.simulator, values.app);
 
 if (values.mode === 'launch') {
@@ -125,16 +152,16 @@ if (values.mode === 'launch') {
   await new Promise((done) => setTimeout(done, 30000));
   const up = isAlive(pid);
   if (values.shot) quietly(() => screenshot(values.shot));
-  if (up) {
+  const passed = up && crashes().length === 0;
+  if (passed) {
     notice('app launch', 'The real app is still running 30 seconds after launch.');
     annotateChunks('app threads', [].concat(quietly(() => threads(pid))).slice(0, 3), notice, 1);
-    for (const crash of crashes()) fail('app crash', crash);
   } else {
-    fail('app launch', 'The real app is not running 30 seconds after launch.');
+    fail('app launch', up ? 'The real app produced a crash report.' : 'The real app is not running 30 seconds after launch.');
     explain(pid);
   }
   quietly(() => simctl('terminate', values.simulator, bundleId));
-  process.exit(up ? 0 : 1);
+  process.exit(passed ? 0 : 1);
 }
 
 const steps = [];
@@ -168,13 +195,14 @@ clearInterval(watchdog);
 server.close();
 
 const summary = steps.filter((step) => step.step !== 'failed').map((step) => JSON.stringify(step)).join('\n');
-if (last.step === 'done') {
+const problem = last.step === 'done' ? engineProblem(steps) : `${last.error ?? ''} ${last.stack ?? ''}`;
+const passed = problem === null && crashes().length === 0;
+if (passed) {
   notice('engine in the app', summary);
-  for (const crash of crashes()) fail('app crash', crash);
 } else {
-  fail('engine in the app', `${last.error ?? ''} ${last.stack ?? ''}`);
-  if (summary) notice('engine in the app, up to the failure', summary);
+  fail('engine in the app', problem ?? 'The app produced a crash report.');
+  if (summary) notice('engine in the app, as far as it got', summary);
   explain(pid);
 }
 quietly(() => simctl('terminate', values.simulator, bundleId));
-process.exit(last.step === 'done' ? 0 : 1);
+process.exit(passed ? 0 : 1);
