@@ -280,16 +280,34 @@
     return press(r, await waitFor(entryOf, 4000, r));
   }
 
-  async function startNewSession(r) {
+  async function startNewSession(r, confirm) {
     var button = await waitFor(function () {
       var side = sidebar();
       if (!side) return null;
       return side.querySelector('button[class*="_newSession"]') || byName(side, 'button', LABELS.newSession);
     }, 8000, r);
+    var previous = confirm ? composerSession(composerEditor()) : null;
+    var stored = confirm ? storedSession() : null;
     if (!press(r, button)) return false;
+    if (confirm) {
+      var editor = await waitFor(function () {
+        var candidate = composerEditor();
+        var id = composerSession(candidate);
+        if (!id || id === previous || id === stored) return null;
+        r.confirmedSession = id;
+        return candidate;
+      }, 10000, r);
+      return !!editor;
+    }
     // Let the new conversation's composer replace the old one.
     await sleep(500);
     return true;
+  }
+
+  // The public conversation wrapper binds this editor to a session.
+  function composerSession(editor) {
+    var conversation = editor && editor.closest('[data-conversation-content][data-conversation-session]');
+    return conversation && conversation.getAttribute('data-conversation-session');
   }
 
   // The composer's editor (Lexical: one contenteditable root) that is on
@@ -337,6 +355,8 @@
     }
     var editor = await waitFor(composerEditor, 10000);
     if (!editor) return post('DshAppCompose', result);
+    if (draft && draft.requireOpenedTarget === true && opening && opening.newSessionBinding &&
+        composerSession(editor) !== opening.newSessionBinding.confirmedSession) return post('DshAppCompose', result);
     var text = (draft && draft.text) || '';
     var files = (draft && draft.files) || [];
     editor.focus();
@@ -411,7 +431,9 @@
   function start(target) {
     if (current) current.stopped = true;
     var r = (current = { booted: false, stopped: false, until: Infinity });
-    return run(r, target);
+    var opening = run(r, target);
+    if (target.newSession && target.confirmNewSession === true) opening.newSessionBinding = r;
+    return opening;
   }
 
   async function run(r, target) {
@@ -450,7 +472,7 @@
       ok = await openRightbar(r, target.rightbar);
     } else if (target.newSession) {
       step = 'newSession';
-      ok = await startNewSession(r);
+      ok = await startNewSession(r, target.confirmNewSession === true);
     } else if (target.sidebar) {
       step = 'sidebar';
       await sleep(400); // after the phone layout's collapse-on-arrival
