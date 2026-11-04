@@ -984,8 +984,10 @@ final class EngineChannel: NSObject, FlutterStreamHandler {
     }
   }
 
+  /// Before the engine stops, so that no action is still live once it does. Called from
+  /// the engine queue, and the main thread never waits on that queue.
   private func retirePhone() {
-    DispatchQueue.main.async { [self] in
+    DispatchQueue.main.sync { [self] in
       MainActor.assumeIsolated {
         phoneLive = false
         phone?.retire()
