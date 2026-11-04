@@ -46,6 +46,74 @@
     if (!el.isConnected || hidden(el)) return false;
     return Array.from(el.getClientRects()).some(r => r.width > 0 && r.height > 0);
   }
+  // DOM click() bypasses pointer hit testing. Check one visible point immediately before
+  // dispatch; do not scroll the page or invalidate unrelated dynamic page content.
+  function hitAt(root, x, y) {
+    let hit = root.elementFromPoint(x, y);
+    while (hit?.shadowRoot?.elementFromPoint) {
+      const inner = hit.shadowRoot.elementFromPoint(x, y);
+      if (!inner || inner === hit) break;
+      hit = inner;
+    }
+    return hit;
+  }
+  function hitsControl(hit, el) {
+    for (let at = hit; at; at = at.assignedSlot || parent(at)) if (at === el) return true;
+    // A transparent native checkbox may be activated through its associated label.
+    const label = hit?.closest?.('label');
+    if (!label || label.control !== el) return false;
+    for (let at = hit; at && at !== label; at = parent(at)) {
+      if (role(at) || at.tabIndex >= 0) return false;
+    }
+    return true;
+  }
+  function axisAlignedFrame(frame) {
+    // A bounding rectangle cannot map a rotated, mirrored or perspective frame's point.
+    // Refuse those layouts instead of guessing; ordinary translation/positive scale works.
+    for (let at = frame; at; at = parent(at)) {
+      const style = at.ownerDocument.defaultView.getComputedStyle(at);
+      if (style.perspective !== 'none' || (style.rotate && style.rotate !== 'none')) return false;
+      if (style.scale && style.scale !== 'none') {
+        const scale = style.scale.split(/\s+/u).map(Number);
+        if (scale.length > 2 || scale.some(n => !Number.isFinite(n) || n <= 0)) return false;
+      }
+      if (style.transform !== 'none') {
+        const match = /^matrix\(([^)]+)\)$/u.exec(style.transform);
+        if (!match) return false;
+        const m = match[1].split(',').map(Number);
+        if (m.length !== 6 || m.some(n => !Number.isFinite(n)) || m[1] !== 0 || m[2] !== 0 || m[0] <= 0 || m[3] <= 0) return false;
+      }
+    }
+    return true;
+  }
+  function clickReachable(el) {
+    let doc = el.ownerDocument;
+    const win = doc.defaultView;
+    const rect = Array.from(el.getClientRects()).find(r => r.width > 0 && r.height > 0);
+    if (!win || !rect) return false;
+    const left = Math.max(0, rect.left), right = Math.min(win.innerWidth, rect.right);
+    const top = Math.max(0, rect.top), bottom = Math.min(win.innerHeight, rect.bottom);
+    if (right <= left || bottom <= top) return false;
+    let x = (left + right) / 2, y = (top + bottom) / 2;
+    if (!hitsControl(hitAt(doc, x, y), el)) return false;
+    while (doc !== document) {
+      const frame = doc.defaultView?.frameElement;
+      if (!frame || !frame.isConnected || frame.contentDocument !== doc || !axisAlignedFrame(frame)) return false;
+      const box = frame.getBoundingClientRect();
+      const style = frame.ownerDocument.defaultView.getComputedStyle(frame);
+      const px = key => Number.parseFloat(style[key]) || 0;
+      const insetX = px('borderLeftWidth') + px('paddingLeft');
+      const insetY = px('borderTopWidth') + px('paddingTop');
+      const width = px('width') + (style.boxSizing === 'border-box' ? 0 : insetX + px('borderRightWidth') + px('paddingRight'));
+      const height = px('height') + (style.boxSizing === 'border-box' ? 0 : insetY + px('borderBottomWidth') + px('paddingBottom'));
+      if (width <= 0 || height <= 0 || box.width <= 0 || box.height <= 0) return false;
+      x = box.left + (insetX + x) * box.width / width;
+      y = box.top + (insetY + y) * box.height / height;
+      doc = frame.ownerDocument;
+      if (hitAt(doc, x, y) !== frame) return false;
+    }
+    return true;
+  }
   function textSnippet(el, max = 200) {
     const parts = []; let count = 0; let visits = 0;
     const stack = [el];
@@ -263,6 +331,7 @@
         case 'click':
           if (record.specialRole === 'document' || !['button', 'link', 'checkbox', 'radio', 'tab', 'menuitem', 'option', 'switch', 'focusable'].includes(role(el) || record.specialRole)) return error('UNSUPPORTED_TARGET');
           if (typeof el.click !== 'function') return error('UNSUPPORTED_TARGET');
+          if (!clickReachable(el)) return error('TARGET_OBSCURED_OR_NOT_IN_VIEW');
           HTMLElement.prototype.click.call(el);
           break;
         case 'fill': {
