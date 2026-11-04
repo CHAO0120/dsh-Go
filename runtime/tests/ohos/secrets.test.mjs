@@ -358,7 +358,9 @@ test('failed recovery with an unusable residual alias stays visible to read prob
   await assert.rejects(fs.access(f.vaultPath), { code: 'ENOENT' });
   f.plugin.onDetachedFromEngine(f.engine); const next = f.attach();
   for (const [method, args] of [['read', { key: 'probe' }], ['readAll', {}], ['write', { key: 'new', value: 'blocked' }]]) {
-    assert.equal((await f.request(method, args, next.channel)).error, 'secrets_key_unusable');
+    const reply = await f.request(method, args, next.channel);
+    assert.equal(reply.error, 'secrets_key_unusable');
+    assert(!reply.message.includes('已保留'), 'there is no ciphertext left to claim preserved');
   }
   assert.equal(f.events.filter(e => e.op === 'generate').length, 1);
   f.change({ deleteKeyError: undefined });
@@ -388,7 +390,9 @@ for (const missing of ['directory', 'vault']) test(`missing ${missing} probes an
 
 test('empty-vault probes report transient key-service failure and retry without creating keys', async t => {
   const f = await secretsFixture(t, { keyQueryError: 12000005 });
-  assert.equal((await f.request('readAll')).error, 'secrets_unavailable');
+  const reply = await f.request('readAll');
+  assert.equal(reply.error, 'secrets_unavailable');
+  assert(!reply.message.includes('已保留'), 'first use has no old ciphertext');
   assert.equal(f.keys.size, 0);
   f.change({ keyQueryError: undefined });
   assert.deepEqual(await f.request('readAll'), { value: {} });

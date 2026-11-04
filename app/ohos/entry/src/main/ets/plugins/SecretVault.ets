@@ -38,7 +38,7 @@ export class SecretVault {
   }
 
   private unavailable(): SecretStorageError {
-    return new SecretStorageError('secrets_unavailable', '系统安全密钥暂不可用，原加密数据已保留。');
+    return new SecretStorageError('secrets_unavailable', '系统安全密钥暂不可用，请重试。');
   }
 
   private keyUnusable(): SecretStorageError {
