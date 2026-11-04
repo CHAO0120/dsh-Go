@@ -61,10 +61,19 @@ const readyWaiters = [];
 const readies = [];
 let tail = [];
 let buffered = '';
+const repeats = new Map();
 const noteLine = (line) => {
   appendFileSync(logFile, line + '\n');
+  // A warning repeated thousands of times would push the cause out of the tail.
+  const key = line.replace(/\d+/g, '#');
+  const seen = (repeats.get(key) ?? 0) + 1;
+  repeats.set(key, seen);
+  if (seen > 3) {
+    if (seen % 1000 === 0) tail.push(`[seen ${seen} times] ${line}`);
+    return;
+  }
   tail.push(line);
-  if (tail.length > 120) tail.shift();
+  if (tail.length > 200) tail.shift();
 };
 engine.stderr.on('data', (data) => String(data).split('\n').forEach((line) => line && noteLine('[smoke stderr] ' + line)));
 engine.stdout.on('data', (data) => {
