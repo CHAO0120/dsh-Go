@@ -40,3 +40,5 @@ site/build/
 
 # Reproducible private OHOS rg regex build
 runtime/ohos/process/build/
+# NodeMobile, the runtime archive and addon sources: tooling/ios/prepare-engine.sh
+app/ios/Engine/

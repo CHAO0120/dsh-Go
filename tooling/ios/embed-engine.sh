@@ -1,0 +1,48 @@
+#!/bin/sh
+# Xcode build phase: puts the engine into the app when tooling/ios/prepare-engine.sh
+# has run. The engine isn't linked at launch: the app dlopens it on first start, so
+# someone who only uses remote hosts doesn't pay for 90 MB of Node.
+set -eu
+
+ROOT="$(cd "$SRCROOT/../.." && pwd)"
+ENGINE="$ROOT/app/ios/Engine"
+if [ ! -f "$ENGINE/.ready" ]; then
+  echo "note: app/ios/Engine isn't prepared; this build connects to remote hosts only."
+  exit 0
+fi
+case "$PLATFORM_NAME" in
+  iphoneos) SLICE=ios-arm64 ;;
+  iphonesimulator) SLICE=ios-arm64-simulator ;;
+  *) echo "error: no engine for $PLATFORM_NAME"; exit 1 ;;
+esac
+
+BUILT="$ENGINE/build/$PLATFORM_NAME"
+STAMP="$BUILT/.inputs"
+INPUTS="$(cat "$ROOT/runtime/ios/host/"* "$ROOT/runtime/ohos/host/publication_binding.cc" \
+  "$ROOT/app/ohos/entry/src/main/cpp/host_core.cpp" "$ROOT/app/ohos/entry/src/main/cpp/host_core.h" \
+  "$ROOT/tooling/ios/build-engine-native.sh" | shasum -a 256)"
+if [ ! -f "$STAMP" ] || [ "$(cat "$STAMP")" != "$INPUTS" ]; then
+  # Xcode's environment selects its own SDK and target, which would override these.
+  env -i PATH="$PATH" HOME="$HOME" DEVELOPER_DIR="${DEVELOPER_DIR:-}" \
+    /bin/bash "$ROOT/tooling/ios/build-engine-native.sh" "$PLATFORM_NAME" "$BUILT"
+  printf '%s' "$INPUTS" >"$STAMP"
+fi
+
+FRAMEWORKS="$TARGET_BUILD_DIR/$FRAMEWORKS_FOLDER_PATH"
+RESOURCES="$TARGET_BUILD_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH"
+mkdir -p "$FRAMEWORKS" "$RESOURCES/dsh-runtime"
+rm -rf "$FRAMEWORKS/NodeMobile.framework" "$FRAMEWORKS/DshNodeHost.framework"
+cp -R "$ENGINE/NodeMobile.xcframework/$SLICE/NodeMobile.framework" "$FRAMEWORKS/"
+rm -rf "$FRAMEWORKS/NodeMobile.framework/Headers" "$FRAMEWORKS/NodeMobile.framework/Modules" \
+  "$FRAMEWORKS/NodeMobile.framework/_CodeSignature"
+cp -R "$BUILT/DshNodeHost.framework" "$FRAMEWORKS/"
+cp "$BUILT/libdsh_flock.so" "$BUILT/libdsh_require_builtin.so" "$FRAMEWORKS/"
+cp "$ENGINE/runtime.zip" "$RESOURCES/dsh-runtime/runtime.zip"
+
+if [ "${CODE_SIGNING_ALLOWED:-YES}" = "NO" ] || [ -z "${EXPANDED_CODE_SIGN_IDENTITY:-}" ]; then
+  exit 0
+fi
+for item in NodeMobile.framework DshNodeHost.framework libdsh_flock.so libdsh_require_builtin.so; do
+  /usr/bin/codesign --force --sign "$EXPANDED_CODE_SIGN_IDENTITY" ${OTHER_CODE_SIGN_FLAGS:-} \
+    --preserve-metadata=identifier,entitlements "$FRAMEWORKS/$item"
+done

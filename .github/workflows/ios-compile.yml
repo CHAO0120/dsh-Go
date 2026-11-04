@@ -1,6 +1,7 @@
 # Compiles the app for the iOS simulator and for a device, unsigned, on a macOS
 # runner: the only place Xcode runs. Needs no secrets. Signing, TestFlight and
-# running anything on a device are later jobs.
+# running anything on a device are later jobs. The engine job does run the engine: on
+# the iOS Simulator, one real round against a fake model, then a restart in place.
 name: iOS compile
 
 on:
@@ -10,6 +11,9 @@ on:
       - 'app/**'
       - 'packages/**'
       - 'tooling/ios/**'
+      - 'runtime/ios/**'
+      - 'runtime/ohos/**'
+      - 'runtime/patches/**'
       - '.github/workflows/ios-compile.yml'
   workflow_dispatch:
 
@@ -63,3 +67,55 @@ jobs:
       - name: Compile for a device, unsigned
         working-directory: app
         run: bash ../tooling/ios/build.sh --release --no-codesign
+
+  engine:
+    runs-on: macos-26
+    timeout-minutes: 60
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
+      DSH_IOS_ENGINE_WORK: ${{ github.workspace }}/../engine-work
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Prepare the engine
+        run: |
+          python3 --version
+          log="$(mktemp)"
+          if ! bash tooling/ios/prepare-engine.sh 2>&1 | tee "$log"; then
+            tail -n 8 "$log" | cut -c1-600 | sed -e 's/%/%25/g' -e 's/^/::error title=prepare-engine::/'
+            exit 1
+          fi
+          ls -la app/ios/Engine
+
+      - name: Compile the native pieces for the simulator
+        run: |
+          log="$(mktemp)"
+          if ! bash tooling/ios/build-engine-native.sh iphonesimulator "$RUNNER_TEMP/sim" -DDSH_IOS_ENGINE_SMOKE 2>&1 | tee "$log"; then
+            grep -E 'error:|Undefined|ld:' "$log" | awk '!seen[$0]++' | head -10 | cut -c1-600               | sed -e 's/%/%25/g' -e 's/^/::error title=native::/'
+            exit 1
+          fi
+          cp -R app/ios/Engine/NodeMobile.xcframework/ios-arm64-simulator/NodeMobile.framework "$RUNNER_TEMP/sim/"
+          xcrun --sdk iphonesimulator clang -target arm64-apple-ios15.0-simulator             tooling/ios/engine-smoke/smoke.c -o "$RUNNER_TEMP/smoke"
+
+      - name: Compile the native pieces for a device
+        run: |
+          log="$(mktemp)"
+          if ! bash tooling/ios/build-engine-native.sh iphoneos "$RUNNER_TEMP/device" 2>&1 | tee "$log"; then
+            grep -E 'error:|Undefined|ld:' "$log" | awk '!seen[$0]++' | head -10 | cut -c1-600               | sed -e 's/%/%25/g' -e 's/^/::error title=native-device::/'
+            exit 1
+          fi
+
+      - name: Run a round on the simulator
+        run: |
+          mkdir -p "$RUNNER_TEMP/tree"
+          unzip -q app/ios/Engine/runtime.zip 'files/*' -d "$RUNNER_TEMP/tree"
+          udid="$(python3 tooling/ios/engine-smoke/pick-simulator.py)"
+          xcrun simctl boot "$udid"
+          xcrun simctl bootstatus "$udid"
+          node="$(ls -d "$DSH_IOS_ENGINE_WORK"/node-v*-darwin-arm64/bin/node)"
+          status=0
+          "$node" tooling/ios/engine-smoke/drive.mjs --simulator "$udid" --smoke "$RUNNER_TEMP/smoke"             --frameworks "$RUNNER_TEMP/sim" --runtime "$RUNNER_TEMP/tree/files" --work "$RUNNER_TEMP/smoke-work"             --ws "$RUNNER_TEMP/tree/files" || status=$?
+          "$node" tooling/ios/engine-smoke/annotate.mjs "$RUNNER_TEMP/smoke-work"
+          exit "$status"
