@@ -35,6 +35,7 @@ final class DshPlugin: NSObject, FlutterPlugin, FlutterSceneLifeCycleDelegate {
       MediaChannel(messenger: messenger),
       NotifyChannel(messenger: messenger),
       VoiceChannel(messenger: messenger),
+      LauncherIconChannel(messenger: messenger),
       // The runtime controller subscribes before it learns there is no engine, and
       // activating a stream with no handler reports an error to Flutter.
       SilentEvents(name: "dsh/runtime/events", messenger: messenger),
@@ -248,6 +249,51 @@ private final class ShortcutsChannel {
         icon: UIApplicationShortcutIcon(systemImageName: "bubble.left"),
         userInfo: info
       )
+    }
+  }
+}
+
+// MARK: - dsh/launcher_icon
+
+/// 桌面图标. The default icon is the primary one and the rest are the asset catalog's
+/// alternates (ASSETCATALOG_COMPILER_ALTERNATE_APPICON_NAMES). The system says so with
+/// an alert of its own when one changes, and there's no mask to report: Dart's
+/// rounded square is close enough to iOS's.
+private final class LauncherIconChannel {
+  private static let primary = "mist"
+  private static let alternates = ["night": "AppIconNight", "frost": "AppIconFrost", "ink": "AppIconInk"]
+
+  private let channel: FlutterMethodChannel
+
+  init(messenger: any FlutterBinaryMessenger) {
+    channel = FlutterMethodChannel(name: "dsh/launcher_icon", binaryMessenger: messenger)
+    channel.setMethodCallHandler { call, result in
+      switch call.method {
+      case "state": result(Self.reply())
+      case "set": Self.set(arguments(call)["id"] as? String, result: result)
+      default: result(FlutterMethodNotImplemented)
+      }
+    }
+  }
+
+  private static func reply() -> [String: String] {
+    let name = UIApplication.shared.alternateIconName
+    return ["current": alternates.first { $0.value == name }?.key ?? primary]
+  }
+
+  private static func set(_ id: String?, result: @escaping FlutterResult) {
+    let known = id == primary || id.flatMap { alternates[$0] } != nil
+    guard known, UIApplication.shared.supportsAlternateIcons else {
+      return result(FlutterError(code: "unavailable", message: nil, details: nil))
+    }
+    UIApplication.shared.setAlternateIconName(id.flatMap { alternates[$0] }) { error in
+      onMain {
+        if error == nil {
+          result(Self.reply())
+        } else {
+          result(FlutterError(code: "refused", message: nil, details: nil))
+        }
+      }
     }
   }
 }

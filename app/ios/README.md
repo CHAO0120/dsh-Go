@@ -35,8 +35,8 @@ flutter build ios --release --no-codesign
 
 - 代码只经过 CI 编译，还没有在设备上跑过，下面的验收项都没做。
 - 没有本机引擎，只能连远程主机。`dsh/runtime` 没有原生实现，Dart 按“这个平台没有”处理。
-- 已接的通道：`dsh/app`、`dsh/links`、`dsh/files`、`dsh/media`、`dsh/notify`、`dsh/voice`、`dsh/shortcuts`、`dsh/share`。
-- 没接的通道，Dart 都按不支持处理：`dsh/native-files`、`dsh/native-media`（原生插件的文件和媒体能力）、`dsh/performance`（设备档位固定中档，不响应发热）、`dsh/launcher_icon`（换图标）、`dsh/diagnostics`、`dsh/usage`、`dsh/launch`、`dsh/dynamic_color`、`dsh/picture_shortcut`。
+- 已接的通道：`dsh/app`、`dsh/links`、`dsh/files`、`dsh/media`、`dsh/notify`、`dsh/voice`、`dsh/shortcuts`、`dsh/share`、`dsh/launcher_icon`。
+- 没接的通道，Dart 都按不支持处理：`dsh/native-files`、`dsh/native-media`（原生插件的文件和媒体能力）、`dsh/performance`（设备档位固定中档，不响应发热）、`dsh/diagnostics`、`dsh/usage`、`dsh/launch`、`dsh/dynamic_color`、`dsh/picture_shortcut`。
 - `dsh/islands` 在 Dart 侧只对 Android 开放，所以 WebView 不跟随应用的深色设置和文字缩放，跟随系统。
 - 通知只在应用运行时发得出去。锁屏和离开应用后的提醒要 APNs，还没做，所以离开应用后等你确认的请求不会提醒你，回到应用才看得到。
 - 凭据存在 Keychain，只留在本机，不随备份迁移。全新安装时会先清掉上一次安装留下的 Keychain。“完整凭据能不能落盘”这件事和安卓一样还没改，发行前要定。
@@ -71,3 +71,4 @@ flutter build ios --release --no-codesign
 | 深色模式 | 系统切深色后启动 | 启动屏不闪白 |
 | 中文 | 系统语言切中文和英文 | 权限说明和快捷操作跟随系统语言 |
 | 图标 | 桌面、设置页 | 显示品牌图标，不是 Flutter 默认图标 |
+| 换图标 | 外观页依次选四款图标 | 系统提示后桌面图标跟着变，重开应用仍选中当前这款 |
