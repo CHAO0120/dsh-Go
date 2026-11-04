@@ -215,6 +215,14 @@ jobs:
           node="$(ls -d "$DSH_IOS_ENGINE_WORK"/node-v*-darwin-arm64/bin/node)"
           "$node" tooling/ios/engine-smoke/tools-check.mjs --simulator "$DSH_SIMULATOR" --app app/build/ios/iphonesimulator/Runner.app --work "$RUNNER_TEMP/tools-check"
 
+      - name: Keep what the tools answered
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: ios-native-tools
+          path: ${{ runner.temp }}/tools-check/rows.jsonl
+          if-no-files-found: ignore
+
       - name: Keep the launch screenshot
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2

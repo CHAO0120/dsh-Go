@@ -331,7 +331,7 @@ final class NativeToolsTests: XCTestCase {
 
     var page = try await read(browser)
     XCTAssertEqual(page["title"] as? String, "Example Domain")
-    XCTAssertTrue((page["text"] as? String ?? "").contains("Example Domain"))
+    XCTAssertTrue((page["text"] as? String ?? "").contains("Example Domain"), "read: \(page["text"] ?? "nothing")")
 
     let shot = try await web(browser, "screenshot")
     XCTAssertGreaterThan(shot.image?.count ?? 0, 1000)
@@ -344,10 +344,11 @@ final class NativeToolsTests: XCTestCase {
 
     // The one link leaves for a site nobody has approved: it stays put and says so.
     page = try await read(browser)
-    try await web(browser, "click", try target(element(page) { $0["role"] as? String == "link" }, page))
+    let clicked = try await web(browser, "click", try target(element(page) { $0["role"] as? String == "link" }, page))
     try await Task.sleep(nanoseconds: 3_000_000_000)
     let answer = try await web(browser, "read", ["maxBytes": 49152])
-    XCTAssertTrue(answer.text.contains("还没有批准"), "no note about the blocked link: \(answer.text.prefix(600))")
+    // Whichever call comes next after the blocked jump carries the note, and only that one.
+    XCTAssertTrue((clicked.text + answer.text).contains("还没有批准"), "no note about the blocked link: \(clicked.text.prefix(300))")
     XCTAssertEqual(parsed(answer)["title"] as? String, "Example Domain")
 
     // A page of ours, with a clock ticking in it the way ads and tickers do.
@@ -355,7 +356,7 @@ final class NativeToolsTests: XCTestCase {
     let view = try XCTUnwrap(browser.webView)
     page = try await read(browser)
     let seen = page["text"] as? String ?? ""
-    XCTAssertTrue(seen.contains("Fixture"))
+    XCTAssertTrue(seen.contains("Fixture"), "read: \(seen.prefix(400))")
     XCTAssertFalse(seen.contains("hidden-text"), "text nobody can see reached the model: \(seen.prefix(400))")
 
     var fill = try target(named("Search", page), page)

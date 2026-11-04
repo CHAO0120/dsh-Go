@@ -49,6 +49,17 @@ const rowsFile = join(work, 'rows.jsonl');
 const rows = existsSync(rowsFile) ? readFileSync(rowsFile, 'utf8').split('\n').filter(Boolean).map((line) => JSON.parse(line)) : [];
 const problems = [];
 const lines = [];
+// A page read is mostly a list of elements, and what matters is whether it saw the page.
+const brief = (row) => {
+  const text = String(row.text);
+  if (row.group === 'browser' && row.name === 'read' && !row.isError) {
+    try {
+      const page = JSON.parse(text.slice(text.indexOf('{')));
+      return `${page.title} | ${page.elements.length} elements | ${String(page.text).replace(/\s+/g, ' ').slice(0, 60)}`;
+    } catch { /* Shown as it came. */ }
+  }
+  return text.replace(/\s+/g, ' ').slice(0, row.isError ? 200 : 90);
+};
 for (const row of rows) {
   const wrong = row.timedOut || (row.expect === 'ok' && row.isError) || (row.expect === 'refused' && !row.isError);
   let contract = '';
@@ -62,23 +73,29 @@ for (const row of rows) {
     problems.push(`${row.group} ${row.name}: ${error.message}`);
   }
   if (wrong) problems.push(`${row.group} ${row.name}: ${row.timedOut ? 'ran out of time' : `expected ${row.expect}`}`);
-  const answer = String(row.text).replace(/\s+/g, ' ').slice(0, row.isError ? 200 : 110);
-  const shown = JSON.stringify(row.args).slice(0, 80);
+  const answer = brief(row);
+  const shown = JSON.stringify(row.args).slice(0, 60);
   lines.push(`${wrong ? 'WRONG ' : ''}${row.name} ${shown} ${row.ms}ms ${row.isError ? 'error' : 'ok'}${row.imageBytes ? ` image ${row.imageBytes}` : ''}: ${answer}${contract}`);
 }
 for (const group of ['system', 'browser']) {
-  notice(`${group} tools`, lines.filter((_, index) => rows[index].group === group).join('\n') || 'no calls recorded');
+  const all = lines.filter((_, index) => rows[index].group === group).join('\n') || 'no calls recorded';
+  // An annotation holds about 4 KB.
+  for (let at = 0, part = 1; at < all.length; at += 3400, part++) notice(`${group} tools ${part}`, all.slice(at, at + 3400));
 }
 
 const logged = existsSync(logFile) ? readFileSync(logFile, 'utf8').split('\n') : [];
 const failures = [...new Set(logged.filter((line) => /error:|BUILD FAILED|TEST FAILED|TEST EXECUTE FAILED/.test(line)))]
   .map((line) => line.slice(0, 400)).slice(0, 25);
-// A failed assertion only reaches the log as a summary line. What it said is in the result bundle.
-const summary = spawnSync('xcrun', ['xcresulttool', 'get', 'test-results', 'summary', '--path', join(work, 'result.xcresult'), '--compact'], { encoding: 'utf8' });
+// A failed assertion only reaches the log as a summary line. Each one, with its line, is in the
+// result bundle's tree of tests.
+const tree = spawnSync('xcrun', ['xcresulttool', 'get', 'test-results', 'tests', '--path', join(work, 'result.xcresult'), '--compact'],
+  { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+const failedAssertions = (nodes = []) => nodes.flatMap((node) => [
+  ...(node.nodeType === 'Failure Message' ? [String(node.name).replace(/\s+/g, ' ').slice(0, 300)] : []),
+  ...failedAssertions(node.children),
+]);
 try {
-  for (const failure of JSON.parse(summary.stdout).testFailures ?? []) {
-    problems.push(`${failure.testName}: ${String(failure.failureText).replace(/\s+/g, ' ').slice(0, 400)}`);
-  }
+  problems.push(...new Set(failedAssertions(JSON.parse(tree.stdout).testNodes)));
 } catch { /* A build that failed leaves no result to read; the log has why. */ }
 if (timedOut) problems.push('xcodebuild ran out of time');
 if (code !== 0) problems.push(`xcodebuild ended with ${code}`);
