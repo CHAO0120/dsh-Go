@@ -188,3 +188,29 @@ test('prepared read-only policy reaches Node file and FileHandle operations and 
   const result = await f.run(argv); assert.equal(result.exitCode, 0, result.stderr.toString());
   assert.equal(result.stdout.toString(), 'read-only\n'); assert.equal(await readFile(join(f.work, 'input'), 'utf8'), 'UNCHANGED');
 });
+
+// Worker exit events retain the integer supplied by the script. At the
+// subprocess seam, Node is an external POSIX command with an 8-bit status.
+for (const method of ['exit', 'exitCode']) for (const route of ['direct', 'nested']) {
+  for (const [code, expected] of [[0, 0], [7, 7], [255, 255], [256, 0], [-1, 255]]) {
+    test(`Node exit status ${method}/${route}/${code} matches an external command`, { timeout: 15000 }, async t => {
+      const f = await fixture(t);
+      const entry = await f.script(method === 'exit' ? `process.exit(${code});` : `process.exitCode=${code};`);
+      const result = await f.run(route === 'direct' ? ['node', entry] : ['bash', '-c', `node '${entry}'`]);
+      assert.deepEqual({ exitCode: result.exitCode, signal: result.signal }, { exitCode: expected, signal: null });
+      assert.equal(result.stdout.length, 0); assert.equal(result.stderr.length, 0);
+      assert.equal(f.runtime.live.size, 0);
+    });
+  }
+}
+
+for (const [code, expected] of [[0, 0], [7, 7], [255, 255], [256, 0], [-1, 255]]) {
+  test(`Node exit status ${code} drives Bash status and conditional branches`, { timeout: 15000 }, async t => {
+    const f = await fixture(t), entry = await f.script(`process.exit(${code});`);
+    const invoke = `node '${entry}'`;
+    const result = await f.run(['bash', '-c', `${invoke}; printf 'status=%s\n' "$?"; if ${invoke}; then printf 'if=yes\n'; else printf 'if=no\n'; fi; ${invoke} && printf 'and=yes\n'; printf 'after-and\n'; set -o pipefail; ${invoke} | cat; printf 'pipe=%s\n' "$?"`]);
+    const branch = expected === 0 ? 'if=yes\nand=yes\n' : 'if=no\n';
+    assert.equal(result.exitCode, 0); assert.equal(result.signal, null); assert.equal(result.stderr.length, 0);
+    assert.equal(result.stdout.toString(), `status=${expected}\n${branch}after-and\npipe=${expected}\n`);
+  });
+}

@@ -294,7 +294,8 @@ export class VirtualSubprocessRuntime {
             else state.failure = error;
           });
           worker.once('exit', exitCode => {
-            if (nodeTask) state.outcome = { exitCode, signal: null };
+            // Worker events retain the script integer; the subprocess seam exposes a POSIX status.
+            if (nodeTask) state.outcome = { exitCode: exitCode & 0xff, signal: null };
             if (!state.outcome && !state.failure && !state.stopped) state.failure = new Error(`虚拟进程 worker 未报告结果，退出码 ${exitCode}`);
             workerExited = true;
             // A paused Worker readable can still contain bytes after its exit

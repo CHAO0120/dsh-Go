@@ -29,7 +29,8 @@ export function nodeCommand({ roots, workspaceRoots, readOnly }) {
         ctx.signal?.removeEventListener('abort', abort);
         resolve({ stdout: Buffer.concat(output.stdout).toString('latin1'), stdoutKind: 'bytes',
           stderr: Buffer.concat(output.stderr).toString('latin1') + (overflow ? 'ERR_OHOS_NODE_OUTPUT_LIMIT: Node command output exceeds 64 MiB\n' : ''), stderrKind: 'bytes',
-          exitCode: overflow ? 1 : exitCode });
+          // Match an external POSIX command before Bash tests the status.
+          exitCode: overflow ? 1 : (exitCode & 0xff) });
       });
     });
     ctx.signal?.throwIfAborted();

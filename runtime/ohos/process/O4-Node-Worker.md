@@ -14,7 +14,7 @@
 | 环境 | 沿用既有 scrubbedParentEnv，加显式 env 覆盖及 undefined 删除；TMPDIR 仍由服务设为私有临时根。未把父引擎 DSH 身份与凭据复制给脚本。 |
 | stdin | 一次性字符串或 Uint8Array，最多 64 MiB；在 Worker 内提供有限 Readable，读取时字节精确，不读取也不拖住正常退出。fs.readFileSync(0) 不等于这个输入流。 |
 | stdout/stderr | 直接 node 任务按实际字节持续交付；继续使用公开 pipe 与原 OutputCollector 的尾部/spill。bash 内的 node 命令先缓冲，等其外层语句完成路由后交付，以保留管道、替换和重定向。 |
-| 退出 | process.exit(n)、自然退出及未捕获异常属于脚本 Worker；异常写 stderr 并得到实际 exit 1。脚本向 parentPort 发任意 exitCode/failure 消息不会伪造后端结果。 |
+| 退出 | process.exit(n)、自然退出及未捕获异常属于脚本 Worker；异常写 stderr 并得到实际 exit 1。直接及 shell 内 Node 在 Worker 退出边界将合法整数映射为 POSIX 低 8 位状态，供 subprocess 结果、`$?`、条件和 pipefail 使用；例如 256→0、-1→255。脚本向 parentPort 发任意 exitCode/failure 消息不会伪造后端结果。 |
 | 取消 | 排队尚未启动可直接取消；已启动则调用真实 Worker.terminate，等实际退出及输出排空。同步死循环和真实后代 Worker 均有取消测试。已写入的内容不会回滚。 |
 | CLI 拒绝 | 不支持的 Node CLI 形式 exit 2；找不到脚本 exit 1；缺少可继承预加载器 exit 127，且 node 从能力命令表中移除。越界/read-only 等实际策略错误保留 EACCES。 |
 
