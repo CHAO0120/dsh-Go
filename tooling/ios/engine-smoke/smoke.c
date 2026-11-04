@@ -25,10 +25,12 @@ static TextFn host_drain;
 static FreeFn host_free;
 static char dsh_home[4096];
 static char workspace[4096];
+// The engine takes over fds 1 and 2 while it runs, so this has its own copy of stdout.
+static FILE* out;
 
 static void die(const char* message, const char* detail) {
-  printf("{\"kind\":\"fatal\",\"message\":\"%s: %s\"}\n", message, detail ? detail : "");
-  fflush(stdout);
+  fprintf(out, "{\"kind\":\"fatal\",\"message\":\"%s: %s\"}\n", message, detail ? detail : "");
+  fflush(out);
   exit(1);
 }
 
@@ -43,8 +45,8 @@ static int exists_then_remove(const char* root, const char* name) {
 
 static void drain(void) {
   char* events = host_drain();
-  printf("%s\n", events);
-  fflush(stdout);
+  fprintf(out, "%s\n", events);
+  fflush(out);
   host_free(events);
 }
 
@@ -68,6 +70,7 @@ static void begin(char** argv) {
 }
 
 int main(int argc, char** argv) {
+  out = fdopen(dup(STDOUT_FILENO), "w");
   if (argc != 5) die("usage", "smoke <frameworks> <runtime root> <guest root> <cache>");
   char library[4096];
   snprintf(library, sizeof library, "%s/DshNodeHost.framework/DshNodeHost", argv[1]);
@@ -92,7 +95,7 @@ int main(int argc, char** argv) {
       return 0;
     }
     if (exists_then_remove(argv[3], "restart")) {
-      printf("{\"kind\":\"restarting\"}\n");
+      fprintf(out, "{\"kind\":\"restarting\"}\n");
       stop_engine();
       while (!phase_is("exited") && !phase_is("error")) { drain(); usleep(100000); }
       drain();

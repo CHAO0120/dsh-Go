@@ -63,7 +63,7 @@ let buffered = '';
 const noteLine = (line) => {
   appendFileSync(logFile, line + '\n');
   tail.push(line);
-  if (tail.length > 40) tail.shift();
+  if (tail.length > 120) tail.shift();
 };
 engine.stderr.on('data', (data) => String(data).split('\n').forEach((line) => line && noteLine('[smoke stderr] ' + line)));
 engine.stdout.on('data', (data) => {
@@ -226,7 +226,7 @@ if (!exited) {
   if (!exited) engine.kill();
 }
 await model.close();
-report.nativeHost = existsSync(logFile) ? tail.slice(-25) : [];
+report.nativeHost = existsSync(logFile) ? tail : [];
 writeFileSync(join(work, 'report.json'), JSON.stringify(report, null, 2) + '\n');
 console.log(JSON.stringify(report, null, 2));
 process.exit(report.status === 'PASS' ? 0 : 1);
