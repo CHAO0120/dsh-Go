@@ -381,10 +381,14 @@ export class BoundaryCoordinator {
   resume() {
     this.#check();
     this.#manualPaused = false;
+    const version = this.#controlVersion;
     // Record releasing the manual cause even while native admission stays closed.
     if (!this.#refreshNative()) {
       this.#admissionTarget = false;
       this.#hostControl = this.#pause();
+    } else if (version === this.#controlVersion) {
+      // Explicit resume also renews transport after an unannounced freeze.
+      this.#hostControl = this.#resume();
     }
     return Promise.resolve(this.#hostControl).then(() => this.status());
   }

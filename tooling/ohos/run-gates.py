@@ -673,7 +673,7 @@ def main():
     g.run('hap-native-paths', lambda: g.py(rt + 'hap-native-paths.py', '--prefix', o / 'targets/ohos-prefix', '--node', node(), '--headers', headers(), '--loader-addon', p('native_library_dir') / 'libdsh_require_builtin.so', '--compiler', p('cc'), '--out', o / 'hap-native-paths'), needs=('android-targets',), timeout=180)
     g.node_tests('native-loader', [rt + 'native-loader-probe.test.mjs'], needs=('android-targets',), extra=lambda: {'DSH_TEST_NODE': str(node()), 'DSH_TEST_O0_PRELOAD': str(s / 'runtime/ohos/sim/preload.mjs'), 'DSH_TEST_NATIVE_PREFIX': str(o / 'targets/ohos-prefix'), 'DSH_TEST_NATIVE_ADDON': str(p('native_library_dir') / 'libdsh_require_builtin.so'), 'DSH_GO_OHOS_NATIVE_LIBRARY_DIR': str(p('native_library_dir'))})
     publication = ['publication-atomic', 'publication-atomic-fuse', 'publication-ledger', 'publication-ledger-lifecycle', 'publication-capabilities']
-    lifecycle = ['lifecycle-journal', 'lifecycle-budget', 'lifecycle-tool-budgets', 'lifecycle-transport', 'lifecycle-engine', 'runtime-capabilities']
+    lifecycle = ['lifecycle-journal', 'lifecycle-budget', 'lifecycle-tool-budgets', 'lifecycle-transport', 'lifecycle-engine', 'lifecycle-explicit-resume', 'runtime-capabilities']
     for mode in ['marker', 'strict']:
         g.node_tests('publication-' + mode, [rt + n + '.test.mjs' for n in publication], mode=mode, needs=('native-publication-build', 'prepared-inputs'), extra=linked_env, timeout=240)
         g.node_tests('publication-lock-' + mode, [rt + 'publication-lock.test.mjs'],
