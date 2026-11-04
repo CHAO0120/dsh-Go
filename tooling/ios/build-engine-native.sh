@@ -37,6 +37,7 @@ HOST_RUNTIME="$ROOT/runtime/ohos/host"
 FRAMEWORK="$OUT/DshNodeHost.framework"
 rm -rf "$FRAMEWORK"
 mkdir -p "$FRAMEWORK"
+cp "$ROOT/runtime/ios/host/worker-preload.cjs" "$FRAMEWORK/worker-preload.cjs"
 "$CLANGXX" "${COMMON[@]}" -std=c++20 -stdlib=libc++ -fexceptions -frtti -DNAPI_VERSION=8 \
   "-I$ENGINE/include" "-I$HOST_CORE" "-I$HOST_RUNTIME" "$@" \
   "$ROOT/runtime/ios/host/node_runner.cc" "$ROOT/runtime/ios/host/ios_host.cc" \

@@ -26,26 +26,16 @@ constexpr size_t kEngineStackBytes = 16 * 1024 * 1024;
 // it is the same in-process, no-child-process runtime, and this is what selects it.
 // Workers inherit it with the rest of execArgv.
 //
-// It also turns off fd tracking in Workers, as RunEnvironment does for the main thread.
-// NodeMobile 24.22.1-0 hashes an fd one way when it adds it to that set and another when it
-// removes it, so nothing ever leaves. When an Environment ends, it closes every number in
-// the set, by then including ones reused for sockets and files elsewhere in the process.
-// Without the set, a raw fd a run leaves open stays open.
-//
-// Decodes to:
-//   import w from'node:worker_threads';
-//   import{syncBuiltinESMExports as s}from'node:module';
-//   Object.defineProperty(process,'platform',{value:'openharmony'});
-//   Reflect.deleteProperty(globalThis,'WebAssembly');
-//   const W=w.Worker;
-//   w.Worker=class Worker extends W{constructor(f,o){super(f,{...o,trackUnmanagedFds:false})}};
-//   s();
+// A synchronous --require bootstrap disables fd tracking for every public Worker,
+// including eval Workers and Workers with an explicit execArgv array. It is shipped
+// beside DshNodeHost; the platform --import alone does not run in classic eval Workers.
+// NodeMobile 24.22.1-0's inconsistent fd-set hash makes tracking unsafe. Raw fds left
+// open intentionally remain open until App exit instead of being closed on Stop.
 constexpr const char* kPlatformImport =
     "--import=data:text/javascript;base64,"
-    "aW1wb3J0IHcgZnJvbSdub2RlOndvcmtlcl90aHJlYWRzJztpbXBvcnR7c3luY0J1aWx0aW5FU01FeHBvcnRzIGFzIHN9ZnJvbSdub2RlOm1v"
-    "ZHVsZSc7T2JqZWN0LmRlZmluZVByb3BlcnR5KHByb2Nlc3MsJ3BsYXRmb3JtJyx7dmFsdWU6J29wZW5oYXJtb255J30pO1JlZmxlY3QuZGVs"
-    "ZXRlUHJvcGVydHkoZ2xvYmFsVGhpcywnV2ViQXNzZW1ibHknKTtjb25zdCBXPXcuV29ya2VyO3cuV29ya2VyPWNsYXNzIFdvcmtlciBleHRl"
-    "bmRzIFd7Y29uc3RydWN0b3IoZixvKXtzdXBlcihmLHsuLi5vLHRyYWNrVW5tYW5hZ2VkRmRzOmZhbHNlfSl9fTtzKCk7";
+    "aW1wb3J0e3N5bmNCdWlsdGluRVNNRXhwb3J0cyBhcyBzfWZyb20nbm9kZTptb2R1bGUnO09iamVjdC5kZWZpbmVQcm9wZXJ0eShwcm9jZXNz"
+    "LCdwbGF0Zm9ybScse3ZhbHVlOidvcGVuaGFybW9ueSd9KTtSZWZsZWN0LmRlbGV0ZVByb3BlcnR5KGdsb2JhbFRoaXMsJ1dlYkFzc2VtYmx5"
+    "Jyk7cygpOw==";
 
 std::mutex environment_mutex;
 node::Environment* active_environment = nullptr;
@@ -161,6 +151,12 @@ extern "C" __attribute__((visibility("default"))) int dsh_node_start(int argc, c
       !IsUnifiedPreload(argv[3]) || argv[4] == nullptr || argv[4][0] != '/') {
     return RejectStartup("ERR_IOS_HOST_ARGV");
   }
+  // The shared host sets this from NativeEngine's framework directory before
+  // entering Node. Direct runner probes must stage the same required resource.
+  const char* native_dir = std::getenv("DSH_GO_OHOS_NATIVE_LIBRARY_DIR");
+  if (native_dir == nullptr || native_dir[0] != '/') return RejectStartup("ERR_IOS_HOST_WORKER_PRELOAD");
+  const std::string worker_preload = std::string(native_dir) + "/DshNodeHost.framework/worker-preload.cjs";
+  if (access(worker_preload.c_str(), R_OK) != 0) return RejectStartup("ERR_IOS_HOST_WORKER_PRELOAD");
   {
     std::lock_guard<std::mutex> lock(environment_mutex);
     if (active) return RejectStartup("ERR_IOS_HOST_ALREADY_STARTED");
@@ -174,7 +170,7 @@ extern "C" __attribute__((visibility("default"))) int dsh_node_start(int argc, c
   Run run;
   // Node's defaults assume a server's memory: left alone, the heap grows until iOS ends
   // the app. These held a five-tool round with a large JSON worker; not yet set on a device.
-  run.arguments = {argv[0], argv[1], "--max-old-space-size=256", "--max-semi-space-size=4", kPlatformImport, argv[2], argv[3]};
+  run.arguments = {argv[0], argv[1], "--max-old-space-size=256", "--max-semi-space-size=4", "--require", worker_preload, kPlatformImport, argv[2], argv[3]};
   run.arguments.insert(run.arguments.end(), argv + 4, argv + argc);
   // The shared host fixes its own profile. What iOS adds (the phone tools) sits next to
   // it, written by the app for this run, and the CLI only takes --patch here.
