@@ -33,7 +33,7 @@
     removeListeners.push(() => target.removeEventListener(type, invalidate, true));
   }
   function hidden(el) {
-    for (let at = el; at; at = parent(at)) {
+    for (let at = el; at; at = parent(at) || at.ownerDocument.defaultView?.frameElement) {
       if (at.hidden || at.inert || attr(at, 'aria-hidden') === 'true') return true;
       const style = at.ownerDocument.defaultView.getComputedStyle(at);
       if (style.display === 'none' || style.visibility === 'hidden' || style.visibility === 'collapse' || style.contentVisibility === 'hidden') return true;
