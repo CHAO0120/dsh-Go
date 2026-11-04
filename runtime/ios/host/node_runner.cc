@@ -157,7 +157,9 @@ extern "C" __attribute__((visibility("default"))) int dsh_node_start(int argc, c
   signal(SIGPIPE, SIG_IGN);
 
   Run run;
-  run.arguments = {argv[0], argv[1], kPlatformImport, argv[2], argv[3]};
+  // Node's defaults assume a server's memory: left alone, the heap grows until iOS ends
+  // the app. These held a five-tool round with a large JSON worker; not yet set on a device.
+  run.arguments = {argv[0], argv[1], "--max-old-space-size=256", "--max-semi-space-size=4", kPlatformImport, argv[2], argv[3]};
   run.arguments.insert(run.arguments.end(), argv + 4, argv + argc);
 #ifdef DSH_IOS_ENGINE_SMOKE
   // Test builds only: the smoke test's fake model has to reach the fixed command line,

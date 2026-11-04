@@ -36,7 +36,7 @@ const cache = realpathSync(work) + '/cache';
 for (const directory of [dshHome, `${guest}/root/.agents`, workspace, cache]) mkdirSync(directory, { recursive: true });
 
 const logFile = join(work, 'engine.log');
-const report = { status: 'BLOCKED', stage: 'startup', approvals: 0, restart: 'not-run' };
+const report = { status: 'BLOCKED', stage: 'startup', approvals: 0, restart: 'not-run', eventTypes: [] };
 const fail = (message) => { throw new Error(message); };
 
 const model = await startFakeModel(workspace);
@@ -189,7 +189,10 @@ async function round(ready) {
         report.approvals++;
         rpc('$events/result', { clientId, eventId: value.eventId, outcome: { kind: 'result', value: 'allowed-once' } }).catch(failMux);
       }
-      if (value?.type === 'event') events.push(value.event);
+      if (value?.type === 'event') {
+        events.push(value.event);
+        report.eventTypes.push(value.event.type);
+      }
       for (const waiter of [...waiters]) if (waiter.predicate(frame)) waiter.accept(frame);
     } catch (error) { failMux(error); }
   });
@@ -244,6 +247,7 @@ if (!exited) {
   await Promise.race([once(engine, 'exit'), new Promise((done) => setTimeout(done, 20000))]);
   if (!exited) engine.kill();
 }
+report.modelRequests = model.requests.map((row) => row.requestedTool);
 await model.close();
 report.nativeHost = existsSync(logFile) ? tail : [];
 writeFileSync(join(work, 'report.json'), JSON.stringify(report, null, 2) + '\n');
