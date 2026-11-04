@@ -111,6 +111,11 @@ final class IOSSystemTools: NSObject, PHPickerViewControllerDelegate, CLLocation
     guard current(), await authorize(), current() else { throw Failure("这个工具调用已经结束，没有执行。") }
   }
 
+  /// A system permission prompt can sit there longer than the tool call waits.
+  private func stillWanted(_ current: () -> Bool) throws {
+    guard current() else { throw Failure("这个工具调用已经结束，没有执行。") }
+  }
+
   nonisolated private static func instant(_ date: Date) -> String {
     let formatter = DateFormatter()
     formatter.locale = Locale(identifier: "en_US_POSIX")
@@ -203,6 +208,7 @@ final class IOSSystemTools: NSObject, PHPickerViewControllerDelegate, CLLocation
     try await asked(
       request, "允许 AI 读取提醒事项？", "\(scope)\(completed ? "提醒（含已完成）" : "未完成提醒")，最多 \(limit) 条，只有标题和日期。", authorize, current)
     try await reminderAccess()
+    try stillWanted(current)
     let predicate = eventStore.predicateForReminders(in: nil)
     let store = eventStore
     let found: [EKReminder] = await withCheckedContinuation { continuation in
@@ -288,6 +294,7 @@ final class IOSSystemTools: NSObject, PHPickerViewControllerDelegate, CLLocation
     let extra = fields.isEmpty ? "只有姓名" : "姓名和" + fields.map { $0 == "phone" ? "电话" : "邮箱" }.joined(separator: "、")
     try await asked(request, "允许 AI 查找联系人？", "姓名匹配「\(query)」的联系人，最多 \(limit) 个，\(extra)。", authorize, current)
     let scope = try await contactAccess()
+    try stillWanted(current)
     var keys: [CNKeyDescriptor] = [
       CNContactFormatter.descriptorForRequiredKeys(for: .fullName), CNContactIdentifierKey as CNKeyDescriptor,
     ]
@@ -334,6 +341,7 @@ final class IOSSystemTools: NSObject, PHPickerViewControllerDelegate, CLLocation
     if let email { detail += "\n邮箱：\(email)" }
     try await asked(request, "允许 AI 新建这个联系人？", detail + "\n\n不会合并或改动已有联系人。", authorize, current)
     _ = try await contactAccess()
+    try stillWanted(current)
     let contact = CNMutableContact()
     contact.givenName = given
     contact.familyName = family ?? ""
@@ -442,6 +450,7 @@ final class IOSSystemTools: NSObject, PHPickerViewControllerDelegate, CLLocation
         manager.requestWhenInUseAuthorization()
       }
     }
+    try stillWanted(current)
     guard [.authorizedWhenInUse, .authorizedAlways].contains(manager.authorizationStatus) else {
       throw Failure("用户没有给定位权限。可以到系统设置里打开。")
     }
