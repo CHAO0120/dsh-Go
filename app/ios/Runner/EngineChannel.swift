@@ -709,7 +709,7 @@ final class EngineChannel: NSObject, FlutterStreamHandler {
       return
     }
     // Deleting 14,000 files takes a while and the status must keep answering meanwhile.
-    DispatchQueue.global(qos: .userInitiated).async { [self] in
+    skills.afterWrites { [self] in
       let outcome = Result { try wipe(keeping: kept) }
       queue.async { [self] in
         pending = nil

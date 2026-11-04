@@ -117,6 +117,11 @@ final class EngineSkills {
     retire()
   }
 
+  /// Call after stop retires all jobs. Earlier file work finishes before this runs.
+  func afterWrites(_ work: @escaping () -> Void) {
+    io.async(qos: .userInitiated) { work() }
+  }
+
   func retire() {
     confirmedGeneration = nil
     confirmedToken = nil
