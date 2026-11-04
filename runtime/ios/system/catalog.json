@@ -39,7 +39,7 @@
         },
         "due": {
           "type": "string",
-          "description": "Exact UTC instant YYYY-MM-DDTHH:mm:ss.sssZ"
+          "description": "UTC timestamp YYYY-MM-DDTHH:mm:ss.sssZ. iOS converts it to local calendar components without fractional seconds; use the returned due value for the stored time."
         },
         "list_id": {
           "type": "string",
