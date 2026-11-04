@@ -64,6 +64,13 @@ fi
 NODE="$WORK/$NODE_DIST/bin/node"
 NPM="$WORK/$NODE_DIST/bin/npm"
 export PATH="$WORK/$NODE_DIST/bin:$PATH"
+# The composition pins its own npm, which isn't the one this Node ships with.
+NPM_VERSION="$("$PYTHON" -c 'import json, sys; print(json.load(open(sys.argv[1]))["installation"]["npmVersion"])' \
+  "$ROOT/runtime/ohos/package/composition.json")"
+if [[ "$("$NPM" --version)" != "$NPM_VERSION" ]]; then
+  "$NPM" install --prefix "$WORK/npm-$NPM_VERSION" --no-audit --no-fund "npm@$NPM_VERSION" >/dev/null
+  NPM="$WORK/npm-$NPM_VERSION/node_modules/.bin/npm"
+fi
 
 fetch "$NODE_MOBILE_URL" "$NODE_MOBILE_SHA256" "$WORK/nodemobile.zip"
 fetch "$ADDON_URL" "$ADDON_SHA256" "$WORK/require-builtin.tar.gz"
