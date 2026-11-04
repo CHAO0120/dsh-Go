@@ -1,0 +1,854 @@
+#!/usr/bin/env python3
+"""One-command Linux OHOS regression matrix; commands belong to this repository.
+
+Configuration supplies input paths, never commands. Each child keeps its own
+scope (Linux/ETS doubles, real Dart, ordinary SDK with UNCOMPILED_HMS). Missing
+inputs are BLOCKED_NOT_RUN, not skips. Any blocked/failed group makes exit 1.
+"""
+import argparse
+import datetime
+import fnmatch
+import hashlib
+import importlib.util
+import json
+import os
+from pathlib import Path
+import re
+import shutil
+import signal
+import socket
+import subprocess
+import sys
+import time
+from urllib.parse import unquote, urljoin, urlparse
+
+REPOSITORY = Path(__file__).resolve().parents[2]
+IGNORED = {'.git', 'node_modules', '.dart_tool', '__pycache__', '.cache', '.vendor', 'build'}
+FLUTTER_ENV = {'PUB_CACHE', 'FLUTTER_ROOT', 'FLUTTER_SUPPRESS_ANALYTICS', 'CI',
+               'DSH_LINUX_FLUTTER_TESTS', 'XDG_CONFIG_HOME', 'DSH_TEST_FONT_DIR'}
+# These existing controllers hide node:test output in their declared files.
+# Inspect only this explicit contract, never unrelated logs under the output.
+WRAPPED_TEST_LOGS = {
+    'git-*': ['{name}/stdout.log'], 'owned-*': ['{name}/stdout.log'],
+    'native-files': ['native-files/logic.log'], 'pdf': ['pdf/logic.log'],
+    'hms-share': ['hms-share/logic.log'], 'native-media': ['native-media/logic.log'],
+    'voice': ['voice/test.log'], 'performance-dart': ['performance-dart/logic.log'],
+    'diagnostics-dart': ['diagnostics-dart/node-test.log'],
+    'composition-process-matrix': ['composition-process-matrix/jit.log', 'composition-process-matrix/strict.log'],
+}
+
+
+def utc():
+    return datetime.datetime.now(datetime.timezone.utc).isoformat()
+
+
+def sha(path):
+    with Path(path).open('rb') as stream:
+        return hashlib.file_digest(stream, 'sha256').hexdigest()
+
+
+def save(path, value):
+    Path(path).write_text(json.dumps(value, ensure_ascii=False, indent=2) + '\n')
+
+
+def source_files(root, ignored=IGNORED):
+    result = {}
+    for current, dirs, files in os.walk(root, followlinks=False):
+        dirs[:] = sorted(d for d in dirs if d not in ignored)
+        for name in sorted(files + [d for d in dirs if (Path(current) / d).is_symlink()]):
+            p = Path(current) / name
+            rel = p.relative_to(root).as_posix()
+            if p.is_symlink():
+                result[rel] = {'type': 'symlink', 'target': os.readlink(p)}
+            else:
+                result[rel] = {'type': 'file', 'bytes': p.stat().st_size,
+                               'mode': p.stat().st_mode & 0o777, 'sha256': sha(p)}
+    return result
+
+
+def flutter_inputs(root):
+    selected = {path: value for path, value in source_files(root).items() if path == 'app/pubspec.yaml'}
+    for directory in ('app/lib', 'app/test', 'packages'):
+        path = root / directory
+        if path.is_symlink():
+            selected[directory] = {'type': 'symlink', 'target': os.readlink(path)}
+        else:
+            # A source subdirectory named build/node_modules is still source.
+            selected.update({directory + '/' + name: value for name, value in source_files(path, ignored=()).items()})
+    links = [path for path, value in selected.items() if value['type'] == 'symlink']
+    if links:
+        raise ValueError('Flutter protected input symlink is not frozen: ' + ', '.join(links))
+    return selected
+
+
+def verify_flutter_inputs(root, expected):
+    actual = flutter_inputs(root)
+    changed = [path for path, value in expected.items() if actual.get(path) != value]
+    added = {path: value for path, value in actual.items() if path not in expected}
+    new_code = [path for path in added if path.endswith(('.dart', '.arb')) or Path(path).name == 'pubspec.yaml']
+    if changed or new_code:
+        raise ValueError('Flutter candidate inputs changed: ' + ', '.join(changed + new_code))
+    return {'originalInputFilesUnchanged': len(expected), 'generatedFiles': added}
+
+
+def verify_flutter_packages(root):
+    root = root.resolve()
+    config = root / 'app/.dart_tool/package_config.json'
+    packages = json.loads(config.read_text())['packages']
+    expected = {'dsh_app': root / 'app', 'dsh_client': root / 'packages/dsh_client',
+                'dsh_remote': root / 'packages/dsh_remote'}
+    selected = {}
+    for name, wanted in expected.items():
+        matches = [entry for entry in packages if entry['name'] == name]
+        if len(matches) != 1:
+            raise ValueError('Expected exactly one local package resolver: ' + name)
+        uri = urlparse(urljoin(config.as_uri(), matches[0]['rootUri']))
+        if uri.scheme != 'file' or uri.netloc not in ('', 'localhost') or uri.query or uri.fragment:
+            raise ValueError('Local candidate package has a nonlocal URI: ' + name)
+        actual = Path(unquote(uri.path)).resolve()
+        if not wanted.is_dir() or wanted.resolve() != wanted or actual != wanted:
+            raise ValueError('Candidate package resolver escaped Flutter copy: ' + name + ': ' + str(actual))
+        library = wanted / 'lib'
+        if not library.is_dir() or library.resolve() != library:
+            raise ValueError('Candidate private lib is missing or redirected: ' + name)
+        package_uri = urlparse(urljoin(actual.as_uri() + '/', matches[0].get('packageUri', '')))
+        if (package_uri.scheme != 'file' or package_uri.netloc not in ('', 'localhost')
+                or package_uri.query or package_uri.fragment
+                or Path(unquote(package_uri.path)).resolve() != library):
+            raise ValueError('Candidate packageUri does not select private lib: ' + name)
+        selected[name] = {'root': str(actual), 'lib': str(library)}
+    return selected
+
+
+class Blocked(Exception):
+    pass
+
+
+def verify_proc_mapping():
+    try:
+        process_pid = os.getpid()
+        procfs_pid = int(os.readlink('/proc/self'))
+        if procfs_pid <= 0:
+            raise ValueError('invalid procfs PID')
+
+        def identity(directory):
+            fields = dict(line.split(':', 1) for line in (directory / 'status').read_text().splitlines() if ':' in line)
+            nspids = [int(value) for value in fields['NSpid'].split()]
+            stat = (directory / 'stat').read_text()
+            started = int(stat.rsplit(')', 1)[1].split()[19])
+            namespace = os.readlink(directory / 'ns/pid')
+            if (int(fields['Pid']) != procfs_pid or int(stat.split(' ', 1)[0]) != procfs_pid
+                    or not nspids or any(pid <= 0 for pid in nspids) or nspids[-1] != process_pid
+                    or started <= 0 or not re.fullmatch(r'pid:\[\d+\]', namespace)):
+                raise ValueError('procfs identity does not match this process')
+            return {'namespacePids': nspids, 'pidNamespace': namespace, 'starttime': started}
+
+        observed = identity(Path('/proc/self'))
+        if identity(Path('/proc') / str(procfs_pid)) != observed or identity(Path('/proc/self')) != observed:
+            raise ValueError('procfs identity changed while verifying')
+        return {'processPid': process_pid, 'procSelfPid': procfs_pid, **observed}
+    except (OSError, ValueError, KeyError, IndexError) as error:
+        raise Blocked('cannot verify parent procfs identity: ' + str(error)) from error
+
+
+def verify_dart_consumers(output):
+    diagnostics = output / 'diagnostics-dart'
+    commands = json.loads((diagnostics / 'commands.json').read_text())
+    driver = str(diagnostics / 'consumer.dart')
+    consumers = [row for row in commands if driver in row['argv']]
+    if len(consumers) != 1 or consumers[0]['exit'] != 0:
+        raise ValueError('diagnostics must execute its actual Dart consumer exactly once')
+    performance = json.loads((output / 'performance-dart/report.json').read_text())
+    if performance.get('consumerExitCode') != 0:
+        raise ValueError('performance Dart consumer did not execute successfully')
+    files = [diagnostics / name for name in ('consumer.dart', 'consumer-input.json', 'dart-inputs.json', 'dart-consumer.log')]
+    files += [output / 'performance-dart/consumer-probe.dart']
+    return {str(path.relative_to(output)): sha(path) for path in files}
+
+
+class Gates:
+    def __init__(self, args):
+        self.args = args
+        self.out = args.out.resolve()
+        self.out.mkdir(parents=True, exist_ok=False)
+        self.config = json.loads(args.config.read_text())
+        if self.config.get('schema') != 1:
+            raise ValueError('configuration schema must be 1')
+        self.config_root = args.config.resolve().parent
+        self.paths = {}
+        for name, value in self.config.get('paths', {}).items():
+            if not isinstance(value, str):
+                raise ValueError('path value must be a string: ' + name)
+            p = Path(value).expanduser()
+            self.paths[name] = p.resolve() if p.is_absolute() else (self.config_root / p).resolve()
+        supplied_env = self.config.get('flutterEnvironment', {})
+        if set(supplied_env) - FLUTTER_ENV:
+            raise ValueError('unsupported Flutter environment key')
+        self.flutter_env = dict(supplied_env, FLUTTER_SUPPRESS_ANALYTICS='true', CI='true')
+        self.source = self.out / 'source'
+        self.original = source_files(REPOSITORY)
+        save(self.out / 'source-before.json', self.original)
+        shutil.copytree(REPOSITORY, self.source, symlinks=True,
+                        ignore=shutil.ignore_patterns(*IGNORED))
+        if source_files(self.source) != self.original:
+            raise ValueError('private source copy differs')
+        # Flutter generates Android registrants and local.properties even on
+        # Linux. Keep them out of the native/Android identity comparison tree.
+        self.flutter_source = self.out / 'flutter-source'
+        shutil.copytree(REPOSITORY, self.flutter_source, symlinks=True,
+                        ignore=shutil.ignore_patterns(*IGNORED))
+        if source_files(self.flutter_source) != self.original:
+            raise ValueError('Flutter source copy differs from frozen candidate')
+        self.flutter_original_inputs = flutter_inputs(REPOSITORY)
+        if flutter_inputs(self.flutter_source) != self.flutter_original_inputs:
+            raise ValueError('Flutter protected input copy differs from frozen candidate')
+        save(self.out / 'flutter-inputs-before.json', self.flutter_original_inputs)
+        self.rows = []
+        self.results = {}
+        self.covered = set()
+        self.coverage = json.loads((REPOSITORY / 'tooling/ohos/gate-coverage.json').read_text())
+        self.plan = []
+        self.started = utc()
+        # Test fixtures may select source files through these variables. Never
+        # inherit a path to an older good tree; this invocation supplies inputs.
+        self.base_env = {k: v for k, v in os.environ.items()
+                         if k not in {'NODE_OPTIONS', 'NODE_PATH', 'LD_PRELOAD'}
+                         and not k.startswith(('OHOS_', 'DSH_', 'M3_', 'M4_', 'M6_', 'P1_', 'DIAGNOSTICS_'))}
+        self.base_env.update(PYTHONDONTWRITEBYTECODE='1', LANG='C.UTF-8', LC_ALL='C.UTF-8', TZ='UTC')
+
+    def path(self, name, suffix=None):
+        p = self.paths.get(name)
+        if p is None:
+            raise Blocked('missing config paths.' + name)
+        if suffix:
+            p = p / suffix
+        if not p.exists():
+            raise Blocked('missing input ' + name + ': ' + str(p))
+        return p
+
+    def run(self, name, argv, *, needs=(), env=None, cwd=None, timeout=180,
+            tests=(), scope='Existing repository test', required=()):
+        tests = list(tests)
+        for pattern, entries in self.coverage['wrappers'].items():
+            if fnmatch.fnmatchcase(name, pattern):
+                tests += entries
+        tests = sorted(set(tests))
+        self.plan.append({'name': name, 'needs': list(needs), 'tests': list(tests), 'scope': scope})
+        self.covered.update(tests)
+        directory = self.out / 'groups' / name
+        directory.mkdir(parents=True)
+        row = {'name': name, 'scope': scope, 'status': 'RUNNING', 'startedUTC': utc(),
+               'dependencies': list(needs), 'tests': list(tests)}
+        try:
+            failed = [n for n in needs if self.results.get(n) != 'PASS']
+            if failed:
+                raise Blocked('prerequisite groups did not pass: ' + ', '.join(failed))
+            for key in required:
+                self.path(key)
+            command = [str(x) for x in (argv() if callable(argv) else argv)]
+            overrides = env() if callable(env) else (env or {})
+            work = cwd() if callable(cwd) else (cwd or self.source)
+            home = directory / 'home'; home.mkdir()
+            temporary = directory / 'tmp'; temporary.mkdir()
+            if name == 'publication-native-boundaries': temporary.chmod(0o1777)
+            environment = dict(self.base_env, HOME=str(home), TMPDIR=str(temporary))
+            environment.update({k: str(v) for k, v in overrides.items()})
+            if 'DSH_HOME' in overrides: Path(overrides['DSH_HOME']).mkdir(parents=True, exist_ok=True)
+            environment['PATH'] = str(self.path('node_root', 'bin')) + os.pathsep + environment.get('PATH', '')
+            environment['CXX'] = str(self.path('cxx'))
+            row.update(argv=command, cwd=str(work), environmentOverrides={**overrides, 'HOME': str(home),
+                       'TMPDIR': str(temporary), 'CXX': environment['CXX']}, timeoutSeconds=timeout)
+            save(directory / 'command-start.json', row)
+            print('RUN ' + name, flush=True)
+            with (directory / 'stdout.log').open('wb') as stdout, (directory / 'stderr.log').open('wb') as stderr:
+                child = subprocess.Popen(command, cwd=work, env=environment, stdin=subprocess.DEVNULL,
+                                         stdout=stdout, stderr=stderr, start_new_session=True)
+                row['pid'] = child.pid
+                try:
+                    code = child.wait(timeout=timeout)
+                    row['timedOut'] = False
+                except subprocess.TimeoutExpired:
+                    row['timedOut'] = True
+                    os.killpg(child.pid, signal.SIGTERM)
+                    try:
+                        child.wait(timeout=5)
+                    except subprocess.TimeoutExpired:
+                        os.killpg(child.pid, signal.SIGKILL)
+                        child.wait()
+                    code = 124
+                row.update(exitCode=code, status='PASS' if code == 0 else 'FAIL')
+            for stream in ('stdout', 'stderr'):
+                p = directory / (stream + '.log')
+                row[stream] = {'bytes': p.stat().st_size, 'sha256': sha(p)}
+            text = (directory / 'stdout.log').read_text(errors='replace')
+            row['reportedTestTotals'] = re.findall(r'^(?:#|ℹ) (?:tests|pass|fail|cancelled|skipped|todo) \d+$', text, re.M)
+            incomplete = re.findall(r'^(?:#|ℹ) (?:skipped|todo) ([1-9]\d*)$|OK \(skipped=([1-9]\d*)\)', text + (directory / 'stderr.log').read_text(errors='replace'), re.M)
+            if code == 0 and name == 'dart-bridge-inventory':
+                inventory = json.loads((self.out / 'dart-bridge-inventory.json').read_text())
+                row['inventoryStatus'] = {key: inventory[key] for key in ('gateStatus', 'fullInventoryStatus')}
+                if inventory['gateStatus'] != 'PASS_SCOPED':
+                    raise ValueError('Required bridge scope did not pass')
+                if inventory['fullInventoryStatus'] != 'LITERAL_DISPATCHES_MATCHED':
+                    incomplete.append('Full bridge inventory remains incomplete')
+            if code == 0 and name == 'flutter-consumers':
+                events = [json.loads(line) for line in text.splitlines() if line.startswith('{')]
+                done = [event for event in events if event.get('type') == 'done']
+                tests_done = [event for event in events if event.get('type') == 'testDone' and not event.get('hidden', False)]
+                if len(done) != 1 or done[0].get('success') is not True or not tests_done:
+                    raise ValueError('Flutter JSON reporter lacks successful completion and actual tests')
+                skipped = sum(event.get('skipped') is True for event in tests_done)
+                failed = sum(event.get('result') != 'success' for event in tests_done)
+                row['flutterTotals'] = {'tests': len(tests_done), 'skipped': skipped, 'failed': failed}
+                if failed: raise ValueError('Flutter exited zero despite failed child tests')
+                if skipped: incomplete.append('Flutter JSON testDone.skipped')
+            if code == 0 and '--test' in command and not re.search(r'^(?:#|ℹ) tests [1-9]\d*$', text, re.M):
+                raise ValueError('Direct node:test invocation did not report executed assertions')
+            row['wrappedTestLogs'] = []
+            if code == 0:
+                for pattern, paths in WRAPPED_TEST_LOGS.items():
+                    if not fnmatch.fnmatchcase(name, pattern): continue
+                    for relative in paths:
+                        path = self.out / relative.format(name=name)
+                        content = path.read_text(errors='replace')
+                        totals = re.findall(r'^(?:#|ℹ) (tests|pass|fail|cancelled|skipped|todo) (\d+)$', content, re.M)
+                        if not any(key == 'tests' and int(value) > 0 for key, value in totals):
+                            raise ValueError('Missing actual test totals in wrapper log: ' + str(path))
+                        row['wrappedTestLogs'].append({'path': str(path.relative_to(self.out)), 'sha256': sha(path), 'totals': totals})
+                        if any(key in ('skipped', 'todo') and int(value) for key, value in totals):
+                            incomplete.append(str(path))
+                        if any(key in ('fail', 'cancelled') and int(value) for key, value in totals):
+                            raise ValueError('Wrapper exited zero despite failed/cancelled child tests: ' + str(path))
+            if code == 0 and incomplete:
+                row.update(status='INCOMPLETE', reason='Child reported skipped/todo assertions or incomplete inventory; see raw output')
+        except Blocked as error:
+            row.update(status='BLOCKED_NOT_RUN', reason=str(error), exitCode=None)
+        except Exception as error:
+            row.update(status='FAIL', error=repr(error), exitCode=None)
+        row['endedUTC'] = utc()
+        save(directory / 'result.json', row)
+        self.rows.append(row); self.results[name] = row['status']
+        save(self.out / 'progress.json', self.rows)
+        print(row['status'] + ' ' + name, flush=True)
+        return row['status'] == 'PASS'
+
+    def internal(self, name, action, *, needs=(), scope='Input preparation'):
+        self.plan.append({'name': name, 'needs': list(needs), 'tests': [], 'scope': scope})
+        directory = self.out / 'groups' / name; directory.mkdir(parents=True)
+        row = {'name': name, 'scope': scope, 'startedUTC': utc(), 'dependencies': list(needs)}
+        try:
+            failed = [n for n in needs if self.results.get(n) != 'PASS']
+            if failed:
+                raise Blocked('prerequisite groups did not pass: ' + ', '.join(failed))
+            row['details'] = action(directory)
+            row['status'] = 'PASS'
+        except Blocked as error:
+            row.update(status='BLOCKED_NOT_RUN', reason=str(error))
+        except Exception as error:
+            row.update(status='FAIL', error=repr(error))
+        row['endedUTC'] = utc(); save(directory / 'result.json', row)
+        self.rows.append(row); self.results[name] = row['status']; save(self.out / 'progress.json', self.rows)
+        print(row['status'] + ' ' + name, flush=True)
+
+    def py(self, script, *args):
+        return [sys.executable, '-I', '-B', self.source / script, *args]
+
+    def node(self, *args):
+        return [self.path('node_root', 'bin/node'), *args]
+
+    def flutter(self, *args):
+        return [self.path('flutter'), '--suppress-analytics', '--no-version-check', *args]
+
+    def common(self):
+        prepared = self.path('prepared')
+        return {'OHOS_TYPESCRIPT_PREFIX': str(self.path('typescript_prefix')),
+                'OHOS_TEST_PROCESS_PREFIX': str(self.out / 'targets/ohos-prefix'),
+                'OHOS_TEST_DSH_PREFIX': str(self.out / 'targets/ohos-prefix'),
+                'OHOS_TEST_BASE_PREFIX': str(self.path('android_pristine')),
+                'DSH_TEST_PREFIX': str(self.out / 'targets/ohos-prefix'),
+                'DSH_LIFECYCLE_TEST_PREFIX': str(self.out / 'targets/ohos-prefix'),
+                'OHOS_SIM_PRELOAD': str(self.source / 'runtime/ohos/sim/preload.mjs'),
+                'OHOS_ESBUILD_PREFIX': str(self.path('esbuild_prefix')),
+                'NODE': str(self.path('node_root', 'bin/node'))}
+
+    def node_tests(self, label, tests, *, mode='plain', extra=None, imports=(), needs=(), timeout=180):
+        def argv():
+            flags = []
+            if mode == 'strict':
+                flags = ['--jitless', '--import', self.source / 'runtime/ohos/sim/preload.mjs']
+            elif mode == 'sim':
+                flags = ['--import', self.source / 'runtime/ohos/sim/preload.mjs']
+            elif mode == 'marker':
+                flags = ['--import', self.source / 'runtime/ohos/sim/marker.mjs']
+            elif mode == 'jitless':
+                flags = ['--jitless']
+            for entry in imports: flags += ['--import', self.source / entry]
+            return self.node(*flags, '--experimental-import-meta-resolve', '--test', '--test-isolation=none', '--test-reporter=tap',
+                             *[self.source / p for p in tests])
+        def env():
+            value = self.common()
+            if mode in ('strict', 'sim'):
+                value.update(DSH_GO_OHOS_SIM_PLATFORM='openharmony', DSH_GO_OHOS_SIM_ADDONS='[]')
+            value.update(extra() if callable(extra) else (extra or {}))
+            return value
+        self.run(label, argv, env=env, needs=needs, timeout=timeout, tests=tests)
+
+    def finish(self):
+        current = source_files(REPOSITORY)
+        private = source_files(self.source)
+        unchanged = current == self.original
+        # Tests may prepare documented generated inputs but must not edit source.
+        changed = [p for p in self.original if private.get(p) != self.original[p]]
+        failures = [r['name'] for r in self.rows if r['status'] != 'PASS']
+        inventory = {p.relative_to(REPOSITORY).as_posix()
+                     for folder in ('runtime/tests/ohos', 'tooling/ohos/tests')
+                     for p in (REPOSITORY / folder).rglob('*')
+                     if p.is_file() and re.search(r'\.test\.(mjs|py)$', p.name)}
+        excluded = self.coverage['historicalOrResearchOnly']
+        unmapped = sorted(inventory - self.covered - set(excluded))
+        coverage = {'inventory': sorted(inventory), 'invokedTests': sorted(self.covered),
+                    'historicalOrResearchOnly': excluded, 'unmapped': unmapped}
+        save(self.out / 'coverage.json', coverage)
+        report = {'schema': 1, 'startedUTC': self.started, 'endedUTC': utc(),
+                  'status': 'PASS_SCOPED_LINUX_MATRIX' if not failures and unchanged and not changed and not unmapped else 'FAIL',
+                  'scope': 'Linux OHOS regression matrix, real Dart consumers, ordinary ArkTS with nonofficial HMS stubs; no device, official HMS or Android APK claim.',
+                  'hms': 'UNCOMPILED_HMS', 'device': 'NOT_RUN', 'rows': self.rows,
+                  'counts': {v: sum(r['status'] == v for r in self.rows) for v in ('PASS', 'FAIL', 'INCOMPLETE', 'BLOCKED_NOT_RUN')},
+                  'sourceUnchanged': unchanged, 'privateTrackedSourceChanges': changed,
+                  'sourceIndexSha256': sha(self.out / 'source-before.json'),
+                  'failedOrBlockedGroups': failures, 'unmappedTests': unmapped}
+        save(self.out / 'plan.json', self.plan)
+        save(self.out / 'source-after.json', current)
+        save(self.out / 'summary.json', report)
+        lines = ['# OHOS gate results', '', '| Group | Status | Exit |', '|---|---|---|']
+        lines += ['| ' + r['name'] + ' | ' + r['status'] + ' | ' + str(r.get('exitCode', '—')) + ' |' for r in self.rows]
+        lines += ['', report['scope'], '', 'HMS: UNCOMPILED_HMS; device: NOT_RUN.', '',
+                  'Original repository unchanged: ' + str(unchanged), '']
+        (self.out / 'SUMMARY.md').write_text('\n'.join(lines))
+        print(json.dumps({'status': report['status'], 'counts': report['counts'], 'summary': str(self.out / 'summary.json')}))
+        return 0 if report['status'] == 'PASS_SCOPED_LINUX_MATRIX' else 1
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument('--config', type=Path, required=True, help='schema1 tool/input paths, relative to this JSON')
+    ap.add_argument('--out', type=Path, required=True, help='new output directory outside the repository')
+    a = ap.parse_args()
+    if a.out.resolve().is_relative_to(REPOSITORY):
+        ap.error('--out must be outside the source tree')
+    g = Gates(a); s = g.source; o = g.out
+    rt = 'runtime/tests/ohos/'; tools = 'tooling/ohos/tests/'
+    def p(name): return g.path(name)
+    def node(): return p('node_root') / 'bin/node'
+    def headers(): return p('node_root') / 'include/node'
+    def prefix(): return o / 'targets/ohos-prefix'
+    def native(): return o / 'native'
+    def payload(): return o / 'composed/expanded/dsh-runtime/files'
+    def free_port():
+        with socket.socket() as sock:
+            sock.bind(('127.0.0.1', 0)); return str(sock.getsockname()[1])
+    def owned_http_host(value):
+        if not value or value in ('0.0.0.0', '::'):
+            raise Blocked('ownedHttpHost must identify an explicitly owned non-loopback interface')
+        return value
+    def linked_env(): return {'LD_PRELOAD': str(native() / 'libpublication-test-linked.so')}
+    def toolchain(_):
+        result = {}
+        expected = json.loads((s / 'runtime/ohos/node-version.json').read_text())
+        version = subprocess.check_output([str(node()), '--version'], text=True).strip()
+        wanted = expected['version'] if isinstance(expected, dict) else expected
+        if not wanted.startswith('v'): wanted = 'v' + wanted
+        if version != wanted: raise ValueError('Node version mismatch: ' + version)
+        for name, command in [('node', [node(), '--version']), ('cxx', [p('cxx'), '--version'])]:
+            env = dict(g.base_env, **g.flutter_env)
+            proc = subprocess.run([str(x) for x in command], capture_output=True, text=True, env=env, timeout=60)
+            result[name] = {'argv': list(map(str, command)), 'exitCode': proc.returncode,
+                            'stdout': proc.stdout, 'stderr': proc.stderr, 'sha256': sha(command[0])}
+            proc.check_returncode()
+        for name in ('git', 'openssl', 'pdfinfo', 'pdftoppm'):
+            if not shutil.which(name): raise Blocked('missing executable ' + name)
+        return result
+    g.internal('tools', toolchain)
+    def native_tools(_):
+        header = g.path('node_root', 'include/node/node_api.h')
+        return {'nodeApiHeaderSha256': sha(header)}
+    g.internal('native-tools', native_tools, needs=('tools',))
+    g.internal('proc-mapping-tools', lambda _: verify_proc_mapping(), needs=('tools',))
+    def permission_tools(_):
+        code = 'import os; os.setgroups([]); os.setgid(65534); os.setuid(65534); print(os.getuid())'
+        if os.geteuid() != 0: return {'uid': os.geteuid(), 'dropRequired': False}
+        probe = subprocess.run([sys.executable, '-c', code], capture_output=True, text=True)
+        if probe.returncode:
+            raise Blocked('permission negative controls require uid drop: ' + probe.stderr.strip())
+        return {'uid': int(probe.stdout), 'dropRequired': True}
+    g.internal('permission-tools', permission_tools, needs=('tools',))
+    def network_interface_tools(_):
+        probe = subprocess.run([str(node()), '-e',
+            "const a=Object.values(require('node:os').networkInterfaces()).flat().filter(v=>v.family==='IPv4'&&!v.internal); if(!a.length) process.exit(2); console.log(a.length)"],
+            capture_output=True, text=True)
+        if probe.returncode:
+            raise Blocked('real non-loopback interface enumeration unavailable: ' + probe.stderr.strip())
+        return {'nonLoopbackIpv4Count': int(probe.stdout)}
+    g.internal('network-interface-tools', network_interface_tools, needs=('tools',))
+    def language_tool(name):
+        tool = p(name)
+        command = g.flutter('--version') if name == 'flutter' else [tool, '--version']
+        result = subprocess.run(list(map(str, command)), capture_output=True, text=True,
+                                env={**g.base_env, **g.flutter_env}, timeout=60)
+        result.check_returncode()
+        return {'argv': list(map(str, command)), 'sha256': sha(tool), 'exitCode': result.returncode,
+                'stdout': result.stdout, 'stderr': result.stderr}
+    g.internal('dart-tools', lambda _: language_tool('dart'))
+    g.internal('flutter-tools', lambda _: language_tool('flutter'))
+    def inputs(_):
+        prepared = p('prepared')
+        spec = importlib.util.spec_from_file_location('gate_prepared_inputs', s / 'runtime/ohos/package/prepare-inputs.py')
+        module = importlib.util.module_from_spec(spec); spec.loader.exec_module(module)
+        config = json.loads((s / 'runtime/ohos/package/composition.json').read_text())
+        receipt = module.verify_inputs(prepared / 'prepared-inputs.json', config, prepared / 'dsh', prepared / 'process')
+        original = prepared
+        prepared = o / 'installed-inputs'
+        prepared.mkdir()
+        for part in ('dsh', 'process'):
+            shutil.copytree(original / part, prepared / part, symlinks=True, copy_function=shutil.copy2)
+        for name in ('prepared-inputs.json', 'target-report.json', 'patch-results.json'):
+            shutil.copy2(original / name, prepared / name)
+        assert module.verify_inputs(prepared / 'prepared-inputs.json', config, prepared / 'dsh', prepared / 'process') == receipt
+        g.paths['prepared'] = prepared
+        for dest, target in [(s / 'node_modules', prepared / 'dsh/node_modules'),
+                             (s / 'runtime/ohos/process/node_modules', prepared / 'process/node_modules')]:
+            if dest.exists() or dest.is_symlink(): raise ValueError('unexpected input link ' + str(dest))
+            dest.symlink_to(target, target_is_directory=True)
+        return {'receiptSha256': receipt, 'targetReportSha256': sha(prepared / 'target-report.json'),
+                'dshLockSha256': sha(prepared / 'dsh/package-lock.json'),
+                'processLockSha256': sha(prepared / 'process/package-lock.json')}
+    g.internal('prepared-inputs', inputs, needs=('tools',))
+    g.run('android-targets', lambda: g.py(rt + 'current-android-targets.py', '--baseline', p('android_baseline'), '--candidate', s, '--pristine-prefix', p('android_pristine'), '--out', o / 'targets'), needs=('tools',), timeout=600)
+    def native_helpers(_):
+        helper = prefix() / 'node_modules/@dsh-go/ohos-native'
+        helper.mkdir(parents=True, exist_ok=True)
+        (s / 'node_modules').unlink()
+        (s / 'node_modules').symlink_to(prefix() / 'node_modules', target_is_directory=True)
+        for filename in ('index.cjs', 'package.json'):
+            shutil.copy2(s / 'runtime/ohos/native/hap-loader' / filename, helper / filename)
+        shutil.copy2(s / 'LICENSE', helper / 'LICENSE')
+        return {'scope': 'Derived full-optional Linux test prefix after Android identity comparison',
+                'files': {name: sha(helper / name) for name in ('index.cjs', 'package.json', 'LICENSE')}}
+    g.internal('ohos-test-helpers', native_helpers, needs=('android-targets',))
+    g.run('android-version-tree', lambda: g.py(rt + 'composition-android.py', '--baseline', p('android_baseline'), '--unpatched-prefix', p('android_pristine'), '--out', o / 'android-version-tree'), needs=('tools',), timeout=600)
+    g.run('gate-runner-contract', lambda: g.py(tools + 'run-gates.test.py'), needs=('tools',), tests=[tools + 'run-gates.test.py'])
+    def native_static(_):
+        # The snapshot omits binary assets used by two existing real HTTP tests.
+        # Generate explicit private fixtures, without changing their assertions.
+        import struct, zlib
+        def chunk(kind, data):
+            return struct.pack('>I', len(data)) + kind + data + struct.pack('>I', zlib.crc32(kind + data))
+        data = b'\x89PNG\r\n\x1a\n' + chunk(b'IHDR', struct.pack('>IIBBBBB', 1, 1, 8, 2, 0, 0, 0))
+        data += chunk(b'IDAT', zlib.compress(b'\x00' * 4, 9)) + chunk(b'IEND', b'')
+        assert hashlib.sha256(data).hexdigest() == '1280e8de649805526731cc11672b0479f5ca25d9bd7ebf7a3375f8a9c966205e'
+        result = {}
+        for relative in ('runtime/tests/fixtures/native-static/assets/img/dot.png',
+                         'runtime/tests/ohos/host-bridge-fixture/proof.png'):
+            path = s / relative
+            generated = not path.exists()
+            if generated:
+                path.parent.mkdir(parents=True, exist_ok=True); path.write_bytes(data)
+            result[relative] = {'generatedFixture': generated, 'bytes': path.stat().st_size, 'sha256': sha(path)}
+        return result
+    g.internal('native-static-resources', native_static, needs=('tools',))
+    g.run('native-publication-build', lambda: ['bash', s / (rt + 'build-publication-native.sh'), p('node_root'), native()], needs=('native-tools',))
+    g.run('native-zlib-build', lambda: [p('cxx'), '-std=c++17', '-shared', '-fPIC', '-I', headers(), s / (tools + 'runtime-zip-zlib.cc'), '-lz', '-o', o / 'zlib.node'], needs=('native-tools',))
+    g.run('native-opener-build', lambda: [p('cxx'), '-std=c++17', '-shared', '-fPIC', '-Wall', '-Wextra', '-Werror', '-I', headers(), s / (rt + 'user-file-access-addon.cc'), '-o', o / 'user-file-access.node'], needs=('native-tools',))
+    g.run('file-access-build', lambda: [p('cxx'), '-std=c++17', '-pthread', '-Wall', '-Wextra', '-Werror', '-I', s / 'app/ohos/entry/src/main/cpp', s / (rt + 'user-file-access.cc'), '-o', o / 'user-file-access-test'], needs=('tools',))
+    g.run('file-access', lambda: [o / 'user-file-access-test', o / 'user-file-access-fixture'], needs=('file-access-build',))
+    g.run('napi-isolation', lambda: g.py(rt + 'napi-isolation.py', '--node-headers', headers(), '--node-executable', node(), '--compiler', p('cxx'), '--out', o / 'napi-isolation'), needs=('native-tools',), timeout=240)
+    g.run('host-embedded', lambda: g.py(rt + 'host-embedded.py', '--node', node(), '--headers', headers(), '--out', o / 'host-embedded'), needs=('native-tools',), timeout=240)
+    g.run('host-startup', lambda: g.py(rt + 'host-startup.py', '--node-root', p('node_root'), '--dsh-prefix', prefix(), '--out', o / 'host-startup'), needs=('prepared-inputs',), timeout=240)
+    g.run('publication-system-build', lambda: g.py(rt + 'publication-system-build.py', '--node-root', p('node_root'), '--out', o / 'publication-system-build'), needs=('native-tools',), timeout=240)
+    g.run('patcher-contract', lambda: [sys.executable, '-I', '-B', '-m', 'unittest', 'discover', '-s', str(s / 'runtime/tests'), '-p', 'test_patch_dsh.py', '-v'], needs=('tools',), env=lambda: {'DSH_FS_LOCAL_ORIGINAL_JS': str(p('android_pristine') / 'node_modules/@deepseek-ai/dsh-fs-local/lib/index.js')}, tests=['runtime/tests/test_patch_dsh.py'])
+    g.node_tests('sim-contract', [rt + 'sim.test.mjs'], needs=('tools',))
+    g.node_tests('measurement-helpers', [rt + 'measurement-loader.test.mjs', rt + 'measurement-publication-fixture.test.mjs'], needs=('prepared-inputs',))
+    g.run('bash-producer-contract', lambda: g.py(rt + 'build-just-bash.test.py', '--package', p('prepared') / 'process/node_modules/just-bash', '--out', o / 'bash-producer-contract'), needs=('prepared-inputs',), timeout=180, tests=[rt + 'build-just-bash.test.py'])
+    g.run('licenses-registration', lambda: g.py(rt + 'licenses-registration.py', '--registration-root', s, '--process-prefix', p('prepared') / 'process', '--esbuild-prefix', p('esbuild_prefix')), needs=('prepared-inputs',), timeout=180)
+    g.node_tests('output-utf8', [rt + 'output-utf8.test.mjs'], needs=('prepared-inputs',), extra=lambda: {'DSH_OUTPUT_COLLECTOR_TEST_MODULE': str(prefix() / 'node_modules/@deepseek-ai/dsh-subprocess-local/lib/output.js'), 'DSH_OUTPUT_COLLECTOR_TEST_SHA256': sha(prefix() / 'node_modules/@deepseek-ai/dsh-subprocess-local/lib/output.js')})
+    g.run('build-bash', lambda: g.py('runtime/ohos/process/build-just-bash.py'), needs=('prepared-inputs',), env=g.common)
+    g.run('build-regex', lambda: g.node(s / 'runtime/ohos/process/build-rg-regex.mjs', p('esbuild_prefix')), needs=('prepared-inputs',), env=g.common)
+    def rg_inputs(_):
+        rg = p('android_pristine') / 'node_modules/@vscode/ripgrep-linux-x64/bin/rg'
+        expected = '193906679498de4d939345b937fa24e0e69a03c244bd70c859f5e41232713f21'
+        if not rg.is_file(): raise Blocked('missing pinned native ripgrep 15.0.0')
+        if sha(rg) != expected: raise ValueError('native ripgrep bytes differ from fixed oracle binary')
+        patch = 'zzzzzzzzzzz-ohos-search-ignore-description.diff'
+        relative = 'node_modules/@deepseek-ai/dsh-tool-fs-search/lib/index.js'
+        pins = json.loads((s / 'runtime/patches/pins.json').read_text())['patches'][patch]
+        target = o / 'grep-description-before' / relative
+        target.parent.mkdir(parents=True)
+        shutil.copy2(prefix() / relative, target)
+        # Later lifecycle edits touch this same file; unwind the selected chain
+        # to the description preimage, checking each real pin boundary.
+        all_pins = json.loads((s / 'runtime/patches/pins.json').read_text())
+        selected = all_pins['targetSets']['ohos']
+        commands = []
+        for name in reversed(selected[selected.index(patch):]):
+            pin = all_pins['patches'][name].get('0.2.1-rc.4', {}).get(relative)
+            if pin is None: continue
+            if sha(target) != pin['after']: raise ValueError('Unexpected reverse-patch input: ' + name)
+            for flag in ('--check', None):
+                argv = ['git', 'apply', '--reverse', '--include=' + relative,
+                        *([flag] if flag else []), str(s / 'runtime/patches' / name)]
+                proc = subprocess.run(argv, cwd=o / 'grep-description-before', capture_output=True, text=True)
+                commands.append({'argv': argv, 'exitCode': proc.returncode, 'stdout': proc.stdout, 'stderr': proc.stderr})
+                proc.check_returncode()
+            if sha(target) != pin['before']: raise ValueError('Unexpected reverse-patch output: ' + name)
+        pin = pins['0.2.1-rc.4'][relative]
+        (o / 'grep-description-before/node_modules/@deepseek-ai/dsh-tool-fs-search/package.json').write_text('{"type":"module"}\n')
+        # Both source images resolve the real provider's sibling dependencies.
+        (o / 'grep-description-before/node_modules/@deepseek-ai/dsh-tool-fs-search/node_modules').symlink_to(prefix() / 'node_modules', target_is_directory=True)
+        return {'nativeRgSha256': expected, 'descriptionPin': pin, 'commands': commands,
+                'gitfileOracleScope': 'NEW_NATIVE_ORACLE_NOT_HISTORICAL_RECOVERY'}
+    g.internal('rg-inputs', rg_inputs, needs=('prepared-inputs',))
+    def rg(): return p('android_pristine') / 'node_modules/@vscode/ripgrep-linux-x64/bin/rg'
+    for mode in ('jit', 'strict', 'android-old-env', 'linux-old-env', 'openharmony-no-marker'):
+        g.node_tests('grep-description-' + mode, [rt + 'process-rg-description.test.mjs'],
+                     mode='marker' if mode == 'jit' else ('strict' if mode == 'strict' else 'plain'),
+                     needs=('rg-inputs',), extra=lambda m=mode: {
+                         'M6_DESCRIPTION_MODE': m, 'M6_PROVIDER_PREFIX': str(prefix()),
+                         'M6_DESCRIPTION_BEFORE': str(o / 'grep-description-before/node_modules/@deepseek-ai/dsh-tool-fs-search/lib/index.js'),
+                         'M6_DESCRIPTION_AFTER': str(prefix() / 'node_modules/@deepseek-ai/dsh-tool-fs-search/lib/index.js')})
+    for mode in ('jit', 'strict'):
+        g.run('rg-selection-' + mode, lambda m=mode: g.py(rt + 'process-rg-selection-oracle.py',
+              '--runtime', s / 'runtime/ohos/process', '--node', node(), '--rg', rg(),
+              '--preload', s / 'runtime/ohos/sim/preload.mjs', '--marker', s / 'runtime/ohos/sim/marker.mjs',
+              '--bash-module', s / 'runtime/ohos/process/build/just-bash/index.js', '--out', o / ('rg-selection-' + m + '.json'), '--mode', m),
+              needs=('rg-inputs', 'build-bash', 'build-regex', 'permission-tools'), timeout=300,
+              tests=[rt + 'process-rg-selection-oracle.py'])
+    def gitfile_env(mode):
+        return {**g.common(), 'M6_GITFILE_MODE': mode, 'M6_GITFILE_ORACLE': str(o / 'gitfile-oracle/native.json'),
+                'M6_GITFILE_FIXTURE_PARENT': str(o / 'gitfile-oracle'), 'OHOS_NATIVE_RG': str(rg()),
+                'DSH_GO_OHOS_SIM_PLATFORM': 'openharmony', 'DSH_GO_OHOS_SIM_ADDONS': '[]'}
+    g.run('rg-gitfile-record', lambda: g.node(s / (rt + 'process-rg-gitfile-differential.mjs')),
+          env=lambda: gitfile_env('record'), needs=('rg-inputs',), timeout=120,
+          scope='New private native oracle and actual worktree/submodule; not recovered historical evidence')
+    for mode in ('jit', 'strict'):
+        g.run('rg-gitfile-' + mode, lambda m=mode: g.node(*(['--jitless', '--import', s / 'runtime/ohos/sim/preload.mjs'] if m == 'strict' else ['--import', s / 'runtime/ohos/sim/marker.mjs']), s / (rt + 'process-rg-gitfile-differential.mjs')),
+              env=lambda m=mode: {**gitfile_env('replay'), 'M6_GITFILE_REPORT': str(o / ('rg-gitfile-' + m + '.json'))},
+              needs=('rg-gitfile-record', 'build-bash', 'build-regex'), timeout=300,
+              tests=[rt + 'process-rg-gitfile-differential.mjs'])
+    g.run('rg-unicode-scalars', lambda: g.node(s / (rt + 'process-rg-unicode-differential.mjs')),
+          env=lambda: {'OHOS_NATIVE_RG': str(rg())}, needs=('rg-inputs', 'build-regex'), timeout=300,
+          tests=[rt + 'process-rg-unicode-differential.mjs'], scope='Existing host-only all-valid-scalar native comparison; not a latency measurement')
+    g.run('compose', lambda: g.py('runtime/ohos/package/compose-runtime.py', '--target', 'ohos', '--dsh-prefix', p('prepared') / 'dsh', '--process-prefix', p('prepared') / 'process', '--target-report', p('prepared') / 'target-report.json', '--prepared-inputs', p('prepared') / 'prepared-inputs.json', '--regex-artifact', s / 'runtime/ohos/process/build/re2js-unicode.mjs', '--esbuild-prefix', p('esbuild_prefix'), '--imports-report', o / 'composition-imports.json', '--out', o / 'composed', '--node', node(), '--runtime-core', s / 'app/ohos/entry/src/main/ets/runtime/RuntimeCore.ets', '--keep-expanded'), needs=('prepared-inputs', 'build-regex'), timeout=300)
+    for filename in ['composition-inputs.test.py', 'composition-archive.test.py']:
+        g.run(filename[:-3], lambda f=filename: g.py(rt + f), needs=('tools',), tests=[rt + filename])
+    g.run('composition-boundaries', lambda: g.py(rt + 'composition-gates.py', '--out', o / 'composition-boundaries'), needs=('tools',))
+    g.node_tests('composition-required', [rt + 'composition-required.test.mjs'], needs=('tools',), extra=lambda: {'OHOS_TYPESCRIPT_PREFIX': str(p('typescript_prefix'))})
+    g.node_tests('composition-import-audit', [rt + 'composition-import-audit.test.mjs'], needs=('tools',))
+    g.node_tests('composition-import-seams', [rt + 'composition-import-seams.test.mjs'], mode='strict', needs=('compose',), extra=lambda: {'OHOS_COMPOSITION_PREFIX': str(payload()), 'OHOS_PROCESS_SOURCE': str(payload() / 'runtime/ohos/process')})
+    g.run('composition-process-matrix', lambda: g.py(rt + 'run-composition-tests.py', '--payload', payload(), '--node', node(), '--out', o / 'composition-process-matrix'), needs=('compose',), timeout=300)
+    g.run('host-core', lambda: g.py(rt + 'host-core.py', '--out', o / 'host-core'), needs=('tools',))
+    g.run('host-profile', lambda: g.py(rt + 'host-lifecycle-profile.py', '--out', o / 'host-profile'), needs=('tools',))
+    g.run('host-adapter', lambda: g.py(rt + 'host-adapter.py', '--node-root', p('node_root'), '--ohos-headers', p('ohos_headers'), '--out', o / 'host-adapter'), needs=('native-tools',))
+    g.run('host-layout', lambda: g.py(rt + 'host-layout.py', '--node', node(), '--native-library-dir', p('native_library_dir'), '--publication-fixture', native() / 'libpublication-test-linked.so', '--assembled-payload', payload(), '--out', o / 'host-layout'), needs=('compose', 'native-publication-build', 'native-static-resources'), timeout=240)
+    for label, host in [('loopback', '127.0.0.1'), ('owned-http', g.config.get('ownedHttpHost', ''))]:
+        g.run('mcp-' + label, lambda h=host: g.py(rt + 'add13/host-gate.py', '--source', s, '--payload', payload(), '--manifest', o / 'composed/manifest.json', '--node', node(), '--native-library-dir', p('native_library_dir'), '--publication-fixture', native() / 'libpublication-test-linked.so', '--out', o / ('mcp-' + label), '--expect', 'complete', '--mcp-host', h if label == 'loopback' else owned_http_host(h)), needs=('compose', 'native-publication-build', 'native-static-resources'), timeout=240)
+    g.node_tests('spawn-boundary', [rt + 'child-process-boundary.test.mjs'], needs=('tools',))
+    for filename in ['test.sh', 'test-integration.sh', 'test-proxy-env.sh', 'test-dispatcher-errors.sh']:
+        g.run('net-' + filename[:-3], lambda f=filename: ['bash', s / 'runtime/ohos/net' / f], needs=('prepared-inputs', *(['network-interface-tools'] if filename == 'test-proxy-env.sh' else [])), env=lambda f=filename: {**g.common(), **({'NODE': str(p('fetch_node'))} if f == 'test.sh' else {})}, timeout=300)
+    g.node_tests('net-bootstrap', [rt + 'net-bootstrap.test.mjs'], needs=('prepared-inputs',))
+    for filename in ['test.sh', 'test-roots.sh']:
+        g.run('process-' + filename[:-3], lambda f=filename: ['bash', s / 'runtime/ohos/process' / f], needs=('build-bash', 'build-regex'), env=g.common, timeout=360)
+    for mode in ['marker', 'strict']:
+        g.node_tests('process-extra-' + mode, [rt + 'process-limit-effects.test.mjs', rt + 'process-rg-large.test.mjs'], mode=mode, needs=('build-bash', 'build-regex'))
+        for suite in ['client', 'oracle', 'semantics', 'worker']:
+            g.run('git-' + suite + '-' + mode, lambda su=suite, m=mode: g.py(rt + 'run-git-tests.py', '--node', node(), '--linked', native() / 'libpublication-test-linked.so', '--prefix', prefix(), '--suite', su, '--mode', 'jit' if m == 'marker' else m, '--output', o / ('git-' + su + '-' + m)), needs=('native-publication-build', 'build-bash'), timeout=300)
+        for suite in ['core', 'rpc', 'share']:
+            g.run('owned-' + suite + '-' + mode, lambda su=suite, m=mode: g.py(rt + 'run-owned-tests.py', '--node', node(), '--native', native() / 'publication.node', '--linked', native() / 'libpublication-test-linked.so', '--sim-preload', s / 'runtime/ohos/sim/preload.mjs', '--marker-preload', s / 'runtime/ohos/sim/marker.mjs', '--suite', su, '--mode', 'jit' if m == 'marker' else m, '--output', o / ('owned-' + su + '-' + m)), needs=('native-publication-build',), timeout=90)
+    for mode in ['marker', 'strict']:
+        g.run('rg-oracle-' + mode, lambda m=mode: g.node(*(['--jitless', '--import', s / 'runtime/ohos/sim/preload.mjs'] if m == 'strict' else ['--import', s / 'runtime/ohos/sim/marker.mjs']), s / (rt + 'process-rg-m4-differential.mjs')), needs=('build-bash', 'build-regex'), env=lambda: {**g.common(), 'M4_RG_MODE': 'replay', 'DSH_GO_OHOS_SIM_PLATFORM': 'openharmony', 'DSH_GO_OHOS_SIM_ADDONS': '[]'}, timeout=300, tests=[rt + 'process-rg-m4-differential.mjs'])
+        g.node_tests('publication-installed-' + mode, [rt + 'publication-integration.test.mjs', rt + 'publication-locks.test.mjs', rt + 'lock-node-contract.test.mjs'], mode='sim' if mode == 'marker' else mode, imports=['runtime/ohos/publication/preload.mjs'], needs=('native-publication-build', 'prepared-inputs'), extra=lambda: {**linked_env(), 'DSH_HOME': str(o / ('publication-installed-' + mode + '-home')), 'DSH_GO_OHOS_SIM_PLATFORM': 'openharmony'}, timeout=240)
+    def native_boundary_env():
+        return {'M3_PUBLICATION_ADDON': str(native() / 'publication.node'), 'M3_PUBLICATION_SHA256': sha(native() / 'publication.node'), 'M3_PUBLICATION_MODULE': str(s / 'runtime/ohos/publication/atomic.mjs'), 'M3_NATIVE_REPORT': str(o / 'native-boundaries.json'), 'M3_PUBLISHER_ERROR_REPORT': str(o / 'native-errno.json')}
+    g.node_tests('publication-native-boundaries', [rt + 'publication-native-boundaries.test.mjs', rt + 'publication-errno-boundaries.test.mjs'], needs=('native-publication-build', 'permission-tools'), extra=native_boundary_env, timeout=240)
+    g.run('hap-native-paths', lambda: g.py(rt + 'hap-native-paths.py', '--prefix', o / 'targets/ohos-prefix', '--node', node(), '--headers', headers(), '--loader-addon', p('native_library_dir') / 'libdsh_require_builtin.so', '--compiler', p('cc'), '--out', o / 'hap-native-paths'), needs=('android-targets',), timeout=180)
+    g.node_tests('native-loader', [rt + 'native-loader-probe.test.mjs'], needs=('android-targets',), extra=lambda: {'DSH_TEST_NODE': str(node()), 'DSH_TEST_O0_PRELOAD': str(s / 'runtime/ohos/sim/preload.mjs'), 'DSH_TEST_NATIVE_PREFIX': str(o / 'targets/ohos-prefix'), 'DSH_TEST_NATIVE_ADDON': str(p('native_library_dir') / 'libdsh_require_builtin.so'), 'DSH_GO_OHOS_NATIVE_LIBRARY_DIR': str(p('native_library_dir'))})
+    publication = ['publication-atomic', 'publication-atomic-fuse', 'publication-ledger', 'publication-ledger-lifecycle', 'publication-capabilities']
+    lifecycle = ['lifecycle-journal', 'lifecycle-budget', 'lifecycle-tool-budgets', 'lifecycle-transport', 'lifecycle-engine', 'runtime-capabilities']
+    for mode in ['marker', 'strict']:
+        g.node_tests('publication-' + mode, [rt + n + '.test.mjs' for n in publication], mode=mode, needs=('native-publication-build', 'prepared-inputs'), extra=linked_env, timeout=240)
+        g.node_tests('publication-lock-' + mode, [rt + 'publication-lock.test.mjs'],
+                     needs=('native-publication-build',), extra=lambda m=mode: {**linked_env(),
+                         'DSH_TEST_LOCK_STRICT': '1' if m == 'strict' else '0',
+                         'DSH_TEST_SIM_PRELOAD': str(s / 'runtime/ohos/sim/preload.mjs')}, timeout=240)
+        g.node_tests('publication-xattr-' + mode, [rt + 'publication-xattr.test.mjs'], mode=mode,
+                     needs=('native-publication-build',), extra=lambda m=mode: {**linked_env(),
+                         'DSH_TEST_XATTR_STRICT': '1' if m == 'strict' else '0'})
+        for name in lifecycle:
+            g.node_tests(name + '-' + mode, [rt + name + '.test.mjs'], mode=mode,
+                         needs=('native-publication-build', 'compose'), extra=lambda m=mode: {**linked_env(),
+                             'DSH_LIFECYCLE_TEST_PREFIX': str(payload() if m == 'strict' else prefix())}, timeout=240)
+    for label in ('crash', 'freeze'):
+        def lifecycle_command(label=label):
+            values = g.py(rt + 'lifecycle-' + label + '-controller.py', '--node', node(), '--prefix', prefix(), '--linked', native() / 'libpublication-test-linked.so', '--native-library-dir', p('native_library_dir'), '--out', o / ('lifecycle-' + label))
+            if label == 'crash': values += ['--baseline-source', p('android_pristine') / 'node_modules/@deepseek-ai/dsh-agent-loop/lib/index.js']
+            return values
+        g.run('lifecycle-' + label, lifecycle_command, needs=('prepared-inputs', 'native-publication-build', 'build-bash', 'build-regex') + (('proc-mapping-tools',) if label == 'freeze' else ()), env=g.common, timeout=360, tests=[rt + 'lifecycle-' + label + '-controller.py'])
+    g.node_tests('lifecycle-platform', [rt + 'lifecycle-platform.test.mjs'], needs=('prepared-inputs',), extra=lambda: {'DSH_LIFECYCLE_BASE_AGENT_LOOP': str(p('android_pristine') / 'node_modules/@deepseek-ai/dsh-agent-loop/lib/index.js')})
+    g.node_tests('lifecycle-host-http', [rt + 'lifecycle-host-http.test.mjs'], needs=('prepared-inputs', 'native-publication-build'), extra=lambda: {**linked_env(), 'DSH_LIFECYCLE_BEFORE_ROUTE': str(p('lifecycle_before_route'))})
+    g.node_tests('publication-platform', [rt + 'publication-platform.test.mjs', rt + 'fs-exclusive.test.mjs'], needs=('android-targets',), extra=lambda: {'DSH_TEST_PREFIX': str(o / 'targets/ohos-prefix')})
+    g.node_tests('publication-capabilities-route', [rt + 'publication-capabilities-route.test.mjs'], needs=('prepared-inputs',), extra=lambda: {'M6_TEST_PREFIX': str(prefix()), 'M6_TEST_CAPABILITIES_MODULE': str(s / 'runtime/ohos/capabilities/index.mjs')})
+    g.run('publication-startup', lambda: g.py(rt + 'publication-startup.py', '--node', node(), '--simulation', s / 'runtime/ohos/sim/preload.mjs', '--linked-lib', native() / 'libpublication-test-linked.so', '--out', o / 'publication-startup.json'), needs=('native-publication-build',), timeout=240)
+    for mode in ['jit', 'strict']:
+        g.run('publication-fuse-' + mode, lambda m=mode: g.py(rt + 'publication-fuse-integration.py', '--node', node(), '--simulation', s / 'runtime/ohos/sim/preload.mjs', '--marker', s / 'runtime/ohos/sim/marker.mjs', '--preload', s / 'runtime/ohos/preload.mjs', '--linked-lib', native() / 'libpublication-test-linked.so', '--prefix', prefix(), '--out', o / ('publication-fuse-' + m), '--mode', m), needs=('native-publication-build', 'prepared-inputs'), timeout=360)
+    g.run('publication-scanners', lambda: g.py(rt + 'publication-scanners.py', '--node', node(), '--prefix', prefix(), '--publication-preload', s / 'runtime/ohos/publication/preload.mjs', '--linked', native() / 'libpublication-test-linked.so', '--simulation', s / 'runtime/ohos/sim/preload.mjs', '--marker', s / 'runtime/ohos/sim/marker.mjs', '--out', o / 'publication-scanners'), needs=('native-publication-build', 'prepared-inputs'), timeout=240)
+    g.node_tests('deletion-core', ['runtime/tests/session-deletion-core.test.mjs', 'runtime/tests/session-deletion-route.test.mjs'], needs=('compose',), extra=lambda: {'DSH_SESSION_DELETION_CORE': str(o / 'composed/generated/ohos-deletion/core.mjs'), 'DSH_SESSION_DELETION_ROUTE': str(o / 'composed/generated/ohos-deletion/session-deletion.js')})
+    g.node_tests('deletion-publication', [rt + 'session-deletion-publication.test.mjs'], mode='strict', needs=('compose', 'native-publication-build'), extra=lambda: {**linked_env(), 'DSH_SESSION_DELETION_CORE': str(o / 'composed/generated/ohos-deletion/core.mjs')})
+    g.run('deletion-directory-sync', lambda: g.node('--jitless', '--import', s / 'runtime/ohos/sim/preload.mjs', '--import', s / 'runtime/ohos/publication/preload.mjs', '--test', '--test-isolation=none', s / (rt + 'session-deletion-sync/directory-sync.test.mjs')), needs=('compose', 'native-publication-build'), env=lambda: {**g.common(), **linked_env(), 'DSH_GO_OHOS_SIM_PLATFORM': 'openharmony', 'DSH_HOME': str(o / 'groups/deletion-directory-sync/home'), 'DSH_DELETION_SYNC_SOURCE': str(o / 'composed/generated/ohos-deletion/core.mjs'), 'DSH_DELETION_SYNC_TRACE': str(o / 'directory-sync-trace.json')}, tests=[rt + 'session-deletion-sync/directory-sync.test.mjs'])
+    for name in ['native-files', 'voice']:
+        g.run(name, lambda n=name: g.py(rt + n + '-linux.py', '--node', node(), '--typescript-prefix', p('typescript_prefix'), '--out', o / n), needs=('tools',), timeout=240)
+    for name in ['pdf', 'hms-share']:
+        g.run(name, lambda n=name: g.py(rt + n + '-linux.py', '--node', node(), '--node-headers', headers(), '--typescript-prefix', p('typescript_prefix'), '--out', o / n, '--cxx', p('cxx')), needs=('tools',), timeout=240)
+    g.run('native-media', lambda: g.py(rt + 'native-media-linux.py', '--node', node(), '--node-headers', headers(), '--typescript-prefix', p('typescript_prefix'), '--path-provider-source', p('path_provider_source'), '--cxx', p('cxx'), '--out', o / 'native-media'), needs=('tools',), timeout=240)
+    g.run('performance-dart', lambda: g.py(rt + 'performance-linux.py', '--node', node(), '--dart', p('dart'), '--typescript-prefix', p('typescript_prefix'), '--out', o / 'performance-dart'), needs=('tools', 'dart-tools'), timeout=180)
+    g.run('diagnostics-dart', lambda: g.py(rt + 'diagnostics-linux.py', '--node', node(), '--dart', p('dart'), '--typescript-prefix', p('typescript_prefix'), '--zlib-addon', o / 'zlib.node', '--output', o / 'diagnostics-dart'), needs=('tools', 'dart-tools', 'native-zlib-build'), timeout=240)
+    g.internal('dart-consumer-evidence', lambda _: verify_dart_consumers(o), needs=('diagnostics-dart', 'performance-dart'))
+    channels = ['app-links-channel', 'connectivity-channel', 'notify-channel', 'files-media-channel']
+    g.node_tests('ets-channels', [rt + n + '.test.mjs' for n in channels], needs=('native-opener-build',), extra=lambda: {'OHOS_USER_FILE_ADDON': str(o / 'user-file-access.node')}, timeout=240)
+    tooling = ['managed-skill', 'native-host-lazy', 'runtime-archive', 'runtime-channel', 'lifecycle-host', 'web-files']
+    g.node_tests('ets-runtime-tooling', [tools + n + '.test.mjs' for n in tooling], needs=('native-zlib-build',), extra=lambda: {'OHOS_TEST_ZLIB_ADDON': str(o / 'zlib.node')}, timeout=240)
+    for mode in ['plain', 'jitless']:
+        g.node_tests('secrets-picker-' + mode, [rt + 'secrets.test.mjs', tools + 'attachment-files-channel.test.mjs'], mode=mode, needs=('tools',))
+    for filename in ['runtime-archive-audit.test.py', 'audit-dart-bridges.test.py', 'patch-framework.test.py']:
+        g.run(filename[:-3], lambda f=filename: g.py(tools + f), needs=('tools',), tests=[tools + filename])
+    g.run('fork-installed-resolution', lambda: g.py(tools + 'prepare-forks-installed.test.py'), needs=('tools',), tests=[tools + 'prepare-forks-installed.test.py'])
+    g.run('archive-manifest', lambda: g.py(tools + 'runtime-archive-manifest-contract.py', '--node', node(), '--report', o / 'archive-manifest.json'), needs=('tools',))
+    g.run('hms-declarations', lambda: g.py(tools + 'prepare-hms-sdk.test.py', '--helper', s / 'tooling/ohos/hms-stubs/prepare-sdk.py', '--output', o / 'hms-declarations'), needs=('tools',), tests=[tools + 'prepare-hms-sdk.test.py'])
+    g.run('embedding-member-identity', lambda: g.py(tools + 'prepare-pasteboard.test.py'), env=lambda: {'DSH_EMBEDDING_HAR': str(p('embedding_har'))}, needs=('tools',), tests=[tools + 'prepare-pasteboard.test.py'])
+    g.run('clipboard-settlement', lambda: g.py(tools + 'clipboard-settlement.py', '--input-har', p('embedding_har'), '--node', node(), '--typescript-prefix', p('typescript_prefix'), '--output', o / 'clipboard-settlement'), needs=('tools',))
+    g.run('fork-contract', lambda: g.py(tools + 'prepare-forks-contract.py'), env=lambda: {'DSH_WEBVIEW_FORK': str(p('webview_original'))}, needs=('tools',), tests=[tools + 'prepare-forks-contract.py'])
+    g.run('fork-prepare', lambda: g.py('tooling/ohos/prepare-forks.py', '--input', p('webview_original'), '--package', 'webview_flutter_ohos', '--output', o / 'webview-prepared'), needs=('tools',))
+    g.node_tests('webview-security', [tools + 'webview-security-contract.mjs'], needs=('fork-prepare',), extra=lambda: {'DSH_WEBVIEW_FORK': str(o / 'webview-prepared/package')})
+    g.node_tests('islands-channel', [tools + 'islands-channel.test.mjs'], needs=('fork-prepare',), extra=lambda: {'DSH_WEBVIEW_FORK': str(o / 'webview-prepared/package')})
+    # Real Dart/Flutter application sources in this private tree, with an explicitly
+    # supplied, fixed offline dependency resolver and real font/asset prerequisites.
+    def app_inputs(_):
+        app = g.flutter_source / 'app'
+        # All resolver and asset generation stays in the independent Flutter
+        # copy; the candidate/native Android comparison tree remains untouched.
+        shutil.copy2(app / 'pubspec.lock', o / 'pubspec.original.lock')
+        overrides = 'dependency_overrides:\n'
+        for package, key in [('flutter_secure_storage', 'secure_fork'), ('file_picker', 'picker_fork')]:
+            if key not in g.paths: continue
+            overrides += '  ' + package + ':\n    path: ' + json.dumps(str(p(key))) + '\n'
+        (app / 'pubspec_overrides.yaml').write_text(overrides)
+        for f in p('app_fonts').iterdir():
+            if f.is_file():
+                target = app / 'assets/fonts' / f.name; target.parent.mkdir(parents=True, exist_ok=True)
+                if not target.exists(): shutil.copy2(f, target)
+        return {'overridesSha256': sha(app / 'pubspec_overrides.yaml'), 'fonts': {f.name: sha(f) for f in p('app_fonts').iterdir() if f.is_file()}}
+    g.internal('flutter-inputs', app_inputs, needs=('tools', 'flutter-tools'))
+    g.run('flutter-pub', lambda: g.flutter('pub', 'get', '--offline'), cwd=g.flutter_source / 'app', env=g.flutter_env, needs=('flutter-inputs',), timeout=180)
+    def flutter_vendor(directory):
+        sdk = p('flutter').resolve().parent.parent
+        source = (sdk / 'packages/flutter/lib/src/foundation/platform.dart').read_text()
+        enum = re.search(r'enum TargetPlatform\s*\{(.*?)\}', source, re.S)
+        if enum is None: raise ValueError('Cannot determine actual Flutter TargetPlatform enum')
+        ohos = re.search(r'\bohos\s*[,}]', enum.group(1) + '}') is not None
+        if not ohos:
+            return {'extraOhosTarget': False, 'scope': 'Standard Linux Flutter; dependency switches unchanged'}
+        argv = [sys.executable, '-I', '-B', g.flutter_source / 'tooling/ohos/vendor_platform_switches.py']
+        result = subprocess.run(list(map(str, argv)), cwd=g.flutter_source, env={**g.base_env, **g.flutter_env}, capture_output=True, text=True)
+        (directory / 'stdout.log').write_text(result.stdout)
+        (directory / 'stderr.log').write_text(result.stderr)
+        save(directory / 'command.json', {'argv': list(map(str, argv)), 'exitCode': result.returncode})
+        result.check_returncode()
+        return {'extraOhosTarget': True, 'scope': 'Existing vendor switch generator for actual oh-flutter SDK'}
+    g.internal('flutter-vendor', flutter_vendor, needs=('flutter-pub',))
+    g.run('flutter-pub-vendored', lambda: g.flutter('pub', 'get', '--offline'), cwd=g.flutter_source / 'app', env=g.flutter_env, needs=('flutter-vendor',), timeout=180)
+    g.run('flutter-l10n', lambda: g.flutter('gen-l10n'), cwd=g.flutter_source / 'app', env=g.flutter_env, needs=('flutter-pub-vendored',), timeout=180)
+    def flutter_identity(_):
+        return {'source': verify_flutter_inputs(g.flutter_source, g.flutter_original_inputs),
+                'localPackages': verify_flutter_packages(g.flutter_source)}
+    g.internal('flutter-input-identity', flutter_identity, needs=('flutter-l10n',))
+    flutter_tests = ['test/secrets', 'test/ohos/attachment_files_test.dart',
+                     'test/chat/attachment_file_budget_test.dart', 'test/remote/private_key_file_budget_test.dart',
+                     'test/chat/attachment_owner_test.dart', 'test/remote/ssh_key_callback_lifetime_test.dart', 'test/share_hosted', 'test/share/share_panel_test.dart']
+    g.run('flutter-consumers', lambda: g.flutter('test', '--no-pub', '--reporter', 'json', '--concurrency=1', *flutter_tests), cwd=g.flutter_source / 'app', env=g.flutter_env, needs=('flutter-input-identity',), timeout=300, tests=['app/' + x for x in flutter_tests], scope='Actual Linux Flutter engine and Dart consumers; not OHOS AOT/device')
+    g.run('flutter-consumer-analyze', lambda: g.flutter('analyze', '--no-pub', 'lib/secrets', 'lib/state/attachment_files_ohos.dart', 'lib/share_hosted/hosted_links_state.dart', 'lib/ui/share_hosted', 'lib/ui/share/share_panel.dart', 'test/secrets', 'test/ohos/attachment_files_test.dart', 'test/share_hosted', 'test/share/share_panel_test.dart'), cwd=g.flutter_source / 'app', env=g.flutter_env, needs=('flutter-input-identity',), timeout=300)
+    def retain_resolver(_):
+        app = g.flutter_source / 'app'
+        names = ['pubspec.lock', 'pubspec_overrides.yaml', '.dart_tool/package_config.json']
+        captured = {}
+        for name in names:
+            src = app / name
+            if src.is_file():
+                dest = o / 'flutter-resolver' / name
+                dest.parent.mkdir(parents=True, exist_ok=True); shutil.copy2(src, dest)
+                captured[name] = sha(dest)
+        return {'resolvedInputs': captured, 'originalLockSha256': sha(o / 'pubspec.original.lock'),
+                'source': verify_flutter_inputs(g.flutter_source, g.flutter_original_inputs),
+                'localPackages': verify_flutter_packages(g.flutter_source),
+                'androidAfterFlutter': source_files(app / 'android'),
+                'androidBeforeFlutter': {path[len('app/android/'):]: value for path, value in g.original.items() if path.startswith('app/android/')}}
+    g.internal('flutter-resolver-record', retain_resolver, needs=('flutter-input-identity',))
+    g.run('dart-bridge-inventory', lambda: g.py('tooling/ohos/audit-dart-bridges.py', '--source', s, '--fork-roots', p('fork_roots'), '--report', o / 'dart-bridge-inventory.json', '--require-group1'), needs=('tools',))
+    for target in ['candidate', 'ohos']:
+        g.run('native-protocol-' + ('android' if target == 'candidate' else 'ohos'), lambda t=target: ['bash', s / 'runtime/tests/run-native-tests.sh', o / ('targets/' + t + '-prefix'), '--port', free_port()], needs=('android-targets', 'native-static-resources'), timeout=300, tests=['runtime/tests/native-bridge.mjs', 'runtime/tests/native-capabilities-live.mjs'], scope='Original full native protocol suite against the selected installed target on Linux')
+    # The shared suites, whole, on each selected tree. The groups around here pick
+    # the files they need and would miss the rest of runtime/tests.
+    shared = sorted('runtime/tests/' + f.name for f in (s / 'runtime/tests').glob('*.test.mjs'))
+    ohos_left_out = ('runtime/tests/input-recovery.test.mjs', 'runtime/tests/model-defaults.test.mjs')  # patches not in the OH set yet
+    for target, label, files in [('candidate', 'android', shared), ('ohos', 'ohos', [f for f in shared if f not in ohos_left_out])]:
+        g.run('shared-suite-' + label, lambda names=files: g.node('--test', '--test-reporter=tap', *[s / f for f in names]), env=lambda t=target: {'TZ': 'Asia/Shanghai', 'DSH_PREFIX': str(o / ('targets/' + t + '-prefix')), 'DSH_TEST_PREFIX': str(o / ('targets/' + t + '-prefix'))}, needs=('android-targets', 'native-static-resources'), timeout=600, tests=files, scope='Every shared runtime test against the installed target on Linux')
+        g.run('route-guard-' + label, lambda t=target: ['bash', s / 'runtime/tests/run-guard-tests.sh', o / ('targets/' + t + '-prefix'), '--port', free_port()], needs=('android-targets',), timeout=300, tests=['runtime/tests/run-guard-tests.sh'])
+    g.run('direct-inventory', lambda: g.py('runtime/tests/test_direct_inventory.py', '-v'), needs=('tools',), tests=['runtime/tests/test_direct_inventory.py'])
+    g.run('publication-kill', lambda: g.node(s / (rt + 'publication-kill.mjs'), '--node', node(), '--simulation', s / 'runtime/ohos/sim/preload.mjs', '--publication', s / 'runtime/ohos/publication', '--linked-lib', native() / 'libpublication-test-linked.so', '--prefix', prefix(), '--out', o / 'publication-kill.json'), needs=('native-publication-build', 'prepared-inputs'), timeout=300, scope='Real SIGKILL and restart with the current publication preload')
+    g.run('manifest-validate', lambda: g.node(s / 'runtime/ohos/package/validate-manifest.mjs', s / 'app/ohos/entry/src/main/ets/runtime/RuntimeCore.ets', o / 'composed/expanded/dsh-runtime/manifest.json'), needs=('compose',))
+    g.run('node-build-contract', lambda: g.py(rt + 'node-build.py', '--source', p('node_source')), needs=('tools',), timeout=240)
+    g.run('napi-rename-current', lambda: g.py('runtime/ohos/node/gen-napi-rename.py', '--source', p('node_source'), '--check'), needs=('tools',), timeout=120)
+    g.run('market-tests', lambda: g.node('--test', '--test-isolation=none', '--test-reporter=tap'), cwd=lambda: s / 'market', needs=('tools',), timeout=300)
+    g.run('market-check', lambda: g.node('scripts/check.mjs'), cwd=lambda: s / 'market', needs=('tools',), timeout=120)
+    g.node_tests('file-upload-resolver', ['runtime/tests/file-upload-resolver.test.mjs'], needs=('android-targets',), extra=lambda: {'DSH_TEST_PREFIX': str(o / 'targets/ohos-prefix')}, timeout=240)
+    g.node_tests('schedule-contract', ['runtime/tests/schedule-authorization.test.mjs'], needs=('android-targets',), extra=lambda: {'DSH_PREFIX': str(o / 'targets/ohos-prefix')}, timeout=240)
+    def fetch_source(_):
+        original = p('node_source'); target = o / 'node-fetch-source'
+        for relative in ('src/node_version.h', 'deps/undici'):
+            src = original / relative; dst = target / relative; dst.parent.mkdir(parents=True, exist_ok=True)
+            if src.is_dir(): shutil.copytree(src, dst, symlinks=True)
+            elif src.is_file(): shutil.copy2(src, dst)
+            else: raise Blocked('missing exact Node source ' + str(src))
+        return {'source': str(original), 'selectedBefore': source_files(target)}
+    g.internal('node-fetch-source', fetch_source, needs=('tools',))
+    g.node_tests('node-fetch-build', [rt + 'node-fetch-build.test.mjs'], needs=('node-fetch-source',), extra=lambda: {'OHOS_NODE_SOURCE': str(p('node_source')), 'OHOS_NODE_BUILD_TOOLS': str(p('esbuild_prefix'))}, timeout=240)
+    g.run('node-fetch-prepare', lambda: g.node(s / 'tooling/ohos/prepare-node-fetch.mjs', '--target', 'ohos', '--build-tools', p('esbuild_prefix'), o / 'node-fetch-source'), needs=('node-fetch-source',), timeout=180)
+    for mode in ('plain', 'jitless'):
+        g.node_tests('node-fetch-' + mode, [rt + 'node-fetch-abort.test.mjs', rt + 'node-formdata.test.mjs'], mode=mode, needs=('node-fetch-prepare',), extra=lambda: {'DSH_GO_UNDICI_BUNDLE': str(o / 'node-fetch-source/deps/undici/undici.js'), 'DSH_GO_UNDICI_SOURCE': str(o / 'node-fetch-source/deps/undici/src'), 'DSH_GO_HTTP_DISPATCHER': str(s / 'runtime/ohos/net/dispatcher.mjs')}, timeout=180)
+    for mode in ('full', 'optional-profile'):
+        g.run('mcp-linux-r7-' + mode, lambda m=mode: g.py('runtime/tests/plugin-config-r7-live.py', '--prefix', o / 'targets/ohos-prefix', '--bridge', s / 'runtime/bridge/dsh-go-bridge', '--media', s / 'runtime/media/dsh-media', '--image-size', p('image_size'), '--out', o / ('mcp-linux-r7-' + m), '--port', free_port(), '--mode', m), needs=('android-targets',), timeout=240, tests=['runtime/tests/plugin-config-r7-live.py'], scope='Original Linux r7 full/optional profile contracts on current OH-selected full-optional prefix; no OH platform spoof')
+    # The SDK checker keeps its own authoritative input/build identity. It uses a
+    # distinct work directory and does not perform --full, --clean or --with-forks.
+    def sdk_inputs(_):
+        project = o / 'sdk-project'; shutil.copytree(s / 'app/ohos', project, symlinks=True)
+        # The source snapshot omits these five referenced compile resources.
+        # They are a compile fixture, not claimed to be original product assets.
+        icons = {}
+        for root in ('AppScope', 'entry/src/main'):
+            for name in (('background.png', 'foreground.png') if root == 'AppScope' else ('icon.png', 'background.png', 'foreground.png')):
+                rel = root + '/resources/base/media/' + name
+                src = p('sdk_resources') / rel
+                if not src.is_file(): raise Blocked('missing compile resource fixture ' + rel)
+                dest = project / rel; dest.parent.mkdir(parents=True, exist_ok=True); shutil.copy2(src, dest)
+                icons[rel] = sha(src)
+        work = o / 'sdk-work'; work.mkdir()
+        cache = p('sdk_cache')
+        for name in ('dl', 'tools'):
+            src = cache / name
+            if not src.is_dir(): raise Blocked('missing pinned SDK tool cache ' + str(src))
+            shutil.copytree(src, work / name, symlinks=True)
+        return {'scope': 'Independent compile resource fixture; not product icon changes', 'resources': icons,
+                'privateToolCache': str(work)}
+    g.internal('sdk-inputs', sdk_inputs, needs=('tools',))
+    g.run('arkts', lambda: ['bash', s / 'tooling/ohos/check-arkts.sh', '--sdk', p('sdk'), '--work', o / 'sdk-work', '--source', o / 'sdk-project', '--hms-stubs'], env=lambda: {'JAVA_HOME': str(p('java_home')), 'NODE': str(node()), 'TAR_OPTIONS': '--no-same-owner'}, needs=('sdk-inputs',), timeout=300, scope='Ordinary public SDK ArkTS compile with nonofficial HMS stubs: UNCOMPILED_HMS, no native/AOT/device')
+    return g.finish()
+
+
+if __name__ == '__main__':
+    raise SystemExit(main())

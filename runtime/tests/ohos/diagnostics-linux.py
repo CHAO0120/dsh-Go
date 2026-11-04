@@ -16,7 +16,7 @@ p = argparse.ArgumentParser()
 p.add_argument('--node', required=True)
 p.add_argument('--typescript-prefix', required=True)
 p.add_argument('--output', required=True)
-p.add_argument('--dart')
+p.add_argument('--dart', required=True)
 p.add_argument('--zlib-addon', required=True)
 a = p.parse_args()
 repo = Path(__file__).resolve().parents[3]
@@ -77,7 +77,7 @@ if status == 0:
         status = run([node, 'runtime/tests/ohos/diagnostics-cold.mjs', mode, str(out / 'cold-root'), str(out)], 'cold-' + mode)
         if status != 0:
             break
-if status == 0 and a.dart:
+if status == 0:
     stubs = out / 'dart-stubs'
     for name in ['flutter', 'flutter_riverpod']:
         (stubs / name / 'lib').mkdir(parents=True)
