@@ -142,6 +142,21 @@ jobs:
           fi
           exit "$status"
 
+      - name: Check the engine comes back from the heap limit
+        if: ${{ !cancelled() && steps.prepare.outcome == 'success' }}
+        run: |
+          bash tooling/ios/engine-smoke/build-heap.sh "$RUNNER_TEMP/heap-smoke"
+          node="$(ls -d "$DSH_IOS_ENGINE_WORK"/node-v*-darwin-arm64/bin/node)"
+          status=0
+          "$node" tooling/ios/engine-smoke/heap-drive.mjs --simulator "$DSH_SIMULATOR" --smoke "$RUNNER_TEMP/heap-smoke" --frameworks "$RUNNER_TEMP/sim" --work "$RUNNER_TEMP/heap-smoke-work" || status=$?
+          report="$RUNNER_TEMP/heap-smoke-work/report.json"
+          if [ -f "$report" ]; then
+            echo "::notice title=heap smoke::$(tr -d '\n' < "$report" | cut -c1-3000 | sed -e 's/%/%25/g')"
+          else
+            echo "::error title=heap smoke::no report, status $status"
+          fi
+          exit "$status"
+
       - name: Install Flutter
         if: ${{ !cancelled() && steps.prepare.outcome == 'success' }}
         run: |
