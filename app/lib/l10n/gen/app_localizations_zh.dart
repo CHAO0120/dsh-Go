@@ -6896,13 +6896,13 @@ class L10nZh extends L10n {
   String get harmonyKwSystemAccess => '权限一览,授权,麦克风,通知权限,回复提醒,语音输入,补开权限';
 
   @override
-  String get harmonyBackgroundSubtitle => '应用离开屏幕后，本机的对话会暂停';
+  String get harmonyBackgroundSubtitle => '应用离开屏幕后，本机的对话很快会暂停';
 
   @override
   String get harmonyBackgroundAway => '离开屏幕后';
 
   @override
-  String get harmonyBackgroundLocal => '系统几秒内就会挂起应用，正在跑的对话跟着暂停，回到应用后会尽量接着跑';
+  String get harmonyBackgroundLocal => '正在跑的对话可能还能跑一小会儿，多久由系统决定。之后跟着应用暂停，回到应用后会尽量接着跑';
 
   @override
   String get harmonyBackgroundRemoteTitle => '已连接的远程主机';
@@ -6920,16 +6920,16 @@ class L10nZh extends L10n {
   String get harmonyBackgroundUseRemote => '或者放到已连接的远程主机上跑';
 
   @override
-  String get harmonyEngineBackgroundHint => '离开屏幕后本机引擎会暂停';
+  String get harmonyEngineBackgroundHint => '离开屏幕后本机引擎很快会暂停';
 
   @override
   String get harmonyKwBackground => '后台,保活,挂起,暂停,被杀,杀后台';
 
   @override
-  String get harmonyPausedInBackground => '对话在后台暂停过';
+  String get harmonyPausedInBackground => '对话在后台可能暂停过';
 
   @override
-  String get harmonyAlertsRequirement => '提醒要应用在运行才发得出：离开屏幕几秒后系统会挂起应用，挂起期间没有提醒';
+  String get harmonyAlertsRequirement => '提醒要应用在运行才发得出：离开屏幕后系统很快会挂起应用，挂起期间没有提醒';
 
   @override
   String get harmonyLiveUnavailable => '这个版本暂时没有实时活动';

@@ -7288,14 +7288,14 @@ class L10nEn extends L10n {
   String get harmonyKwSystemAccess => 'permissions,grant,microphone,notification permission,reply alerts,voice input';
 
   @override
-  String get harmonyBackgroundSubtitle => 'On-device chats pause when the app leaves the screen';
+  String get harmonyBackgroundSubtitle => 'On-device chats pause soon after the app leaves the screen';
 
   @override
   String get harmonyBackgroundAway => 'When the app leaves the screen';
 
   @override
   String get harmonyBackgroundLocal =>
-      'The system suspends the app within seconds, and a running conversation pauses with it. It tries to pick up when you come back';
+      'A running conversation may go on for a short while, as long as the system allows. Then it pauses with the app, and tries to pick up when you come back';
 
   @override
   String get harmonyBackgroundRemoteTitle => 'Connected remote host';
@@ -7313,17 +7313,17 @@ class L10nEn extends L10n {
   String get harmonyBackgroundUseRemote => 'Or run them on a connected remote host';
 
   @override
-  String get harmonyEngineBackgroundHint => 'The on-device engine pauses when the app leaves the screen';
+  String get harmonyEngineBackgroundHint => 'The on-device engine pauses soon after the app leaves the screen';
 
   @override
   String get harmonyKwBackground => 'background activity,keep alive,suspended,paused,killed';
 
   @override
-  String get harmonyPausedInBackground => 'Paused while in the background';
+  String get harmonyPausedInBackground => 'May have paused in the background';
 
   @override
   String get harmonyAlertsRequirement =>
-      'Alerts need the app running: the system suspends it seconds after it leaves the screen, and none go out then';
+      'Alerts need the app running: the system suspends it soon after it leaves the screen, and none go out then';
 
   @override
   String get harmonyLiveUnavailable => 'Live activities aren\'t available in this version yet';

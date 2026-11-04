@@ -12635,7 +12635,7 @@ abstract class L10n {
   /// No description provided for @harmonyBackgroundSubtitle.
   ///
   /// In zh, this message translates to:
-  /// **'应用离开屏幕后，本机的对话会暂停'**
+  /// **'应用离开屏幕后，本机的对话很快会暂停'**
   String get harmonyBackgroundSubtitle;
 
   /// No description provided for @harmonyBackgroundAway.
@@ -12647,7 +12647,7 @@ abstract class L10n {
   /// No description provided for @harmonyBackgroundLocal.
   ///
   /// In zh, this message translates to:
-  /// **'系统几秒内就会挂起应用，正在跑的对话跟着暂停，回到应用后会尽量接着跑'**
+  /// **'正在跑的对话可能还能跑一小会儿，多久由系统决定。之后跟着应用暂停，回到应用后会尽量接着跑'**
   String get harmonyBackgroundLocal;
 
   /// No description provided for @harmonyBackgroundRemoteTitle.
@@ -12683,7 +12683,7 @@ abstract class L10n {
   /// No description provided for @harmonyEngineBackgroundHint.
   ///
   /// In zh, this message translates to:
-  /// **'离开屏幕后本机引擎会暂停'**
+  /// **'离开屏幕后本机引擎很快会暂停'**
   String get harmonyEngineBackgroundHint;
 
   /// No description provided for @harmonyKwBackground.
@@ -12695,13 +12695,13 @@ abstract class L10n {
   /// No description provided for @harmonyPausedInBackground.
   ///
   /// In zh, this message translates to:
-  /// **'对话在后台暂停过'**
+  /// **'对话在后台可能暂停过'**
   String get harmonyPausedInBackground;
 
   /// No description provided for @harmonyAlertsRequirement.
   ///
   /// In zh, this message translates to:
-  /// **'提醒要应用在运行才发得出：离开屏幕几秒后系统会挂起应用，挂起期间没有提醒'**
+  /// **'提醒要应用在运行才发得出：离开屏幕后系统很快会挂起应用，挂起期间没有提醒'**
   String get harmonyAlertsRequirement;
 
   /// No description provided for @harmonyLiveUnavailable.

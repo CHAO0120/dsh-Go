@@ -198,6 +198,9 @@ void main() {
       ]) {
         expect(find.text(text), findsOneWidget, reason: text);
       }
+      // A running turn may carry on under the system's short grant first.
+      expect(zh.harmonyBackgroundLocal, contains('一小会儿'));
+      expect(zh.harmonyPausedInBackground, contains('可能'));
       for (final text in [
         zh.pluginsSystemBatteryOptimization,
         zh.pluginsStayOnline,

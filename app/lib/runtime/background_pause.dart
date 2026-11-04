@@ -1,9 +1,10 @@
-// HarmonyOS suspends an app within seconds of it leaving the screen, and the
-// on-device engine runs as this app: a turn left running stops where it is, with
-// nothing to say it did. Whether it can pick up afterwards takes a device to
-// know, so this says only that it paused: one quiet line in the chat on the way
-// back (ui/notify/background_pause_host.dart draws it). Android's own line, about a
-// phone cutting the network, is runtime/background_net.dart.
+// HarmonyOS suspends an app soon after it leaves the screen, and the on-device
+// engine runs as this app: a turn left running gets the system's short grant at
+// best, then stops where it is, with nothing to say it did. How long the grant was
+// and whether the turn can pick up afterwards take a device to know, so this says
+// only that it may have paused: one quiet line in the chat on the way back
+// (ui/notify/background_pause_host.dart draws it). Android's own line, about a phone
+// cutting the network, is runtime/background_net.dart.
 
 import 'dart:async';
 
@@ -17,9 +18,10 @@ import '../state/sessions_state.dart';
 
 /// The decision, without timers or the platform (unit-tested).
 abstract final class BackgroundPausePolicy {
-  /// Away this long and the app has been suspended. The system only says 「几秒」
-  /// (best practices, background tasks): well past that, so a quick look at
-  /// another app isn't told about a pause it most likely never had.
+  /// Away this long and the app may well have been suspended. The system only
+  /// says 「几秒」 (best practices, background tasks), and a running turn's grant
+  /// can run longer: well past the first, so a quick look at another app isn't
+  /// told about a pause it most likely never had.
   static const suspendedAfter = Duration(seconds: 10);
 
   /// Whether a return after [away] calls for the line: the on-device engine is
