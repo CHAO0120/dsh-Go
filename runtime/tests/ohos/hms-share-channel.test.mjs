@@ -290,14 +290,42 @@ test('incoming exact file/count/total caps, too-many and too-large map to actual
   f.receive(sources.map(source => ({ uri: source.uri, title: 'file', utd: 'general.file' })));
   await ready(f); await waitEvents(f, 1);
   assert.equal(f.delivered[0].value.files.length, 9); assert.equal(f.delivered[0].value.skipped[0].reason, 'too_many');
-  const huge = await f.external('huge', ''); await fsp.truncate(huge.path, 30 * 1024 * 1024 + 1);
+  const huge = await f.external('huge', ''); await fsp.truncate(huge.path, 200 * 1024 * 1024 + 1);
   f.receive([{ uri: huge.uri, utd: 'general.file' }]); await waitEvents(f, 2);
   assert.equal(f.delivered[1].value.files.length, 0); assert.equal(f.delivered[1].value.skipped[0].reason, 'too_large');
   const large = [];
-  for (let i = 0; i < 3; i++) { const value = await f.external('total-' + i, ''); await fsp.truncate(value.path, 30 * 1024 * 1024); large.push(value); }
+  for (let i = 0; i < 3; i++) { const value = await f.external('total-' + i, ''); await fsp.truncate(value.path, i < 2 ? 200 * 1024 * 1024 : 1); large.push(value); }
   f.receive(large.map(x => ({ uri: x.uri, title: 'large', utd: 'general.file' }))); await waitEvents(f, 3);
-  assert.deepEqual(f.delivered[2].value.files.map(x => x.size), [30 * 1024 * 1024, 30 * 1024 * 1024]);
+  assert.deepEqual(f.delivered[2].value.files.map(x => x.size), [200 * 1024 * 1024, 200 * 1024 * 1024]);
   assert.equal(f.delivered[2].value.skipped[0].reason, 'too_large');
+});
+
+test('incoming policy matches Android and Dart while outgoing and count limits stay fixed', async t => {
+  const f = await shareFixture(t);
+  assert.equal(f.policy.SHARE_MAX_FILE, 200 * 1024 * 1024);
+  assert.equal(f.policy.SHARE_MAX_TOTAL, 400 * 1024 * 1024);
+  assert.equal(f.policy.SHARE_MAX_ITEMS, 9);
+  assert.equal(f.policy.SHARE_OUT_MAX_BYTES, 300 * 1024 * 1024);
+});
+
+test('a real 31 MiB incoming file is copied with bounded requests and closed descriptors', async t => {
+  let maxRead = 0, maxWrite = 0;
+  const f = await shareFixture(t, {
+    beforeRead: ({ buffer }) => { maxRead = Math.max(maxRead, buffer.byteLength); },
+    beforeWrite: ({ buffer }) => { maxWrite = Math.max(maxWrite, buffer.byteLength); },
+  });
+  const payload = Buffer.alloc(31 * 1024 * 1024, 0x5a);
+  const source = await f.external('中文 大文件.bin', payload);
+  f.receive([{ uri: source.uri, title: '中文 大文件.bin', utd: 'general.file' }]);
+  await ready(f); await waitEvents(f, 1);
+  const event = f.delivered[0].value;
+  assert.deepEqual(event.skipped, []);
+  assert.equal(event.files.length, 1);
+  assert.equal(event.files[0].size, payload.byteLength);
+  assert.deepEqual(await fsp.readFile(event.files[0].path), payload);
+  assert(maxRead > 0 && maxRead <= 256 * 1024);
+  assert(maxWrite > 0 && maxWrite <= 256 * 1024);
+  await until(() => f.fds.size === 0 && f.pendingIO === 0);
 });
 
 test('external authority policy refuses private/self/HTTP/traversal before open and missing grant is unreadable', async t => {
