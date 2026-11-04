@@ -113,11 +113,16 @@ export default class FilesMediaPlugin implements FlutterPlugin, AbilityAware {
     const parts = input.split(/[\\/]/);
     const cleaned = (parts[parts.length - 1] || 'file').replace(/[\x00-\x1f\x7f\\/:*?"'`<>|{}\[\]]/g, '_').trim();
     const encoder = new util.TextEncoder();
+    const dot = cleaned.lastIndexOf('.');
+    const extension = dot > 0 && encoder.encodeInto(cleaned.substring(dot)).byteLength <= 32 ? cleaned.substring(dot) : '';
+    const stem = extension ? cleaned.substring(0, dot) : cleaned;
+    const limit = 240 - encoder.encodeInto(extension).byteLength;
     let name = '';
-    for (const character of cleaned) {
-      if (encoder.encodeInto(name + character).byteLength > 240) break;
+    for (const character of stem) {
+      if (encoder.encodeInto(name + character).byteLength > limit) break;
       name += character;
     }
+    name += extension;
     return name === '' || name === '.' || name === '..' ? 'file' : name;
   }
 
