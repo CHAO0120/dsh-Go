@@ -309,7 +309,7 @@ final class EngineSkills {
     guard path.hasPrefix(root + "/") else { return false }
     var walked = root
     for part in path.dropFirst(root.count + 1).split(separator: "/") {
-      walked += "/" + part
+      walked += "/(part)"
       var info = stat()
       if lstat(walked, &info) != 0 { return true }
       if info.st_mode & S_IFMT == S_IFLNK { return false }

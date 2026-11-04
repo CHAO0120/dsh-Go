@@ -198,7 +198,7 @@ final class RuntimeArchive {
     defer { compression_stream_destroy(stream) }
     var produced = 0
     var checkedMagic = false
-    try bytes.withUnsafeBytes { (raw: UnsafeRawBufferPointer) in
+    try bytes.withUnsafeBytes { (raw: UnsafeRawBufferPointer) -> Void in
       guard let base = raw.bindMemory(to: UInt8.self).baseAddress else {
         throw EngineFailure("ios_archive_inflate", "运行时压缩流未正常结束。")
       }

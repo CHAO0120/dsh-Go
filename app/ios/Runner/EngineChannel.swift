@@ -218,7 +218,7 @@ private final class EngineLifecycle: NSObject, URLSessionTaskDelegate {
       guard let self, current() else { return }
       guard error == nil, let http = response as? HTTPURLResponse else { return done("ios_lifecycle_unavailable") }
       let header = http.value(forHTTPHeaderField: "Set-Cookie") ?? ""
-      let matches = header.matches(of: #"dsh-auth-[A-Za-z0-9_-]+=[A-Za-z0-9_.-]+"#)
+      let matches = header.regexMatches(#"dsh-auth-[A-Za-z0-9_-]+=[A-Za-z0-9_.-]+"#)
       guard http.statusCode == 303, matches.count == 1 else { return done("ios_lifecycle_auth") }
       self.cookie = matches[0]
       done(nil)
@@ -253,7 +253,7 @@ private final class EngineLifecycle: NSObject, URLSessionTaskDelegate {
 }
 
 extension String {
-  fileprivate func matches(of pattern: String) -> [String] {
+  fileprivate func regexMatches(_ pattern: String) -> [String] {
     guard let expression = try? NSRegularExpression(pattern: pattern) else { return [] }
     let range = NSRange(startIndex..., in: self)
     return expression.matches(in: self, range: range).compactMap { Range($0.range, in: self).map { String(self[$0]) } }
@@ -428,7 +428,7 @@ final class EngineChannel: NSObject, FlutterStreamHandler {
         case "getLogs":
           reply(recent(arguments["lines"] as? Int ?? 500).map { $0["line"] ?? "" })
         case "getLogSnapshot":
-          reply(["entries": recent(arguments["lines"] as? Int ?? 300), "throughSeq": logSequence])
+          reply(["entries": recent(arguments["lines"] as? Int ?? 300), "throughSeq": logSequence] as [String: Any])
         case "clearFailure":
           failureLines = []
           lastError = nil
@@ -437,7 +437,8 @@ final class EngineChannel: NSObject, FlutterStreamHandler {
         case "failureLog":
           reply(failureLines)
         case "lastKnownGood":
-          reply(["available": false, "at": nil, "disable": [], "enable": [], "changed": [], "patchChanged": false, "empty": true] as [String: Any?])
+          let none: [String] = []
+          reply(["available": false, "at": nil, "disable": none, "enable": none, "changed": none, "patchChanged": false, "empty": true] as [String: Any?])
         case "storageStatus":
           reply(["granted": false, "permission": false, "legacy": false, "guestPath": ""] as [String: Any])
         case "networkMetered":
@@ -525,7 +526,15 @@ final class EngineChannel: NSObject, FlutterStreamHandler {
     }
     let active = nativePhase == "running"
     let bundled = archive?.manifest
-    let exitedMessage = exitedUnasked ? "本机引擎已退出，可以重新启动。" : nil
+    let exitedMessage: String? = exitedUnasked ? "本机引擎已退出，可以重新启动。" : nil
+    let lifecycleMessage: String? = lifecycle.failure != nil ? EngineChannel.notice : nil
+    let shownError: String? = lastError ?? setupError ?? errorMessage ?? exitedMessage ?? lifecycleMessage
+    let liveUrl: String? = active ? baseUrl : nil
+    let liveToken: String? = active ? token : nil
+    let liveGeneration: Int? = active ? skills.generation(for: token) : nil
+    let executionMode: String? = active ? "ios-embedded" : nil
+    let selectedMode: String? = nativePhase != "idle" ? "ios-embedded" : nil
+    let launchFailure: String? = errorCode ?? (exitedUnasked ? "ios_node_exited" : nil)
     return [
       "abi": "arm64-v8a",
       "bundledVersion": bundled?.runtimeVersion,
@@ -533,19 +542,18 @@ final class EngineChannel: NSObject, FlutterStreamHandler {
       "dshVersion": bundled?.dshVersion,
       "nodeVersion": bundled?.nodeVersion,
       "phase": phase,
-      "baseUrl": active ? baseUrl : nil,
-      "token": active ? token : nil,
-      "managedSkillGeneration": active ? skills.generation(for: token) : nil,
-      "error": lastError ?? setupError ?? errorMessage ?? exitedMessage
-        ?? (lifecycle.failure != nil ? EngineChannel.notice : nil),
+      "baseUrl": liveUrl,
+      "token": liveToken,
+      "managedSkillGeneration": liveGeneration,
+      "error": shownError,
       "mode": "normal", "safeState": "off", "safeReason": nil, "strikes": 0, "autoSafe": false,
       "failure": nil, "mainFailure": nil, "healthyAt": nil, "networkBlocked": false, "networkBlockedAt": nil,
       "directEngineEnabled": false, "directEngineAvailable": false, "directEngineActive": false,
       "directEngineFallbackReason": nil,
-      "currentExecutionMode": active ? "ios-embedded" : nil,
-      "launchSelectedMode": nativePhase != "idle" ? "ios-embedded" : nil,
+      "currentExecutionMode": executionMode,
+      "launchSelectedMode": selectedMode,
       "launchSpawned": nativePhase != "idle",
-      "launchFailureReason": errorCode ?? (exitedUnasked ? "ios_node_exited" : nil),
+      "launchFailureReason": launchFailure,
       "tidyingFiles": false,
       "lifecycle": lifecycle.status(),
     ]
@@ -585,10 +593,15 @@ final class EngineChannel: NSObject, FlutterStreamHandler {
     // Install takes a while and the status must keep answering meanwhile.
     DispatchQueue.global(qos: .userInitiated).async { [self] in
       var failure: Error?
+      // At most one event per percent, so 14,000 files don't flood the channel.
+      var lastStep = ""
+      var lastPercent = -1
       do {
         try installer.install(archive) { step, done, total in
-          // At most one event per percent, so 14,000 files don't flood the channel.
-          if step != "extract" || done == total || done % max(total / 100, 1) < 16384 {
+          let percent = total == 0 ? 100 : done * 100 / total
+          if step != lastStep || percent != lastPercent {
+            lastStep = step
+            lastPercent = percent
             emit(["type": "progress", "step": step, "done": done, "total": total])
           }
         }
@@ -651,7 +664,9 @@ final class EngineChannel: NSObject, FlutterStreamHandler {
       }
       try writeInstructions(visualReplies: visualReplies)
       if native == nil { native = try NativeEngine() }
-      environment.values.forEach(rememberSecret)
+      for (key, value) in environment where key.uppercased().range(of: "KEY|TOKEN|SECRET|PASSWORD", options: .regularExpression) != nil {
+        rememberSecret(value)
+      }
       requestedStop = false
       runtimeGeneration += 1
       lastStart = (environment, visualReplies)
