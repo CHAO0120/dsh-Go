@@ -292,6 +292,56 @@ final class NativeToolsTests: XCTestCase {
     try await view.callAsyncJavaScript("return eval(source)", arguments: ["source": source], in: nil, contentWorld: .page)
   }
 
+  /// Exercise the real handoff sheet and its Done action, then wait for UIKit to dismiss it.
+  /// As with approval sheets, only the person's tap is supplied by the test.
+  private func completeHandoff(_ browser: IOSBrowser, view: WKWebView) async throws {
+    let home = try XCTUnwrap(view.superview, "the agent web view is not attached")
+    let host = try XCTUnwrap(Self.top(), "no presenter for handoff")
+    let frame = view.frame
+    let translates = view.translatesAutoresizingMaskIntoConstraints
+    XCTAssertFalse(view.isUserInteractionEnabled)
+    let doneTap = Task { @MainActor in
+      for _ in 0..<100 {
+        if Task.isCancelled { return false }
+        if let sheet = Self.top() as? IOSBrowserSheet, sheet.viewIfLoaded?.window != nil,
+          !sheet.isBeingPresented, !sheet.isBeingDismissed
+        {
+          // Never complete a fake sheet or a replacement web view.
+          guard browser.webView === view, view.isDescendant(of: sheet.view),
+            view.isUserInteractionEnabled
+          else { return false }
+          let choices = Self.buttons(in: sheet.view).filter { $0.currentTitle == "完成" }
+          guard choices.count == 1, let done = choices.first else { return false }
+          done.sendActions(for: .touchUpInside)
+          return true
+        }
+        do { try await Task.sleep(nanoseconds: 100_000_000) } catch { return false }
+      }
+      return false
+    }
+    defer {
+      doneTap.cancel()
+      // Failure cleanup only: a timed-out handoff must not leave its continuation or sheet live.
+      browser.enteredBackground()
+    }
+    try await web(browser, "handoff", ["text": "Synthetic fixture: finish the handoff without entering personal data."], seconds: 15)
+    let tapped = await doneTap.value
+    XCTAssertTrue(tapped, "the real handoff sheet and its unique Done button were not observed")
+    // handOver resumes when Done is handled, before the dismissal animation finishes.
+    for _ in 0..<50 {
+      if Self.top() === host, host.presentedViewController == nil { break }
+      try await Task.sleep(nanoseconds: 100_000_000)
+    }
+    XCTAssertTrue(Self.top() === host, "handoff did not return to its presenter")
+    XCTAssertNil(host.presentedViewController)
+    XCTAssertTrue(browser.webView === view, "handoff replaced the WKWebView")
+    XCTAssertTrue(view.superview === home, "handoff did not return the WKWebView to its original container")
+    XCTAssertNotNil(view.window)
+    XCTAssertFalse(view.isUserInteractionEnabled)
+    XCTAssertEqual(view.translatesAutoresizingMaskIntoConstraints, translates)
+    XCTAssertEqual(view.frame, frame)
+  }
+
   private func fixture(_ browser: IOSBrowser) async throws {
     let view = try XCTUnwrap(browser.webView)
     let html = """
@@ -361,6 +411,8 @@ final class NativeToolsTests: XCTestCase {
     // A page of ours, with a clock ticking in it the way ads and tickers do.
     try await fixture(browser)
     let view = try XCTUnwrap(browser.webView)
+    try await completeHandoff(browser, view: view)
+    // The same page and the agent's isolated content world still work after the sheet returns.
     page = try await read(browser)
     let seen = page["text"] as? String ?? ""
     XCTAssertTrue(seen.contains("Fixture"), "read: \(seen.prefix(400))")
