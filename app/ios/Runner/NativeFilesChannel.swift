@@ -266,7 +266,7 @@ final class NativeFilesChannel: NSObject, PHPickerViewControllerDelegate, UIDocu
     guard urls.count <= picked.budget.maxFiles else { return refuse("too-large") }
     ioBusy = true
     io.async {
-      let outcome = Result { try urls.map { try Self.document($0) } }
+      let outcome = Result { try Self.documents(urls) }
       onMain { [weak self] in self?.documentsRead(outcome, for: picked) }
     }
   }
@@ -280,6 +280,18 @@ final class NativeFilesChannel: NSObject, PHPickerViewControllerDelegate, UIDocu
   func presentationControllerDidDismiss(_ presentationController: UIPresentationController) {
     shownPicker = nil
     revoke()
+  }
+
+  /// A file refused partway through a selection mustn't leave the earlier ones' scopes open.
+  private static func documents(_ urls: [URL]) throws -> [SelectedFile] {
+    var files: [SelectedFile] = []
+    do {
+      for url in urls { files.append(try document(url)) }
+    } catch {
+      files.filter(\.scoped).forEach { $0.url.stopAccessingSecurityScopedResource() }
+      throw error
+    }
+    return files
   }
 
   private static func document(_ url: URL) throws -> SelectedFile {
