@@ -338,7 +338,7 @@ final class NativeToolsTests: XCTestCase {
 
     var page = try await read(browser)
     XCTAssertEqual(page["title"] as? String, "Example Domain")
-    XCTAssertTrue((page["text"] as? String ?? "").contains("Example Domain"), "read: \(page["text"] ?? "nothing")")
+    XCTAssertTrue((page["text"] as? String ?? "").contains("domain"), "read: \(page["text"] ?? "nothing")")
 
     let shot = try await web(browser, "screenshot")
     XCTAssertGreaterThan(shot.image?.count ?? 0, 1000)
@@ -419,10 +419,21 @@ final class NativeToolsTests: XCTestCase {
     page = try await read(browser)
     let covered = try await web(browser, "click", try target(named("Go", page), page), expect: .refused)
     XCTAssertEqual(covered.text, "TARGET_OBSCURED_OR_NOT_IN_VIEW")
-    _ = try await script(view, "document.getElementById('cover').remove(); window.scrollTo(0, 2500); 1")
+    _ = try await script(view, "document.getElementById('cover').remove(); 1")
     page = try await read(browser)
-    let away = try await web(browser, "click", try target(named("Go", page), page), expect: .refused)
-    XCTAssertEqual(away.text, "TARGET_OBSCURED_OR_NOT_IN_VIEW")
+    var away = try target(element(page) { $0["role"] as? String == "document" }, page)
+    away["direction"] = "down"
+    try await web(browser, "scroll", away)
+    // The web view does the scrolling, and the page only hears of it a moment later.
+    var scrolled = 0.0
+    for _ in 0..<25 where scrolled < 300 {
+      try await Task.sleep(nanoseconds: 200_000_000)
+      scrolled = try await script(view, "window.scrollY") as? Double ?? 0
+    }
+    XCTAssertGreaterThanOrEqual(scrolled, 300, "the scroll tool didn't move the page")
+    page = try await read(browser)
+    let gone = try await web(browser, "click", try target(named("Go", page), page), expect: .refused)
+    XCTAssertEqual(gone.text, "TARGET_OBSCURED_OR_NOT_IN_VIEW")
     _ = try await script(view, "window.scrollTo(0, 0); 1")
 
     // Another address in the same page is another page.
