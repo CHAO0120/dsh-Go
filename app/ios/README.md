@@ -4,6 +4,12 @@ Flutter 3.47.7，Xcode 26（CI 用 26.6），最低 iOS 15。插件走 Swift Pac
 
 ## 在 Mac 上编译
 
+要本机引擎就先准备一次（要 python3 3.11 以上和网络，几分钟，产物在 `app/ios/Engine/`，不进 git）。不准备也能编，只是这个包只能连远程主机：
+
+```sh
+tooling/ios/prepare-engine.sh
+```
+
 ```sh
 cd app
 flutter pub get
@@ -29,15 +35,17 @@ flutter build ios --simulator --debug
 flutter build ios --release --no-codesign
 ```
 
-分支上的推送也会跑 `iOS compile`。它失败时不用登录也能看原因：Xcode 的报错会列在运行页的 Annotations 里（`tooling/ios/build.sh`）。
+分支上的推送也会跑 `iOS compile`。它失败时不用登录也能看原因：Xcode 的报错会列在运行页的 Annotations 里（`tooling/ios/build.sh`）。其中 `engine` 任务在模拟器上真跑引擎：一轮写、改、读、搜、bash 加审批，对着假模型，然后原地停止再启动（`tooling/ios/engine-smoke/`）。
 
 ## 现状
 
 - 代码只经过 CI 编译，还没有在设备上跑过，下面的验收项都没做。
-- 没有本机引擎，只能连远程主机。`dsh/runtime` 没有原生实现，Dart 按“这个平台没有”处理。
-- 已接的通道：`dsh/app`、`dsh/links`、`dsh/files`、`dsh/media`、`dsh/notify`、`dsh/voice`、`dsh/shortcuts`、`dsh/share`、`dsh/launcher_icon`。
-- 没接的通道，Dart 都按不支持处理：`dsh/native-files`、`dsh/native-media`（原生插件的文件和媒体能力）、`dsh/performance`（设备档位固定中档，不响应发热）、`dsh/diagnostics`、`dsh/usage`、`dsh/launch`、`dsh/dynamic_color`、`dsh/picture_shortcut`。
-- `dsh/islands` 在 Dart 侧只对 Android 开放，所以 WebView 不跟随应用的深色设置和文字缩放，跟随系统。
+- 本机引擎和鸿蒙是同一层（`runtime/ohos/`）：同进程的 Node（NodeMobile 24.22.1，`--jitless`），命令是 just-bash 模拟的。没有真正的 Linux，不能起子进程，没有 Python。首次安装解压约 160 MB。引擎第一次启动时才加载，只连远程的人不占这份内存。
+- 和鸿蒙不同：停止后能原地再启动，不用重开应用（`runtime/ios/host/node_runner.cc`）。
+- App 切到后台后，系统很快会暂停引擎；后台的本地监听被回收时，回到前台会自动重启引擎。
+- 手机操控、桌宠悬浮窗、后台常驻、应用内 APK 更新在 iOS 上没有，已隐藏。手机系统动作（日历、分享、拨号草稿等）还在做。
+- `dsh/native-media` 的语音不提供：回声消除管不到扬声器。`dsh/usage` 只读不上报：Worker 只收安卓的值。`dsh/dynamic_color`、`dsh/picture_shortcut` iOS 没有公开接口，入口隐藏。
+- 设备档位：内存低于 3.5 GiB 算低档，其余中档，不用 `high`。
 - 通知只在应用运行时发得出去。锁屏和离开应用后的提醒要 APNs，还没做，所以离开应用后等你确认的请求不会提醒你，回到应用才看得到。
 - 凭据存在 Keychain，只留在本机，不随备份迁移。全新安装时会先清掉上一次安装留下的 Keychain。“完整凭据能不能落盘”这件事和安卓一样还没改，发行前要定。
 - 包里还带着 `assets/engine/`，隐藏入口不等于移除。发行前要决定去留，并生成 iOS 的第三方许可清单。
@@ -67,7 +75,13 @@ flutter build ios --release --no-codesign
 | 链接 | Safari 打开 `dshgo://` 链接 | 进入对应页面 |
 | 文件 | 打开和保存对话产生的文件、PDF 预览 | 预览正常，保存后在文件 App 的 DSH Go 目录里 |
 | 相册 | 保存生成的图片 | 系统只要求“添加照片”权限，图片进相册 |
-| WebView | 打开网页模式，切后台久一点再回来 | 被系统回收时显示错误页，重试后恢复 |
+| WebView | 打开网页模式，切后台久一点再回来 | 被系统回收时显示“网页已关闭 · 重新打开”，点开后恢复 |
+| 本机引擎安装 | 设置里安装本机运行环境，中途杀掉应用再来一次 | 有进度；第二次接着装完 |
+| 本机引擎一轮 | 配好模型，新对话让它写文件、搜索、跑 bash | 回复流式出现，审批是真弹的，文件在产出目录 |
+| 本机引擎重启 | 停止，再启动 | 不用重开应用，新对话正常 |
+| 本机引擎切后台 | 跑一轮时切走几分钟，再回来 | 接着跑或明确报结果未知，不重复执行工具 |
+| 只连远程不加载引擎 | 不启动本机引擎时看内存（Xcode 调试栏） | 没有多出约 90 MB 的 Node |
+| 换主题的网页小窗 | 系统和应用的深色设置不一致时打开插件小窗 | 跟随应用的深色，文字缩放跟随 |
 | 深色模式 | 系统切深色后启动 | 启动屏不闪白 |
 | 中文 | 系统语言切中文和英文 | 权限说明和快捷操作跟随系统语言 |
 | 图标 | 桌面、设置页 | 显示品牌图标，不是 Flutter 默认图标 |
