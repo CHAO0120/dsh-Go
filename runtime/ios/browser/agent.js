@@ -281,7 +281,7 @@
           if (tag(el) !== 'select' || el.options.length > 256 || state(el).readOnly) return error('UNSUPPORTED_TARGET');
           if (!Array.isArray(request.values) || request.values.length > 64 || request.values.some(x => typeof x !== 'string' || x.length > 2000) || (!el.multiple && request.values.length !== 1)) return error('INVALID_ARGUMENT');
           const selected = request.values.map(id => record.options.get(id));
-          if (selected.some(o => !o || !o.isConnected || o.disabled || o.parentElement?.disabled)) return error('INVALID_OPTION');
+          if (selected.some(o => !o || !o.isConnected || o.closest('select') !== el || o.disabled || o.parentElement?.disabled)) return error('INVALID_OPTION');
           for (const option of el.options) option.selected = selected.includes(option);
           el.dispatchEvent(new Event('input', { bubbles: true, composed: true }));
           if (!el.isConnected || sensitive(el)) return finish(error('TARGET_CHANGED_AFTER_INPUT'));
