@@ -3,7 +3,6 @@
 // model request would read it.
 import assert from 'node:assert/strict';
 import { mkdtempSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { crc32, deflateSync } from 'node:zlib';
@@ -66,7 +65,8 @@ const exifSegment = orientation => {
   return Buffer.concat([head, body]);
 };
 
-const root = mkdtempSync(join(tmpdir(), 'dsh-image-smoke-'));
+// In the app the attachments live under DSH_HOME, on the same volume as the publisher's ledger.
+const root = mkdtempSync(join(process.env.DSH_HOME, 'attachments-'));
 let failures = 0;
 
 async function flow(name, data, mediaType, expect) {
@@ -143,3 +143,5 @@ await refused('not an image', Buffer.from('this is not an image at all'), 'image
 writeFileSync(join(root, 'done'), '');
 note({ name: 'done', failures });
 process.exitCode = failures === 0 ? 0 : 1;
+// Only fires if something the publisher opened is keeping the loop alive.
+setTimeout(() => process.exit(), 5000).unref();
