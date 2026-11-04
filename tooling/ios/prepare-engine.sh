@@ -45,6 +45,8 @@ fetch() { # url sha256 file
 }
 
 mkdir -p "$WORK"
+# prepare-inputs.py compares paths lexically, so a ".." here would look inside the repository.
+WORK="$(cd "$WORK" && pwd -P)"
 STEP="$(mktemp -d "$WORK/run.XXXXXX")"
 trap 'rm -rf "$STEP"' EXIT
 
