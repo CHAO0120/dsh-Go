@@ -7,12 +7,15 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		D5480000000000000000E00A /* PhoneRunnerUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5480000000000000000E009 /* PhoneRunnerUITests.swift */; };
+		D5480000000000000000E00C /* PhoneRunnerSupport.m in Sources */ = {isa = PBXBuildFile; fileRef = D5480000000000000000E00B /* PhoneRunnerSupport.m */; };
 		1498D2341E8E89220040F4C2 /* GeneratedPluginRegistrant.m in Sources */ = {isa = PBXBuildFile; fileRef = 1498D2331E8E89220040F4C2 /* GeneratedPluginRegistrant.m */; };
 		331C808B294A63AB00263BE5 /* RunnerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 331C807B294A618700263BE5 /* RunnerTests.swift */; };
 		3B3967161E833CAA004F5970 /* AppFrameworkInfo.plist in Resources */ = {isa = PBXBuildFile; fileRef = 3B3967151E833CAA004F5970 /* AppFrameworkInfo.plist */; };
 		74858FAF1ED2DC5600515810 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 74858FAE1ED2DC5600515810 /* AppDelegate.swift */; };
 		D5480000000000000000A001 /* DshPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5480000000000000000A002 /* DshPlugin.swift */; };
 		D5480000000000000000A003 /* VoiceChannel.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5480000000000000000A004 /* VoiceChannel.swift */; };
+		D5480000000000000000C081 /* IOSPhoneRunner.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5480000000000000000C080 /* IOSPhoneRunner.swift */; };
 		D5480000000000000000C071 /* IOSBrowser.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5480000000000000000C070 /* IOSBrowser.swift */; };
 		D5480000000000000000C061 /* ContinuedRun.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5480000000000000000C060 /* ContinuedRun.swift */; };
 		D5480000000000000000C051 /* SiriIntents.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5480000000000000000C050 /* SiriIntents.swift */; };
@@ -85,6 +88,12 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		D5480000000000000000E009 /* PhoneRunnerUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhoneRunnerUITests.swift; sourceTree = "<group>"; };
+		D5480000000000000000E00B /* PhoneRunnerSupport.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = PhoneRunnerSupport.m; sourceTree = "<group>"; };
+		D5480000000000000000E00D /* PhoneRunnerSupport.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = PhoneRunnerSupport.h; sourceTree = "<group>"; };
+		D5480000000000000000E00E /* PhoneRunner-Bridging-Header.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "PhoneRunner-Bridging-Header.h"; sourceTree = "<group>"; };
+		D5480000000000000000E00F /* PhoneRunner.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = PhoneRunner.entitlements; sourceTree = "<group>"; };
+		D5480000000000000000E002 /* PhoneRunnerUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = PhoneRunnerUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		1498D2321E8E86230040F4C2 /* GeneratedPluginRegistrant.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = GeneratedPluginRegistrant.h; sourceTree = "<group>"; };
 		1498D2331E8E89220040F4C2 /* GeneratedPluginRegistrant.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = GeneratedPluginRegistrant.m; sourceTree = "<group>"; };
 		331C807B294A618700263BE5 /* RunnerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RunnerTests.swift; sourceTree = "<group>"; };
@@ -94,6 +103,7 @@
 		74858FAE1ED2DC5600515810 /* AppDelegate.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
 		D5480000000000000000A002 /* DshPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DshPlugin.swift; sourceTree = "<group>"; };
 		D5480000000000000000A004 /* VoiceChannel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceChannel.swift; sourceTree = "<group>"; };
+		D5480000000000000000C080 /* IOSPhoneRunner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IOSPhoneRunner.swift; sourceTree = "<group>"; };
 		D5480000000000000000C070 /* IOSBrowser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IOSBrowser.swift; sourceTree = "<group>"; };
 		D5480000000000000000C060 /* ContinuedRun.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContinuedRun.swift; sourceTree = "<group>"; };
 		D5480000000000000000C050 /* SiriIntents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SiriIntents.swift; sourceTree = "<group>"; };
@@ -150,6 +160,18 @@
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
+		D5480000000000000000E008 /* PhoneRunner */ = {
+			isa = PBXGroup;
+			children = (
+				D5480000000000000000E009 /* PhoneRunnerUITests.swift */,
+				D5480000000000000000E00D /* PhoneRunnerSupport.h */,
+				D5480000000000000000E00B /* PhoneRunnerSupport.m */,
+				D5480000000000000000E00E /* PhoneRunner-Bridging-Header.h */,
+				D5480000000000000000E00F /* PhoneRunner.entitlements */,
+			);
+			path = PhoneRunner;
+			sourceTree = "<group>";
+		};
 		331C8082294A63A400263BE5 /* RunnerTests */ = {
 			isa = PBXGroup;
 			children = (
@@ -177,6 +199,7 @@
 				97C146F01CF9000F007C117D /* Runner */,
 				97C146EF1CF9000F007C117D /* Products */,
 				331C8082294A63A400263BE5 /* RunnerTests */,
+				D5480000000000000000E008 /* PhoneRunner */,
 				D5480000000000000000B011 /* ShareExtension */,
 			);
 			sourceTree = "<group>";
@@ -186,6 +209,7 @@
 			children = (
 				97C146EE1CF9000F007C117D /* Runner.app */,
 				331C8081294A63A400263BE5 /* RunnerTests.xctest */,
+				D5480000000000000000E002 /* PhoneRunnerUITests.xctest */,
 				D5480000000000000000B009 /* ShareExtension.appex */,
 			);
 			name = Products;
@@ -206,6 +230,7 @@
 				74858FAE1ED2DC5600515810 /* AppDelegate.swift */,
 				D5480000000000000000A002 /* DshPlugin.swift */,
 				D5480000000000000000A004 /* VoiceChannel.swift */,
+				D5480000000000000000C080 /* IOSPhoneRunner.swift */,
 				D5480000000000000000C070 /* IOSBrowser.swift */,
 				D5480000000000000000C060 /* ContinuedRun.swift */,
 				D5480000000000000000C050 /* SiriIntents.swift */,
@@ -243,6 +268,21 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
+		D5480000000000000000E001 /* PhoneRunnerUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = D5480000000000000000E004 /* Build configuration list for PBXNativeTarget "PhoneRunnerUITests" */;
+			buildPhases = (
+				D5480000000000000000E003 /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = PhoneRunnerUITests;
+			productName = PhoneRunnerUITests;
+			productReference = D5480000000000000000E002 /* PhoneRunnerUITests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
 		331C8080294A63A400263BE5 /* RunnerTests */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = 331C8087294A63A400263BE5 /* Build configuration list for PBXNativeTarget "RunnerTests" */;
@@ -342,6 +382,7 @@
 			targets = (
 				97C146ED1CF9000F007C117D /* Runner */,
 				331C8080294A63A400263BE5 /* RunnerTests */,
+				D5480000000000000000E001 /* PhoneRunnerUITests */,
 				D5480000000000000000B010 /* ShareExtension */,
 			);
 		};
@@ -428,6 +469,15 @@
 /* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
+		D5480000000000000000E003 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				D5480000000000000000E00A /* PhoneRunnerUITests.swift in Sources */,
+				D5480000000000000000E00C /* PhoneRunnerSupport.m in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		331C807D294A63A400263BE5 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -443,6 +493,7 @@
 				74858FAF1ED2DC5600515810 /* AppDelegate.swift in Sources */,
 				D5480000000000000000A001 /* DshPlugin.swift in Sources */,
 				D5480000000000000000A003 /* VoiceChannel.swift in Sources */,
+				D5480000000000000000C081 /* IOSPhoneRunner.swift in Sources */,
 				D5480000000000000000C071 /* IOSBrowser.swift in Sources */,
 				D5480000000000000000C061 /* ContinuedRun.swift in Sources */,
 				D5480000000000000000C051 /* SiriIntents.swift in Sources */,
@@ -533,6 +584,76 @@
 /* End PBXVariantGroup section */
 
 /* Begin XCBuildConfiguration section */
+		D5480000000000000000E005 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CODE_SIGN_ENTITLEMENTS = PhoneRunner/PhoneRunner.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = io.github.ccch1mneyyy.dshgo.PhoneRunner;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_OBJC_BRIDGING_HEADER = "PhoneRunner/PhoneRunner-Bridging-Header.h";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = "";
+				USES_XCTRUNNER = YES;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+			};
+			name = Debug;
+		};
+		D5480000000000000000E006 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CODE_SIGN_ENTITLEMENTS = PhoneRunner/PhoneRunner.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = io.github.ccch1mneyyy.dshgo.PhoneRunner;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_OBJC_BRIDGING_HEADER = "PhoneRunner/PhoneRunner-Bridging-Header.h";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = "";
+				USES_XCTRUNNER = YES;
+			};
+			name = Release;
+		};
+		D5480000000000000000E007 /* Profile */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CODE_SIGN_ENTITLEMENTS = PhoneRunner/PhoneRunner.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = io.github.ccch1mneyyy.dshgo.PhoneRunner;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_OBJC_BRIDGING_HEADER = "PhoneRunner/PhoneRunner-Bridging-Header.h";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = "";
+				USES_XCTRUNNER = YES;
+			};
+			name = Profile;
+		};
 		249021D3217E4FDB00AE95B9 /* Profile */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -891,6 +1012,16 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
+		D5480000000000000000E004 /* Build configuration list for PBXNativeTarget "PhoneRunnerUITests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				D5480000000000000000E005 /* Debug */,
+				D5480000000000000000E006 /* Release */,
+				D5480000000000000000E007 /* Profile */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
 		331C8087294A63A400263BE5 /* Build configuration list for PBXNativeTarget "RunnerTests" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (

@@ -5,8 +5,9 @@ import { actionFor } from './actions.mjs';
 
 const result = (text, isError = false) => ({ content: [{ type: 'text', text }], isError });
 const failure = (code, text) => result(`${code}: ${text}`, true);
-const isBrowser = request => request.action.kind.startsWith('browser-');
-// A page or a screenshot is a good deal larger than anything a phone action answers with.
+// These need nobody on screen in DSH Go, and answer with a page or a screenshot, a good deal
+// larger than anything else here.
+const isBrowser = request => /^(browser|runner)-/.test(request.action.kind);
 const RESULT_BYTES = 16384;
 const BROWSER_RESULT_BYTES = 512 * 1024;
 const BROWSER_IMAGE_BYTES = 1200 * 1024;
@@ -102,7 +103,7 @@ export async function createPhoneBridge({ token, runId, timeoutMs = 120000, brow
       if (!signal || signal.aborted || !callId || !agent?.session?.id) return Promise.resolve(failure('ERR_IOS_PHONE_OWNER', '没有仍有效的会话工具调用。'));
       if (pending.size >= 8) return Promise.resolve(failure('ERR_IOS_PHONE_BUSY', '手机动作等待队列已满，请等用户处理。'));
       const id = randomUUID();
-      const limit = action.kind === 'browser-handoff' ? Math.max(timeoutMs, HANDOFF_MS) : timeoutMs;
+      const limit = /-handoff$/.test(action.kind) ? Math.max(timeoutMs, HANDOFF_MS) : timeoutMs;
       const request = Object.freeze({ v: 1, runId, id, owner: { sessionId: agent.session.id, callId },
         action: JSON.parse(JSON.stringify(action)), expiresAt: Date.now() + limit });
       return new Promise(resolve => {

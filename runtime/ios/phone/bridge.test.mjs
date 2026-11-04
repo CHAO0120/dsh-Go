@@ -87,10 +87,18 @@ test('timeout after begin reports unknown; no automatic replay', async t => {
   assert.match((await waiting).content[0].text, /结果未知/);
   assert.equal((await post('/claim')).body.request, null);
 });
-test('unsupported cross-app tools and GCJ-02/map choices never enter native queue', async t => {
+test('cross-app tools go to the runner with their arguments intact', () => {
+  assert.deepEqual(actionFor('tap', { screen: 's3', id: 7 }), { kind: 'runner-call', method: 'tap', params: '{"screen":"s3","id":7}' });
+  assert.deepEqual(actionFor('open', { app: 'com.apple.Preferences' }), { kind: 'runner-call', method: 'open', params: '{"app":"com.apple.Preferences"}' });
+  assert.deepEqual(actionFor('handoff', { reason: '请登录' }), { kind: 'runner-handoff', text: '请登录' });
+  for (const name of ['screen', 'collect', 'type', 'scroll', 'key', 'tap_xy', 'apps']) {
+    assert.equal(actionFor(name, {}).method, name);
+  }
+});
+test('no background screen, unknown tools and GCJ-02/map choices never enter native queue', async t => {
   const { bridge, post, execution } = await fixture(t);
-  for (const name of ['screen', 'tap', 'type', 'collect', 'scroll', 'key', 'tap_xy', 'apps', 'handoff']) {
-    assert.equal((await bridge.call(name, {}, execution)).isError, true);
+  for (const [name, args] of [['screen', { background: true }], ['open', { app: 'x', background: true }], ['nonsense', {}], ['handoff', {}]]) {
+    assert.equal((await bridge.call(name, args, execution)).isError, true);
   }
   for (const args of [{ kind: 'navigate', lat: 31, lng: 121 }, { kind: 'navigate', destination: '上海', map: 'amap' },
     { kind: 'settings', page: 'wifi' }, { kind: 'alarm', hour: 7 }, { kind: 'timer', seconds: 2 }]) {

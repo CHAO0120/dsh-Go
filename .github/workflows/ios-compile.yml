@@ -173,6 +173,12 @@ jobs:
           node="$(ls -d "$DSH_IOS_ENGINE_WORK"/node-v*-darwin-arm64/bin/node)"
           "$node" tooling/ios/engine-smoke/app-check.mjs --simulator "$DSH_SIMULATOR"             --app app/build/ios/iphonesimulator/Runner.app --mode launch --shot "$RUNNER_TEMP/launch.png"
 
+      - name: Drive other apps with the phone runner
+        if: ${{ !cancelled() && steps.prepare.outcome == 'success' }}
+        run: |
+          node="$(ls -d "$DSH_IOS_ENGINE_WORK"/node-v*-darwin-arm64/bin/node)"
+          "$node" tooling/ios/engine-smoke/phone-runner-check.mjs --simulator "$DSH_SIMULATOR" --work "$RUNNER_TEMP/phone-runner"
+
       - name: Keep the launch screenshot
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2

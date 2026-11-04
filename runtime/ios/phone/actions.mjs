@@ -17,7 +17,8 @@ const number = value => {
 export function actionFor(name, args) {
   switch (name) {
     case 'open': {
-      if (args.app !== undefined || args.background === true) throw unsupported('iOS 只能在前台打开网址，不提供枚举应用、按包名打开或后台屏。');
+      if (args.background === true) throw unsupported('iOS 没有后台屏。');
+      if (args.app !== undefined) return runner('open', { app: text(args.app, 'app', 256) });
       const value = text(args.url, 'url', 2048);
       let url;
       try { url = new URL(value); } catch { throw invalid('url 不是有效网址。'); }
@@ -61,6 +62,18 @@ export function actionFor(name, args) {
         default: throw unsupported('iOS 此实现不提供系统闹钟或计时器；可使用 calendar 打开由用户保存的日程编辑器。');
       }
     }
-    default: throw unsupported('iOS 公开 API 不允许此实现跨 App 读屏、截图、点击、输入、滚动或系统按键，也不能枚举已安装应用。请说明限制并让用户手动完成；handoff 不会提供或代替操作批准。');
+    case 'handoff': return { kind: 'runner-handoff', text: text(args.reason, 'reason', 1024) };
+    case 'apps': case 'screen': case 'collect': case 'tap': case 'type': case 'scroll': case 'key': case 'tap_xy':
+      if (args.background === true) throw unsupported('iOS 没有后台屏。');
+      return runner(name, args);
+    default: throw unsupported(`iOS 没有 ${name} 这个工具。`);
   }
+}
+
+// Driving other apps goes through the phone runner (app/ios/PhoneRunner), which checks these
+// again: a password field, say, is refused there, where the screen can be seen.
+function runner(method, args) {
+  const params = JSON.stringify(args);
+  if (Buffer.byteLength(params) > 16384) throw invalid('参数太长。');
+  return { kind: 'runner-call', method, params };
 }

@@ -26,6 +26,9 @@ struct IOSPhoneRequest: Decodable {
     let key: String?
     let direction: String?
     let maxBytes: Int?
+    // The phone runner's tools.
+    let method: String?
+    let params: String?
   }
   let v: Int
   let runId: String
@@ -47,9 +50,12 @@ struct IOSPhoneOutcome {
 final class IOSPhoneApproval: UIViewController {
   private let heading: String
   private let detail: String
+  private let allowTitle: String
+  private let denyTitle: String
   private let answer: (Bool) -> Void
-  init(heading: String = "允许这一次手机动作？", detail: String, answer: @escaping (Bool) -> Void) {
-    self.heading = heading; self.detail = detail; self.answer = answer
+  init(heading: String = "允许这一次手机动作？", detail: String, allow: String = "允许一次", deny: String = "拒绝",
+       answer: @escaping (Bool) -> Void) {
+    self.heading = heading; self.detail = detail; self.allowTitle = allow; self.denyTitle = deny; self.answer = answer
     super.init(nibName: nil, bundle: nil)
     modalPresentationStyle = .pageSheet
     isModalInPresentation = true
@@ -67,10 +73,10 @@ final class IOSPhoneApproval: UIViewController {
     text.text = detail
     text.font = .preferredFont(forTextStyle: .body)
     let deny = UIButton(type: .system)
-    deny.setTitle("拒绝", for: .normal)
+    deny.setTitle(denyTitle, for: .normal)
     deny.addAction(UIAction { [weak self] _ in self?.answer(false) }, for: .touchUpInside)
     let allow = UIButton(type: .system)
-    allow.setTitle("允许一次", for: .normal)
+    allow.setTitle(allowTitle, for: .normal)
     allow.addAction(UIAction { [weak self] _ in self?.answer(true) }, for: .touchUpInside)
     let buttons = UIStackView(arrangedSubviews: [deny, allow])
     buttons.distribution = .fillEqually
@@ -153,15 +159,19 @@ final class IOSPhoneActions: NSObject, EKEventEditViewDelegate, MFMessageCompose
     return await perform(request.action, id: request.id, validate: validate)
   }
   /// The same real sheet, for a tool that decides what happens after the answer itself.
-  func confirm(_ request: IOSPhoneRequest, title: String, detail: String) async -> Bool {
+  func confirm(
+    _ request: IOSPhoneRequest, title: String, detail: String, allow: String = "允许一次", deny: String = "拒绝",
+    waitsForever: Bool = false
+  ) async -> Bool {
     guard foreground else { return false }
     requestId = request.id
     defer { if requestId == request.id { requestId = nil } }
-    let controller = IOSPhoneApproval(heading: title, detail: detail) { [weak self] allowed in
+    let controller = IOSPhoneApproval(heading: title, detail: detail, allow: allow, deny: deny) { [weak self] allowed in
       guard let self, self.requestId == request.id else { return }
       self.finish(allowed ? .success("allowed-once") : .failure("declined"))
     }
     let expiry = Task { [weak self] in
+      if waitsForever { return }
       try? await Task.sleep(nanoseconds: 30_000_000_000)
       guard !Task.isCancelled, let self, self.requestId == request.id, self.modal === controller else { return }
       self.finish(.failure("timed-out"))

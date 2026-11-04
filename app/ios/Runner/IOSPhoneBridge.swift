@@ -13,6 +13,7 @@ final class IOSPhoneBridge: NSObject, URLSessionTaskDelegate {
   private let nativeClear: Clear
   private let actions: IOSPhoneActions
   private let browser: IOSBrowser
+  private let runner: IOSPhoneRunner
   private let runtimeCurrent: () -> Bool
   private var directory: URL?
   private var runId: String?
@@ -40,6 +41,7 @@ final class IOSPhoneBridge: NSObject, URLSessionTaskDelegate {
     nativeClear = unsafeBitCast(clear, to: Clear.self)
     self.actions = IOSPhoneActions(presenter: presenter)
     self.browser = IOSBrowser(actions: actions, presenter: presenter)
+    self.runner = IOSPhoneRunner(actions: actions)
     self.runtimeCurrent = runtimeCurrent
     super.init()
   }
@@ -85,6 +87,7 @@ final class IOSPhoneBridge: NSObject, URLSessionTaskDelegate {
     poller?.cancel(); poller = nil
     session?.invalidateAndCancel(); session = nil
     browser.retire()
+    runner.retire()
     if let active { actions.cancel(active.id) }
     operation?.cancel(); operation = nil
     if let runId { nativeClear(runId) }
@@ -152,9 +155,10 @@ final class IOSPhoneBridge: NSObject, URLSessionTaskDelegate {
       active = request
       operation = Task { [weak self] in
         guard let self else { return }
-        if request.action.kind.hasPrefix("browser-") {
+        let kind = request.action.kind
+        if kind.hasPrefix("browser-") || kind.hasPrefix("runner-") {
           _ = try? await self.post("begin", ["id": request.id])
-          let result = await self.browser.run(request)
+          let result = kind.hasPrefix("browser-") ? await self.browser.run(request) : await self.runner.run(request)
           guard self.current(request) else { return }
           var values: [String: Any] = ["id": request.id, "text": result.text, "isError": result.isError]
           if let image = result.image { values["image"] = image.base64EncodedString() }
