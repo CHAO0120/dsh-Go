@@ -18,6 +18,7 @@ const baseFiles = {
   'runtime/ohos/process/index.mjs': 'export const process = true;',
   'runtime/ohos/process/sandbox.mjs': 'export const sandbox = true;',
   'runtime/ohos/lifecycle/index.mjs': 'export const lifecycle = true;',
+  'runtime/ohos/phone/index.mjs': 'export const phone = true;',
   'runtime/ohos/capabilities/index.mjs': 'export const capabilities = true;',
   'runtime/bridge/dsh-go-bridge/lib/index.js': 'export function apply() {}',
   'runtime/ohos/process/child-process.mjs': 'export const childProcess = true;',
@@ -237,3 +238,92 @@ test('a staging close rejection retains explicit ownership and a new storage ins
     if(failed!==null&&observation.fd.has(failed.fd))await originalClose(failed);
   }
 });
+
+
+for (const kind of ['metadata', 'payload']) {
+  test(`actual installer ${kind} staging hardlink preserves the other inode name`, async () => {
+    const c = await scenario('hardlink-' + kind);
+    const member = c.manifest.files.find(file => file.path === 'runtime/ohos/preload.mjs');
+    const staging = kind === 'metadata' ? c.installer.base + '/installing.json.tmp'
+      : c.installer.base + '/staging/' + member.sha256 + '.tmp';
+    const victim = path.join(c.directory, 'outside-runtime-sentinel');
+    await fs.mkdir(path.dirname(staging), { recursive:true });
+    await fs.writeFile(victim, 'unchanged user bytes'); await fs.link(victim, staging);
+    assert.equal((await fs.stat(staging)).ino, (await fs.stat(victim)).ino);
+    await install(c);
+    assert.equal((await c.installer.installed()).runtimeVersion, 'v1');
+    for (const [name, bytes] of Object.entries(baseFiles))
+      assert.deepEqual(await fs.readFile(c.installer.root + '/' + name), Buffer.from(bytes));
+    assert.equal(await fs.readFile(victim, 'utf8'), 'unchanged user bytes');
+    assert.equal((await fs.stat(victim)).size, Buffer.byteLength('unchanged user bytes'));
+  });
+}
+
+
+async function hardlinkStage(name, kind) {
+  const c = await scenario(name);
+  const member = c.manifest.files.find(file => file.path === 'runtime/ohos/preload.mjs');
+  c.staging = kind === 'metadata' ? c.installer.base + '/installing.json.tmp'
+    : c.installer.base + '/staging/' + member.sha256 + '.tmp';
+  c.target = kind === 'metadata' ? c.installer.base + '/installing.json'
+    : c.installer.root + '/runtime/ohos/preload.mjs';
+  c.previous = kind === 'metadata' ? JSON.stringify({schema:1, ownedPaths:[], stagingHashes:[]}) : 'old target';
+  c.victim = path.join(c.directory, 'victim');
+  await fs.mkdir(path.dirname(c.staging), {recursive:true});
+  await fs.mkdir(path.dirname(c.target), {recursive:true});
+  await fs.writeFile(c.victim, 'outside data'); await fs.link(c.victim, c.staging);
+  await fs.writeFile(c.target, c.previous);
+  return c;
+}
+
+for (const kind of ['metadata', 'payload']) {
+  for (const errorCode of [13900005, 13900018]) {
+    test(`${kind} staging unlink error ${errorCode} preserves both files and permits explicit retry`, async () => {
+      const c = await hardlinkStage(`unlink-${kind}-${errorCode}`, kind), originalUnlink = fileIo.unlink;
+      fileIo.unlink = async name => {
+        if (name === c.staging) throw Object.assign(new Error('injected unlink failure'), {code:errorCode});
+        return originalUnlink(name);
+      };
+      try { await assert.rejects(install(c), {code:errorCode}); }
+      finally { fileIo.unlink = originalUnlink; }
+      assert.equal(await fs.readFile(c.victim, 'utf8'), 'outside data');
+      assert.equal(await fs.readFile(c.staging, 'utf8'), 'outside data');
+      assert.equal(await fs.readFile(c.target, 'utf8'), c.previous);
+      await install(c); assert.equal((await c.installer.installed()).runtimeVersion, 'v1');
+      assert.equal(await fs.readFile(c.victim, 'utf8'), 'outside data');
+    });
+  }
+  for (const entryKind of ['directory', 'symlink', 'danglingSymlink']) {
+    test(`${kind} staging ${entryKind} is rejected without touching its contents or target`, async () => {
+      const c = await hardlinkStage(`wrong-type-${kind}-${entryKind}`, kind);
+      await fs.unlink(c.staging);
+      if (entryKind === 'directory') {
+        await fs.mkdir(c.staging); await fs.writeFile(path.join(c.staging, 'keep'), 'child');
+      } else await fs.symlink(entryKind === 'danglingSymlink' ? c.victim + '.missing' : c.victim, c.staging);
+      if (entryKind === 'danglingSymlink') await assert.rejects(install(c));
+      else await assert.rejects(install(c), {code:'ohos_path_link'});
+      assert.equal(await fs.readFile(c.victim, 'utf8'), 'outside data');
+      assert.equal(await fs.readFile(c.target, 'utf8'), c.previous);
+      if (entryKind === 'directory') assert.equal(await fs.readFile(path.join(c.staging, 'keep'), 'utf8'), 'child');
+      else assert((await fs.lstat(c.staging)).isSymbolicLink());
+    });
+  }
+  test(`${kind} staging unlink fsync failure stops before replacement and retry succeeds`, async () => {
+    const c = await hardlinkStage('unlink-fsync-' + kind, kind);
+    const originalUnlink = fileIo.unlink, originalSync = fileIo.fsync;
+    let removed = false, failed = false;
+    fileIo.unlink = async name => { await originalUnlink(name); if (name === c.staging) removed = true; };
+    fileIo.fsync = async fd => {
+      if (removed && !failed) { failed = true; throw new Error('injected unlink parent fsync failure'); }
+      return originalSync(fd);
+    };
+    try { await assert.rejects(install(c), /unlink parent fsync failure/); }
+    finally { fileIo.unlink = originalUnlink; fileIo.fsync = originalSync; }
+    assert.equal(failed, true);
+    await assert.rejects(fs.access(c.staging), {code:'ENOENT'});
+    assert.equal(await fs.readFile(c.victim, 'utf8'), 'outside data');
+    assert.equal(await fs.readFile(c.target, 'utf8'), c.previous);
+    await install(c); assert.equal((await c.installer.installed()).runtimeVersion, 'v1');
+    assert.equal(await fs.readFile(c.victim, 'utf8'), 'outside data');
+  });
+}

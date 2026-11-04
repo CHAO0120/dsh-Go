@@ -119,6 +119,7 @@ export class OhosRuntimeStorage implements RuntimeStorage {
     await OhosRuntimeStorage.closeRetiredFiles();
     await this.checkParents(path);
     const temp = path + '.tmp';
+    await this.removeFile(temp);
     const file = await fs.open(temp, fs.OpenMode.CREATE | fs.OpenMode.READ_WRITE | fs.OpenMode.TRUNC | fs.OpenMode.NOFOLLOW);
     try {
       const bytes = content.length === 0 ? new Uint8Array(0) : new util.TextEncoder().encodeInto(content);
@@ -153,6 +154,7 @@ export class OhosRuntimeStorage implements RuntimeStorage {
     }
     await OhosRuntimeStorage.closeRetiredFiles();
     await this.checkParents(target);
+    await this.removeFile(target);
     const output = await fs.open(target, fs.OpenMode.CREATE | fs.OpenMode.READ_WRITE | fs.OpenMode.TRUNC | fs.OpenMode.NOFOLLOW);
     try {
       let offset = 0;
