@@ -13,6 +13,7 @@ import NativeFilesPlugin from '../plugins/NativeFilesPlugin';
 import NativeMediaPlugin from '../plugins/NativeMediaPlugin';
 import PerformancePlugin from '../plugins/PerformancePlugin';
 import DiagnosticsPlugin from '../plugins/DiagnosticsPlugin';
+import UsagePlugin from '../plugins/UsagePlugin';
 import { loadNativeHost } from '../runtime/NativeHost';
 import WebFilesPlugin from '../plugins/WebFilesPlugin';
 import HmsSharePlugin from '../plugins/HmsSharePlugin';
@@ -77,6 +78,7 @@ export default class EntryAbility extends FlutterAbility {
     }))
     flutterEngine.getPlugins()?.add(new PerformancePlugin())
     flutterEngine.getPlugins()?.add(new DiagnosticsPlugin())
+    flutterEngine.getPlugins()?.add(new UsagePlugin())
     flutterEngine.getPlugins()?.add(new HmsSharePlugin())
     flutterEngine.getPlugins()?.add(new VoicePlugin())
     flutterEngine.getPlugins()?.add(new ShortcutsPlugin())
