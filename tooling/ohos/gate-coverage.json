@@ -10,6 +10,7 @@
       "runtime/tests/ohos/process-cancel-before-start.test.mjs",
       "runtime/tests/ohos/process-combined.test.mjs",
       "runtime/tests/ohos/process-control-flow.test.mjs",
+      "runtime/tests/ohos/process-date-timezone.test.mjs",
       "runtime/tests/ohos/process-diagnostics.test.mjs",
       "runtime/tests/ohos/process-independent-open.test.mjs",
       "runtime/tests/ohos/process-integration.test.mjs",

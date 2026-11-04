@@ -446,6 +446,11 @@ function ohosReadCharEnd(s,count){let end=0,characters=0;while(end<s.length&&cha
            'async readlink(t){let{fs:n,relativePath:r}=this.routePath(t);return n.readlink(r)}',
            'async readlink(t){let{fs:n,relativePath:r}=this.routePath(t),ohosTarget=await n.readlink(r);if(ohosTarget.startsWith("/")){let ohosPath=W(t);for(let ohosMount of this.mounts.keys())if(ohosPath===ohosMount||ohosPath.startsWith(`${ohosMount}/`))return ohosTarget==="/"?ohosMount:`${ohosMount}${ohosTarget}`}return ohosTarget}')
 
+    # -u selects UTC for a naive -d input as well as its formatted output.
+    # Explicit offsets and epochs retain their existing absolute-time path.
+    change('chunks/chunk-5ATEFZLC.js', 'p=t!==null?b(t,l):new Date',
+           'p=t!==null?b(t,i?"UTC":l):new Date')
+
     notice = ('/* Modified for dsh-go OHOS: permission diagnostics, typed output and statement delivery.\n'
               ' * Derived from just-bash 3.6.0; Apache-2.0. See LICENSE and PROVENANCE.json. */\n')
     return {name: (notice + text).encode('utf-8') for name, text in texts.items()}
