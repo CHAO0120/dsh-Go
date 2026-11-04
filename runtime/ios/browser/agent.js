@@ -321,7 +321,11 @@
     const record = records.get(request.target);
     if (!record) return error('TARGET_UNAVAILABLE');
     const el = record.el;
-    if (!el.isConnected || el.ownerDocument !== record.document || !rendered(el)) return error('TARGET_UNAVAILABLE');
+    if (!el.isConnected || el.ownerDocument !== record.document) return error('TARGET_UNAVAILABLE');
+    // The top-level viewport can scroll even when an all-absolute page's root box is empty.
+    const visible = record.specialRole === 'document' && record.document === document
+      ? el === document.scrollingElement && !hidden(el) : rendered(el);
+    if (!visible) return error('TARGET_UNAVAILABLE');
     if (fingerprint(el, isRegion(record.specialRole)) !== record.fingerprint) return error('TARGET_CHANGED');
     if (sensitive(el)) return error('SENSITIVE_TARGET');
     if (state(el).disabled) return error('TARGET_DISABLED');
