@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:math';
 
 import 'package:dsh_client/dsh_client.dart';
@@ -6,6 +7,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../l10n/l10n.dart';
 import '../usage/usage_stats.dart';
+import 'android_features.dart' show operatingSystemProvider;
 import 'attachments.dart';
 import 'chat_error_text.dart';
 import 'connection_state.dart';
@@ -466,8 +468,9 @@ class ChatController extends Notifier<ChatState> {
   final _commands = CommandLog();
   var _localCommands = 0;
 
-  /// A send whose outcome is unknown (the connection dropped mid-call):
-  /// sending the same content again reuses its request id, which DSH dedups.
+  /// A send whose outcome is unknown (the connection dropped mid-call).
+  /// Retrying its draft reuses the request id, which DSH dedups; on iOS a
+  /// replacement attachment is a new submission even with the same name.
   ({String content, String requestId})? _unsettled;
 
   /// Device minus Host clock; null until a live event was seen (and always
@@ -1339,9 +1342,15 @@ class ChatController extends Notifier<ChatState> {
     if (ref.mounted) ref.read(usageStatsProvider.notifier).count(UsageCount.turns);
   }
 
-  /// What a send is matched on when it is tried again ([_unsettled]).
-  static String _contentKey(String text, List<DraftAttachment> attachments) =>
-      [text, for (final a in attachments) a.name].join('\n');
+  /// What a send is matched on when it is tried again ([_unsettled]). An iOS
+  /// replacement pick is a new submission even when its display name is the
+  /// same. Retrying the existing tray keeps those attachments' stable IDs.
+  String _contentKey(String text, List<DraftAttachment> attachments) {
+    if (ref.read(operatingSystemProvider) == 'ios') {
+      return jsonEncode([text, for (final a in attachments) [a.id, a.name, a.mediaType]]);
+    }
+    return [text, for (final a in attachments) a.name].join('\n');
+  }
 
   /// Stages the files among [attachments] (`DshClient.uploadFile` prefers the
   /// Host's raw-byte route and falls back to `fileUploads/upload`); images go
