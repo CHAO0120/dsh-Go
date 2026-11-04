@@ -821,6 +821,7 @@ final class EngineChannel: NSObject, FlutterStreamHandler {
       startPolling()
       startPhone()
     } catch {
+      retirePhone()
       lastError = (error as? EngineFailure)?.message ?? "本机引擎启动失败。"
       throw error
     }
