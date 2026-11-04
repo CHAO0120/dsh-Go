@@ -348,6 +348,13 @@ final class RuntimeInstaller {
       hasher.update(data: chunk)
     }
     guard size == file.size else { return false }
-    return hasher.finalize().map { String(format: "%02x", $0) }.joined() == file.sha256
+    let hex = Array("0123456789abcdef".utf8)
+    var text: [UInt8] = []
+    text.reserveCapacity(64)
+    for byte in hasher.finalize() {
+      text.append(hex[Int(byte >> 4)])
+      text.append(hex[Int(byte & 15)])
+    }
+    return String(decoding: text, as: UTF8.self) == file.sha256
   }
 }
