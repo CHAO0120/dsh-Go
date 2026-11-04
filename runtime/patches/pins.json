@@ -430,7 +430,7 @@
       "0.2.1-rc.4": {
         "node_modules/@deepseek-ai/dsh-subprocess-local/lib/output.js": {
           "before": "4f77ef6da608d36df168c99177e9b527e7145df1418845eba567635e64a4c2a3",
-          "after": "3be3d0fe5376087a57af7f881cf889bc6cedc2f821f5e6b08324d82414cb8445"
+          "after": "df888a57989c91c17915b7c42f1e5b64e704a69895fb86dbf283ba11c23229a7"
         }
       }
     },

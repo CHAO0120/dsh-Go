@@ -34,7 +34,17 @@
  	/** Total bytes ever pushed (not just retained). */
  	total = 0;
  	/**
-@@ -189,9 +209,13 @@
+@@ -126,7 +146,8 @@
+ 				this.chunks.shift();
+ 				this.bytes -= head.length;
+ 			} else {
+-				this.chunks[0] = head.subarray(excess);
++				const tail = head.subarray(excess);
++				this.chunks[0] = head.buffer.byteLength > Math.max(this.maxBytes, Buffer.poolSize) ? Buffer.from(tail) : tail;
+ 				this.bytes -= excess;
+ 			}
+ 			this.dropped = true;
+@@ -189,9 +210,13 @@
  		const windowStart = this.total - this.bytes;
  		const buffer = Buffer.concat(this.chunks);
  		const lossy = fromByte < windowStart;
@@ -50,7 +60,7 @@
  			lossy,
  			...this.spillFile !== void 0 ? { spillPath: this.spillFile } : {}
  		};
-@@ -214,6 +238,7 @@
+@@ -214,6 +239,7 @@
  	* never point at a still-open file.
  	*/
  	seal() {
