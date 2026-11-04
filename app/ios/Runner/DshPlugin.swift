@@ -224,17 +224,22 @@ private final class ShortcutsChannel {
       default: result(FlutterMethodNotImplemented)
       }
     }
+    SystemEntries.attach { [weak self] in self?.send($0) }
   }
 
   /// False for an item that isn't the app's.
   func perform(_ item: UIApplicationShortcutItem) -> Bool {
     guard let entry = Self.entry(item) else { return false }
+    send(entry)
+    return true
+  }
+
+  private func send(_ entry: [String: String]) {
     if ready {
       channel.invokeMethod("entry", arguments: entry)
     } else {
       held.append(entry)
     }
-    return true
   }
 
   private static func entry(_ item: UIApplicationShortcutItem) -> [String: String]? {

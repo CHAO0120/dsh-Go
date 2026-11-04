@@ -13,6 +13,7 @@
 		74858FAF1ED2DC5600515810 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 74858FAE1ED2DC5600515810 /* AppDelegate.swift */; };
 		D5480000000000000000A001 /* DshPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5480000000000000000A002 /* DshPlugin.swift */; };
 		D5480000000000000000A003 /* VoiceChannel.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5480000000000000000A004 /* VoiceChannel.swift */; };
+		D5480000000000000000C051 /* SiriIntents.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5480000000000000000C050 /* SiriIntents.swift */; };
 		D5480000000000000000C041 /* IOSPhoneActions.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5480000000000000000C040 /* IOSPhoneActions.swift */; };
 		D5480000000000000000C043 /* IOSPhoneBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5480000000000000000C042 /* IOSPhoneBridge.swift */; };
 		D5480000000000000000C021 /* PerformanceChannel.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5480000000000000000C020 /* PerformanceChannel.swift */; };
@@ -26,6 +27,8 @@
 		D5480000000000000000C013 /* EngineRuntime.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5480000000000000000C012 /* EngineRuntime.swift */; };
 		D5480000000000000000C015 /* EngineSkills.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5480000000000000000C014 /* EngineSkills.swift */; };
 		D5480000000000000000A005 /* InfoPlist.strings in Resources */ = {isa = PBXBuildFile; fileRef = D5480000000000000000A006 /* InfoPlist.strings */; };
+		D5480000000000000000D001 /* AppShortcuts.strings in Resources */ = {isa = PBXBuildFile; fileRef = D5480000000000000000D002 /* AppShortcuts.strings */; };
+		D5480000000000000000D004 /* Localizable.strings in Resources */ = {isa = PBXBuildFile; fileRef = D5480000000000000000D005 /* Localizable.strings */; };
 		7884E8682EC3CC0700C636F2 /* SceneDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7884E8672EC3CC0400C636F2 /* SceneDelegate.swift */; };
 		78A318202AECB46A00862997 /* FlutterGeneratedPluginSwiftPackage in Frameworks */ = {isa = PBXBuildFile; productRef = 78A3181F2AECB46A00862997 /* FlutterGeneratedPluginSwiftPackage */; };
 		97C146FC1CF9000F007C117D /* Main.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 97C146FA1CF9000F007C117D /* Main.storyboard */; };
@@ -89,6 +92,7 @@
 		74858FAE1ED2DC5600515810 /* AppDelegate.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
 		D5480000000000000000A002 /* DshPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DshPlugin.swift; sourceTree = "<group>"; };
 		D5480000000000000000A004 /* VoiceChannel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceChannel.swift; sourceTree = "<group>"; };
+		D5480000000000000000C050 /* SiriIntents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SiriIntents.swift; sourceTree = "<group>"; };
 		D5480000000000000000C040 /* IOSPhoneActions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IOSPhoneActions.swift; sourceTree = "<group>"; };
 		D5480000000000000000C042 /* IOSPhoneBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IOSPhoneBridge.swift; sourceTree = "<group>"; };
 		D5480000000000000000C020 /* PerformanceChannel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PerformanceChannel.swift; sourceTree = "<group>"; };
@@ -102,6 +106,8 @@
 		D5480000000000000000C012 /* EngineRuntime.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EngineRuntime.swift; sourceTree = "<group>"; };
 		D5480000000000000000C014 /* EngineSkills.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EngineSkills.swift; sourceTree = "<group>"; };
 		D5480000000000000000A007 /* zh-Hans */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = "zh-Hans"; path = "zh-Hans.lproj/InfoPlist.strings"; sourceTree = "<group>"; };
+		D5480000000000000000D003 /* zh-Hans */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = "zh-Hans"; path = "zh-Hans.lproj/AppShortcuts.strings"; sourceTree = "<group>"; };
+		D5480000000000000000D006 /* zh-Hans */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = "zh-Hans"; path = "zh-Hans.lproj/Localizable.strings"; sourceTree = "<group>"; };
 		7884E8672EC3CC0400C636F2 /* SceneDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SceneDelegate.swift; sourceTree = "<group>"; };
 		78E0A7A72DC9AD7400C4905E /* FlutterGeneratedPluginSwiftPackage */ = {isa = PBXFileReference; lastKnownFileType = wrapper; name = FlutterGeneratedPluginSwiftPackage; path = Flutter/ephemeral/Packages/FlutterGeneratedPluginSwiftPackage; sourceTree = "<group>"; };
 		7AFA3C8E1D35360C0083082E /* Release.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; name = Release.xcconfig; path = Flutter/Release.xcconfig; sourceTree = "<group>"; };
@@ -189,11 +195,14 @@
 				97C146FF1CF9000F007C117D /* LaunchScreen.storyboard */,
 				97C147021CF9000F007C117D /* Info.plist */,
 				D5480000000000000000A006 /* InfoPlist.strings */,
+				D5480000000000000000D002 /* AppShortcuts.strings */,
+				D5480000000000000000D005 /* Localizable.strings */,
 				1498D2321E8E86230040F4C2 /* GeneratedPluginRegistrant.h */,
 				1498D2331E8E89220040F4C2 /* GeneratedPluginRegistrant.m */,
 				74858FAE1ED2DC5600515810 /* AppDelegate.swift */,
 				D5480000000000000000A002 /* DshPlugin.swift */,
 				D5480000000000000000A004 /* VoiceChannel.swift */,
+				D5480000000000000000C050 /* SiriIntents.swift */,
 				D5480000000000000000C040 /* IOSPhoneActions.swift */,
 				D5480000000000000000C042 /* IOSPhoneBridge.swift */,
 				D5480000000000000000C020 /* PerformanceChannel.swift */,
@@ -349,6 +358,8 @@
 				97C146FE1CF9000F007C117D /* Assets.xcassets in Resources */,
 				97C146FC1CF9000F007C117D /* Main.storyboard in Resources */,
 				D5480000000000000000A005 /* InfoPlist.strings in Resources */,
+				D5480000000000000000D001 /* AppShortcuts.strings in Resources */,
+				D5480000000000000000D004 /* Localizable.strings in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -426,6 +437,7 @@
 				74858FAF1ED2DC5600515810 /* AppDelegate.swift in Sources */,
 				D5480000000000000000A001 /* DshPlugin.swift in Sources */,
 				D5480000000000000000A003 /* VoiceChannel.swift in Sources */,
+				D5480000000000000000C051 /* SiriIntents.swift in Sources */,
 				D5480000000000000000C041 /* IOSPhoneActions.swift in Sources */,
 				D5480000000000000000C043 /* IOSPhoneBridge.swift in Sources */,
 				D5480000000000000000C021 /* PerformanceChannel.swift in Sources */,
@@ -492,6 +504,22 @@
 				D5480000000000000000A007 /* zh-Hans */,
 			);
 			name = InfoPlist.strings;
+			sourceTree = "<group>";
+		};
+		D5480000000000000000D002 /* AppShortcuts.strings */ = {
+			isa = PBXVariantGroup;
+			children = (
+				D5480000000000000000D003 /* zh-Hans */,
+			);
+			name = AppShortcuts.strings;
+			sourceTree = "<group>";
+		};
+		D5480000000000000000D005 /* Localizable.strings */ = {
+			isa = PBXVariantGroup;
+			children = (
+				D5480000000000000000D006 /* zh-Hans */,
+			);
+			name = Localizable.strings;
 			sourceTree = "<group>";
 		};
 /* End PBXVariantGroup section */
