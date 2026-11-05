@@ -30,6 +30,7 @@ import 'package:flutter/services.dart';
 
 import 'custom_launch.dart';
 import 'launch_media.dart';
+import 'startup_trace.dart';
 
 /// What the launch window shows, as `begin` reports it.
 class LaunchSnapshot {
@@ -265,6 +266,16 @@ class LaunchController extends ChangeNotifier {
   /// motion starts).
   bool get systemIcon => _systemIcon;
 
+  static bool _gaveUp = false;
+
+  /// main(): [begin] took too long and the app has gone on without it. An answer that still comes
+  /// is ignored: the launch screen would lie over a page that has already said it's ready, and
+  /// nothing would ever take it away.
+  static void giveUp() => _gaveUp = true;
+
+  @visibleForTesting
+  static void resetGaveUp() => _gaveUp = false;
+
   /// main(): asks the native side what the launch window shows. Null when there's no launch
   /// screen this time (no native side, a warm start).
   static Future<LaunchController?> begin({LaunchChannel channel = const LaunchChannel(), Size? screen}) async {
@@ -273,6 +284,10 @@ class LaunchController extends ChangeNotifier {
       if (snapshot == null) return null;
       final stored = await CustomLaunch.load();
       final custom = stored != null && stored.on ? stored : null;
+      if (_gaveUp) {
+        snapshot.icon?.dispose();
+        return null;
+      }
       final controller = LaunchController(snapshot: snapshot, custom: custom, channel: channel);
       channel.listen(controller.handOver);
       if (custom != null) unawaited(controller.openMedia(screen ?? _screen()));
@@ -438,6 +453,8 @@ class LaunchController extends ChangeNotifier {
     if (native) {
       channel.stopListening();
       unawaited(channel.done());
+      // Tapped away before the first page: RootGate says so when that comes.
+      if (_ready) StartupTrace.finished();
     }
     if (identical(active.value, this)) active.value = null;
     notifyListeners();

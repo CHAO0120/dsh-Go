@@ -1,5 +1,4 @@
-import 'dart:ui';
-
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -21,11 +20,13 @@ Future<void> _startApp() async {
   if (!frameProbeEnabled) SteadyFrameBinding();
   WidgetsFlutterBinding.ensureInitialized();
   appErrorCapture.install();
+  appErrorLog.onRecord = (record) => StartupTrace.error(record.message);
+  StartupTrace.mark('main, ${kReleaseMode ? 'release' : (kProfileMode ? 'profile' : 'debug')}');
   // The first frame is already in the chosen language (设置 → 语言), and is the launch
   // window's own picture (启动画面, lib/launch/launch_state.dart).
   await Future.wait([
     StartupTrace.step('language', AppLanguageController.load),
-    StartupTrace.step('launch screen', LaunchController.begin),
+    StartupTrace.step('launch screen', LaunchController.begin, onLate: LaunchController.giveUp),
     StartupTrace.step('paths', LocalPaths.load),
   ]);
   // MIT / OFL notices must ship with the APK, not just the sources.
@@ -37,8 +38,5 @@ Future<void> _startApp() async {
   SystemChrome.setSystemUIOverlayStyle(dshSystemOverlay(PlatformDispatcher.instance.platformBrightness));
   StartupTrace.mark('runApp');
   runApp(const ProviderScope(child: DshApp()));
-  WidgetsBinding.instance.addPostFrameCallback((_) {
-    StartupTrace.mark('first frame');
-    if (LaunchController.active.value == null) StartupTrace.finished();
-  });
+  WidgetsBinding.instance.addPostFrameCallback((_) => StartupTrace.mark('first frame'));
 }

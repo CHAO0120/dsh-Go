@@ -39,6 +39,9 @@ class AppErrorLog {
   final Queue<AppErrorRecord> _records = Queue();
   bool _recording = false;
 
+  /// Each record as it's kept.
+  void Function(AppErrorRecord record)? onRecord;
+
   List<AppErrorRecord> snapshot() => List.unmodifiable(_records);
 
   void record(AppErrorSource source, Object error, StackTrace stack) {
@@ -55,6 +58,7 @@ class AppErrorLog {
       );
       if (_records.length == maxRecords) _records.removeFirst();
       _records.addLast(record);
+      onRecord?.call(record);
     } catch (_) {
       // Diagnostics must not replace the error being reported with its own.
     } finally {

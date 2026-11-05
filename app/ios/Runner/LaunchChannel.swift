@@ -35,10 +35,11 @@ final class LaunchChannel {
       case "begin", "snapshot": result(Self.describe())
       case "reveal": result(false)
       case "mark":
-        StartupWatch.shared.mark("launch screen: \(call.arguments.map { "\($0)" } ?? "")")
+        let name = (call.arguments as? [String: Any])?["name"] as? String ?? ""
+        StartupWatch.shared.mark("launch screen: \(name)")
         result(nil)
       case "done":
-        StartupWatch.shared.finished()
+        StartupWatch.shared.mark("launch screen: gone")
         result(nil)
       default: result(FlutterMethodNotImplemented)
       }
@@ -395,6 +396,7 @@ final class StartupWatch {
   private static let noFrameAfter: TimeInterval = 6
   private static let stillUpAfter: TimeInterval = 15
 
+  private let born = Date()
   private var stages: [String] = []
   private var isFinished = false
   private var armedAt: Date?
@@ -402,7 +404,7 @@ final class StartupWatch {
 
   func mark(_ stage: String) {
     NSLog("[dsh-startup] %@", stage)
-    stages.append(stage)
+    stages.append(String(format: "%5.1fs %@", Date().timeIntervalSince(born), stage))
     if let note { note.text = report(note.window) }
   }
 
@@ -460,6 +462,11 @@ final class StartupWatch {
       guard let url = frameworks?.appendingPathComponent(path) else { return "?" }
       return FileManager.default.fileExists(atPath: url.path) ? "yes" : "NO"
     }
+    let embedded = frameworks
+      .flatMap { try? FileManager.default.contentsOfDirectory(atPath: $0.path) }?
+      .map { $0.replacingOccurrences(of: ".framework", with: "") }
+      .sorted()
+      .joined(separator: " ")
     let root = window?.rootViewController
     let flutter = root as? FlutterViewController
     let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?"
@@ -468,10 +475,10 @@ final class StartupWatch {
       "DSH Go is stuck starting. Please send a photo of this.",
       "\(version) (\(build))  iOS \(UIDevice.current.systemVersion)",
       "root \(root.map { "\(type(of: $0))" } ?? "none")  drawing \(flutter?.isDisplayingFlutterUI == true)",
-      "App.framework \(has("App.framework/App"))  assets \(has("App.framework/flutter_assets"))",
-      "Flutter \(has("Flutter.framework/Flutter"))  engine \(has("DshNodeHost.framework"))",
+      "App binary \(has("App.framework/App"))  assets \(has("App.framework/flutter_assets"))",
+      "frameworks: \(embedded ?? "?")",
       "stages:",
-      stages.isEmpty ? "  (Dart has said nothing)" : stages.suffix(16).map { "  \($0)" }.joined(separator: "\n"),
+      stages.isEmpty ? "  (Dart has said nothing)" : stages.suffix(20).joined(separator: "\n"),
     ].joined(separator: "\n")
   }
 }

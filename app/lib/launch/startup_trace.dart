@@ -17,20 +17,34 @@ abstract final class StartupTrace {
 
   static bool get _on => !kIsWeb && defaultTargetPlatform == TargetPlatform.iOS;
 
+  static bool _over = false;
+  static String? _last;
+
   static void mark(String stage) {
-    if (!_on) return;
+    if (!_on || _over || stage == _last) return;
+    _last = stage;
     debugPrint('[dsh-startup] $stage');
     unawaited(_send('mark', stage));
   }
 
-  /// The launch screen isn't in the way any more, or there was none.
+  /// An error on the way there: its first line, already redacted (diagnostics/app_error_log.dart).
+  static void error(String message) {
+    final line = message.split('\n').first;
+    mark('error: ${line.length > 160 ? '${line.substring(0, 159)}…' : line}');
+  }
+
+  /// The first page is up and nothing lies over it any more. The watch has done its job, and
+  /// nothing is noted after this.
   static void finished() {
-    if (_on) unawaited(_send('finished', null));
+    if (!_on || _over) return;
+    _over = true;
+    unawaited(_send('finished', null));
   }
 
   /// One thing the first frame waits for. On iOS it can't stop the app from starting: a step that
-  /// hangs or throws is noted and the app goes on without it.
-  static Future<void> step(String name, Future<Object?> Function() run) async {
+  /// hangs or throws is noted and the app goes on without it, with [onLate] called when it hung,
+  /// since it may yet finish later (the app has moved on by then).
+  static Future<void> step(String name, Future<Object?> Function() run, {void Function()? onLate}) async {
     if (!_on) {
       await run();
       return;
@@ -40,10 +54,17 @@ abstract final class StartupTrace {
       await run().timeout(limit);
       mark('$name ok');
     } on TimeoutException {
+      onLate?.call();
       mark('$name timed out');
     } on Object catch (error) {
       mark('$name failed: $error');
     }
+  }
+
+  @visibleForTesting
+  static void reset() {
+    _over = false;
+    _last = null;
   }
 
   static Future<void> _send(String method, String? stage) async {

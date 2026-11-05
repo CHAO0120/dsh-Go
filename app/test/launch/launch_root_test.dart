@@ -4,12 +4,14 @@
 
 import 'package:dsh_app/app.dart';
 import 'package:dsh_app/launch/launch_state.dart';
+import 'package:dsh_app/launch/startup_trace.dart';
 import 'package:dsh_app/runtime/runtime_bridge.dart';
 import 'package:dsh_app/runtime/runtime_state.dart';
 import 'package:dsh_app/state/settings_state.dart';
 import 'package:dsh_app/ui/launch/launch_overlay.dart';
 import 'package:dsh_app/ui/shell/root_gate.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -69,6 +71,87 @@ void main() {
     // The engine was asked to start, and nobody waited for it.
     expect(runtime.starts, ['start']);
     await tester.pump(const Duration(seconds: 1));
+  });
+
+  group('the startup watch on iOS', () {
+    late List<String> said;
+    final ios = TargetPlatformVariant.only(TargetPlatform.iOS);
+
+    Widget gate(AppSettings settings) => goldenApp(
+      home: const RootGate(home: Scaffold(body: Text('home'))),
+      brightness: Brightness.light,
+      overrides: [
+        localRuntimeProvider.overrideWith(
+          () => RecordingRuntime(
+            const LocalRuntimeState(
+              loaded: true,
+              status: RuntimeStatus(phase: RuntimePhase.installed, bundledVersion: 'r1', installedVersion: 'r1'),
+            ),
+          ),
+        ),
+        settingsProvider.overrideWith(() => FakeSettings(settings)),
+      ],
+    );
+
+    setUp(() {
+      said = [];
+      StartupTrace.reset();
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockMethodCallHandler(
+        const MethodChannel('dsh/startup'),
+        (call) async {
+          said.add('${call.method}:${call.arguments}');
+          return null;
+        },
+      );
+    });
+
+    testWidgets('no launch screen: stands down when the first page is up', (tester) async {
+      usePhoneSurface(tester);
+      await tester.pumpWidget(gate(const AppSettings(loaded: true, apiKey: 'key')));
+      await tester.pump();
+      await tester.pump();
+      expect(said, containsAllInOrder(['mark:first page', 'finished:null']));
+      await tester.pump(const Duration(seconds: 1));
+    }, variant: ios);
+
+    testWidgets('says what the first page is waiting for, and stays', (tester) async {
+      usePhoneSurface(tester);
+      await tester.pumpWidget(gate(const AppSettings(apiKey: 'key')));
+      await tester.pump();
+      await tester.pump();
+      expect(said.any((s) => s.contains('waiting: settings false')), isTrue);
+      expect(said, isNot(contains('finished:null')));
+      await tester.pump(const Duration(seconds: 1));
+    }, variant: ios);
+
+    testWidgets('a launch screen over it: stays until that has gone', (tester) async {
+      usePhoneSurface(tester);
+      final c = LaunchController(snapshot: snapshotFor(), channel: FakeLaunchChannel());
+      LaunchController.active.value = c;
+      await tester.pumpWidget(gate(const AppSettings(loaded: true, apiKey: 'key')));
+      await tester.pump();
+      await tester.pump();
+      expect(said, contains('mark:first page'));
+      expect(said, isNot(contains('finished:null')));
+      c.gone();
+      await tester.pump();
+      expect(said, contains('finished:null'));
+      await tester.pump(const Duration(seconds: 1));
+    }, variant: ios);
+
+    testWidgets('tapped away before the first page: still watching until that comes', (tester) async {
+      usePhoneSurface(tester);
+      final c = LaunchController(snapshot: snapshotFor(), channel: FakeLaunchChannel());
+      LaunchController.active.value = c;
+      c.gone();
+      await tester.pump();
+      expect(said, isNot(contains('finished:null')));
+      await tester.pumpWidget(gate(const AppSettings(loaded: true, apiKey: 'key')));
+      await tester.pump();
+      await tester.pump();
+      expect(said, contains('finished:null'));
+      await tester.pump(const Duration(seconds: 1));
+    }, variant: ios);
   });
 
   testWidgets('the app root tells a held cold start when this phone\'s engine is running', (tester) async {
