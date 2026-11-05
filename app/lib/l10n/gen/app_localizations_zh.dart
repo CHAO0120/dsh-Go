@@ -4147,6 +4147,9 @@ class L10nZh extends L10n {
   String get chatErrApiKey => 'API Key 无效或已过期';
 
   @override
+  String get chatErrForbidden => '凭据不可用或权限不足';
+
+  @override
   String get chatErrBalance => '余额不足';
 
   @override

@@ -4412,6 +4412,9 @@ class L10nEn extends L10n {
   String get chatErrApiKey => 'API key is invalid or expired';
 
   @override
+  String get chatErrForbidden => 'Credentials unavailable or permission denied';
+
+  @override
   String get chatErrBalance => 'Insufficient balance';
 
   @override

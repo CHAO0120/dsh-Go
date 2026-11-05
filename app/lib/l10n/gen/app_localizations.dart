@@ -7634,6 +7634,12 @@ abstract class L10n {
   /// **'API Key 无效或已过期'**
   String get chatErrApiKey;
 
+  /// No description provided for @chatErrForbidden.
+  ///
+  /// In zh, this message translates to:
+  /// **'凭据不可用或权限不足'**
+  String get chatErrForbidden;
+
   /// No description provided for @chatErrBalance.
   ///
   /// In zh, this message translates to:

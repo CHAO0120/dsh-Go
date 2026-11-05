@@ -88,6 +88,7 @@ test('asynchronous OS callback native failure is consumed and retires before cle
 });
 
 const context={applicationInfo:{accessTokenId:1,name:'test.dsh'},abilityInfo:{name:'EntryAbility'}};
+test('status says whether the app is on screen, so the UI can tell a return from a lost task',t=>{const f=setup(t);assert.equal(f.owner.status().get('foreground'),true);f.owner.observe(false);assert.equal(f.owner.status().get('foreground'),false);});
 test('granted TASK_KEEPING starts continuous task and avoids transient quota',async t=>{
  const f=setup(t,context);f.background();await new Promise(resolve=>setImmediate(resolve));
  assert.equal(continuous.requests.length,1);assert.deepEqual(continuous.requests[0].request.backgroundTaskModes,[9]);

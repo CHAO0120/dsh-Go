@@ -147,6 +147,29 @@ class RuntimeFailure {
 }
 
 /// Snapshot of the native runtime (see docs/architecture.md, "RuntimeStatus").
+/// HarmonyOS's background grant, as its native side reports it. Android has none.
+class RuntimeBackgroundTask {
+  const RuntimeBackgroundTask({required this.phase, required this.foreground});
+
+  /// The phase of the long-running task: the turn goes on, with no deadline.
+  static const longRunningPhase = 7;
+
+  final int phase;
+
+  /// The app is on screen, so a task ending now is the return, not the system's doing.
+  final bool foreground;
+
+  bool get longRunning => phase == longRunningPhase;
+
+  static RuntimeBackgroundTask? fromMap(Object? raw) => switch (raw) {
+    {'phase': final num phase, 'foreground': final bool foreground} => RuntimeBackgroundTask(
+      phase: phase.toInt(),
+      foreground: foreground,
+    ),
+    _ => null,
+  };
+}
+
 class RuntimeStatus {
   const RuntimeStatus({
     required this.phase,
@@ -179,11 +202,15 @@ class RuntimeStatus {
     this.launchFailureReason,
     this.tidyingFiles = false,
     this.resetPending = false,
+    this.backgroundTask,
   });
 
   const RuntimeStatus.unknown() : this(phase: RuntimePhase.notInstalled);
 
   final RuntimePhase phase;
+
+  /// Null where there's no such grant.
+  final RuntimeBackgroundTask? backgroundTask;
   final String? abi;
   final String? bundledVersion;
   final String? installedVersion;
@@ -273,6 +300,7 @@ class RuntimeStatus {
 
   factory RuntimeStatus.fromMap(Map<Object?, Object?> map) => RuntimeStatus(
     phase: RuntimePhase.parse(map['phase']),
+    backgroundTask: RuntimeBackgroundTask.fromMap(map['transientTask']),
     abi: map['abi'] as String?,
     bundledVersion: map['bundledVersion'] as String?,
     installedVersion: map['installedVersion'] as String?,

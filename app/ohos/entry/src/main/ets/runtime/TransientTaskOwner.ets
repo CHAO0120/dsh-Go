@@ -150,7 +150,7 @@ export class TransientTaskOwner {
         }
       } catch (_) { this.failure = 'ohos_transient_native_failed'; }
     }
-    return new Map<string, Object | null>([['ownerGeneration', this.owner], ['retired', this.retired],
+    return new Map<string, Object | null>([['ownerGeneration', this.owner], ['retired', this.retired], ['foreground', this.foreground],
       ['phase', phase], ['deadlineMs', deadline], ['drainAtMs', drain],
       ['cleanupPending', this.cleanupPending()], ['error', this.failure ?? this.continuous?.error() ?? null]]);
   }

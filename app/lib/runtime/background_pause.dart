@@ -3,13 +3,17 @@
 // best, then stops where it is, with nothing to say it did. How long the grant was
 // and whether the turn can pick up afterwards take a device to know, so this says
 // only that it may have paused: one quiet line in the chat on the way back
-// (ui/notify/background_pause_host.dart draws it). Android's own line, about a phone
+// (ui/notify/background_pause_host.dart draws it). With the long-running task held for
+// the whole time away, nothing paused, so there's no line. Android's own line, about a phone
 // cutting the network, is runtime/background_net.dart.
 
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+
+import 'runtime_bridge.dart' show RuntimeBackgroundTask;
+import 'runtime_state.dart';
 
 import '../state/chat_state.dart';
 import '../state/hosts_state.dart';
@@ -26,13 +30,15 @@ abstract final class BackgroundPausePolicy {
 
   /// Whether a return after [away] calls for the line: the on-device engine is
   /// the [local] host (a remote one kept going), and its turn [wasRunning] on
-  /// leaving and is [running] still (one that ended first has nothing to go on with).
+  /// leaving and is [running] still (one that ended first has nothing to go on with),
+  /// and no long-running task [keptRunning] the turn going all that time.
   static bool onReturn({
     required Duration away,
     required bool local,
     required bool wasRunning,
     required bool running,
-  }) => local && wasRunning && running && away >= suspendedAfter;
+    bool keptRunning = false,
+  }) => local && wasRunning && running && !keptRunning && away >= suspendedAfter;
 }
 
 /// Whether the line shows. It follows the app on and off screen by itself; a
@@ -49,6 +55,11 @@ class BackgroundPauseController extends Notifier<bool> {
   /// When the app left, and whether a turn was going then.
   DateTime? _since;
   bool _wasRunning = false;
+
+  /// Whether the long-running task started while away, and whether it then ended
+  /// with the app still away, which leaves the turn to the short grant at best.
+  bool _taskHeld = false;
+  bool _taskLost = false;
   Timer? _timer;
 
   @override
@@ -58,6 +69,7 @@ class BackgroundPauseController extends Notifier<bool> {
     ref.listen(activeHostProvider, (_, host) {
       if (!host.isLocal) dismiss();
     });
+    ref.listen(localRuntimeProvider.select((runtime) => runtime.status.backgroundTask), (_, task) => _onTask(task));
     ref.onDispose(() => _timer?.cancel());
     return false;
   }
@@ -68,11 +80,21 @@ class BackgroundPauseController extends Notifier<bool> {
     return sessionId != null && ref.exists(chatProvider(sessionId)) && ref.read(chatProvider(sessionId)).running;
   }
 
+  void _onTask(RuntimeBackgroundTask? task) {
+    if (_since == null) return;
+    if (task?.longRunning == true) {
+      _taskHeld = true;
+    } else if (_taskHeld && task?.foreground != true) {
+      _taskLost = true;
+    }
+  }
+
   void _onScreen(bool foreground) {
     if (!foreground) {
       dismiss();
       _since = now();
       _wasRunning = _turnRunning;
+      _taskHeld = _taskLost = false;
       return;
     }
     final since = _since;
@@ -83,6 +105,7 @@ class BackgroundPauseController extends Notifier<bool> {
       local: ref.read(activeHostProvider).isLocal,
       wasRunning: _wasRunning,
       running: _turnRunning,
+      keptRunning: _taskHeld && !_taskLost,
     );
     if (!due) return;
     ref.read(launchNoticeShownProvider.notifier).set(true);
