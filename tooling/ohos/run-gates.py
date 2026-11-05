@@ -860,6 +860,7 @@ def main():
     g.run('publication-kill', lambda: g.node(s / (rt + 'publication-kill.mjs'), '--node', node(), '--simulation', s / 'runtime/ohos/sim/preload.mjs', '--publication', s / 'runtime/ohos/publication', '--linked-lib', native() / 'libpublication-test-linked.so', '--prefix', prefix(), '--out', o / 'publication-kill.json'), needs=('native-publication-build', 'prepared-inputs'), timeout=300, scope='Real SIGKILL and restart with the current publication preload')
     g.run('manifest-validate', lambda: g.node(s / 'runtime/ohos/package/validate-manifest.mjs', s / 'app/ohos/entry/src/main/ets/runtime/RuntimeCore.ets', o / 'composed/expanded/dsh-runtime/manifest.json'), needs=('compose',))
     g.run('node-build-contract', lambda: g.py(rt + 'node-build.py', '--source', p('node_source')), needs=('tools',), timeout=240)
+    g.run('node-embedded-bundle', lambda: g.py(rt + 'node-embedded-bundle.test.py'), needs=('tools',), tests=[rt + 'node-embedded-bundle.test.py'])
     g.run('napi-rename-current', lambda: g.py('runtime/ohos/node/gen-napi-rename.py', '--source', p('node_source'), '--check'), needs=('tools',), timeout=120)
     def market_inputs(_):
         (s / 'market/node_modules').symlink_to(p('market_modules'), target_is_directory=True)
