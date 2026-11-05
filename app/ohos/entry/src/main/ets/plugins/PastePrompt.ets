@@ -41,7 +41,7 @@ export class PastePrompt {
   constructor(cancel: () => void) {
     this.cancel = cancel;
     this.event = (value: window.WindowEventType): void => {
-      if (value === window.WindowEventType.WINDOW_INACTIVE || value === window.WindowEventType.WINDOW_HIDDEN) {
+      if (value === window.WindowEventType.WINDOW_HIDDEN || value === window.WindowEventType.WINDOW_DESTROYED) {
         this.cancel();
       }
     };

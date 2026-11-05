@@ -1,4 +1,5 @@
 import pasteboard from '@ohos.pasteboard';
+import UIAbility from '@ohos.app.ability.UIAbility';
 import {
   Any, AbilityAware, AbilityPluginBinding, FlutterPlugin, FlutterPluginBinding,
   MethodCall, MethodChannel, MethodResult
@@ -11,19 +12,30 @@ class PastePending {
   readonly id: string;
   readonly result: MethodResult;
   readonly prompt: PastePrompt;
-  constructor(id: string, result: MethodResult, cancel: () => void) {
+  readonly ability: UIAbility;
+  readonly cancel: () => void;
+  constructor(id: string, result: MethodResult, ability: UIAbility, cancel: () => void) {
     this.id = id;
     this.result = result;
+    this.ability = ability;
+    this.cancel = cancel;
     this.prompt = new PastePrompt(cancel);
   }
 }
 let activePaste: PastePending | null = null;
+const foregroundAbilities: WeakSet<UIAbility> = new WeakSet<UIAbility>();
 
 export default class PastePlugin implements FlutterPlugin, AbilityAware {
   private engine: FlutterPluginBinding | null = null;
   private ability: AbilityPluginBinding | null = null;
   private channel: MethodChannel | null = null;
   private pending: PastePending | null = null;
+  static onForeground(ability: UIAbility): void { foregroundAbilities.add(ability); }
+  static onBackground(ability: UIAbility): void {
+    foregroundAbilities.delete(ability);
+    const pending = activePaste;
+    if (pending !== null && pending.ability === ability) pending.cancel();
+  }
   getUniqueClassName(): string { return 'DshPastePlugin'; }
   onAttachedToEngine(binding: FlutterPluginBinding): void {
     this.retire(); this.channel?.setMethodCallHandler(null);
@@ -64,7 +76,7 @@ export default class PastePlugin implements FlutterPlugin, AbilityAware {
   }
   private request(id: string, result: MethodResult): void {
     const ability = this.ability;
-    if (ability === null) { this.reply(result, 'unavailable'); return; }
+    if (ability === null || !foregroundAbilities.has(ability.getAbility())) { this.reply(result, 'unavailable'); return; }
     const active = activePaste;
     if (active !== null) {
       // A new user request may retry only the exact retired owner's cleanup.
@@ -72,7 +84,7 @@ export default class PastePlugin implements FlutterPlugin, AbilityAware {
       if (active.settled) this.cleanup(active);
       this.reply(result, 'busy'); return;
     }
-    const pending = new PastePending(id, result, (): void => {
+    const pending = new PastePending(id, result, ability.getAbility(), (): void => {
       if (this.pending !== pending) return;
       if (pending.settled) this.cleanup(pending);
       else this.finish(pending, 'cancelled');

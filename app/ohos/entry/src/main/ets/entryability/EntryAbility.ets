@@ -56,6 +56,7 @@ export default class EntryAbility extends FlutterAbility {
   }
 
   onForeground(): void {
+    PastePlugin.onForeground(this);
     AppLinksPlugin.onForeground(this);
     RuntimeController.onForeground(this);
     VoicePlugin.onForeground(this);
@@ -65,6 +66,7 @@ export default class EntryAbility extends FlutterAbility {
   }
 
   onBackground(): void {
+    PastePlugin.onBackground(this);
     AppLinksPlugin.onBackground(this);
     RuntimeController.onBackground(this);
     VoicePlugin.onBackground(this);
@@ -74,6 +76,7 @@ export default class EntryAbility extends FlutterAbility {
   }
 
   onDestroy(): void {
+    PastePlugin.onBackground(this);
     RuntimeController.onDestroy(this);
     super.onDestroy();
   }
