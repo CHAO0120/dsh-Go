@@ -184,7 +184,7 @@ export async function shareFixture(t, options = {}) {
         }
         if (name.startsWith('.')) {
           if (path.endsWith('EntryAbility.ets') && !name.includes('HmsShare')) {
-            return { default: class { static receive() { return false; } }, GeneratedPluginRegistrant: { registerWith() {} }, RuntimePlugin: class {} };
+            return { default: class { static receive() { return false; } }, GeneratedPluginRegistrant: { registerWith() {} }, RuntimePlugin: class {}, OhosKeyboardLog: class { attach() {} detach() {} } };
           }
           return load(resolve(dirname(path), name + '.ets'));
         }

@@ -18,7 +18,7 @@ function fixture({bundle,info={sdkApiVersion:23,abiList:'arm64-v8a,armeabi-v7a',
    if(key==='@ohos.bundle.bundleManager')return {default:bundleManager};
    if(key==='@ohos.deviceInfo')return {default:info};
    if(key==='../plugins/UsagePlugin')return load('plugins/UsagePlugin');
-   return {default:Stub,RuntimePlugin:Stub,GeneratedPluginRegistrant:{registerWith(){}},RuntimeController:{},HmsShareInbox:{}};
+   return {default:Stub,RuntimePlugin:Stub,OhosKeyboardLog:Stub,GeneratedPluginRegistrant:{registerWith(){}},RuntimeController:{},HmsShareInbox:{}};
   }});return module.exports;
  }
  const entry=new (load('entryability/EntryAbility').default)();entry.configureFlutterEngine({getPlugins:()=>({add(p){plugins.push(p);p.onAttachedToEngine?.(binding);}})});
