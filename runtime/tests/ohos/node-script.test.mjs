@@ -243,3 +243,28 @@ test('fd wrappers preserve native customPromisifyArgs results and buffer identit
     fs.closeSync(fd);console.log(JSON.stringify({promisify:true}));`;
   assert.equal(successful(await (await f.launch(source)).done).promisify, true);
 });
+
+test('inline Node expressions, print, version and stdin use the inherited guarded Worker', async t => {
+  const f = await fixture(t);
+  const run = async (args, stdin = '') => {
+    const worker = createNodeScriptWorker({args,cwd:f.workspace,roots:[f.workspace,f.temporary],workspaceRoots:[f.workspace],env:{CHECK_ENV:'环境值'},stdin});
+    const stdout=[],stderr=[],errors=[];
+    worker.stdout.on('data',b=>stdout.push(b));worker.stderr.on('data',b=>stderr.push(b));worker.on('error',e=>errors.push(e));
+    const exitCode=await new Promise(resolve=>worker.once('exit',resolve));
+    return {exitCode,stdout:Buffer.concat(stdout).toString(),stderr:Buffer.concat(stderr).toString(),errors};
+  };
+  await promises.writeFile(join(f.workspace,'relative.cjs'),'module.exports="相对模块";');
+  const inline=await run(['-e', 'console.log(JSON.stringify({cwd:process.cwd(),env:process.env.CHECK_ENV,arg:process.argv[1],value:require("./relative.cjs")}));process.exitCode=7;', '--', '参数']);
+  assert.equal(inline.exitCode,7,JSON.stringify({stderr:inline.stderr,errors:inline.errors.map(e=>({message:e.message,stack:e.stack,code:e.code}))}));assert.deepEqual(inline.errors,[]);
+  assert.deepEqual(JSON.parse(inline.stdout),{cwd:f.workspace,env:'环境值',arg:'参数',value:'相对模块'});
+  for(const [expression,expected] of [['1+2','3\n'],['undefined','undefined\n'],['({x:"中文",n:2})',"{ x: '中文', n: 2 }\n"]]){
+    const result=await run(['-p',expression]);assert.equal(result.exitCode,0);assert.equal(result.stdout,expected);
+  }
+  assert.equal((await run(['--version'])).stdout,process.version+'\n');
+  assert.equal((await run(['-p','(setTimeout(()=>console.log("later"),0),42)'])).stdout,'later\n42\n');
+  for(const code of ['const console=null;42','(setTimeout(()=>{console.log=()=>{}},0),42)']) assert.equal((await run(['-p',code])).stdout,'42\n');
+  assert.equal((await run(['-e','console.log(import.meta.main)'])).stdout,'false\n');
+  for(const args of [[],['-']]) assert.equal((await run(args,'console.log("管道中文")')).stdout,'管道中文\n');
+  assert.equal((await run(['-e','"use strict";console.log((function(){return this})()===undefined)'])).stdout,'true\n');
+  assert.equal((await run(['-e','import path from "node:path";console.log(await Promise.resolve(path.basename(process.cwd())))'])).stdout,'工作区\n');
+});

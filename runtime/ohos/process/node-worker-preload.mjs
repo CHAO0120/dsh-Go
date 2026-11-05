@@ -1,5 +1,7 @@
 import { workerData } from 'node:worker_threads';
 import { Readable } from 'node:stream';
+import { registerHooks } from 'node:module';
+import { pathToFileURL } from 'node:url';
 import { installNodeWorkerPaths } from './node-worker-paths.mjs';
 
 // The host still has one --import. Its inherited Worker branch runs before
@@ -12,5 +14,19 @@ if (workerData?.dshOhosNodeScript?.protocol === 1) {
   Object.defineProperty(process, 'stdin', { value: Readable.from([Buffer.from(config.stdin)], { objectMode: false }),
     configurable: true, enumerable: true });
   installNodeWorkerPaths(config);
+  if (config.inline !== undefined) {
+    const base = pathToFileURL(config.inline.base + '.mjs').href;
+    registerHooks({
+      resolve(specifier, context, nextResolve) {
+        if (specifier === 'dsh-ohos-inline:source') return { url: specifier, shortCircuit: true };
+        return nextResolve(specifier, context.parentURL === 'dsh-ohos-inline:source'
+          ? { ...context, parentURL: base } : context);
+      },
+      load(url, context, nextLoad) {
+        if (url === 'dsh-ohos-inline:source') return { format: 'module', source: config.inline.source, shortCircuit: true };
+        return nextLoad(url, context);
+      },
+    });
+  }
 }
 Object.defineProperty(globalThis, Symbol.for('dsh.go.ohos.nodeWorker.preload'), { value: 1 });
