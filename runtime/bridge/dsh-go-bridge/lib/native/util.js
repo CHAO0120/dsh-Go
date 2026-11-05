@@ -88,11 +88,6 @@ export function deepEqual(a, b) {
   return true;
 }
 
-// JSON member names are data, including "__proto__"; never invoke inherited setters.
-function setJsonMember(object, key, value) {
-  Object.defineProperty(object, key, { value, enumerable: true, configurable: true, writable: true });
-}
-
 /**
  * RFC 7386 JSON Merge Patch turning `from` into `to` (both JSON values). Objects recurse, keys
  * missing from `to` become null, everything else is replaced whole. Returns undefined when equal.
@@ -103,17 +98,17 @@ export function mergeDiff(from, to) {
   let changed = false;
   for (const k of Object.keys(from)) {
     if (!Object.hasOwn(to, k) || to[k] === null) {
-      if (from[k] !== null) { setJsonMember(patch, k, null); changed = true; }
+      if (from[k] !== null) { patch[k] = null; changed = true; }
     }
   }
   for (const [k, v] of Object.entries(to)) {
     if (v === null) continue;
-    if (!Object.hasOwn(from, k) || from[k] === null) { setJsonMember(patch, k, v); changed = true; continue; }
+    if (!Object.hasOwn(from, k) || from[k] === null) { patch[k] = v; changed = true; continue; }
     if (isPlainObject(from[k]) && isPlainObject(v)) {
       const sub = mergeDiff(from[k], v);
-      if (sub !== undefined) { setJsonMember(patch, k, sub); changed = true; }
+      if (sub !== undefined) { patch[k] = sub; changed = true; }
     } else if (!deepEqual(from[k], v)) {
-      setJsonMember(patch, k, v);
+      patch[k] = v;
       changed = true;
     }
   }
@@ -126,7 +121,7 @@ export function mergeApply(target, patch) {
   const out = isPlainObject(target) ? { ...target } : {};
   for (const [k, v] of Object.entries(patch)) {
     if (v === null) delete out[k];
-    else setJsonMember(out, k, mergeApply(Object.hasOwn(out, k) ? out[k] : undefined, v));
+    else out[k] = mergeApply(out[k], v);
   }
   return out;
 }
@@ -136,7 +131,7 @@ export function withoutNulls(v) {
   if (Array.isArray(v)) return v.map(withoutNulls);
   if (!isPlainObject(v)) return v;
   const out = {};
-  for (const [k, x] of Object.entries(v)) if (x !== null) setJsonMember(out, k, withoutNulls(x));
+  for (const [k, x] of Object.entries(v)) if (x !== null) out[k] = withoutNulls(x);
   return out;
 }
 

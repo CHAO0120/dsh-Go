@@ -8,21 +8,18 @@ const [directory, encoded, initial] = process.argv.slice(2);
 const record = JSON.parse(encoded);
 let clock = Number(initial);
 let reported = false;
-// Both lock implementations delegate real exclusive opens; observe either API.
-for (const method of ['open', 'writeFile']) {
-  const original = fs[method];
-  fs[method] = async (...args) => {
-    try { return await original(...args); }
-    catch (error) {
-      if (!reported && args[0] === join(directory, 'ledger-v1.json.lock')
-        && error?.code === 'EEXIST') {
-        reported = true;
-        process.send({ type: 'blocked' });
-      }
-      throw error;
+const writeFile = fs.writeFile;
+fs.writeFile = async (...args) => {
+  try { return await writeFile(...args); }
+  catch (error) {
+    if (!reported && args[0] === join(directory, 'ledger-v1.json.lock')
+      && error?.code === 'EEXIST') {
+      reported = true;
+      process.send({ type: 'blocked' });
     }
-  };
-}
+    throw error;
+  }
+};
 syncBuiltinESMExports();
 process.on('message', value => {
   if (value?.type === 'clock') {

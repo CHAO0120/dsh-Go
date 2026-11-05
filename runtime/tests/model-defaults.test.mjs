@@ -1,4 +1,4 @@
-// Actual rc.1 service, settings forms, and extracted controller methods; no live Host.
+// Actual rc4 service, settings forms, and extracted controller methods; no live Host.
 // DSH_PREFIX=/private/patched/prefix node --test runtime/tests/model-defaults.test.mjs
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
@@ -42,7 +42,6 @@ function fixture(raw = old, { beforeEdit, missingEntry, missingEditor } = {}) {
   const update = value => {
     entry.options.config = structuredClone(value);
     entry.fiber.config = AgentDefaultModelConfig.Config(structuredClone(value));
-    entry.fiber.effectiveConfig = entry.fiber.config;
     defaults.config = entry.fiber.config;
   };
   update(raw);
@@ -72,7 +71,7 @@ function fixture(raw = old, { beforeEdit, missingEntry, missingEditor } = {}) {
 function commands(defaults, { resolveCallConfig, requireModel } = {}) {
   const selected = [];
   const logs = [];
-  const agent = { id: 'session-fixture', model: { select: value => selected.push(value) } };
+  const agent = { id: 'session-fixture' };
   const ctx = {
     agentDefaultModel: defaults,
     llm: { resolveCallConfig: resolveCallConfig ?? (async value => value) },
@@ -142,22 +141,20 @@ test('fixed default skips persistence but installs the Session selection', async
   assert.equal(f.writes.length, 0);
 });
 
-test('selectModel waits for persistence and keeps the requested route after validation', async () => {
+test('selectModel waits for persistence and returns the normalized installed selection', async () => {
   const gate = deferred();
   const entered = deferred();
   const f = fixture(old, { beforeEdit: () => { entered.resolve(); return gate.promise; } });
-  const c = commands(f.defaults, { resolveCallConfig: async requested => {
-    assert.deepEqual(requested, next);
-    return { ...next, reasoningEffort: 'high' };
-  } });
+  const normalized = { ...next, reasoningEffort: 'high' };
+  const c = commands(f.defaults, { resolveCallConfig: async () => normalized });
   let returned = false;
   const pending = c.controller.selectModel({ sessionId: 'session-fixture', ...next }).then(value => { returned = true; return value; });
   await entered.promise;
   await flush();
-  assert.deepEqual(c.selected, [next]);
+  assert.deepEqual(c.selected, [normalized]);
   assert.equal(returned, false);
   gate.resolve();
-  assert.deepEqual(await pending, { selected: next, defaultSave: { status: 'saved' } });
+  assert.deepEqual(await pending, { selected: normalized, defaultSave: { status: 'saved' } });
 });
 
 test('queued remember save rechecks fixed mode under the editor lock, even with stale live refs', async () => {
