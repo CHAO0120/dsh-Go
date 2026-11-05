@@ -207,8 +207,10 @@
     const { inViewport, ...steady } = state(el);
     // A list can reuse a row's nodes for another item: the same Remove button, a different thing to remove.
     const row = el.closest?.('li, tr, dialog, [role=row], [role=listitem], [role=dialog], [role=alertdialog]');
+    const article = el.closest?.('article, [role=article]');
     return JSON.stringify({ submissionAction: submissionAction(el), tag: tag(el), role: role(el), name: name(el), type: el.type || '',
       state: steady, sensitive: sensitive(el), row: row ? textSnippet(row, 400) : null,
+      article: article ? textSnippet(article, 400) : null,
       // Values remain internal and are never returned/logged. Sensitive values aren't read.
       value: sensitive(el) ? null : (['input', 'textarea', 'select'].includes(tag(el)) ? el.value.slice(0, 16385) : null),
       href: tag(el) === 'a' ? el.href : null,
