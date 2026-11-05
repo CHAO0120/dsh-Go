@@ -1,6 +1,7 @@
 // Test boundary only: actual ETS bodies and real Linux FS / production openUserFile.
 // HMS events, URI grants, Flutter and display are explicit doubles, never a device proof.
 import assert from 'node:assert/strict';
+import { randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -84,7 +85,8 @@ export async function shareFixture(t, options = {}) {
       if (currentOptions.zeroWrite) return 0;
       return (await promisify(fs.write)(fd, Buffer.from(buffer), 0, Math.min(buffer.byteLength, currentOptions.maxWrite ?? Infinity), opts.offset)).bytesWritten;
     },
-    fsync: fd => promisify(fs.fsync)(fd), unlink: fsp.unlink,
+    fsync: fd => promisify(fs.fsync)(fd),
+    async unlink(path) { await currentOptions.beforeUnlink?.(path); return fsp.unlink(path); },
     rmdir: path => fsp.rm(path, { recursive: true }),
   };
   for (const [name, operation] of Object.entries(api)) {
@@ -156,7 +158,7 @@ export async function shareFixture(t, options = {}) {
       FileUri: class { constructor(uri) { this.name = decodeURIComponent(uri.slice(uri.lastIndexOf('/') + 1)); } },
     } };
     if (name === '@ohos.data.uniformTypeDescriptor') return { default: utd };
-    if (name === '@ohos.util') return { default: { TextEncoder: class { encodeInto(value) { return new TextEncoder().encode(value); } } } };
+    if (name === '@ohos.util') return { default: { generateRandomUUID: randomUUID, TextEncoder: class { encodeInto(value) { return new TextEncoder().encode(value); } } } };
     if (name === '@ohos.display') return { default: { getDefaultDisplaySync: () => ({ densityPixels: currentOptions.density ?? 2.5 }) } };
     if (name === 'libdsh_host.so') return Promise.resolve(currentOptions.beforeNativeLoad?.()).then(() => ({ default: {
       openUserFile(root, relative) {
@@ -202,10 +204,12 @@ export async function shareFixture(t, options = {}) {
   const { HmsShareInbox: inbox } = load(resolve(dirname(pluginPath), 'HmsShareInbox.ets'));
   const policy = load(resolve(dirname(pluginPath), 'HmsSharePolicy.ets'));
   const entry = load(resolve(repo, 'app/ohos/entry/src/main/ets/entryability/EntryAbility.ets')).default;
+  const engines = [];
   function attach(plugin = new Plugin(), attachAbility = true) {
     const engine = { getApplicationContext: () => app, getBinaryMessenger: () => ({}) };
     const ability = { getAbility: () => ({ context: ui }) };
     plugin.onAttachedToEngine(engine); if (attachAbility) plugin.onAttachedToAbility(ability);
+    engines.push({ plugin, engine });
     return { plugin, engine, ability, outgoing: channels[channels.length - 2], incoming: channels[channels.length - 1] };
   }
   function call(channel, method, object = {}) {
@@ -224,7 +228,7 @@ export async function shareFixture(t, options = {}) {
   t.after(async () => {
     try {
       for (const panel of panels) panel.emit('dismiss');
-      first.plugin.onDetachedFromEngine(first.engine);
+      for (const value of engines) value.plugin.onDetachedFromEngine(value.engine);
       await until(() => fds.size === 0 && pendingIO === 0, 'all real IO closed and settled');
       assert.equal(panels.filter(panel => panel.visible).length, 0);
     } finally {

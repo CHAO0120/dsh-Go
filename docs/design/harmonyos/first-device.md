@@ -8,7 +8,7 @@
 
 | 项 | 要求 |
 |---|---|
-| 设备 | 系统 API 26 或更新，手机或平板。这版 Flutter 引擎的硬要求，低了装不上 |
+| 设备 | HarmonyOS 7.0（API 26）或更新，手机或平板。这版 Flutter 引擎的硬要求，低了装不上。在 `设置 > 关于本机` 看版本 |
 | 账号 | 华为开发者账号。实名后调试证书 180 天，未实名只有 14 天，都不能续期 |
 | 工具 | OpenHarmony SDK 和 JDK 17（见 `tooling/ohos/check-arkts.sh`），里面有 `hdc` 和 `hap-sign-tool` |
 | 包 | `tooling/ohos/check-arkts.sh --full` 打出的未签名 HAP。第一次用不带 `--distribution` 的 |

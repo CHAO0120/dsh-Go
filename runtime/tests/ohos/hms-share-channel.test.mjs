@@ -452,3 +452,145 @@ test('real FIFO is rejected as non-regular without blocking for a writer', async
   assert.equal(f.delivered[0].value.skipped[0].reason, 'unreadable');
   await until(() => f.fds.size === 0 && f.pendingIO === 0);
 });
+
+const consume = (f, event, channel = f.incoming) => f.call(channel, 'consumed', { shareId: event.shareId });
+async function incomingFile(f, index) {
+  const source = await f.external('consumed-' + index + '.txt', 'bytes-' + index);
+  const before = f.delivered.length;
+  f.receive([{ uri: source.uri, title: 'file-' + index, utd: 'general.file' }]);
+  await waitEvents(f, before + 1);
+  return f.delivered.at(-1).value;
+}
+
+test('delivered unconsumed files retain all eight slots; ninth is rejected until consumed', async t => {
+  const f = await shareFixture(t); await ready(f); const events = [];
+  for (let i = 0; i < 8; i++) events.push(await incomingFile(f, i));
+  assert.equal(new Set(events.map(x => x.shareId)).size, 8);
+  for (const event of events) assert.match(event.shareId, /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i);
+  assert.deepEqual(await Promise.all(events.map(x => fsp.readFile(x.files[0].path, 'utf8'))),
+    Array.from({ length: 8 }, (_, i) => 'bytes-' + i));
+  const calls = f.dataCalls.length;
+  const overflow = await incomingFile(f, 8);
+  assert.equal(overflow.skipped[0].reason, 'too_many'); assert.equal(overflow.files.length, 0);
+  assert.equal(overflow.shareId, undefined); assert.equal(f.dataCalls.length, calls);
+  assert.equal((await consume(f, events[0]).done).value, true);
+  await assert.rejects(fsp.stat(events[0].files[0].path), { code: 'ENOENT' });
+  const replacement = await incomingFile(f, 9);
+  assert.equal(await fsp.readFile(replacement.files[0].path, 'utf8'), 'bytes-9');
+  for (const event of events.slice(1)) assert.equal((await fsp.stat(event.files[0].path)).isFile(), true);
+});
+
+test('text and unreadable events carry no file token and do not accumulate consumed capacity', async t => {
+  const f = await shareFixture(t); await ready(f);
+  for (let i = 0; i < 12; i++) {
+    const before = f.delivered.length;
+    f.receive(i % 2 ? [{ uri: 'file://external/no-grant', utd: 'general.file' }] : [{ content: 'text-' + i }]);
+    await waitEvents(f, before + 1);
+    assert.equal(f.delivered.at(-1).value.shareId, undefined);
+    assert.equal(f.delivered.at(-1).value.files.length, 0);
+  }
+  const event = await incomingFile(f, 'after-text');
+  assert.equal(await fsp.readFile(event.files[0].path, 'utf8'), 'bytes-after-text');
+});
+
+test('invalid unknown duplicate and old-owner consumed cannot delete another batch', async t => {
+  const f = await shareFixture(t); await ready(f);
+  const old = await incomingFile(f, 'old'); const oldHandler = f.incoming.handler;
+  for (const shareId of [undefined, null, 12, '', 'unknown', old.files[0].path]) {
+    assert.equal((await f.call(f.incoming, 'consumed', { shareId }).done).value, false);
+  }
+  const next = f.attach(); await f.call(next.incoming, 'ready').done;
+  const fresh = await incomingFile(f, 'new');
+  assert.equal((await consume(f, old, next.incoming).done).value, false);
+  const late = deferred();
+  oldHandler.onMethodCall({ method: 'consumed', argument: key => key === 'shareId' ? old.shareId : undefined },
+    { success: late.resolve, error: late.reject, notImplemented: () => late.reject(new Error('missing consumed')) });
+  assert.equal(await late.promise, false);
+  assert.equal(await fsp.readFile(old.files[0].path, 'utf8'), 'bytes-old');
+  f.plugin.onDetachedFromEngine(f.engine);
+  await until(() => f.pendingIO === 0);
+  await assert.rejects(fsp.stat(old.files[0].path), { code: 'ENOENT' });
+  assert.equal(await fsp.readFile(fresh.files[0].path, 'utf8'), 'bytes-new');
+  assert.equal((await consume(f, old, next.incoming).done).value, false);
+  assert.equal((await consume(f, fresh, next.incoming).done).value, true);
+  assert.equal((await consume(f, fresh, next.incoming).done).value, false);
+});
+
+test('cleanup in flight retains its slot and duplicate ACK or detach never runs discard twice', async t => {
+  const f = await shareFixture(t); await ready(f); const events = [];
+  for (let i = 0; i < 8; i++) events.push(await incomingFile(f, i));
+  const entered = deferred(), release = deferred(); let unlinks = 0;
+  f.change({ beforeUnlink: async path => {
+    if (path === events[0].files[0].path) { unlinks++; entered.resolve(); await release.promise; }
+  } });
+  const first = consume(f, events[0]); await entered.promise;
+  try {
+    assert.equal((await consume(f, events[0]).done).value, false);
+    const overflow = await incomingFile(f, 'in-flight');
+    assert.equal(overflow.skipped[0].reason, 'too_many');
+    f.plugin.onDetachedFromEngine(f.engine);
+    assert.equal(unlinks, 1);
+  } finally { release.resolve(); }
+  assert.equal((await first.done).value, true);
+  await until(() => f.pendingIO === 0);
+  assert.equal(unlinks, 1);
+  for (const event of events) await assert.rejects(fsp.stat(event.files[0].path), { code: 'ENOENT' });
+});
+
+test('engine cancellation retires delivered files but an in-flight unsubmitted share crosses engines', async t => {
+  const f = await shareFixture(t); await ready(f); const delivered = await incomingFile(f, 'delivered');
+  const entered = deferred(), release = deferred();
+  f.change({ beforeRead: async () => { entered.resolve(); await release.promise; } });
+  const source = await f.external('pending.txt', 'pending-data');
+  f.receive([{ uri: source.uri, utd: 'general.file' }]); await entered.promise;
+  f.plugin.onDetachedFromEngine(f.engine); const next = f.attach(f.plugin);
+  await f.call(next.incoming, 'ready').done;
+  release.resolve(); await waitEvents(f, 2);
+  await until(() => f.pendingIO === 0);
+  await assert.rejects(fsp.stat(delivered.files[0].path), { code: 'ENOENT' });
+  const resumed = f.delivered[1]; assert.equal(resumed.channel, next.incoming);
+  assert.equal(await fsp.readFile(resumed.value.files[0].path, 'utf8'), 'pending-data');
+  assert.equal((await consume(f, resumed.value, next.incoming).done).value, true);
+});
+
+test('transport throw retains protected pending files and ready retry delivers each only once', async t => {
+  const f = await shareFixture(t, { throwDelivery: true }); await ready(f);
+  for (let i = 0; i < 8; i++) {
+    const source = await f.external('retry-' + i, 'retry-' + i);
+    f.receive([{ uri: source.uri, utd: 'general.file' }]);
+    await until(() => f.writes >= i + 1 && f.fds.size === 0 && f.pendingIO === 0);
+  }
+  assert.equal(f.delivered.length, 0);
+  assert.equal((await fsp.readdir(f.app.cacheDir + '/dsh-share-in')).length, 8);
+  f.change({ throwDelivery: false }); await ready(f); await waitEvents(f, 8);
+  await ready(f); assert.equal(f.delivered.length, 8);
+  assert.deepEqual(await Promise.all(f.delivered.map(x => fsp.readFile(x.value.files[0].path, 'utf8'))),
+    Array.from({ length: 8 }, (_, i) => 'retry-' + i));
+});
+
+test('consumed acknowledges completion despite original best-effort unlink failure, not physical deletion', async t => {
+  const f = await shareFixture(t); await ready(f); const event = await incomingFile(f, 'residue');
+  f.change({ beforeUnlink: async path => { if (path === event.files[0].path) throw new Error('controlled OS unlink rejection'); } });
+  assert.equal((await consume(f, event).done).value, true);
+  assert.equal(await fsp.readFile(event.files[0].path, 'utf8'), 'bytes-residue');
+  assert.equal((await consume(f, event).done).value, false);
+  f.change({ beforeUnlink: undefined });
+  await fsp.utimes(join(event.files[0].path, '..'), 1, 1);
+  // Four further consumed residues plus a new allocation exercise the original
+  // storage prune. No new cleanup API or production deletion rule is introduced.
+  for (let i = 0; i < 5; i++) {
+    const other = await incomingFile(f, 'residue-' + i);
+    f.change({ beforeUnlink: async path => { if (path === other.files[0].path) throw new Error('controlled residue'); } });
+    assert.equal((await consume(f, other).done).value, true);
+    f.change({ beforeUnlink: undefined });
+  }
+  await assert.rejects(fsp.stat(event.files[0].path), { code: 'ENOENT' });
+});
+
+test('Ability detach does not consume the engine-owned incoming file', async t => {
+  const f = await shareFixture(t); await ready(f); const event = await incomingFile(f, 'background');
+  f.plugin.onDetachedFromAbility(); await new Promise(resolve => setImmediate(resolve));
+  assert.equal(await fsp.readFile(event.files[0].path, 'utf8'), 'bytes-background');
+  assert.equal((await consume(f, event).done).value, true);
+  await assert.rejects(fsp.stat(event.files[0].path), { code: 'ENOENT' });
+});
