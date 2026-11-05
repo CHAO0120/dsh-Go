@@ -103,11 +103,16 @@ test('actual production HTTP guard precedes media handler; finite same-host medi
 
 test('lease rejects cross-connection/stale/duplicate events and ignores handler effects', async t => {
   const f = await fixture(t), events = [];
+  let marker = 0;
+  const settled = async client => {
+    const at = ++marker; client.send({ t: 'ping', at });
+    await client.next(message => message.t === 'pong' && message.at === at);
+  };
   f.service.media('clip', () => ({ body: Buffer.from('a'), contentType: 'audio/mpeg' })); f.service.onCapability((s, e) => { events.push([s, e.event]); return { command: 'danger' }; });
   f.service.on('go', () => ({ type: 'audio', op: 'play', instance: 'a', src: 'media:clip' }));
   const a = await f.ws(['audio']), b = await f.ws(['audio']); const old = (await f.invoke(a)).effects[0], current = (await f.invoke(a)).effects[0]; assert.notEqual(old.lease, current.lease);
-  b.send({ t: 'cap.event', lease: current.lease, seq: 1, event: 'audio.ended' }); a.send({ t: 'cap.event', lease: old.lease, seq: 2, event: 'audio.ended' }); await delay(30); assert.equal(events.length, 0);
-  a.send({ t: 'cap.event', lease: current.lease, seq: 2, event: 'audio.ended' }); a.send({ t: 'cap.event', lease: current.lease, seq: 3, event: 'audio.ended' }); await delay(30); assert.equal(events.length, 1); assert.equal(events[0][0].sessionId, 's1'); assert.equal((await f.request(f.mediaPath(current))).status, 404);
+  b.send({ t: 'cap.event', lease: current.lease, seq: 1, event: 'audio.ended' }); a.send({ t: 'cap.event', lease: old.lease, seq: 2, event: 'audio.ended' }); await Promise.all([settled(a), settled(b)]); assert.equal(events.length, 0);
+  a.send({ t: 'cap.event', lease: current.lease, seq: 2, event: 'audio.ended' }); a.send({ t: 'cap.event', lease: current.lease, seq: 3, event: 'audio.ended' }); await settled(a); assert.equal(events.length, 1); assert.equal(events[0][0].sessionId, 's1'); assert.equal((await f.request(f.mediaPath(current))).status, 404);
 });
 
 test('media stop aborts pending handler; disconnect revokes lease', async t => {
