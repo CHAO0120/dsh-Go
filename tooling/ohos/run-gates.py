@@ -687,6 +687,15 @@ def main():
         g.run('net-' + filename[:-3], lambda f=filename: ['bash', s / 'runtime/ohos/net' / f], needs=('prepared-inputs', *(['network-interface-tools'] if filename == 'test-proxy-env.sh' else [])), env=lambda f=filename: {**g.common(), **({'NODE': str(p('fetch_node'))} if f == 'test.sh' else {})}, timeout=300)
     g.node_tests('net-bootstrap', [rt + 'net-bootstrap.test.mjs'], needs=('prepared-inputs',))
     g.node_tests('provider-body-timeout', [rt + 'provider-body-timeout.test.mjs'], needs=('android-targets',))
+    # Optional entries that would reach a real process past the OH subprocess backend.
+    for name in ['forge-github-unavailable', 'liveshare-owner-unavailable', 'market-git-unavailable']:
+        g.node_tests(name, [rt + name + '.test.mjs'], needs=('android-targets',))
+    # The package manager's public methods: refused on OH, and the same calls off it.
+    for driver in ['plugin-install-refusal', 'plugin-registry-refusal']:
+        script = s / (rt + driver + '.mjs')
+        g.run(driver + '-ohos', lambda script=script, driver=driver: g.node('--jitless', '--import', s / 'runtime/ohos/sim/preload.mjs', script, prefix(), o / (driver + '-ohos.json'), 'ohos'),
+              env={'DSH_GO_OHOS_SIM_PLATFORM': 'openharmony', 'DSH_GO_OHOS_SIM_ADDONS': '[]'}, needs=('android-targets',))
+        g.run(driver + '-control', lambda script=script, driver=driver: g.node(script, prefix(), o / (driver + '-control.json'), 'native'), needs=('android-targets',))
     for mode in ['plain', 'jitless']:
         g.node_tests('discovery-response-cleanup-' + mode, [rt + 'discovery-response-cleanup.test.mjs'],
                      mode=mode, needs=('prepared-inputs', 'android-targets'),

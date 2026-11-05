@@ -30,8 +30,8 @@
 
 | 固定产物 | 前像 SHA-256 | 后像 SHA-256 |
 | --- | --- | --- |
-| `dsh-plugin-manager/lib/index.js` | `f3822130e4abdc752bd4ad8cc3b1f000ebe78bd545fbebaed09909f06b0908bd` | `24a7eabae2c1c2f8e93d526c40348c980505fe2308354da5a8e973b4637f1781` |
-| `dsh-plugin-manager/lib/types/operations.js` | `a9f2c4bbcfcad95eaac8878358e5aecb2532cfa4a7a9c6f981ff507fe3403f94` | `baa52993c097351842b4446cdba0a4a63cb63c5db4d906ab94180216f951a32c` |
+| `dsh-plugin-manager/lib/index.js` | `8db484f5f039ba58485c5fff449e0f6fe5b53a092108eee77995f91fe77ff6ea` | `579e8f797c3e36269c5fe75f1fe305a2b7dea0800af2208057a68b7cef287af0` |
+| `dsh-plugin-manager/lib/types/operations.js` | `0a6b2887b6e9c651d54707fb2a13f2def335c44881ba6cfd483d97a053314f9e` | `695085bd8493467375ded4d95489e249add651dd44db9da55bfcce3bf7473e45` |
 
 ## 已实际执行的验证
 
