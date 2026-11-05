@@ -153,6 +153,7 @@ await fs.writeFile(path.join(temp, 'EntryAbility.mts'),
   `const OhosKeyboardLog = class { attach() {} detach() {} };\n` +
   `const VoicePlugin = { onForeground() {}, onBackground() {} };\n` +
   `const AppLinksPlugin = { onForeground() {}, onBackground() {} };\n` +
+  `const PastePlugin = { onForeground() {}, onBackground() {} };\n` +
   `const NativeFilesPlugin = { onForeground() {}, onBackground() {} };\n` +
   `const NativeMediaPlugin = { onForeground() {}, onBackground() {} };\n` + entryText);
 const { default: EntryAbility } = await import(pathToFileURL(path.join(temp, 'EntryAbility.mts')));
