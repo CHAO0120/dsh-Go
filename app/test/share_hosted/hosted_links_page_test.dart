@@ -108,9 +108,9 @@ void main() {
     final storage = FaultStorage([_links.first])..readError = PlatformException(code: 'locked');
     final container = ProviderContainer(
       overrides: [
-            operatingSystemProvider.overrideWithValue('ohos'),
-            hostedLinkStoreProvider.overrideWithValue(SecureHostedLinkStore(storage)),
-          ],
+        operatingSystemProvider.overrideWithValue('ohos'),
+        hostedLinkStoreProvider.overrideWithValue(SecureHostedLinkStore(storage)),
+      ],
     );
     addTearDown(container.dispose);
     final links = container.read(hostedLinksProvider.notifier);

@@ -102,7 +102,7 @@ class HostedLinksController extends Notifier<HostedLinksState> {
   late Future<void> _ready;
   late bool _harmony;
   bool _canSave = false;
-  final _mainPersisted = <String>{};
+  final _plainPersisted = <String>{};
 
   bool get isHarmonyOS => _harmony;
 
@@ -117,22 +117,24 @@ class HostedLinksController extends Notifier<HostedLinksState> {
   HostedLinksState build() {
     _harmony = ref.watch(operatingSystemProvider) == 'ohos';
     _canSave = false;
-    _mainPersisted.clear();
+    _plainPersisted.clear();
     ref.onDispose(() {
       for (final t in _timers.values) {
         t.cancel();
       }
       _timers.clear();
     });
-    _ready = _harmony ? _local(() async {
-      await _load();
-    }) : _loadMain();
+    _ready = _harmony
+        ? _local(() async {
+            await _load();
+          })
+        : _loadPlain();
     return const HostedLinksState();
   }
 
   /// Completes once the saved list is in.
   Future<void> get ready => _ready;
-  bool isPersisted(String id) => _harmony ? !_unsaved.contains(id) : _mainPersisted.contains(id);
+  bool isPersisted(String id) => _harmony ? !_unsaved.contains(id) : _plainPersisted.contains(id);
 
   void _put(List<HostedLink> links, {HostedStorageError? error, HostedDeleteFailure? failure}) {
     state = HostedLinksState(
@@ -223,7 +225,7 @@ class HostedLinksController extends Notifier<HostedLinksState> {
         for (final l in state.links)
           if (l.id != link.id) l,
       ]);
-      return _saveMain();
+      return _savePlain();
     }
     if (!await ensureLoaded()) return false;
     return _local(() async {
@@ -239,15 +241,15 @@ class HostedLinksController extends Notifier<HostedLinksState> {
     });
   }
 
-  /// OH hides [id] only once saved; main keeps its session-only operation even
-  /// if saving fails. Both delete on the host after [undoWindow] without [undo].
-  /// The result reports persistence, not whether main hid the in-memory row.
+  /// On HarmonyOS [id] hides only once saved; elsewhere it hides for this session
+  /// even if saving fails. Both delete on the host after [undoWindow] without
+  /// [undo]. The result reports persistence, not whether the row hid.
   Future<bool> remove(String id) async {
     if (!_harmony) {
       await _ready;
       if (!ref.mounted || _find(id) == null) return false;
-      _markMain(id, true);
-      final saved = await _saveMain();
+      _markPlain(id, true);
+      final saved = await _savePlain();
       _timers.remove(id)?.cancel();
       _timers[id] = Timer(undoWindow, () {
         _timers.remove(id);
@@ -275,8 +277,8 @@ class HostedLinksController extends Notifier<HostedLinksState> {
     if (!_harmony) {
       _timers.remove(id)?.cancel();
       if (!ref.mounted || _find(id)?.deleting != true) return HostedUndoResult.unavailable;
-      _markMain(id, false);
-      return await _saveMain() ? HostedUndoResult.restored : HostedUndoResult.sessionOnly;
+      _markPlain(id, false);
+      return await _savePlain() ? HostedUndoResult.restored : HostedUndoResult.sessionOnly;
     }
     // Cancel immediately, even if an earlier local write is still outstanding.
     _timers.remove(id)?.cancel();
@@ -290,7 +292,7 @@ class HostedLinksController extends Notifier<HostedLinksState> {
   }
 
   Future<void> _commit(String id) async {
-    if (!_harmony) return _commitMain(id);
+    if (!_harmony) return _commitPlain(id);
     final pending = await _local(() async {
       if (!ref.mounted || _cancelled.contains(id) || _deleting.contains(id)) return null;
       final link = _find(id);
@@ -325,8 +327,9 @@ class HostedLinksController extends Notifier<HostedLinksState> {
       await _save(state.links);
     });
   }
-  // Keep main's session-only Android behavior separate from OH's explicit recovery.
-  Future<void> _loadMain() async {
+
+  // Off HarmonyOS a failed save stays session-only, with no recovery to offer.
+  Future<void> _loadPlain() async {
     final List<HostedLink> saved;
     try {
       saved = await ref.read(hostedLinkStoreProvider).load();
@@ -336,39 +339,39 @@ class HostedLinksController extends Notifier<HostedLinksState> {
     }
     if (!ref.mounted) return;
     _canSave = true;
-    _mainPersisted.addAll(saved.map((link) => link.id));
+    _plainPersisted.addAll(saved.map((link) => link.id));
     final cutoff = DateTime.now().subtract(keepExpired);
     final links = [
       for (final l in saved)
         if (l.expiresAt == null || l.expiresAt!.isAfter(cutoff)) l,
     ];
     state = state.copyWith(links: links, loaded: true);
-    if (links.length != saved.length) await _saveMain();
+    if (links.length != saved.length) await _savePlain();
     for (final l in links) {
       if (l.deleting) unawaited(_commit(l.id));
     }
   }
 
-  Future<bool> _saveMain() async {
+  Future<bool> _savePlain() async {
     // Never replace a collection this run could not read.
     if (!ref.mounted || !_canSave) return false;
     final links = state.links;
     try {
       await ref.read(hostedLinkStoreProvider).save(links);
-      _mainPersisted
+      _plainPersisted
         ..clear()
         ..addAll(links.map((link) => link.id));
       return true;
     } catch (_) {
-      // Main keeps the in-memory operation even when persistence fails.
+      // The in-memory operation stands even when persistence fails.
       return false;
     }
   }
 
-  void _markMain(String id, bool deleting) =>
+  void _markPlain(String id, bool deleting) =>
       _put([for (final l in state.links) l.id == id ? l.copyWith(deleting: deleting) : l]);
 
-  Future<void> _commitMain(String id) async {
+  Future<void> _commitPlain(String id) async {
     final link = _find(id);
     if (link == null || !link.deleting) return;
     try {
@@ -380,13 +383,12 @@ class HostedLinksController extends Notifier<HostedLinksState> {
       ]);
     } catch (e) {
       if (!ref.mounted) return;
-      _markMain(id, false);
+      _markPlain(id, false);
       final error = e is HostedShareException ? e : const HostedShareException(HostedShareError.network);
       state = state.copyWith(failure: HostedDeleteFailure(link.copyWith(deleting: false), error));
     }
-    await _saveMain();
+    await _savePlain();
   }
-
 }
 
 final hostedLinksProvider = NotifierProvider<HostedLinksController, HostedLinksState>(HostedLinksController.new);

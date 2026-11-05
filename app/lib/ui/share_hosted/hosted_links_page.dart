@@ -115,8 +115,9 @@ class _HostedLinksPageState extends ConsumerState<HostedLinksPage> {
         onPressed: () async {
           final result = await links.undo(link.id);
           if (!context.mounted) return;
-          if (links.isHarmonyOS && result == HostedUndoResult.sessionOnly) _toast(context, context.l10n.remoteHostedUndoUnsaved);
-          if (links.isHarmonyOS && result == HostedUndoResult.unavailable) _toast(context, context.l10n.remoteHostedUndoFailed);
+          if (!links.isHarmonyOS) return;
+          if (result == HostedUndoResult.sessionOnly) _toast(context, context.l10n.remoteHostedUndoUnsaved);
+          if (result == HostedUndoResult.unavailable) _toast(context, context.l10n.remoteHostedUndoFailed);
         },
       ),
     );
