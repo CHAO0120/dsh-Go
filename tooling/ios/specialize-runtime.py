@@ -21,6 +21,7 @@ AFTER = 'let e=y.encode(t),o=[];for(let r=0;r<e.length;r+=8192)o.push(String.fro
 # write WebP, so alpha stays in PNG. Each has to match exactly once, or the build stops.
 ATTACHMENTS = 'node_modules/@deepseek-ai/dsh-attachment-local/lib/index.js'
 IMAGE_CODEC = 'node_modules/@deepseek-ai/dsh-attachment-local/lib/ios-sharp.cjs'
+WORKER_ENV = 'runtime/ios/process/worker-env.mjs'
 PRELOAD = 'runtime/ohos/preload.mjs'
 RELOCATION_FILES = ('runtime/ios/storage/relocate.mjs', 'runtime/ios/storage/preload.mjs')
 PRELOAD_BEFORE = "await import('./publication/preload.mjs');\n"
@@ -42,6 +43,8 @@ DIAGNOSTIC_EDITS = {
         ('候选文件数超过鸿蒙本机上限', '候选文件数超过 iOS 本机上限'),
     ),
     'runtime/ohos/process/runtime.mjs': (
+        ("import { randomUUID } from 'node:crypto';", "import { randomUUID } from 'node:crypto';\nimport { workerEnvironment } from '../../ios/process/worker-env.mjs';"),
+        ("          const workerEnv = { ...env };", "          const workerEnv = workerEnvironment(env);"),
         ("prepare(argv, policy, signal) {\n    if (this.closed) throw new Error('鸿蒙虚拟进程服务已关闭')", "prepare(argv, policy, signal) {\n    if (this.closed) throw new Error('iOS 虚拟进程服务已关闭')"),
         ('鸿蒙本机没有 PTY，可以连接电脑执行', 'iOS 本机没有 PTY，可以连接电脑执行'),
         ("spawn(spec) {\n    if (this.closed) throw new Error('鸿蒙虚拟进程服务已关闭')", "spawn(spec) {\n    if (this.closed) throw new Error('iOS 虚拟进程服务已关闭')"),
@@ -118,6 +121,8 @@ DIAGNOSTIC_EDITS = {
         ('child_process is unavailable in the OHOS Node script Worker', 'child_process is unavailable in the iOS Node script Worker'),
     ),
     'runtime/ohos/process/node-script.mjs': (
+        ("import { Worker } from 'node:worker_threads';", "import { Worker } from 'node:worker_threads';\nimport { workerEnvironment } from '../../ios/process/worker-env.mjs';"),
+        ("    argv: args.slice(1), env, stdout: true, stderr: true,", "    argv: args.slice(1), env: workerEnvironment(env), stdout: true, stderr: true,"),
         ('Node scripts require the inherited OHOS product preload', 'Node scripts require the inherited iOS product preload'),
     ),
     'runtime/ohos/net/bootstrap.mjs': (
@@ -229,6 +234,7 @@ def specialize(expanded, out, composer):
             data = data.replace(before, after)
         diagnostics[name] = data
     codec = (Path(__file__).resolve().parents[2] / 'runtime/ios/image/ios-sharp.cjs').read_bytes()
+    worker_env = (Path(__file__).resolve().parents[2] / WORKER_ENV).read_bytes()
     relocation = {name: (Path(__file__).resolve().parents[2] / name).read_bytes()
                   for name in RELOCATION_FILES}
     preload = (expanded / 'files' / PRELOAD).read_text()
@@ -263,7 +269,7 @@ def specialize(expanded, out, composer):
         stage = Path(temp) / 'result'
         tree = stage / 'expanded/dsh-runtime'
         shutil.copytree(expanded, tree)
-        for name, data in {IMAGE_CODEC: codec, **relocation}.items():
+        for name, data in {IMAGE_CODEC: codec, WORKER_ENV: worker_env, **relocation}.items():
             if name in entries:
                 raise ValueError('The shared composition already has an iOS-only file: ' + name)
             row = {'path': name, 'size': len(data), 'sha256': composer.digest(data)}
