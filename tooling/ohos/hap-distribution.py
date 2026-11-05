@@ -8,7 +8,9 @@ import shutil
 import subprocess
 import tempfile
 
-RESTRICTED = ('ohos.permission.KEEP_BACKGROUND_RUNNING_SYSTEM', 'ohos.permission.READ_PASTEBOARD')
+RESTRICTED = ('ohos.permission.KEEP_BACKGROUND_RUNNING_SYSTEM', 'ohos.permission.READ_PASTEBOARD',
+              # Needs AGC's agent reminder service before it does anything, so the first install stays without it.
+              'ohos.permission.PUBLISH_AGENT_REMINDER')
 
 
 class Refused(ValueError):
@@ -26,6 +28,7 @@ def permissions(document, distribution):
         requested.append({'name': RESTRICTED[0]})
         requested.append({'name': RESTRICTED[1], 'reason': '$string:dsh_pasteboard_reason',
                           'usedScene': {'abilities': ['EntryAbility'], 'when': 'inuse'}})
+        requested.append({'name': RESTRICTED[2]})
         modes.append('taskKeeping')
     module['requestPermissions'] = requested
     if modes:

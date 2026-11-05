@@ -38,7 +38,7 @@
 
    **第一次先别申请受限权限，也别用带权限的包：声明了受限权限的 HAP，Profile 里没有对应 ACL 就装不上。** 先把下面的前 5 项走通，再回来申请 `READ_PASTEBOARD`、`KEEP_BACKGROUND_RUNNING_SYSTEM`，换 `check-arkts.sh --full --distribution debug` 打的包，才能试粘贴和长期后台。文档说审批前可得一个有效期较短的临时 Profile。
 
-   `PUBLISH_AGENT_REMINDER` 不在此列：SDK 的权限表写的是 normal、system_grant，声明它不影响安装。但手机上的代理提醒要先在 AGC 开通并重签 Profile，没开通时闹钟和计时器会被系统拒绝，AI 收到的是“系统没有接受提醒”。
+   `PUBLISH_AGENT_REMINDER` 也只进带权限的包：SDK 的权限表写的是 normal、system_grant，但手机上的代理提醒要先在 AGC 开通服务并重签 Profile。没带这个权限的包里，AI 设闹钟或计时器会收到系统没有接受提醒。
 
 5. **签名并安装。**
 
