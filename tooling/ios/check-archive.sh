@@ -76,5 +76,12 @@ if [ -s "$log" ]; then fail "missing at launch: $(cat "$log")"; else note 'archi
 loose="$(find "$app" \( -name '*.dylib' -o -name '*.so' -o -name '*.node' \) -not -path '*/Frameworks/*.framework/*' | sed "s|$app/||" | head -10 | tr '\n' ' ')"
 [ -n "$loose" ] && note 'archive loose binaries' "$loose"
 
+# The same app as an unsigned .ipa, for a phone: a signing tool (Xcode, or one that signs with
+# an Apple ID) still has to sign it before it installs.
+mkdir -p "$RUNNER_TEMP/ipa/Payload"
+cp -R "$app" "$RUNNER_TEMP/ipa/Payload/"
+(cd "$RUNNER_TEMP/ipa" && /usr/bin/ditto -c -k --keepParent Payload "$RUNNER_TEMP/DSH-Go-unsigned.ipa")
+note 'archive ipa' "$(du -h "$RUNNER_TEMP/DSH-Go-unsigned.ipa" | cut -f1), unsigned, in the ios-unsigned-ipa artifact"
+
 note 'archive' "$( [ "$failed" -eq 0 ] && echo 'looks whole' || echo 'see the errors')"
 exit "$failed"
