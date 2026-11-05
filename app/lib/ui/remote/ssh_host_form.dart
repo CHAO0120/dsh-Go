@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../clipboard/field_paste.dart';
 import '../../l10n/l10n.dart';
 import '../../remote/ssh/ssh_link.dart';
 import '../../state/attachments.dart';
@@ -40,7 +41,7 @@ class SshHostFormPage extends ConsumerStatefulWidget {
   ConsumerState<SshHostFormPage> createState() => _SshHostFormPageState();
 }
 
-class _SshHostFormPageState extends ConsumerState<SshHostFormPage> {
+class _SshHostFormPageState extends ConsumerState<SshHostFormPage> with FieldPaste<SshHostFormPage> {
   late final String _id = widget.existing?.id ?? SshHostConfig.newId();
   late final _name = TextEditingController(text: widget.existing?.name ?? '');
   late final _host = TextEditingController(text: widget.existing?.host ?? '');
@@ -353,9 +354,8 @@ class _SshHostFormPageState extends ConsumerState<SshHostFormPage> {
   }
 
   Future<void> _pasteKey() async {
-    final data = await Clipboard.getData(Clipboard.kTextPlain);
+    final text = await readClipboard();
     if (!mounted) return;
-    final text = data?.text;
     if (text != null && text.trim().isNotEmpty) setState(() => _privateKey.text = text.trim());
   }
 

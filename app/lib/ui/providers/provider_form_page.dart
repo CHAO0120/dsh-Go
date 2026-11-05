@@ -9,6 +9,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../clipboard/field_paste.dart';
 import '../../l10n/l10n.dart';
 import '../../state/providers_state.dart';
 import '../common/app_dialog.dart';
@@ -45,7 +46,7 @@ class ProviderFormPage extends ConsumerStatefulWidget {
 /// The fields that can carry an error, in page order.
 enum _F { baseUrl, key, models }
 
-class _ProviderFormPageState extends ConsumerState<ProviderFormPage> {
+class _ProviderFormPageState extends ConsumerState<ProviderFormPage> with FieldPaste<ProviderFormPage> {
   late final _name = TextEditingController(text: widget.existing?.displayName ?? '');
   late final _baseUrl = TextEditingController(text: widget.existing?.baseUrl ?? '');
   final _key = TextEditingController();
@@ -137,8 +138,7 @@ class _ProviderFormPageState extends ConsumerState<ProviderFormPage> {
   }
 
   Future<void> _paste() async {
-    final data = await Clipboard.getData(Clipboard.kTextPlain);
-    final text = normalizeProviderKey(data?.text ?? '');
+    final text = normalizeProviderKey(await readClipboard() ?? '');
     if (text.isEmpty || !mounted) return;
     _key.value = TextEditingValue(
       text: text,

@@ -18,6 +18,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../../../clipboard/paste_reader.dart';
 import '../../../l10n/l10n.dart';
 import '../../../plugins/native/native_capabilities.dart';
 import '../../../plugins/native/native_effects.dart';
@@ -258,7 +259,7 @@ Future<bool> runNativeTap(
 }) async {
   if (!context.mounted || !ref.context.mounted) return false;
   final clock = ref.read(nativeClockProvider);
-  final tappedAt = gestureAt ?? clock();
+  var tappedAt = gestureAt ?? clock();
   if (userGesture && nativeTapIsFresh(tappedAt, clock())) HapticFeedback.selectionClick();
   final l10n = context.l10n;
   final plugin = ref.read(nativeContributionsProvider).plugin(package);
@@ -279,10 +280,8 @@ Future<bool> runNativeTap(
 
   // What may travel with this tap, after asking once.
   final wants = switch (surface) {
-    NativeSurface.composerActions || NativeSurface.composerTools => {
-      if (plugin.wantsDraft) 'draft',
-      if (plugin.wantsClipboard) 'clipboard',
-    },
+    NativeSurface.composerActions ||
+    NativeSurface.composerTools => {if (plugin.wantsDraft) 'draft', if (plugin.wantsClipboard) 'clipboard'},
     NativeSurface.messageActions => {if (plugin.wantsMessage && message != null) 'message'},
     _ => const <String>{},
   };
@@ -298,12 +297,24 @@ Future<bool> runNativeTap(
   }
   String? clipboard;
   if (wants.contains('clipboard')) {
-    try {
-      clipboard = (await Clipboard.getData(Clipboard.kTextPlain))?.text;
-    } catch (_) {
-      clipboard = null;
+    if (ref.read(operatingSystemProvider) == 'ohos') {
+      // 允许 above only said what may travel with a tap; the system's own button
+      // still grants this read, and pressing it is the gesture from here on.
+      final result = await ref.read(pasteReaderProvider).begin().finish();
+      if (!context.mounted || !guard.current) return false;
+      if (pasteFailureText(result) case final message?) _toast(context, message);
+      // An empty clipboard goes on without one, as on Android; the rest end the tap.
+      if (result.status != PasteStatus.text && result.status != PasteStatus.empty) return false;
+      clipboard = result.text;
+      tappedAt = clock();
+    } else {
+      try {
+        clipboard = (await Clipboard.getData(Clipboard.kTextPlain))?.text;
+      } catch (_) {
+        clipboard = null;
+      }
+      if (!context.mounted || !guard.current) return false;
     }
-    if (!context.mounted || !guard.current) return false;
   }
 
   work.start(control, NativeWork(owner: owner));

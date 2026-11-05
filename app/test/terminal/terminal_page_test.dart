@@ -5,6 +5,9 @@
 import 'dart:ui' show Tristate;
 
 import 'package:dsh_app/l10n/l10n.dart';
+
+import 'dart:async';
+
 import 'package:dsh_app/state/android_features.dart';
 import 'package:dsh_app/state/runtime_capabilities_state.dart';
 import 'package:dsh_app/state/terminal_state.dart';
@@ -19,6 +22,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:xterm/xterm.dart' show TerminalView;
 
+import '../clipboard/fake_paste.dart';
 import 'support.dart';
 
 Finder _key(TerminalExtraKey key) => find.byKey(ValueKey('terminal-key-${key.name}'));
@@ -308,6 +312,57 @@ void main() {
     await tester.tap(find.text('粘贴'));
     await settleTerminal(tester);
     expect(backend.attachOf('a').written, contains('echo pasted'));
+  });
+
+  group('粘贴 on HarmonyOS', () {
+    Future<void> selectAndPaste(WidgetTester tester) async {
+      final view = tester.getRect(find.byType(TerminalView));
+      await tester.longPressAt(view.topLeft + const Offset(14, 8));
+      await settleTerminal(tester);
+      await tester.tap(find.text('粘贴'));
+      await settleTerminal(tester);
+    }
+
+    final onHarmony = [operatingSystemProvider.overrideWithValue('ohos')];
+
+    testWidgets('the system paste button\'s text goes in as it is', (tester) async {
+      final paste = FakePaste(tester, reply: FakePaste.text('echo pasted\n'), flutterText: 'wrong');
+      final backend = FakeTerminalBackend(terminals: [infoJson('a')])..screens['a'] = 'hello world\r\n\$ ';
+      await pumpTerminalPage(tester, backend, overrides: onHarmony);
+      await selectAndPaste(tester);
+      expect(backend.attachOf('a').written, contains('echo pasted'));
+      expect(paste.flutterReads, 0);
+    });
+
+    testWidgets('backed out of, nothing goes in and nothing is said', (tester) async {
+      FakePaste(tester, reply: {'status': 'cancelled'});
+      final backend = FakeTerminalBackend(terminals: [infoJson('a')])..screens['a'] = 'hello world\r\n\$ ';
+      await pumpTerminalPage(tester, backend, overrides: onHarmony);
+      final before = backend.attachOf('a').written.length;
+      await selectAndPaste(tester);
+      expect(backend.attachOf('a').written.length, before);
+      expect(find.byType(SnackBar), findsNothing);
+    });
+
+    testWidgets('a paste still waiting is for its terminal: another tab closes the window', (tester) async {
+      final paste = FakePaste(tester, reply: FakePaste.text('echo late\n'))..gate = Completer<void>();
+      final backend = FakeTerminalBackend(
+        terminals: [
+          infoJson('a', title: 'one'),
+          infoJson('b', title: 'two'),
+        ],
+      )..screens['a'] = 'hello world\r\n\$ ';
+      await pumpTerminalPage(tester, backend, overrides: onHarmony);
+      await selectAndPaste(tester);
+      expect(paste.reads, hasLength(1));
+      await tester.tap(find.byKey(const ValueKey('terminal-tab-b')));
+      await settleTerminal(tester);
+      expect(paste.cancels, contains(paste.reads.single));
+      paste.gate!.complete();
+      await settleTerminal(tester);
+      expect(backend.attachOf('a').written, isNot(contains('echo late')));
+      expect(backend.attachOf('b').written, isNot(contains('echo late')));
+    });
   });
 
   testWidgets('pinch changes the font size', (tester) async {

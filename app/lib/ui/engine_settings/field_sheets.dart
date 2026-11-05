@@ -12,6 +12,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../clipboard/field_paste.dart';
 import '../../l10n/l10n.dart';
 import '../../state/engine_settings_state.dart';
 import '../common/app_sheet.dart';
@@ -909,7 +910,7 @@ class SecretFieldSheet extends StatefulWidget {
   State<SecretFieldSheet> createState() => _SecretFieldSheetState();
 }
 
-class _SecretFieldSheetState extends State<SecretFieldSheet> {
+class _SecretFieldSheetState extends State<SecretFieldSheet> with FieldPaste<SecretFieldSheet> {
   final _controller = TextEditingController();
   bool _obscure = true;
   bool _busy = false;
@@ -924,8 +925,8 @@ class _SecretFieldSheetState extends State<SecretFieldSheet> {
   String get _value => _controller.text.replaceAll(RegExp(r'\s'), '');
 
   Future<void> _paste() async {
-    final data = await Clipboard.getData(Clipboard.kTextPlain);
-    final text = (data?.text ?? '').replaceAll(RegExp(r'\s'), '');
+    final raw = await readClipboard(say: (message) => setState(() => _error = message));
+    final text = (raw ?? '').replaceAll(RegExp(r'\s'), '');
     if (text.isEmpty || !mounted) return;
     _controller.value = TextEditingValue(
       text: text,
