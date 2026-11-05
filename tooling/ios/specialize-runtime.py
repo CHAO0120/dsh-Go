@@ -21,6 +21,8 @@ AFTER = 'let e=y.encode(t),o=[];for(let r=0;r<e.length;r+=8192)o.push(String.fro
 # write WebP, so alpha stays in PNG. Each has to match exactly once, or the build stops.
 ATTACHMENTS = 'node_modules/@deepseek-ai/dsh-attachment-local/lib/index.js'
 IMAGE_CODEC = 'node_modules/@deepseek-ai/dsh-attachment-local/lib/ios-sharp.cjs'
+RG = 'runtime/ohos/process/rg.mjs'
+RG_PREFIX = 'rg: 鸿蒙本机尚不支持'.encode()
 ATTACHMENT_EDITS = (
     ('const loadSharp = createLazyRequire("sharp", import.meta.url);',
      'const loadSharp = createLazyRequire("./ios-sharp.cjs", import.meta.url);'),
@@ -58,8 +60,11 @@ def specialize(expanded, out, composer):
     manifest = json.loads((expanded / 'manifest.json').read_bytes())
     entries = {row['path']: row for row in manifest['files']}
     attachments = attachments_for_ios((expanded / 'files' / ATTACHMENTS).read_bytes())
+    rg = (expanded / 'files' / RG).read_bytes()
+    if rg.count(RG_PREFIX) != 1:
+        raise ValueError('iOS rg diagnostic prefix differs from the composed input')
     codec = (Path(__file__).resolve().parents[2] / 'runtime/ios/image/ios-sharp.cjs').read_bytes()
-    for name in (HELPER, PROVENANCE, ATTACHMENTS):
+    for name in (HELPER, PROVENANCE, ATTACHMENTS, RG):
         data = (expanded / 'files' / name).read_bytes()
         if entries[name]['sha256'] != composer.digest(data) or entries[name]['size'] != len(data):
             raise ValueError('iOS specialization input differs from shared manifest: ' + name)
@@ -87,7 +92,8 @@ def specialize(expanded, out, composer):
         entries[IMAGE_CODEC] = row
         manifest['files'] = sorted([*manifest['files'], row], key=lambda item: item['path'])
         (tree / 'files' / IMAGE_CODEC).write_bytes(codec)
-        for name, data in ((HELPER, changed), (PROVENANCE, composer.json_bytes(provenance)), (ATTACHMENTS, attachments)):
+        for name, data in ((HELPER, changed), (PROVENANCE, composer.json_bytes(provenance)), (ATTACHMENTS, attachments),
+                           (RG, rg.replace(RG_PREFIX, 'rg: iOS 本机尚不支持'.encode()))):
             (tree / 'files' / name).write_bytes(data)
             entries[name]['sha256'] = composer.digest(data)
             entries[name]['size'] = len(data)
