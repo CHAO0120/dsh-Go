@@ -15,8 +15,10 @@ assert(process.env.DSH_DISCOVERY_PREFIX, 'DSH_DISCOVERY_PREFIX must identify act
 const prefix = resolve(process.env.DSH_DISCOVERY_PREFIX);
 const source = await readFile(join(prefix, 'node_modules/@deepseek-ai/dsh-llm-pi-ai/lib/index.js'), 'utf8');
 const digest = createHash('sha256').update(source).digest('hex');
+// Upstream, the common chain before the fix, and the fix itself.
 assert(['99b5c20830a52f69641df8a18a39206079b0c725201958cce2c4a934f1d4f7cd',
-        '98d539a928892c368c815289fe7708349c573e61de052f04cdc4e48f3f5c40e9'].includes(digest), 'unreviewed adapter bytes');
+        '7d4812ef6d10126807ccd4211107cf22d6579ef59c5adfd375e104d4773bdfd5',
+        'b6b2aa1edb6c2ec8db1d9c828daaa79fc36ee9daaf07a66f2501480263bed69c'].includes(digest), 'unreviewed adapter bytes');
 const require = createRequire(join(prefix, 'package.json'));
 const {LlmError} = await import(pathToFileURL(require.resolve('@deepseek-ai/dsh-llm')).href);
 const begin = 'const LISTABLE_PROTOCOLS = new Set([';

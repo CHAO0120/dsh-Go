@@ -26,11 +26,11 @@
 
 ## 固定补丁与 hash
 
-`runtime/patches/zzzzzzzzzzzzz-ohos-plugin-install-refusal.diff` 的两处前像均由既有固定补丁链产生，`pins.json` 同时记录前后像。目标列表的文本位置不决定应用顺序；`rtbuild.select_dsh_patches` 按名称排序，本补丁在前述既有插件管理守卫之后执行。
+`runtime/patches/zzzzzzzzzzzzz-ohos-plugin-install-refusal.diff` 的两处前像均由既有固定补丁链产生，`pins.json` 同时记录前后像。OHOS 按 `targetSets.ohos` 的声明顺序应用（`runtime/patches/TARGETS.md`），本补丁在完整公共链之后执行，所以也在前述既有插件管理守卫之后。
 
 | 固定产物 | 前像 SHA-256 | 后像 SHA-256 |
 | --- | --- | --- |
-| `dsh-plugin-manager/lib/index.js` | `7978a5b16f406b3c223de5a83c93e86125677ece1265d39d79dcba19de13cd45` | `be812f844e6da171a7e2a874fca716f05a157dcab96ded1c79a35f679285b6c7` |
+| `dsh-plugin-manager/lib/index.js` | `f3822130e4abdc752bd4ad8cc3b1f000ebe78bd545fbebaed09909f06b0908bd` | `24a7eabae2c1c2f8e93d526c40348c980505fe2308354da5a8e973b4637f1781` |
 | `dsh-plugin-manager/lib/types/operations.js` | `a9f2c4bbcfcad95eaac8878358e5aecb2532cfa4a7a9c6f981ff507fe3403f94` | `baa52993c097351842b4446cdba0a4a63cb63c5db4d906ab94180216f951a32c` |
 
 ## 已实际执行的验证
