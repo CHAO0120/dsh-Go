@@ -5,6 +5,7 @@
 import 'dart:async';
 
 import 'package:dsh_client/dsh_client.dart' show TerminalShell;
+import 'package:flutter/foundation.dart' show kIsWeb, defaultTargetPlatform, TargetPlatform;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -101,23 +102,40 @@ class _TerminalPageState extends ConsumerState<TerminalPage> {
 
   Future<void> _rename(TerminalTab tab) async {
     final controller = TextEditingController(text: tab.title);
-    final next = await showDialog<String>(
-      context: context,
-      builder: (dialog) => AlertDialog(
-        title: Text(appL10n.botsTerminalRename),
-        content: TextField(
-          controller: controller,
-          autofocus: true,
-          maxLength: 120,
-          decoration: InputDecoration(hintText: appL10n.botsTerminalName, counterText: ''),
-          onSubmitted: (v) => Navigator.pop(dialog, v.trim()),
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(dialog), child: Text(appL10n.commonCancel)),
-          FilledButton(onPressed: () => Navigator.pop(dialog, controller.text.trim()), child: Text(appL10n.commonSave)),
-        ],
-      ),
-    ).whenComplete(controller.dispose);
+    final waitForRemoval = !kIsWeb && defaultTargetPlatform == TargetPlatform.iOS;
+    Future<String?>? removed;
+    final next =
+        await showDialog<String>(
+          context: context,
+          builder: (dialog) {
+            if (waitForRemoval) removed = ModalRoute.of<String>(dialog)?.completed;
+            return AlertDialog(
+              title: Text(appL10n.botsTerminalRename),
+              content: TextField(
+                controller: controller,
+                autofocus: true,
+                maxLength: 120,
+                decoration: InputDecoration(hintText: appL10n.botsTerminalName, counterText: ''),
+                onSubmitted: (v) => Navigator.pop(dialog, v.trim()),
+              ),
+              actions: [
+                TextButton(onPressed: () => Navigator.pop(dialog), child: Text(appL10n.commonCancel)),
+                FilledButton(
+                  onPressed: () => Navigator.pop(dialog, controller.text.trim()),
+                  child: Text(appL10n.commonSave),
+                ),
+              ],
+            );
+          },
+        ).whenComplete(() {
+          final completion = removed;
+          if (completion == null) {
+            controller.dispose();
+          } else {
+            // The result arrives before the closing dialog leaves the overlay.
+            unawaited(completion.then<void>((_) => controller.dispose()));
+          }
+        });
     if (next == null || next.isEmpty || next == tab.title || !mounted) return;
     final messenger = ScaffoldMessenger.maybeOf(context);
     final ok = await ref.read(_provider.notifier).rename(tab.id, next);
