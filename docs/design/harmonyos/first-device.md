@@ -11,7 +11,7 @@
 | 设备 | 系统 API 26 或更新，手机或平板。这版 Flutter 引擎的硬要求，低了装不上 |
 | 账号 | 华为开发者账号。实名后调试证书 180 天，未实名只有 14 天，都不能续期 |
 | 工具 | OpenHarmony SDK 和 JDK 17（见 `tooling/ohos/check-arkts.sh`），里面有 `hdc` 和 `hap-sign-tool` |
-| 包 | `tooling/ohos/check-arkts.sh --full` 打出的未签名 HAP |
+| 包 | `tooling/ohos/check-arkts.sh --full` 打出的未签名 HAP。第一次用不带 `--distribution` 的 |
 
 ## 步骤
 
@@ -36,7 +36,7 @@
    3. 上传 `debug.csr`，申请调试证书，下载存为 `~/keys/dsh-ohos/debug.cer`；
    4. 申请调试 Profile，勾选设备，下载存为 `~/keys/dsh-ohos/debug.p7b`。
 
-   要用受限权限（粘贴、长期后台）时在这一步一起申请。文档说审批前可得一个有效期较短的临时 Profile。
+   **第一次先别申请受限权限，也别用带权限的包：声明了受限权限的 HAP，Profile 里没有对应 ACL 就装不上。** 先把下面的前 5 项走通，再回来申请 `READ_PASTEBOARD`、`KEEP_BACKGROUND_RUNNING_SYSTEM`，换 `check-arkts.sh --full --distribution debug` 打的包，才能试粘贴和长期后台。文档说审批前可得一个有效期较短的临时 Profile。
 
 5. **签名并安装。**
 

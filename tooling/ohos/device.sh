@@ -15,8 +15,8 @@
 #   DSH_OHOS_SIGN   the signing folder, outside the repo (default ~/keys/dsh-ohos):
 #                   key.p12 and password from keygen; debug.cer and debug.p7b from AGC
 #
-# The password never reaches the output or the repo. hap-sign-tool only takes it as
-# an argument, so it does show in this machine's process list while signing.
+# The password never reaches the output or the repo. keygen passes it as an argument, so
+# it shows in this machine's process list then; signing goes through hap-distribution.py.
 set -euo pipefail
 
 BUNDLE=io.github.ccch1mneyyy.dsh_app
@@ -95,9 +95,10 @@ cmd_install() {
   WORK="$(mktemp -d)"
   trap 'rm -rf "$WORK"' EXIT
   signed="$WORK/signed.hap"
-  "$JAVA" -jar "$TOOL" sign-app -mode localSign -keystoreFile "$SIGN/key.p12" -keystorePwd "$pass" \
-    -keyAlias "$ALIAS" -keyPwd "$pass" -signAlg SHA256withECDSA -profileFile "$SIGN/debug.p7b" \
-    -appCertFile "$SIGN/debug.cer" -inFile "$hap" -outFile "$signed"
+  JAVA_HOME="${JAVA_HOME:-$HOME/dev/jdk-17}" DSH_OHOS_SIGN_KEYSTORE="$SIGN/key.p12" DSH_OHOS_SIGN_CERTIFICATE="$SIGN/debug.cer" \
+    DSH_OHOS_SIGN_PROFILE="$SIGN/debug.p7b" DSH_OHOS_SIGN_KEY_ALIAS="$ALIAS" DSH_OHOS_SIGN_KEY_PASSWORD="$pass" \
+    DSH_OHOS_SIGN_STORE_PASSWORD="$pass" DSH_OHOS_SIGN_TOOL="$TOOL" \
+    python3 -I -B "$(dirname "$0")/hap-distribution.py" sign --input "$hap" --output "$signed"
   # hdc can report a refused install and still exit 0.
   local result
   result="$("$HDC" install -r "$signed" 2>&1)" || true
