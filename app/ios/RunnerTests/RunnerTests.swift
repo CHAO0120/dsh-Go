@@ -159,6 +159,43 @@ final class NativeToolsTests: XCTestCase {
     return value
   }
 
+  // Compiles the actual intent implementation into this test bundle. The receiver observes
+  // the handoff consumed by DshPlugin; this does not exercise Siri dispatch or Flutter.
+  func testSiriPerformHandoff() async throws {
+    guard #available(iOS 16.0, *) else { throw XCTSkip("AppIntents requires iOS 16") }
+    defer { SystemEntries.attach { _ in } }
+    var received: [[String: String]] = []
+    var ask = AskDshIntent()
+    ask.text = "测试 DSH\nsecond line"
+    // Nothing has attached to this bundle's SystemEntries yet: a cold app launch.
+    _ = try await ask.perform()
+    _ = try await ask.perform()
+    _ = try await VoiceInputIntent().perform()
+    _ = try await NewChatIntent().perform()
+    XCTAssertTrue(received.isEmpty)
+    SystemEntries.attach { received.append($0) }
+    let queued = received
+    let expected: [[String: String]] = [
+      ["kind": "new", "text": ask.text], ["kind": "new", "text": ask.text],
+      ["kind": "voice"], ["kind": "new"],
+    ]
+    XCTAssertEqual(queued, expected)
+    try note(["group": "siri", "name": "queued", "args": [String: String](), "expect": "ok",
+      "isError": queued != expected, "text": "perform before attach", "ms": 0, "entries": queued])
+
+    // Attaching again must not replay the drained queue.
+    received.removeAll()
+    SystemEntries.attach { received.append($0) }
+    XCTAssertTrue(received.isEmpty)
+    _ = try await ask.perform()
+    _ = try await ask.perform()
+    _ = try await VoiceInputIntent().perform()
+    _ = try await NewChatIntent().perform()
+    XCTAssertEqual(received, expected)
+    try note(["group": "siri", "name": "attached", "args": [String: String](), "expect": "ok",
+      "isError": received != expected, "text": "perform after attach; no replay", "ms": 0, "entries": received])
+  }
+
   // MARK: The system tools
 
   @discardableResult

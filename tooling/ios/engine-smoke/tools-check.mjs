@@ -3,6 +3,7 @@
 // nobody is there to answer a prompt; only the app's own sheet gets tapped, by the test.
 //
 //   node tools-check.mjs --simulator <udid> --app <Runner.app> --work <new dir>
+import { checkSiriRows } from './siri-results.mjs';
 import { spawn, spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, openSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -47,7 +48,7 @@ clearTimeout(deadline);
 
 const rowsFile = join(work, 'rows.jsonl');
 const rows = existsSync(rowsFile) ? readFileSync(rowsFile, 'utf8').split('\n').filter(Boolean).map((line) => JSON.parse(line)) : [];
-const problems = [];
+const problems = checkSiriRows(rows);
 const lines = [];
 // A page read is mostly a list of elements, and what matters is whether it saw the page.
 const brief = (row) => {
@@ -67,7 +68,8 @@ for (const row of rows) {
     if (row.group === 'system') {
       const action = systemAction(row.name, row.args);
       if (!row.isError) resultFor(action, JSON.parse(row.text));
-    } else browserAction(row.name, row.args);
+    } else if (row.group === 'browser') browserAction(row.name, row.args);
+    else if (row.group !== 'siri') throw new Error(`unknown group ${row.group}`);
   } catch (error) {
     contract = ` CONTRACT: ${error.message}`;
     problems.push(`${row.group} ${row.name}: ${error.message}`);
@@ -77,7 +79,7 @@ for (const row of rows) {
   const shown = JSON.stringify(row.args).slice(0, 60);
   lines.push(`${wrong ? 'WRONG ' : ''}${row.name} ${shown} ${row.ms}ms ${row.isError ? 'error' : 'ok'}${row.imageBytes ? ` image ${row.imageBytes}` : ''}: ${answer}${contract}`);
 }
-for (const group of ['system', 'browser']) {
+for (const group of ['system', 'browser', 'siri']) {
   const all = lines.filter((_, index) => rows[index].group === group).join('\n') || 'no calls recorded';
   // An annotation holds about 4 KB.
   for (let at = 0, part = 1; at < all.length; at += 3400, part++) notice(`${group} tools ${part}`, all.slice(at, at + 3400));
