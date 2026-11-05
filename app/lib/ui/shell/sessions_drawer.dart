@@ -3,6 +3,7 @@
 import 'dart:async';
 
 import 'package:dsh_client/dsh_client.dart';
+import 'package:flutter/foundation.dart' show TargetPlatform, defaultTargetPlatform, kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/scheduler.dart';
@@ -622,26 +623,39 @@ class _SessionList extends ConsumerWidget {
 
   Future<String?> _askTitle(BuildContext context, String initial) {
     final controller = TextEditingController(text: initial);
+    final waitForRemoval = !kIsWeb && defaultTargetPlatform == TargetPlatform.iOS;
+    Future<String?>? removed;
     return showDialog<String>(
       context: context,
-      builder: (dialog) => AlertDialog(
-        title: Text(context.l10n.shellRenameChat),
-        content: TextField(
-          controller: controller,
-          autofocus: true,
-          maxLength: 80,
-          decoration: InputDecoration(hintText: context.l10n.shellChatTitle, counterText: ''),
-          onSubmitted: (v) => Navigator.pop(dialog, v.trim()),
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(dialog), child: Text(context.l10n.commonCancel)),
-          FilledButton(
-            onPressed: () => Navigator.pop(dialog, controller.text.trim()),
-            child: Text(context.l10n.commonSave),
+      builder: (dialog) {
+        if (waitForRemoval) removed = ModalRoute.of<String>(dialog)?.completed;
+        return AlertDialog(
+          title: Text(context.l10n.shellRenameChat),
+          content: TextField(
+            controller: controller,
+            autofocus: true,
+            maxLength: 80,
+            decoration: InputDecoration(hintText: context.l10n.shellChatTitle, counterText: ''),
+            onSubmitted: (v) => Navigator.pop(dialog, v.trim()),
           ),
-        ],
-      ),
-    ).whenComplete(controller.dispose);
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(dialog), child: Text(context.l10n.commonCancel)),
+            FilledButton(
+              onPressed: () => Navigator.pop(dialog, controller.text.trim()),
+              child: Text(context.l10n.commonSave),
+            ),
+          ],
+        );
+      },
+    ).whenComplete(() {
+      final completion = removed;
+      if (completion == null) {
+        controller.dispose();
+      } else {
+        // The result arrives before the closing dialog leaves the overlay.
+        unawaited(completion.then<void>((_) => controller.dispose()));
+      }
+    });
   }
 }
 
