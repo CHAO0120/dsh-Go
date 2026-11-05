@@ -235,13 +235,15 @@ test('a phone call asks through the engine approval first and a refusal never re
   assert.equal(f.queue.status().pending, 0); assert.equal(f.counts().claims, 0);
 });
 
-test('a call that cannot run now fails plainly instead of asking first', async t => {
+test('a call that cannot run now fails plainly, for the true reason, instead of asking first', async t => {
   const f = await approvalFixture(t, 'ask');
-  for (const change of [{ available: false }, { available: true, foreground: false }]) {
+  for (const [change, code] of [[{ available: false, foreground: true }, 'native_unavailable'],
+    [{ available: true, foreground: false }, 'not_foreground'], [{ available: false, foreground: false }, 'not_foreground']]) {
     Object.assign(f.state, change);
     const result = await f.run('open', { url: 'https://example.test' });
     assert.equal(result.isError, true); assert.equal(f.asks.length, 0);
-    assert.equal(JSON.parse(result.error.message).dispatched, false);
+    const phone = JSON.parse(result.error.message);
+    assert.equal(phone.dispatched, false); assert.equal(phone.code, code);
   }
 });
 
