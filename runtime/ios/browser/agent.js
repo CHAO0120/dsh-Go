@@ -285,7 +285,7 @@
       if (['script', 'style', 'noscript', 'template'].includes(tag(el))) return;
       if (hidden(el)) return;
       const interactive = role(el) || el.tabIndex >= 0;
-      if (rendered(el) && interactive) add(el, context, role(el) || 'focusable');
+      if (interactive && rendered(el)) add(el, context, role(el) || 'focusable');
       else if (scrollable(el)) add(el, context, 'scroll-region');
       if (tag(el) === 'iframe') {
         try {
