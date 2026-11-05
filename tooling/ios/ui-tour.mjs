@@ -4,7 +4,7 @@
 //
 //   node ui-tour.mjs --simulator <udid> --app <Runner.app> --out <new dir> --video <new dir>
 import { execFileSync, spawn } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { parseArgs } from 'node:util';
@@ -32,7 +32,10 @@ let errors = 0;
 
 async function pass(mode, minutes) {
   rmSync(log, { force: true });
-  simctl(['launch', '--terminate-running-process', values.simulator, bundleId], { SIMCTL_CHILD_DSH_TOUR_MODE: mode });
+  // A stale answer would let the app run on without waiting for its screenshot.
+  for (const name of readdirSync(tmp)) if (name.startsWith('dsh-ui-tour-ack-')) rmSync(join(tmp, name));
+  writeFileSync(join(tmp, 'dsh-ui-tour-mode'), mode);
+  simctl(['launch', '--terminate-running-process', values.simulator, bundleId]);
   let seen = 0;
   let finished = false;
   const deadline = Date.now() + minutes * 60 * 1000;

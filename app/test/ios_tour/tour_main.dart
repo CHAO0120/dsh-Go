@@ -42,7 +42,7 @@ var _shots = 0;
 void _say(String line) => _log.writeAsStringSync('$line\n', mode: FileMode.append, flush: true);
 
 /// The second pass, for the video: real time, no stops for screenshots.
-final _recording = Platform.environment['DSH_TOUR_MODE'] == 'video';
+final _recording = File('${Directory.systemTemp.path}/dsh-ui-tour-mode').readAsStringSync().trim() == 'video';
 
 /// Asks the driver for a screenshot and waits until it has it. One can take a good while on a CI
 /// machine, and going on without it would put the next screen under this name.
