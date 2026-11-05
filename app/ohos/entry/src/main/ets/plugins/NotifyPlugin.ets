@@ -1,5 +1,6 @@
 // 普通通知使用现有 title/text/fullText；锁屏内容隐藏由系统设置控制，待真机核实。
 import notificationManager from '@ohos.notificationManager';
+import commonEventManager from '@ohos.commonEventManager';
 import wantAgent from '@ohos.app.ability.wantAgent';
 import Want from '@ohos.app.ability.Want';
 import AbilityConstant from '@ohos.app.ability.AbilityConstant';
@@ -16,6 +17,7 @@ import {
 } from '@ohos/flutter_ohos';
 
 const ACTION = 'io.github.ccch1mneyyy.dsh_app.NOTIFICATION';
+const APPROVAL_ACTION = ACTION + '_APPROVAL';
 const LABEL = 'dsh-chat:';
 const SLOT = notificationManager.SlotType.SERVICE_INFORMATION;
 // requestEnableNotification's refusal, now or from an earlier dialog.
@@ -26,6 +28,24 @@ interface NotifyRoute {
   host: string;
   kind: string;
   eventId: string;
+}
+
+interface NotifyApproval {
+  actionId: string;
+  requestToken: number;
+  group: string;
+  key: string;
+  sessionId: string;
+  host: string;
+  eventId: string;
+  decision: string;
+}
+
+interface PendingApproval {
+  action: NotifyApproval;
+  request: notificationManager.NotificationRequest;
+  openButton: notificationManager.NotificationActionButton;
+  submitted: boolean;
 }
 
 interface NotifyPermission { enabled: boolean; slot: boolean; }
@@ -98,6 +118,12 @@ export default class NotifyPlugin implements FlutterPlugin, AbilityAware, NewWan
   private taps?: EventChannel;
   private actions?: EventChannel;
   private sink?: EventSink;
+  private actionSink?: EventSink;
+  private actionEpoch: number = 0;
+  private subscriber?: commonEventManager.CommonEventSubscriber;
+  private subscriberEpoch: number = -1;
+  private actionTask: Promise<void> = Promise.resolve();
+  private approvals: Map<string, PendingApproval> = new Map<string, PendingApproval>();
   private bundleName: string = '';
   private abilityName: string = '';
   private generation: number = 0;
@@ -143,15 +169,16 @@ export default class NotifyPlugin implements FlutterPlugin, AbilityAware, NewWan
     });
     this.actions.setStreamHandler({
       onListen: (_args: Any, events: EventSink): void => {
-        events.error('ohos_unsupported', '请点通知进入应用查看并确认操作。', null);
-        events.endOfStream();
+        this.retireActions();
+        this.actionSink = events;
       },
-      onCancel: (_args: Any): void => {}
+      onCancel: (_args: Any): void => { this.retireActions(); }
     });
   }
 
   onDetachedFromEngine(binding: FlutterPluginBinding): void {
     this.generation++;
+    this.retireActions();
     this.onDetachedFromAbility();
     this.methods?.setMethodCallHandler(null);
     binding.getBinaryMessenger().setMessageHandler('dsh/notify/taps', null);
@@ -199,6 +226,110 @@ export default class NotifyPlugin implements FlutterPlugin, AbilityAware, NewWan
     }).catch((_error: Error) => { hilog.warn(0x3F00, 'DshNotify', '通知跳转校验未完成'); });
   }
 
+  // A dynamic subscriber only works while this process and Dart listener live.
+  // Retain the explicit open button for cold/frozen processes and failed replies.
+  private retireActions(): void {
+    this.actionEpoch++;
+    this.actionSink = undefined;
+    this.approvals.clear();
+    this.actionTask = this.actionTask.then(() => this.unsubscribeActions()).catch((_error: Error) => {
+      hilog.warn(0x3F00, 'DshNotify', '通知操作订阅尚未释放');
+    });
+  }
+
+  private async unsubscribeActions(): Promise<void> {
+    const subscriber = this.subscriber;
+    if (!subscriber) return;
+    await new Promise<void>((resolve: () => void, reject: (error: Error) => void): void => {
+      commonEventManager.unsubscribe(subscriber, (error?: BusinessError): void => {
+        if (error) reject(error); else resolve();
+      });
+    });
+    this.subscriber = undefined;
+    this.subscriberEpoch = -1;
+  }
+
+  private async enableActions(generation: number): Promise<boolean> {
+    const epoch = this.actionEpoch;
+    const current = (): boolean => this.generation === generation && this.actionEpoch === epoch && this.actionSink !== undefined;
+    if (!current()) return false;
+    this.actionTask = this.actionTask.then(async (): Promise<void> => {
+      if (!current()) return;
+      if (this.subscriber && this.subscriberEpoch === epoch) return;
+      // A failed subscribe/unsubscribe keeps its one owned subscriber for retry.
+      await this.unsubscribeActions();
+      if (!current()) return;
+      this.subscriber = await commonEventManager.createSubscriber({ events: [APPROVAL_ACTION], publisherBundleName: this.bundleName });
+      if (!current()) { await this.unsubscribeActions(); return; }
+      await commonEventManager.subscribeToEvent(this.subscriber, (data: commonEventManager.CommonEventData): void => {
+        this.acceptAction(data, generation, epoch);
+      });
+      if (!current()) { await this.unsubscribeActions(); return; }
+      this.subscriberEpoch = epoch;
+    }).catch((_error: Error) => {
+      hilog.warn(0x3F00, 'DshNotify', '通知操作订阅未就绪，保留打开入口');
+    });
+    await this.actionTask;
+    return current() && this.subscriber !== undefined && this.subscriberEpoch === epoch;
+  }
+
+  private acceptAction(data: commonEventManager.CommonEventData, generation: number, epoch: number): void {
+    if (data.event !== APPROVAL_ACTION || data.bundleName !== this.bundleName || !data.parameters) return;
+    const payload = data.parameters['dshNotifyActionPayload'];
+    const signature = data.parameters['dshNotifyActionMac'];
+    const signer = this.signer;
+    if (!signer || typeof payload !== 'string' || payload.length > 8192 || typeof signature !== 'string') return;
+    this.serial(async (): Promise<Any> => {
+      if (this.generation !== generation || this.actionEpoch !== epoch || !this.actionSink) return null;
+      if (!await signer.verify(payload, signature)) return null;
+      const action = JSON.parse(payload) as NotifyApproval;
+      if (typeof action.group !== 'string' || typeof action.key !== 'string' ||
+          (action.decision !== 'allowed-once' && action.decision !== 'rejected')) return null;
+      const entry = this.approvals.get(await this.label(action.group, action.key));
+      if (this.generation !== generation || this.actionEpoch !== epoch || !this.actionSink || !entry || entry.submitted ||
+          entry.action.actionId !== action.actionId || entry.action.requestToken !== action.requestToken ||
+          entry.action.host !== action.host || entry.action.sessionId !== action.sessionId || entry.action.eventId !== action.eventId) return null;
+      entry.submitted = true;
+      this.actionSink.success(new Map<string, Any>([
+        ['group', action.group], ['key', action.key], ['host', action.host], ['sessionId', action.sessionId],
+        ['eventId', action.eventId], ['decision', action.decision], ['actionId', action.actionId], ['requestToken', action.requestToken]
+      ]));
+      return null;
+    }).catch((_error: Error) => { hilog.warn(0x3F00, 'DshNotify', '通知操作校验未完成'); });
+  }
+
+  private async approvalButton(action: NotifyApproval, title: string, signer: TapSigner): Promise<notificationManager.NotificationActionButton> {
+    const payload = JSON.stringify(action);
+    if (payload.length > 8192) throw new NotifyError('bad_args', '通知操作信息过长。');
+    const signature = await signer.sign(payload);
+    const agent = await wantAgent.getWantAgent({ wants: [{ bundleName: this.bundleName,
+      action: APPROVAL_ACTION, uri: 'dsh-notification-action://' + signature,
+      parameters: { dshNotifyActionPayload: payload, dshNotifyActionMac: signature } }], requestCode: 0,
+      actionType: wantAgent.OperationType.SEND_COMMON_EVENT, actionFlags: [wantAgent.WantAgentFlags.CONSTANT_FLAG] });
+    return { title: title, wantAgent: agent };
+  }
+
+  private async completeAction(call: MethodCall, generation: number): Promise<void> {
+    this.ensureCurrent(generation);
+    const label = await this.label(call.argument('group') as string, call.argument('key') as string);
+    const entry = this.approvals.get(label);
+    if (!entry || !entry.submitted || entry.action.actionId !== call.argument('actionId')) return;
+    const result = call.argument('result');
+    if (!['handled', 'gone', 'failed'].includes(result as string)) throw new NotifyError('bad_args', '未知通知操作结果。');
+    this.ensureCurrent(generation);
+    this.approvals.delete(label);
+    if (result === 'failed') {
+      entry.request.actionButtons = [entry.openButton];
+      entry.request.content = {
+        notificationContentType: notificationManager.ContentType.NOTIFICATION_CONTENT_BASIC_TEXT,
+        normal: { title: 'DSH Go', text: '未能完成审批，请打开应用处理。' }
+      };
+      await notificationManager.publish(entry.request);
+    } else {
+      await notificationManager.cancel(0, label);
+    }
+  }
+
   private serial(work: () => Promise<Any>): Promise<Any> {
     const next: Promise<Any> = NotifyPlugin.queue.then(work);
     NotifyPlugin.queue = next.then(() => {}).catch((_error: Error) => {});
@@ -234,6 +365,8 @@ export default class NotifyPlugin implements FlutterPlugin, AbilityAware, NewWan
       host: (call.argument('host') ?? '') as string, kind: (call.argument('kind') ?? '') as string,
       eventId: (call.argument('eventId') ?? '') as string };
     if (!group || !key || !route.sessionId || route.sessionId.length > 200) throw new NotifyError('bad_args', '通知缺少有效的会话标识。');
+    const label = await this.label(group, key);
+    this.approvals.delete(label);
     const title = (call.argument('title') ?? 'DSH Go') as string;
     const text = (call.argument('text') ?? '') as string;
     const publicText = (call.argument('publicText') ?? '有新的会话提醒') as string;
@@ -263,13 +396,35 @@ export default class NotifyPlugin implements FlutterPlugin, AbilityAware, NewWan
       parameters: { dshNotifyPayload: payload, dshNotifyMac: signature } }], requestCode: 0,
       actionType: wantAgent.OperationType.START_ABILITY, actionFlags: [wantAgent.WantAgentFlags.CONSTANT_FLAG] });
     const request: notificationManager.NotificationRequest = {
-      id: 0, label: await this.label(group, key), groupName: await this.group(group),
+      id: 0, label: label, groupName: await this.group(group),
       notificationSlotType: SLOT, tapDismissed: true, isAlertOnce: true, wantAgent: agent,
       content: content
     };
-    if (call.argument('canApprove') === true) request.actionButtons = [{ title: '打开应用处理', wantAgent: agent }];
+    let pending: PendingApproval | undefined;
+    const epoch = this.actionEpoch;
+    if (call.argument('canApprove') === true) {
+      const openButton: notificationManager.NotificationActionButton = { title: '打开应用处理', wantAgent: agent };
+      request.actionButtons = [openButton];
+      const token = call.argument('requestToken');
+      if (typeof token === 'number' && Number.isSafeInteger(token) && token > 0 && route.eventId !== '' && await this.enableActions(generation)) {
+        try {
+          const action: NotifyApproval = { actionId: util.generateRandomUUID(), requestToken: token,
+            group: group, key: key, sessionId: route.sessionId, host: route.host, eventId: route.eventId, decision: 'rejected' };
+          const reject = await this.approvalButton(action, '拒绝', signer);
+          action.decision = 'allowed-once';
+          const allow = await this.approvalButton(action, '允许本次', signer);
+          if (this.actionEpoch === epoch && this.actionSink) {
+            request.actionButtons = [reject, allow, openButton];
+            pending = { action: action, request: request, openButton: openButton, submitted: false };
+          }
+        } catch (_error) {
+          hilog.warn(0x3F00, 'DshNotify', '通知审批按钮不可用，保留打开入口');
+        }
+      }
+    }
     this.ensureCurrent(generation);
     await notificationManager.publish(request);
+    if (pending && this.generation === generation && this.actionEpoch === epoch && this.actionSink) this.approvals.set(label, pending);
   }
 
   private async handle(call: MethodCall, generation: number): Promise<Any> {
@@ -283,14 +438,20 @@ export default class NotifyPlugin implements FlutterPlugin, AbilityAware, NewWan
       case 'cancel': {
         const label = await this.label(call.argument('group') as string, call.argument('key') as string);
         this.ensureCurrent(generation);
+        this.approvals.delete(label);
         await notificationManager.cancel(0, label); return null;
       }
       case 'cancelGroup': {
-        const group = await this.group(call.argument('group') as string);
+        const value = call.argument('group') as string;
+        const group = await this.group(value);
         this.ensureCurrent(generation);
+        this.approvals.forEach((entry: PendingApproval, label: string): void => {
+          if (entry.action.group === value) this.approvals.delete(label);
+        });
         await notificationManager.cancelGroup(group); return null;
       }
       case 'cancelAll': {
+        this.approvals.clear();
         const active = await notificationManager.getActiveNotifications();
         for (const item of active) if (item.id === 0 && item.label?.startsWith(LABEL)) {
           this.ensureCurrent(generation);
@@ -319,7 +480,7 @@ export default class NotifyPlugin implements FlutterPlugin, AbilityAware, NewWan
       case 'live':
         if (call.argument('enabled') === false || !call.argument('activity')) return null;
         throw new NotifyError('ohos_unsupported', '当前公开接口不允许普通应用自行创建实况窗，请在应用内查看进度；回复提醒仍可使用普通通知。');
-      case 'actionResult': throw new NotifyError('ohos_unsupported', '通知不直接执行审批，请打开应用查看并确认。');
+      case 'actionResult': return await this.serial(async (): Promise<Any> => { await this.completeAction(call, generation); return null; });
       default: return null;
     }
   }

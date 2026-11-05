@@ -64,6 +64,7 @@ class NotifyPost {
     this.eventId,
     this.canApprove = false,
     this.fullText,
+    this.requestToken,
   });
 
   /// One per conversation: `<host>|<sessionId>` (see [notifyGroup]).
@@ -84,7 +85,10 @@ class NotifyPost {
   final bool canApprove;
   final String? fullText;
 
-  Map<String, Object?> toMap() => {
+  /// OH notification actions are bound to this displayed request scope.
+  final int? requestToken;
+
+  Map<String, Object?> toMap({bool ohos = false}) => {
     'group': group,
     'key': key,
     'attention': attention,
@@ -97,6 +101,7 @@ class NotifyPost {
     'eventId': ?eventId,
     if (canApprove) 'canApprove': true,
     'fullText': ?fullText,
+    if (ohos && requestToken != null) 'requestToken': requestToken,
   };
 }
 
@@ -148,6 +153,9 @@ class NotifyAction {
     required this.key,
     required this.eventId,
     required this.decision,
+    this.sessionId,
+    this.requestToken,
+    this.actionId,
   });
 
   /// Null for anything that isn't a well-formed action of ours.
@@ -164,6 +172,32 @@ class NotifyAction {
     };
     if (group is! String || key is! String || eventId is! String || eventId.isEmpty || host is! String) return null;
     if (decision == null) return null;
+    final actionId = raw['actionId'];
+    final token = raw['requestToken'];
+    final session = raw['sessionId'];
+    // An incomplete OH envelope must not fall through to Android's unscoped action.
+    if (actionId != null || token != null) {
+      if (actionId is! String ||
+          !RegExp(r'^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$')
+              .hasMatch(actionId) ||
+          token is! int ||
+          token <= 0 ||
+          token > 9007199254740991 ||
+          session is! String ||
+          session.isEmpty ||
+          session.length > 200)
+        return null;
+      return NotifyAction(
+        host: HostRef.decode(host),
+        group: group,
+        key: key,
+        eventId: eventId,
+        decision: decision,
+        sessionId: session,
+        requestToken: token,
+        actionId: actionId,
+      );
+    }
     return NotifyAction(host: HostRef.decode(host), group: group, key: key, eventId: eventId, decision: decision);
   }
 
@@ -172,6 +206,9 @@ class NotifyAction {
   final String key;
   final String eventId;
   final ApprovalDecision decision;
+  final String? sessionId;
+  final int? requestToken;
+  final String? actionId;
 }
 
 /// What the live activity is told: whether it is on, the pet whose pictures
@@ -265,7 +302,7 @@ class NotifyChannel {
     }
   }
 
-  Future<void> show(NotifyPost post) => _call('show', post.toMap());
+  Future<void> show(NotifyPost post) => _call('show', post.toMap(ohos: Platform.operatingSystem == 'ohos'));
 
   /// An operational return path: report whether the native post was accepted.
   /// This cannot prove that an OEM actually displayed the notification.
@@ -275,7 +312,9 @@ class NotifyChannel {
       final system = await status().timeout(const Duration(seconds: 2));
       if (stillCurrent?.call() == false) return false;
       if (!system.native || !system.enabled || !(post.attention ? system.attention : system.done)) return false;
-      await _methods.invokeMethod<void>('show', post.toMap()).timeout(const Duration(seconds: 3));
+      await _methods
+          .invokeMethod<void>('show', post.toMap(ohos: Platform.operatingSystem == 'ohos'))
+          .timeout(const Duration(seconds: 3));
       return true;
     } on MissingPluginException {
       return false;
@@ -361,8 +400,12 @@ class NotifyChannel {
       .handleError((Object _) {}, test: (e) => e is MissingPluginException || e is PlatformException);
 
   /// Shows how [action] went on its notification.
-  Future<void> completeAction(NotifyAction action, NotifyActionResult result) =>
-      _call('actionResult', {'group': action.group, 'key': action.key, 'result': result.name});
+  Future<void> completeAction(NotifyAction action, NotifyActionResult result) => _call('actionResult', {
+    'group': action.group,
+    'key': action.key,
+    'result': result.name,
+    'actionId': ?action.actionId,
+  });
 
   Future<void> _call(String method, [Map<String, Object?>? args]) async {
     try {
