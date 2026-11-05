@@ -184,6 +184,7 @@ class SettingSpot {
     this.opens,
     this.field,
     this.altTitle,
+    this.ohosTitle,
     this.androidOnly = false,
     this.ohosOnly = false,
   });
@@ -218,6 +219,12 @@ class SettingSpot {
   /// The title the row shows in its other state (安全模式: 以安全模式启动 /
   /// 恢复正常模式).
   final Label? altTitle;
+
+  /// In place of [title] where the row has another name on HarmonyOS.
+  final Label? ohosTitle;
+
+  /// The title on this OS, for what lists the spot away from its row.
+  Label titleOn({required bool androidFeatures}) => androidFeatures ? title : ohosTitle ?? title;
 
   /// Android's own, on a page that isn't ([SettingsIndex.androidOnly]).
   final bool androidOnly;
@@ -973,7 +980,9 @@ abstract final class Spots {
     'notify-live',
     page: SettingsPageId.notifications,
     title: (l) => l.liveSettingsSwitch,
+    ohosTitle: (l) => l.harmonyLiveSwitch,
     keywords: (l) => l.searchKwNotifyLive,
+    ohosKeywords: (l) => l.harmonyKwNotifyLive,
   );
   static final notifySystem = SettingSpot(
     'notify-system',

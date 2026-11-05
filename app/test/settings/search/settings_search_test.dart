@@ -254,6 +254,13 @@ void main() {
       expect(find.text(_zh.harmonySearchUnavailable), findsNothing);
     });
 
+    testWidgets('on HarmonyOS: the progress notification is listed by its own name', (tester) async {
+      await _pumpSearch(tester, overrides: [..._overrides(), operatingSystemProvider.overrideWithValue('ohos')]);
+      await _type(tester, '进度通知');
+      expect(find.text(_zh.harmonyLiveSwitch), findsOneWidget);
+      expect(find.text(_zh.liveSettingsSwitch), findsNothing);
+    });
+
     testWidgets('on Android: those words find their pages, and it never says so', (tester) async {
       await _pumpSearch(tester, overrides: [..._overrides(), operatingSystemProvider.overrideWithValue('android')]);
       for (final q in ['悬浮窗', '手机操控', '无障碍', 'phone control', '电池优化']) {

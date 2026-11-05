@@ -243,6 +243,7 @@ class LiveSystemStatus {
     this.ordinaryFallback = false,
     this.ordinaryAllowed = false,
     this.backend = 'none',
+    this.readFailed = false,
   });
 
   const LiveSystemStatus.unavailable() : this(native: false);
@@ -281,6 +282,9 @@ class LiveSystemStatus {
   /// The fallback implementation: 'ordinary', or 'none' when unavailable.
   final String backend;
 
+  /// The native side is there but this read failed: nothing above is known.
+  final bool readFailed;
+
   @override
   bool operator ==(Object other) =>
       other is LiveSystemStatus &&
@@ -291,11 +295,21 @@ class LiveSystemStatus {
       other.xiaomiFocus == xiaomiFocus &&
       other.ordinaryFallback == ordinaryFallback &&
       other.ordinaryAllowed == ordinaryAllowed &&
-      other.backend == backend;
+      other.backend == backend &&
+      other.readFailed == readFailed;
 
   @override
-  int get hashCode =>
-      Object.hash(native, supported, allowed, settings, xiaomiFocus, ordinaryFallback, ordinaryAllowed, backend);
+  int get hashCode => Object.hash(
+    native,
+    supported,
+    allowed,
+    settings,
+    xiaomiFocus,
+    ordinaryFallback,
+    ordinaryAllowed,
+    backend,
+    readFailed,
+  );
 }
 
 /// Notification group of one conversation on one host.
@@ -386,7 +400,7 @@ class NotifyChannel {
     } on MissingPluginException {
       return const LiveSystemStatus.unavailable();
     } on PlatformException {
-      return const LiveSystemStatus();
+      return const LiveSystemStatus(readFailed: true);
     }
   }
 

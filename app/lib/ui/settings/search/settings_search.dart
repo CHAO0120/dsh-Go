@@ -123,7 +123,7 @@ List<SearchHit> searchSettings(
     if (androidFeatures && spot.ohosOnly) continue;
     final langs = [
       for (final l in [zh, en])
-        _Words(spot.title(l), [
+        _Words(spot.titleOn(androidFeatures: androidFeatures)(l), [
           ..._split((androidFeatures ? spot.keywords : spot.ohosKeywords ?? spot.keywords)?.call(l)),
           ?spot.altTitle?.call(l),
         ], SettingsIndex.path(spot, l).join(' ')),

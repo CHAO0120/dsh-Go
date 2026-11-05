@@ -241,6 +241,17 @@ void main() {
       expect(ids('日历', android: true), isNot(contains('page:systemActions')));
     });
 
+    test('the progress notification goes by its own name on HarmonyOS, the live activity on Android', () {
+      for (final q in ['进度通知', '通知栏进度', '显示进度通知', 'progress notification']) {
+        expect(ids(q, android: false), contains('notify-live'), reason: q);
+        expect(ids(q, android: true), isNot(contains('notify-live')), reason: q);
+      }
+      for (final q in ['实时活动', '灵动岛', 'live activity']) {
+        expect(ids(q, android: true), contains('notify-live'), reason: q);
+        expect(ids(q, android: false), isNot(contains('notify-live')), reason: q);
+      }
+    });
+
     test('on HarmonyOS: 系统操作 by its name and what it does, in both languages', () {
       for (final q in [
         '系统操作',

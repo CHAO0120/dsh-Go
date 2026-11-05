@@ -7329,7 +7329,7 @@ class L10nEn extends L10n {
       'Alerts need the app running: the system suspends it soon after it leaves the screen, and none go out then';
 
   @override
-  String get harmonyLiveUnavailable => 'Live activities aren\'t available in this version yet';
+  String get harmonyLiveUnavailable => 'This version has no progress notification';
 
   @override
   String get harmonySchedulesLocal =>
@@ -7475,12 +7475,29 @@ class L10nEn extends L10n {
   String get harmonyLiveSubtitle => 'Keeps one status notification while a conversation runs';
 
   @override
-  String get harmonyLiveFooter =>
-      'This is a plain notification and stops updating once the system suspends the app. Live View isn\'t connected yet.';
+  String get harmonyLiveFooter => 'This is a plain notification. It stops updating once the system suspends the app.';
 
   @override
   String get harmonyLockScreenPrivacy =>
       'Whether the lock screen shows chat content is up to the system: check its lock screen notification setting';
+
+  @override
+  String get harmonyLiveBlockedTitle => 'The system isn\'t allowing progress notifications';
+
+  @override
+  String get harmonyLiveBlockedText => 'Turn on notifications for DSH Go in system settings';
+
+  @override
+  String get harmonyAlertsOffTitle => 'Alert notifications are off';
+
+  @override
+  String get harmonyAlertsOffText => 'You won\'t be alerted when a reply finishes or needs your approval';
+
+  @override
+  String get harmonyEnableBanner => 'Banners are off by default. To see them, turn on banner notifications';
+
+  @override
+  String get harmonyKwNotifyLive => 'progress notification,notification progress,status bar progress';
 
   @override
   String get hostDetailsConnectionType => 'Connection type';

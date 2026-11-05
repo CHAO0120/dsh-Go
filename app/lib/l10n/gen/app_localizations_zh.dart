@@ -6935,7 +6935,7 @@ class L10nZh extends L10n {
   String get harmonyAlertsRequirement => '提醒要应用在运行才发得出：离开屏幕后系统很快会挂起应用，挂起期间没有提醒';
 
   @override
-  String get harmonyLiveUnavailable => '这个版本暂时没有实时活动';
+  String get harmonyLiveUnavailable => '这个版本没有进度通知';
 
   @override
   String get harmonySchedulesLocal => '本机的任务只在应用运行时触发：应用被系统挂起时，到点不会运行';
@@ -7068,10 +7068,28 @@ class L10nZh extends L10n {
   String get harmonyLiveSubtitle => '对话进行中，在通知栏显示一条状态';
 
   @override
-  String get harmonyLiveFooter => '这是普通通知，应用被系统挂起后不再更新。实况窗还没有接入。';
+  String get harmonyLiveFooter => '这是普通通知，应用被系统挂起后不再更新。';
 
   @override
   String get harmonyLockScreenPrivacy => '锁屏是否显示对话内容由系统决定：设置 › 通知和状态栏 › 锁屏通知';
+
+  @override
+  String get harmonyLiveBlockedTitle => '系统没有允许进度通知';
+
+  @override
+  String get harmonyLiveBlockedText => '在系统设置里为 DSH Go 打开通知';
+
+  @override
+  String get harmonyAlertsOffTitle => '提醒通知已关闭';
+
+  @override
+  String get harmonyAlertsOffText => '回复跑完和等你确认都不会提醒';
+
+  @override
+  String get harmonyEnableBanner => '横幅默认关闭，要弹出来请开启「横幅通知」';
+
+  @override
+  String get harmonyKwNotifyLive => '进度通知,通知栏进度,状态栏进度';
 
   @override
   String get hostDetailsConnectionType => '连接方式';

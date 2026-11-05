@@ -12713,7 +12713,7 @@ abstract class L10n {
   /// No description provided for @harmonyLiveUnavailable.
   ///
   /// In zh, this message translates to:
-  /// **'这个版本暂时没有实时活动'**
+  /// **'这个版本没有进度通知'**
   String get harmonyLiveUnavailable;
 
   /// No description provided for @harmonySchedulesLocal.
@@ -12977,7 +12977,7 @@ abstract class L10n {
   /// No description provided for @harmonyLiveFooter.
   ///
   /// In zh, this message translates to:
-  /// **'这是普通通知，应用被系统挂起后不再更新。实况窗还没有接入。'**
+  /// **'这是普通通知，应用被系统挂起后不再更新。'**
   String get harmonyLiveFooter;
 
   /// No description provided for @harmonyLockScreenPrivacy.
@@ -12985,6 +12985,42 @@ abstract class L10n {
   /// In zh, this message translates to:
   /// **'锁屏是否显示对话内容由系统决定：设置 › 通知和状态栏 › 锁屏通知'**
   String get harmonyLockScreenPrivacy;
+
+  /// No description provided for @harmonyLiveBlockedTitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'系统没有允许进度通知'**
+  String get harmonyLiveBlockedTitle;
+
+  /// No description provided for @harmonyLiveBlockedText.
+  ///
+  /// In zh, this message translates to:
+  /// **'在系统设置里为 DSH Go 打开通知'**
+  String get harmonyLiveBlockedText;
+
+  /// No description provided for @harmonyAlertsOffTitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'提醒通知已关闭'**
+  String get harmonyAlertsOffTitle;
+
+  /// No description provided for @harmonyAlertsOffText.
+  ///
+  /// In zh, this message translates to:
+  /// **'回复跑完和等你确认都不会提醒'**
+  String get harmonyAlertsOffText;
+
+  /// No description provided for @harmonyEnableBanner.
+  ///
+  /// In zh, this message translates to:
+  /// **'横幅默认关闭，要弹出来请开启「横幅通知」'**
+  String get harmonyEnableBanner;
+
+  /// No description provided for @harmonyKwNotifyLive.
+  ///
+  /// In zh, this message translates to:
+  /// **'进度通知,通知栏进度,状态栏进度'**
+  String get harmonyKwNotifyLive;
 
   /// No description provided for @hostDetailsConnectionType.
   ///
