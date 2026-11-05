@@ -103,6 +103,8 @@ export async function diagnosticsFixture(t, options = {}) {
   class MethodChannel { constructor(messenger,name) { this.name=name; channels.push(this); } setMethodCallHandler(value) { this.handler=value; } }
   const boundaries = {
     '@ohos.file.fs':{default:api},
+    '@ohos.app.ability.common':{default:{}},
+    '@ohos.app.ability.wantAgent':{default:{}},
     '@ohos.zlib':{default:nativeZlib},
     '@ohos.file.hash':{default:{hash(){throw Error('hash outside diagnostics test scope');}}},
     // Diagnostics never requests an OS background grant; actual task-owner code is loaded.

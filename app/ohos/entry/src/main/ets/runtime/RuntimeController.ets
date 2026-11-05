@@ -135,7 +135,7 @@ export class RuntimeController {
         !['starting', 'running'].includes(host.getState().phase)) return;
     this.ownerAbility = RuntimeController.ability;
     this.taskOwner = new TransientTaskOwner(host, RuntimeController.foreground,
-      (): void => this.lifecycle.observe(RuntimeController.foreground));
+      (): void => this.lifecycle.observe(RuntimeController.foreground), RuntimeController.ability.context);
   }
 
   private retireOwner(): void {

@@ -17,13 +17,13 @@ export function tickRetry() {
   timers.delete(id); timer.callback(); return timer.delay;
 }
 export const permission = { grants: 0, modes: 0, status: 0, supported: true,
-  accessCapability: true, backgroundCapability: true, error: null, requestedModes: null };
+  accessCapability: true, backgroundCapability: true, error: null, requestedModes: null, systemStatus: null };
 export const abilityAccessCtrl = {
   GrantStatus: { PERMISSION_GRANTED: 0, PERMISSION_DENIED: -1 },
   createAtManager() { return { checkAccessTokenSync(id, name) {
     permission.grants++; permission.last = { id, name };
     if (permission.error) throw permission.error;
-    return permission.status;
+    return name === 'ohos.permission.KEEP_BACKGROUND_RUNNING_SYSTEM' && permission.systemStatus !== null ? permission.systemStatus : permission.status;
   } }; },
 };
 export const backgroundTaskManager = {

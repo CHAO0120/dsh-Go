@@ -134,6 +134,10 @@ controllerText = controllerText.replace("import common from '@ohos.app.ability.c
   .replace("from './OhosRuntimeStorage'", "from './OhosRuntimeStorage.mts'");
 let transientText = (await fs.readFile(path.join(source, 'TransientTaskOwner.ets'), 'utf8'))
   .replace("import backgroundTaskManager from '@ohos.resourceschedule.backgroundTaskManager';", `import {backgroundTaskManager} from '${hostFixtureUrl}';`)
+  .replace("import common from '@ohos.app.ability.common';\n", '')
+  // Long background has its own tests; this channel runs as a listing build would, without the permission.
+  .replace("import { ContinuousTaskOwner } from './ContinuousTaskOwner';",
+    'class ContinuousTaskOwner { eligible() { return false; } request() { return false; } stop() {} active() { return false; } cleanupPending() { return false; } error() { return null; } }')
   .replace("import { NativeHostModule } from './NativeHost';", '')
   .replace("import { HostLifecycleAck } from './RuntimeLifecycle';", '');
 await fs.writeFile(path.join(temp, 'TransientTaskOwner.mts'), transientText);

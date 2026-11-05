@@ -1,4 +1,4 @@
-// Eligibility for TASK_KEEPING only. No permission request or background task is created.
+// Eligibility only; ContinuousTaskOwner separately waits for OS task acceptance.
 import abilityAccessCtrl from '@ohos.abilityAccessCtrl';
 import backgroundTaskManager from '@ohos.resourceschedule.backgroundTaskManager';
 
@@ -10,6 +10,8 @@ export function backgroundComputePermission(accessTokenId: number): string {
     if (grant === abilityAccessCtrl.GrantStatus.PERMISSION_DENIED) return 'denied';
     if (grant !== abilityAccessCtrl.GrantStatus.PERMISSION_GRANTED ||
         !canIUse('SystemCapability.ResourceSchedule.BackgroundTaskManager.ContinuousTask')) return 'unknown';
+    if (abilityAccessCtrl.createAtManager().checkAccessTokenSync(accessTokenId,
+      'ohos.permission.KEEP_BACKGROUND_RUNNING_SYSTEM') !== abilityAccessCtrl.GrantStatus.PERMISSION_GRANTED) return 'denied';
     const request = new backgroundTaskManager.ContinuousTaskRequest();
     request.backgroundTaskModes = [backgroundTaskManager.BackgroundTaskMode.MODE_TASK_KEEPING];
     return request.isModeSupported() ? 'granted' : 'denied';

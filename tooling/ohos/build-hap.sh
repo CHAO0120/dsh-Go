@@ -17,18 +17,43 @@
 # A release build uses the embedding from tooling/ohos/prepare-pasteboard.py: it stands in for the SDK's HAR for
 # this run, since flutter_tools and flutter-hvigor-plugin both read that one path, and goes back on exit.
 # hvigor builds libdsh_host.so itself, against the placed libnode, through entry/src/main/cpp/CMakeLists.txt.
+set +x  # Signing environment values must never be traced.
 set -euo pipefail
 
 APP="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../app" && pwd)"
 FLUTTER="${FLUTTER_OHOS:-flutter}"
-MODE="${1:---release}"
+MODE=--release
+DISTRIBUTION=store
+SIGN=0
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --debug|--release) MODE="$1"; shift ;;
+    --distribution)
+      DISTRIBUTION="${2:?--distribution requires debug, device or store}"; SIGN=1; shift 2 ;;
+    *) printf 'Usage: build-hap.sh [--debug|--release] [--distribution debug|device|store]\n' >&2; exit 2 ;;
+  esac
+done
+case "$DISTRIBUTION" in
+  debug|device|store) ;;
+  *) printf 'Unknown distribution\n' >&2; exit 2 ;;
+esac
+if [[ "$DISTRIBUTION" == device && "$MODE" != --release ]]; then
+  printf 'Device distribution requires --release\n' >&2; exit 2
+fi
+DISTRIBUTION_HELPER="$APP/../tooling/ohos/hap-distribution.py"
+SIGN_KEYS=(DSH_OHOS_SIGN_KEYSTORE DSH_OHOS_SIGN_CERTIFICATE DSH_OHOS_SIGN_PROFILE DSH_OHOS_SIGN_KEY_ALIAS
+           DSH_OHOS_SIGN_KEY_PASSWORD DSH_OHOS_SIGN_STORE_PASSWORD DSH_OHOS_SIGN_TOOL)
+# Keep credentials in this shell; only the signing helper inherits them.
+export -n "${SIGN_KEYS[@]}"
+signing_python() ( export "${SIGN_KEYS[@]}"; python3 -I -B "$DISTRIBUTION_HELPER" "$@"; )
+if [[ "$SIGN" == 1 ]]; then
+  signing_python check-signing
+fi
 NATIVE_LIBS="${DSH_OHOS_NATIVE_LIBS:?Set DSH_OHOS_NATIVE_LIBS to the arm64-v8a directory from build-hap-libs.py}"
 : "${DSH_NODE_HEADERS:?Set DSH_NODE_HEADERS to the pinned Node source src directory}"
 RUNTIME="${DSH_OHOS_RUNTIME:?Set DSH_OHOS_RUNTIME to the zip from runtime/ohos/package/compose-runtime.py}"
 RUNTIME="$(cd "$(dirname "$RUNTIME")" && pwd)/$(basename "$RUNTIME")"
 [[ -f "$RUNTIME" ]] || { printf 'Missing runtime zip: %s\n' "$RUNTIME" >&2; exit 1; }
-PASTEBOARD_HELPER_SHA256=4f16b6fa39cfc6d668895ce6e01a6faeec250c845feeeac700ba5d3263a84803
-PLATFORM_PLUGIN_SHA256=938829683d527ce8e0c4f2f76895122c36b0992633596dc0e7b196890e2882a9
 PREBUILT=(libnode.so libdsh_flock.so libdsh_require_builtin.so)
 for lib in "${PREBUILT[@]}"; do
   [[ -f "$NATIVE_LIBS/$lib" ]] || { printf 'Missing native library: %s\n' "$NATIVE_LIBS/$lib" >&2; exit 1; }
@@ -39,6 +64,9 @@ LIBS=ohos/entry/libs/arm64-v8a
 RAWFILE=ohos/entry/src/main/resources/rawfile
 LOCK="$(mktemp)"
 cp pubspec.lock "$LOCK"
+MODULE=ohos/entry/src/main/module.json5
+MODULE_KEPT="$(mktemp)"
+cp "$MODULE" "$MODULE_KEPT"
 ENGINE_HAR=""
 ENGINE_KEPT=""
 PREPARED=""
@@ -50,10 +78,27 @@ restore() {
   rmdir "$LIBS" ohos/entry/libs 2>/dev/null || true
   rm -rf "$RAWFILE/dsh-runtime"
   rmdir "$RAWFILE" 2>/dev/null || true
+  cp "$MODULE_KEPT" "$MODULE"
+  rm -f "$MODULE_KEPT"
   cp "$LOCK" pubspec.lock
   rm -f "$LOCK"
 }
 trap restore EXIT
+python3 -I -B "$DISTRIBUTION_HELPER" permissions --distribution "$DISTRIBUTION" --input "$MODULE_KEPT" --output "$MODULE"
+# Signing happens outside hvigor, so neither its project model nor cache gets credentials.
+if ! python3 -I - ohos/build-profile.json5 <<'PY_UNSIGNED'
+import pathlib, re, sys
+text = pathlib.Path(sys.argv[1]).read_text()
+sys.exit(0 if re.search(r'"signingConfigs"\s*:\s*\[\s*\]', text) else 1)
+PY_UNSIGNED
+then
+  printf 'Use an empty signingConfigs array; supply signing materials through DSH_OHOS_SIGN_* environment variables\n' >&2
+  exit 1
+fi
+UNSIGNED_CANDIDATES=("$APP/ohos/entry/build/default/outputs/default/entry-default-unsigned.hap" "$APP/build/hap/outputs/default/entry-default-unsigned.hap")
+if [[ "$SIGN" == 1 ]]; then
+  for hap in "${UNSIGNED_CANDIDATES[@]}"; do rm -f "$hap"; done
+fi
 
 mkdir -p "$LIBS"
 for lib in "${PREBUILT[@]}"; do cp "$NATIVE_LIBS/$lib" "$LIBS/$lib"; done
@@ -111,9 +156,15 @@ python3 -I -B "$APP/../tooling/ohos/prepare-forks.py" \
 python3 -I -B "$APP/../tooling/ohos/prepare-forks.py" --verify-installed "$APP/ohos"
 if [[ "$MODE" == --release ]]; then
   # What ohpm installed is what hvigor compiled.
-  for pinned in "util/PasteboardUtils.ets $PASTEBOARD_HELPER_SHA256" "plugin/PlatformPlugin.ets $PLATFORM_PLUGIN_SHA256"; do
-    read -r file sum <<< "$pinned"
-    installed="$(find ohos/oh_modules -path "*/@ohos/flutter_ohos/src/main/ets/$file")"
+  python3 -I - "$APP/../tooling/ohos/embedding-fixes/pasteboard-settlement.json" > "$PREPARED/fix-outputs.tsv" <<'PY_EMBEDDING_FIXES'
+import json, sys
+for fix in json.load(open(sys.argv[1]))['fixes']:
+    target = fix['target']
+    assert target.startswith('package/src/main/ets/')
+    print(target.removeprefix('package/'), fix['afterSha256'])
+PY_EMBEDDING_FIXES
+  while read -r file sum; do
+    installed="$(find ohos/oh_modules -path "*/@ohos/flutter_ohos/$file")"
     [[ -n "$installed" ]] || { printf 'No installed %s under ohos/oh_modules\n' "$file" >&2; exit 1; }
     while IFS= read -r copy; do
       echo "$sum  $copy" | sha256sum -c --status || {
@@ -121,5 +172,21 @@ if [[ "$MODE" == --release ]]; then
         exit 1
       }
     done <<< "$installed"
+  done < "$PREPARED/fix-outputs.tsv"
+fi
+
+if [[ "$SIGN" == 1 ]]; then
+  UNSIGNED=""
+  for hap in "${UNSIGNED_CANDIDATES[@]}"; do
+    [[ -f "$hap" ]] || continue
+    if [[ -n "$UNSIGNED" ]] && ! cmp -s "$UNSIGNED" "$hap"; then
+      printf 'Two different unsigned HAP outputs were produced; refusing ambiguous signing input\n' >&2
+      exit 1
+    fi
+    UNSIGNED="$hap"
   done
+  [[ -n "$UNSIGNED" ]] || { printf 'No fresh unsigned HAP was produced\n' >&2; exit 1; }
+  SIGNED="$APP/build/hap/dsh-go-$DISTRIBUTION-signed.hap"
+  signing_python sign --input "$UNSIGNED" --output "$SIGNED"
+  printf 'Signed and verified HAP: %s\n' "$SIGNED"
 fi

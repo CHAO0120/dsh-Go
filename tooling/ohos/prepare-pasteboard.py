@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Prepare a private, pinned Flutter embedding HAR with its source fixes.
 
-The fixes are embedding-fixes/pasteboard-settlement.json's: the three-line IME paste
-fix and the haptic presets. Never edits the input HAR, SDK, build-hap.sh, application
-permissions or platform channel. Output is a new directory containing the HAR, matching
+The fixes are embedding-fixes/pasteboard-settlement.json's: IME paste settlement,
+clipboard availability settlement and haptic presets. Never edits the input HAR,
+SDK, build-hap.sh or application permissions. Output is a new directory containing the HAR, matching
 extracted package, license notices and exact byte audit. A caller chooses how to stage
 this private bundle into its build; production build integration is intentionally separate.
 """

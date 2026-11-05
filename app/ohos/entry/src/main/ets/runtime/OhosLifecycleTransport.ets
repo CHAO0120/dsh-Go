@@ -104,7 +104,7 @@ export class OhosLifecycleTransport implements LifecycleTransport {
     if (native === null || native === undefined || native.version !== 1 ||
         ![native.engineGeneration, native.ownerGeneration, native.revision, native.grantGeneration,
           native.deadlineMs, native.drainAtMs, native.phase].every((value: number): boolean => Number.isSafeInteger(value) && value >= 0) ||
-        !Number.isSafeInteger(native.nowMs) || native.nowMs < -1 || native.phase > 6 ||
+        !Number.isSafeInteger(native.nowMs) || native.nowMs < -1 || native.phase > 7 ||
         ![0, 1].includes(native.available) || ![0, 1].includes(native.foreground) ||
         ![0, 1].includes(native.clockFailed)) throw new LifecycleFailure('ohos_lifecycle_native');
     return ack;

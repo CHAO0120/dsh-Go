@@ -108,3 +108,22 @@ test('activity is actual agent work including model wait, never running-state fa
  running=true;assert.equal(f.coordinator.status().busy,true,'model wait without tools is active');
  running=false;assert.equal(f.coordinator.status().busy,false,'completion/cancel releases activity');
 });
+test('OS continuous native lease opens background gate without a short deadline; manual pause and revocation still close it',async t=>{
+ const state={...trusted(false),phase:7,nowMs:1000000};
+ const f=await fixture(t,{coordinator:{readHost:()=>state}});
+ let ack=await f.coordinator.observeHost(observation(1,false,'denied'));
+ assert.equal(ack.paused,false);assert.equal(ack.host.computePermission,'granted');assert.equal(f.coordinator.admit('continuous-session'),true);
+ state.nowMs+=600000;
+ assert.equal(f.coordinator.admit('continuous-session'),true,'continuous lease is not a renewed three-minute grant');
+ await f.coordinator.pause();assert.equal(f.coordinator.admit('continuous-session'),false);
+ await f.coordinator.resume();assert.equal(f.coordinator.admit('continuous-session'),true);
+ state.phase=4;state.revision++;
+ ack=await f.coordinator.observeHost(observation(2,true,'granted'));
+ assert.equal(ack.paused,true);assert.equal(ack.host.computePermission,'unknown');assert.equal(f.coordinator.admit('continuous-session'),false,'HTTP cannot resurrect cancelled OS ownership');
+});
+test('continuous native state survives actual authenticated ArkTS transport decoding',async t=>{
+ const f=await fixture(t,{coordinator:{readHost:()=>({...trusted(false),phase:7})}});
+ const transport=new OhosLifecycleTransport();t.after(()=>transport.cancel());
+ const ack=await transport.send(f.origin,f.auth.launchToken,observation(1,false,'granted'));
+ assert.equal(ack.nativeHost.phase,7);assert.equal(ack.confirmedPause,false);
+});

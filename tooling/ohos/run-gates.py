@@ -743,6 +743,7 @@ def main():
         g.node_tests('secrets-picker-' + mode, [rt + 'secrets.test.mjs', tools + 'attachment-files-channel.test.mjs'], mode=mode, needs=('tools',))
     for filename in ['runtime-archive-audit.test.py', 'audit-dart-bridges.test.py', 'patch-framework.test.py']:
         g.run(filename[:-3], lambda f=filename: g.py(tools + f), needs=('tools',), tests=[tools + filename])
+    g.run('hap-distribution', lambda: g.py(tools + 'hap-distribution.test.py'), needs=('tools',), tests=[tools + 'hap-distribution.test.py'])
     g.run('fork-installed-resolution', lambda: g.py(tools + 'prepare-forks-installed.test.py'), needs=('tools',), tests=[tools + 'prepare-forks-installed.test.py'])
     g.run('archive-manifest', lambda: g.py(tools + 'runtime-archive-manifest-contract.py', '--node', node(), '--report', o / 'archive-manifest.json'), needs=('tools',))
     g.run('hms-declarations', lambda: g.py(tools + 'prepare-hms-sdk.test.py', '--helper', s / 'tooling/ohos/hms-stubs/prepare-sdk.py', '--output', o / 'hms-declarations'), needs=('tools',), tests=[tools + 'prepare-hms-sdk.test.py'])
@@ -797,6 +798,9 @@ def main():
                      'test/chat/attachment_file_budget_test.dart', 'test/remote/private_key_file_budget_test.dart',
                      'test/chat/attachment_owner_test.dart', 'test/remote/ssh_key_callback_lifetime_test.dart', 'test/share_hosted', 'test/share/share_panel_test.dart']
     g.run('flutter-consumers', lambda: g.flutter('test', '--no-pub', '--reporter', 'json', '--concurrency=1', *flutter_tests), cwd=g.flutter_source / 'app', env=g.flutter_env, needs=('flutter-input-identity',), timeout=300, tests=['app/' + x for x in flutter_tests], scope='Actual Linux Flutter engine and Dart consumers; not OHOS AOT/device')
+    g.run('flutter-clipboard-consumer', lambda: g.flutter('test', '--no-pub', '--reporter', 'json', 'test/runtime/ohos_clipboard_consumer_test.dart'), cwd=g.flutter_source / 'app',
+          env={**g.flutter_env, 'OHOS_CLIPBOARD_WIRE': str(o / 'clipboard-settlement/after-observations.json')}, needs=('flutter-input-identity', 'clipboard-settlement'), timeout=120,
+          tests=['app/test/runtime/ohos_clipboard_consumer_test.dart'], scope='Actual HAR replies consumed by Flutter Clipboard, ApiKeyPage and EditableText; not device clipboard permission')
     g.run('flutter-consumer-analyze', lambda: g.flutter('analyze', '--no-pub', 'lib/secrets', 'lib/state/attachment_files_ohos.dart', 'lib/share_hosted/hosted_links_state.dart', 'lib/ui/share_hosted', 'lib/ui/share/share_panel.dart', 'test/secrets', 'test/ohos/attachment_files_test.dart', 'test/share_hosted', 'test/share/share_panel_test.dart'), cwd=g.flutter_source / 'app', env=g.flutter_env, needs=('flutter-input-identity',), timeout=300)
     def retain_resolver(_):
         app = g.flutter_source / 'app'

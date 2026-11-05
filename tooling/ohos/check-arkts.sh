@@ -10,6 +10,7 @@
 #   --debug       debug embedding and buildMode (default release, as build-hap.sh)
 #   --with-forks  also compile the plugin forks of pubspec_overrides.ohos.yaml
 #   --hms-stubs   NONOFFICIAL minimal declarations; HMS remains uncompiled
+#   --distribution debug|device|store  permissions for that build (hap-distribution.py); store is what's in the repo
 #   --werror      warnings in the project's own files also fail the check
 #   --clean       delete --work first, downloads included
 #
@@ -62,6 +63,7 @@ FORKS=0
 HMS_STUBS=0
 WERROR=0
 CLEAN=0
+DISTRIBUTION=""
 FULL=0
 AOT=""
 NATIVE=""
@@ -77,6 +79,7 @@ while [ $# -gt 0 ]; do
     --hms-stubs) HMS_STUBS=1; shift ;;
     --werror) WERROR=1; shift ;;
     --clean) CLEAN=1; shift ;;
+    --distribution) DISTRIBUTION="${2:?--distribution needs debug, device or store}"; shift 2 ;;
     --full) FULL=1; shift ;;
     --aot) AOT="${2:?--aot needs a directory}"; shift 2 ;;
     --native) NATIVE="${2:?--native needs a directory}"; shift 2 ;;
@@ -343,6 +346,11 @@ export class GeneratedPluginRegistrant {{
 print(version)
 PY
 )"
+
+if [ -n "$DISTRIBUTION" ]; then
+  python3 -I -B "$REPO/tooling/ohos/hap-distribution.py" permissions --distribution "$DISTRIBUTION" \
+    --input "$PROJECT/entry/src/main/module.json5" --output "$PROJECT/entry/src/main/module.json5"
+fi
 
 # --- the rest of the HAP, where flutter-hvigor-plugin's FlutterTask and flutter_tools put it.
 if [ "$FULL" = 1 ]; then
