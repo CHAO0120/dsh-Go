@@ -7630,6 +7630,9 @@ class L10nEn extends L10n {
       'The system didn\'t accept the reminder, so nothing was set. It may be at its limit, or this version may not have the service.';
 
   @override
+  String get harmonyPluginVoiceUnavailable => 'This device can\'t listen for you';
+
+  @override
   String get hostDetailsConnectionType => 'Connection type';
 
   @override

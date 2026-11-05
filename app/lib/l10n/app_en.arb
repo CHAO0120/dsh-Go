@@ -2195,6 +2195,7 @@
   "harmonyRemindersNoDevice": "This device doesn't have system reminders",
   "harmonyReminderSet": "Reminder set",
   "harmonyReminderRefused": "The system didn't accept the reminder, so nothing was set. It may be at its limit, or this version may not have the service.",
+  "harmonyPluginVoiceUnavailable": "This device can't listen for you",
   "hostDetailsConnectionType": "Connection type",
   "hostDetailsSshNetworkHint": "Uses an SSH tunnel. LAN / P2P route inspection and latency measurements are not available for this connection.",
   "hubSessionDetails": "Chat details",

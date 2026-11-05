@@ -106,5 +106,6 @@
   "harmonyRemindersNoBuild": "This version doesn't have system reminders",
   "harmonyRemindersNoDevice": "This device doesn't have system reminders",
   "harmonyReminderSet": "Reminder set",
-  "harmonyReminderRefused": "The system didn't accept the reminder, so nothing was set. It may be at its limit, or this version may not have the service."
+  "harmonyReminderRefused": "The system didn't accept the reminder, so nothing was set. It may be at its limit, or this version may not have the service.",
+  "harmonyPluginVoiceUnavailable": "This device can't listen for you"
 }

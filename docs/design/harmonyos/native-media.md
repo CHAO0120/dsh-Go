@@ -6,13 +6,13 @@
 
 `app/lib/plugins/native/native_platform.dart` 使用 `dsh/native-media` 与 `dsh/native-media/events`。`native_capabilities.dart` 先订阅事件，再带 `{owner, generation, lease}` 激活所有者；音频由 Dart 下载到 `getTemporaryDirectory()/native-media/<owner>/clip`，然后传入 `privatePath` 与 `contentType`。停止调用成功或终态事件会允许 Dart 删除缓存、结束该角色。因此，原生通道只有在播放器释放、文件描述符关闭后才能报告停止或结束。
 
-当前仅在公开 `SystemCapability.Multimedia.Media.AVPlayer` 可用时广告 `audio`。`overlay` 不广告，缺原生字幕窗口。`voice` 的后端已在，但 `EntryAbility` 还没注入可见的停止控件（`NativeVoiceIndicator`），所以同样不广告、不开麦。现有 Dart 会据 `features` 过滤能力。
+当前仅在公开 `SystemCapability.Multimedia.Media.AVPlayer` 可用时广告 `audio`。`overlay` 不广告，缺原生字幕窗口。`voice` 在公开 `SystemCapability.Multimedia.Audio.Capturer` 可用时广告：`EntryAbility` 注入 `NativeVoiceStopControl`，它在窗口的 overlay 上放一个「插件在听，点这里停止」按钮，点它或控件丢失都会停止。现有 Dart 会据 `features` 过滤能力；不能听的设备上，插件页的「听你开口」写明原因，开关不可点。
 
 普通听写和插件共用一个物理麦克风（`VoiceMicLease`），不再是两把各自的锁。听写优先：它等插件的采集真正释放后才开始；释放失败就保留占用，听写报忙，不会两边同时开麦。一次 `dsh/voice` 的取消也能重试已退役引擎留下的听写。语音活动检测只算 PCM 帧的能量，不存录音、不转写，也不把转录当活动检测。
 
 | 方法 | 行为 |
 |---|---|
-| `capabilities` | 返回 `{features:['audio']}` 或空列表；不创建播放器，不调用安全 opener，不加载 Node |
+| `capabilities` | 返回 `{features:[...]}`，含 `audio`、`voice` 或为空；不创建播放器，不调用安全 opener，不加载 Node |
 | `activate` | 校验前台 UIAbility、已订阅事件流及所有者三元组；旧播放器实际关闭后再次核对 binding、Ability、sink 和前台状态 |
 | `play` | 仅当前所有者固定缓存片段；用安全 fd、有限长度设置 AVPlayer，不向播放器交路径或 URL |
 | `pause` / `resume` | 已初始化片段按 AVPlayer 状态暂停/恢复；初始化期间的暂停意图保留到 prepare 完成后 |

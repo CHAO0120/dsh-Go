@@ -12,6 +12,7 @@ import { RuntimeController } from '../runtime/RuntimeController';
 import FilesMediaPlugin from '../plugins/FilesMediaPlugin';
 import NativeFilesPlugin from '../plugins/NativeFilesPlugin';
 import NativeMediaPlugin from '../plugins/NativeMediaPlugin';
+import { NativeVoiceStopControl } from '../plugins/NativeVoiceStopControl';
 import PerformancePlugin from '../plugins/PerformancePlugin';
 import { OhosKeyboardLog } from '../plugins/OhosKeyboardLog';
 import DiagnosticsPlugin from '../plugins/DiagnosticsPlugin';
@@ -97,7 +98,7 @@ export default class EntryAbility extends FlutterAbility {
     flutterEngine.getPlugins()?.add(new NativeMediaPlugin(async (root: string, relative: string): Promise<number> => {
       const host = await loadNativeHost();
       return host.openUserFile(root, relative);
-    }))
+    }, new NativeVoiceStopControl(this.context)))
     flutterEngine.getPlugins()?.add(new PerformancePlugin())
     flutterEngine.getPlugins()?.add(new DiagnosticsPlugin())
     flutterEngine.getPlugins()?.add(new UsagePlugin())

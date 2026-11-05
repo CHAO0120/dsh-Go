@@ -37,6 +37,10 @@
       "value": "Cancel"
     },
     {
+      "name": "dsh_voice_stop",
+      "value": "A plugin is listening. Tap to stop"
+    },
+    {
       "name": "dsh_paste_denied",
       "value": "Paste was not authorized. Tap the Paste button again."
     },

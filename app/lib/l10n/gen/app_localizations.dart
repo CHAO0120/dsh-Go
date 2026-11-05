@@ -13262,6 +13262,12 @@ abstract class L10n {
   /// **'系统没有接受提醒，没有设置。'**
   String get harmonyReminderRefused;
 
+  /// No description provided for @harmonyPluginVoiceUnavailable.
+  ///
+  /// In zh, this message translates to:
+  /// **'这台设备不能听你开口'**
+  String get harmonyPluginVoiceUnavailable;
+
   /// No description provided for @hostDetailsConnectionType.
   ///
   /// In zh, this message translates to:

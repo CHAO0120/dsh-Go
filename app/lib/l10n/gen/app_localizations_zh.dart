@@ -7214,6 +7214,9 @@ class L10nZh extends L10n {
   String get harmonyReminderRefused => '系统没有接受提醒，没有设置。';
 
   @override
+  String get harmonyPluginVoiceUnavailable => '这台设备不能听你开口';
+
+  @override
   String get hostDetailsConnectionType => '连接方式';
 
   @override

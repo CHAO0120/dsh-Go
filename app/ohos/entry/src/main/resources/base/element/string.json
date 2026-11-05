@@ -41,6 +41,10 @@
       "value": "取消"
     },
     {
+      "name": "dsh_voice_stop",
+      "value": "插件在听，点这里停止"
+    },
+    {
       "name": "dsh_paste_denied",
       "value": "系统未授予粘贴权限，请重新点击粘贴按钮。"
     },
