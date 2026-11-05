@@ -5,6 +5,7 @@
 #include <pthread.h>
 #include <signal.h>
 #include <sys/resource.h>
+#include <time.h>
 #include <unistd.h>
 
 #include <algorithm>
@@ -111,6 +112,9 @@ int RunEnvironment(const std::vector<std::string>& args, const std::vector<std::
     v8::Isolate::Scope isolate_scope(isolate);
     v8::HandleScope handle_scope(isolate);
     v8::Context::Scope context_scope(setup->context());
+    // HostCore sets TZ outside process.env; refresh the caches for this run.
+    tzset();
+    isolate->DateTimeConfigurationChangeNotification(v8::Isolate::TimeZoneDetection::kRedetect);
     isolate->AddNearHeapLimitCallback(StopAtHeapLimit, &heap_limit);
     node::SetProcessExitHandler(env, [&](node::Environment* exiting, int code) {
       explicit_exit = code;

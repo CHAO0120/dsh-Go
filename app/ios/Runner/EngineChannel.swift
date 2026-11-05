@@ -922,9 +922,12 @@ final class EngineChannel: NSObject, FlutterStreamHandler {
       if (try? preparePhone()) == nil {
         try Data("[]".utf8).write(to: dshHome.appendingPathComponent("ios-host.patch.json"), options: .atomic)
       }
+      NSTimeZone.resetSystemTimeZone()
+      var launchEnvironment = environment
+      launchEnvironment["TZ"] = TimeZone.current.identifier
       try native?.begin(
         runtime: installer.root.path, guest: guestRoot.path, home: dshHome.path, cache: cache.path,
-        workspace: workspace.path, env: environment)
+        workspace: workspace.path, env: launchEnvironment)
       startPolling()
       startPhone()
     } catch {
