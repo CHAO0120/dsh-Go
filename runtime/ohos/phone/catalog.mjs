@@ -21,7 +21,7 @@ export const phoneCatalog = Object.freeze([
       days: { type: 'array', items: { type: 'integer' }, description: '重复的星期，1=周一 … 7=周日；省略只响一次' },
       seconds: integer('秒 1–86400'), message: str('闹钟 / 计时器标签'), title: str('日程标题'),
       begin: str('开始，如 2026-10-24T19:00（手机时区）；全天写 2026-10-24'),
-      end: str('结束，省略 = 开始后 1 小时'), all_day: boolean('全天'), location: str('地点'),
+      end: str('结束，省略 = 开始后 1 小时；全天事件省略 = 只占当天'), all_day: boolean('全天'), location: str('地点'),
       description: str('备注'), number: str('电话号码'), text: str('文字内容'),
       app: str('分享目标应用（省略弹分享面板）；settings:app_notifications 用哪个应用'),
       destination: str('目的地名称或地址'), lat: number('纬度 GCJ-02'), lng: number('经度 GCJ-02'),
