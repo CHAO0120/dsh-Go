@@ -69,8 +69,15 @@ export async function loadNativeHost(): Promise<NativeHostModule> {
   const gate = recovery;
   if (gate === null) throw new RuntimeChannelError('ohos_recovery_unconfigured', '原生恢复门尚未配置。');
   gate.check();
-  if (loading === null) loading = importNative(gate);
-  // Keep a failed import promise: even a missing export can follow a loaded DSO.
+  if (loading === null) {
+    loading = importNative(gate).catch((error: Error): NativeHostModule => {
+      // Recovery preparation can fail before import is even attempted. Only
+      // that shared task may be retried; a touched DSO remains process-sticky.
+      if (!touched) loading = null;
+      throw error;
+    });
+  }
+  // Keep failures after touching the DSO, including missing exports or finish I/O.
   const host = await loading;
   gate.check();
   return host;
