@@ -131,7 +131,8 @@
   function name(el) {
     const ids = attr(el, 'aria-labelledby').split(/\s+/u).filter(Boolean).slice(0, 8);
     const root = el.getRootNode();
-    const labelled = ids.map(id => textSnippet(root.getElementById?.(id) || document.createTextNode(''))).join(' ');
+    const labels = ids.map(id => root.getElementById?.(id));
+    const labelled = labels.some(Boolean) ? labels.map(label => textSnippet(label || document.createTextNode(''))).join(' ') : '';
     return bounded(labelled || attr(el, 'aria-label') ||
       (el.labels ? Array.from(el.labels).map(label => textSnippet(label)).join(' ') : '') ||
       (tag(el) === 'input' && ['button', 'submit', 'reset'].includes(el.type) ? el.value : '') ||
