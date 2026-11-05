@@ -851,13 +851,29 @@ class _WebViewPageState extends State<WebViewPage> {
 
   void _onHide() => _hiddenAt = DateTime.now();
 
-  void _onShow() {
+  Future<void> _onShow() async {
     final after = widget.reloadAfterBackground;
     final hidden = _hiddenAt;
     _hiddenAt = null;
-    if (after != null && hidden != null && !_gone && DateTime.now().difference(hidden) > after) {
-      unawaited(_controller.reload());
+    if (after == null || hidden == null || _gone || DateTime.now().difference(hidden) <= after) return;
+    final controller = _controller;
+    if (!kIsWeb && defaultTargetPlatform == TargetPlatform.iOS && widget.dshWeb) {
+      try {
+        final count = await controller
+            .runJavaScriptReturningResult(
+              "typeof window.__dshAppPendingAttachmentCount === 'function' ? window.__dshAppPendingAttachmentCount() : null",
+            )
+            .timeout(const Duration(seconds: 1));
+        // Only a definite count protects this draft. An unavailable or stuck
+        // page still gets the original socket-recovery reload.
+        if (count is num && count.isFinite && count > 0 && count == count.truncateToDouble()) return;
+      } on Object {
+        // Missing bridge, timeout or WebView error: keep the recovery reload.
+      }
     }
+    // Asking JavaScript yields: the person may leave or background us again.
+    if (!mounted || _gone || _hiddenAt != null || !identical(controller, _controller)) return;
+    await controller.reload();
   }
 
   @override

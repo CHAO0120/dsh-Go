@@ -362,6 +362,12 @@
     return document.querySelectorAll('[data-attachment-id], [data-file-reference], [data-lexical-decorator="true"]').length;
   }
 
+  // Read only: background recovery asks about this editor, never chat history.
+  window.__dshAppPendingAttachmentCount = function () {
+    var editor = composerEditor();
+    return editor ? attachmentCount(editor) : 0;
+  };
+
   window.__dshAppCompose = async function (draft) {
     var result = { text: false, files: 0 };
     // iOS correlates overlapping replies; legacy callers keep the same shape.
