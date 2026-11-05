@@ -216,11 +216,13 @@ class _NotificationSettingsPageState extends ConsumerState<NotificationSettingsP
         ),
         SettingsSection(
           title: l10n.pluginsAlerts,
-          footer: Text(switch ((ohos, ref.watch(localRuntimeProvider.select((s) => s.status.longTaskEligible)))) {
-            (true, true) => l10n.harmonyAlertsRequirementLong,
-            (true, false) => l10n.harmonyAlertsRequirement,
-            (false, _) => l10n.pluginsRemoteAlertsRequirement,
-          }),
+          footer: Text(
+            !ohos
+                ? l10n.pluginsRemoteAlertsRequirement
+                : ref.watch(localRuntimeProvider.select((s) => s.status.longTaskEligible))
+                ? l10n.harmonyAlertsRequirementLong
+                : l10n.harmonyAlertsRequirement,
+          ),
           children: [
             SettingsSwitchTile(
               spot: Spots.notifyDone,

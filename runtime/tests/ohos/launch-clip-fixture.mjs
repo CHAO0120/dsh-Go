@@ -29,7 +29,7 @@ function png(width, height) {
   return Buffer.concat([Buffer.from([137,80,78,71,13,10,26,10]), chunk('IHDR', header),
     chunk('IDAT', zlib.deflateSync(scan)), chunk('IEND', Buffer.alloc(0))]);
 }
-const unrelated = new Set(['AppLinksPlugin','SecretsPlugin','AttachmentFilesPlugin','IslandsPlugin','NotifyPlugin',
+const unrelated = new Set(['AppLinksPlugin','SecretsPlugin','AttachmentFilesPlugin','IslandsPlugin','NotifyPlugin','PastePlugin',
   'ConnectivityPlugin','GeneratedPluginRegistrant','RuntimePlugin','RuntimeController','FilesMediaPlugin',
   'NativeFilesPlugin','NativeMediaPlugin','PerformancePlugin','OhosKeyboardLog','DiagnosticsPlugin','UsagePlugin',
   'WebFilesPlugin','HmsSharePlugin','HmsShareInbox','ShortcutsPlugin','LauncherIconPlugin','VoicePlugin']);
