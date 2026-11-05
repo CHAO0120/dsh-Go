@@ -72,6 +72,25 @@ class RunnerContract(unittest.TestCase):
         self.assertIn('app/test/failures/actual.png', proof['generatedFiles'])
         self.assertEqual(proof['originalInputFilesUnchanged'], len(self.g.flutter_original_inputs))
 
+    def test_flutter_l10n_outputs_can_regenerate_but_other_code_and_missing_outputs_fail(self):
+        root = self.g.flutter_source
+        path = root / 'app/lib/l10n/gen/app_localizations.dart'
+        path.parent.mkdir(parents=True)
+        path.write_text('previous generated localization')
+        expected = gates.flutter_inputs(root)
+        path.write_text('regenerated localization from merged parts')
+        proof = gates.verify_flutter_inputs(root, expected)
+        self.assertIn('app/lib/l10n/gen/app_localizations.dart', proof['generatedFiles'])
+        self.assertEqual(proof['originalInputFilesUnchanged'], len(expected) - 1)
+        unexpected = path.with_name('unregistered_generated.dart')
+        unexpected.write_text('unexpected executable source')
+        with self.assertRaisesRegex(ValueError, 'unregistered_generated.dart'):
+            gates.verify_flutter_inputs(root, expected)
+        unexpected.unlink()
+        path.unlink()
+        with self.assertRaisesRegex(ValueError, 'app_localizations.dart'):
+            gates.verify_flutter_inputs(root, expected)
+
     def test_flutter_resolver_cannot_redirect_shared_package_to_an_old_tree(self):
         root = self.g.flutter_source
         config = root / 'app/.dart_tool/package_config.json'; config.parent.mkdir()

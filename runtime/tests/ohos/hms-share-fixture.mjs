@@ -10,6 +10,7 @@ import { dirname, join, resolve, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import vm from 'node:vm';
+import { assertEntryAbilityImports, createEntryAbilityImports } from './entry-ability-fixture.mjs';
 
 const require = createRequire(import.meta.url);
 assert(process.env.OHOS_TYPESCRIPT_PREFIX && process.env.OHOS_USER_FILE_ADDON,
@@ -170,10 +171,17 @@ export async function shareFixture(t, options = {}) {
     };
     throw new Error('Unadapted platform import: ' + name);
   };
+  const entryImports = createEntryAbilityImports({
+    '../plugins/HmsSharePlugin': () => load(resolve(repo, 'app/ohos/entry/src/main/ets/plugins/HmsSharePlugin.ets')),
+    '../plugins/HmsShareInbox': () => load(resolve(repo, 'app/ohos/entry/src/main/ets/plugins/HmsShareInbox.ets')),
+    '../runtime/NativeHost': () => ({ loadNativeHost() { throw new Error('Share Entry fixture must not load NativeHost'); } }),
+  });
   function load(path) {
     if (moduleCache.has(path)) return moduleCache.get(path).exports;
     const module = { exports: {} }; moduleCache.set(path, module);
-    const compiled = ts.transpileModule(fs.readFileSync(path, 'utf8'), {
+    const source = fs.readFileSync(path, 'utf8');
+    if (path.endsWith('/entryability/EntryAbility.ets')) assertEntryAbilityImports(source);
+    const compiled = ts.transpileModule(source, {
       compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS },
     });
     try { vm.runInNewContext(compiled.outputText, {
@@ -185,9 +193,7 @@ export async function shareFixture(t, options = {}) {
           return Promise.resolve(currentOptions.beforeKitLoad?.()).then(() => load(resolve(dirname(path), name + '.ets')));
         }
         if (name.startsWith('.')) {
-          if (path.endsWith('EntryAbility.ets') && !name.includes('HmsShare')) {
-            return { default: class { static receive() { return false; } }, GeneratedPluginRegistrant: { registerWith() {} }, RuntimePlugin: class {}, OhosKeyboardLog: class { attach() {} detach() {} } };
-          }
+          if (path.endsWith('/entryability/EntryAbility.ets')) return entryImports(name);
           return load(resolve(dirname(path), name + '.ets'));
         }
         return boundary(name);

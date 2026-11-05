@@ -567,8 +567,11 @@ class BundleSheet extends ConsumerWidget {
               ],
               // Loader evidence, then native UI switches and diagnostics.
               if (!gone) PluginLoadStatus(bundle: bundle),
-              if (!gone) NativePluginSection(package: bundle.name),
-              if (!gone) NativePluginPanels(package: bundle.name),
+              if (!gone)
+                for (final package in nativePackagesOf(bundle)) ...[
+                  NativePluginSection(package: package, named: package != bundle.name),
+                  NativePluginPanels(package: package),
+                ],
               if (!gone) PluginWebPlacesSection(package: bundle.name, pluginNames: [...?bundle.meta?.title?.all]),
               if (job != null && job.isActive) ...[
                 const SizedBox(height: 16),

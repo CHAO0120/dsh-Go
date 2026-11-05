@@ -7,6 +7,7 @@
     "flutter": "../gate-inputs/flutter",
     "cxx": "../gate-inputs/cxx",
     "cc": "../gate-inputs/cc",
+    "pnpm_prefix": "../gate-inputs/pnpm-prefix",
     "prepared": "../gate-inputs/prepared",
     "typescript_prefix": "../gate-inputs/typescript-prefix",
     "esbuild_prefix": "../gate-inputs/esbuild-prefix",

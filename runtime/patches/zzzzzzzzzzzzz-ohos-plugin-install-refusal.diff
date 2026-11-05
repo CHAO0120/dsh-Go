@@ -35,7 +35,7 @@
  	const result = await execa(options.command ?? "pnpm", [
  		...options.args ?? [],
  		"view",
-@@ -2440,7 +2447,7 @@
+@@ -2453,7 +2460,7 @@
  			return {
  				...this.configuredRegistries,
  				fallbackRegistries: [...this.configuredRegistries.fallbackRegistries],
@@ -44,7 +44,7 @@
  					...this.profile.packageManager ?? { command: this.pnpmCommand },
  					timeoutMs: this.inspectTimeoutMs
  				})
-@@ -2453,6 +2460,7 @@
+@@ -2466,6 +2473,7 @@
  		* @returns The package the spec names, or why it is refused.
  		*/
  		async inspect(spec, options, signal) {
@@ -52,7 +52,7 @@
  			let parsed;
  			try {
  				parsed = parseInstallSpec(spec);
-@@ -2759,6 +2767,9 @@
+@@ -2775,6 +2783,9 @@
  		* @returns The parsed answer and the registry that gave it, or the last refusal, with every registry asked.
  		*/
  		async askRegistries(spec, fields, plan, parsed, signal) {
@@ -62,10 +62,10 @@
  			const attempts = [];
  			for (const [index, registry] of plan.entries()) {
  				const view = await viewProfilePackage(this.profile.dir, spec, {
-@@ -2871,6 +2882,11 @@
- 		* @returns Package-manager diagnostics, the registries asked, and the observed activation outcome.
+@@ -2888,6 +2899,11 @@
  		*/
- 		installBundle(spec, options) {
+ 		// expectedInstalled is an internal update precondition, not a Remote option.
+ 		installBundle(spec, options, expectedInstalled) {
 +			if (process.platform === "openharmony") return Promise.resolve({
 +				stage: "install", target: spec, enabled: options?.enabled !== false,
 +				changed: false, application: "failed",
@@ -74,10 +74,10 @@
  			const requestId = options?.requestId;
  			const control = {
  				abort: new AbortController(),
-@@ -3078,6 +3094,10 @@
- 		* @returns Removal diagnostics and the remaining profile state.
+@@ -3103,6 +3119,10 @@
  		*/
- 		removeBundle(name) {
+ 		// selection is owned by this update only; capture it before HMR deselects.
+ 		removeBundle(name, selection) {
 +			if (process.platform === "openharmony") return Promise.resolve({
 +				stage: "remove", target: name, changed: false, application: "failed",
 +				error: { code: "operation-error", diagnostic: OHOS_PLUGIN_INSTALL_MESSAGE }

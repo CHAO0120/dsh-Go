@@ -444,5 +444,13 @@
   "remoteHostedUndoUnsaved": "Deletion is cancelled for this session, but the undo wasn’t saved. It may resume after restart. Retry saving in My shared links.",
   "remoteHostedUndoFailed": "Couldn’t restore sharing. Deletion may have started. Check My shared links.",
   "remoteHostedCreatedUnsaved": "Your link is ready to copy and use, but wasn’t saved on this device. Keep a copy and retry saving in My shared links.",
-  "remoteHostedStopFailed": "Couldn’t stop sharing. The link is still active. Please retry."
+  "remoteHostedStopFailed": "Couldn’t stop sharing. The link is still active. Please retry.",
+  "remoteNetworkLocalIpVersion": "Phone ICE IP version",
+  "remoteNetworkRemoteIpVersion": "Host ICE IP version",
+  "remoteNetworkIceProtocol": "ICE protocol",
+  "remoteTransferSettings": "Remote transfer",
+  "remoteCompactHistory": "Compact history",
+  "remoteErrHistoryModeChanged": "The Host no longer supports compact history. Switch to another host and back, or restart the app, to reload history.",
+  "remoteCompactHistoryHint": "Reduces historical tool details on supporting DSH Remote Hosts; live replies and approvals stay unchanged. Switch hosts or restart the app to apply. Older Hosts keep full history.",
+  "searchKwRemoteCompactHistory": "compact slim lite history tools transfer bandwidth remote"
 }

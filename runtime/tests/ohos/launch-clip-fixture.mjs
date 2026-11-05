@@ -2,7 +2,8 @@
 // Only SDK media/image/texture services are doubles: this is not codec/device proof.
 import fs from 'node:fs';
 import { createRequire } from 'node:module';
-import { resolve, dirname, basename } from 'node:path';
+import { resolve, dirname } from 'node:path';
+import { assertEntryAbilityImports, createEntryAbilityImports } from './entry-ability-fixture.mjs';
 import vm from 'node:vm';
 import crypto from 'node:crypto';
 import zlib from 'node:zlib';
@@ -29,10 +30,6 @@ function png(width, height) {
   return Buffer.concat([Buffer.from([137,80,78,71,13,10,26,10]), chunk('IHDR', header),
     chunk('IDAT', zlib.deflateSync(scan)), chunk('IEND', Buffer.alloc(0))]);
 }
-const unrelated = new Set(['AppLinksPlugin','SecretsPlugin','AttachmentFilesPlugin','IslandsPlugin','NotifyPlugin','PastePlugin',
-  'ConnectivityPlugin','GeneratedPluginRegistrant','RuntimePlugin','RuntimeController','FilesMediaPlugin',
-  'NativeFilesPlugin','NativeMediaPlugin','NativeVoiceStopControl','PerformancePlugin','OhosKeyboardLog','DiagnosticsPlugin','UsagePlugin',
-  'WebFilesPlugin','HmsSharePlugin','HmsShareInbox','ShortcutsPlugin','LauncherIconPlugin','VoicePlugin']);
 export function launchFixture(repo, filesDir, options = {}) {
   const ts = createRequire(resolve(process.env.OHOS_TYPESCRIPT_PREFIX, 'package.json'))('typescript');
   const channels = new Map(), plugins = [], loaded = [], isolated = [], calls = [], events = [];
@@ -131,12 +128,16 @@ export function launchFixture(repo, filesDir, options = {}) {
       arguments: value instanceof Map ? Object.fromEntries(value) : value }); }
   }
   class FlutterAbility { configureFlutterEngine() {} }
-  class UnrelatedPlugin { static registerWith() {} }
-  const opaque = new Proxy({}, { get: () => UnrelatedPlugin });
+  const entryImports = createEntryAbilityImports({
+    '../plugins/LaunchPlugin': () => load(resolve(repo, 'app/ohos/entry/src/main/ets/plugins/LaunchPlugin.ets')),
+    '../plugins/LaunchClipPlugin': () => load(resolve(repo, 'app/ohos/entry/src/main/ets/plugins/LaunchClipPlugin.ets')),
+    '../runtime/NativeHost': () => ({ nativeHostState: () => ({ phase: 'idle' }) }),
+  });
   const cache = new Map();
   function load(path) {
     if (cache.has(path)) return cache.get(path).exports;
     const source = fs.readFileSync(path, 'utf8');
+    if (path.endsWith('/entryability/EntryAbility.ets')) assertEntryAbilityImports(source);
     loaded.push({ path, sha256: crypto.createHash('sha256').update(source).digest('hex') });
     const module = { exports: {} }; cache.set(path, module);
     const js = ts.transpileModule(source, { compilerOptions: {
@@ -157,7 +158,10 @@ export function launchFixture(repo, filesDir, options = {}) {
         if (name.endsWith('/FlutterAbility')) return { FlutterAbility };
         if (name.endsWith('/NativeHost')) return { nativeHostState: () => ({ phase: 'idle' }) };
         if (name.startsWith('.')) {
-          if (unrelated.has(basename(name))) { isolated.push(name); return opaque; }
+          if (path.endsWith('/entryability/EntryAbility.ets')) {
+            if (name !== '../plugins/LaunchPlugin' && name !== '../plugins/LaunchClipPlugin') isolated.push(name);
+            return entryImports(name);
+          }
           return load(resolve(dirname(path), name + '.ets'));
         }
         throw new Error('Unadapted runtime import: ' + name);

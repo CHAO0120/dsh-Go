@@ -4,6 +4,7 @@ import {readFileSync,writeFileSync} from 'node:fs';
 import {createRequire} from 'node:module';
 import path from 'node:path';
 import vm from 'node:vm';
+import { assertEntryAbilityImports, createEntryAbilityImports } from './entry-ability-fixture.mjs';
 const ts=createRequire(process.env.OHOS_TYPESCRIPT_PREFIX+'/package.json')('typescript');
 const root=process.env.OHOS_USAGE_ROOT??new URL('../../../',import.meta.url).pathname;
 const deferred=()=>Promise.withResolvers();
@@ -12,13 +13,14 @@ function fixture({bundle,info={sdkApiVersion:23,abiList:'arm64-v8a,armeabi-v7a',
  class Stub{configureFlutterEngine(){}onAttachedToEngine(){}}
  const binding={getBinaryMessenger:()=>({})};
  const bundleManager={BundleFlag:{GET_BUNDLE_INFO_DEFAULT:0},async getBundleInfoForSelf(flag){assert.equal(flag,0);return bundle?await bundle():{versionName:'0.9.9',versionCode:123};}};
- function load(name){const module={exports:{}};const source=readFileSync(path.join(root,'app/ohos/entry/src/main/ets',name+'.ets'),'utf8');const js=ts.transpileModule(source,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS}}).outputText;
+ const entryImports=createEntryAbilityImports({'../plugins/UsagePlugin':()=>load('plugins/UsagePlugin'),'../runtime/NativeHost':()=>({loadNativeHost(){throw Error('Usage fixture must not load NativeHost');}})});
+ function load(name){const module={exports:{}};const source=readFileSync(path.join(root,'app/ohos/entry/src/main/ets',name+'.ets'),'utf8');if(name==='entryability/EntryAbility')assertEntryAbilityImports(source);const js=ts.transpileModule(source,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS}}).outputText;
   vm.runInNewContext(js,{module,exports:module.exports,require(key){
    if(key==='@ohos/flutter_ohos')return {MethodChannel:Channel,FlutterAbility:Stub};
    if(key==='@ohos.bundle.bundleManager')return {default:bundleManager};
    if(key==='@ohos.deviceInfo')return {default:info};
-   if(key==='../plugins/UsagePlugin')return load('plugins/UsagePlugin');
-   return {default:Stub,RuntimePlugin:Stub,OhosKeyboardLog:Stub,NativeVoiceStopControl:Stub,GeneratedPluginRegistrant:{registerWith(){}},RuntimeController:{},HmsShareInbox:{}};
+   if(name==='entryability/EntryAbility'&&key.startsWith('.'))return entryImports(key);
+   throw new Error('Unadapted usage import: '+key);
   }});return module.exports;
  }
  const entry=new (load('entryability/EntryAbility').default)();entry.configureFlutterEngine({getPlugins:()=>({add(p){plugins.push(p);p.onAttachedToEngine?.(binding);}})});

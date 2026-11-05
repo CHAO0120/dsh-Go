@@ -33,7 +33,7 @@
     "importer": "node_modules/@deepseek-ai/dsh-fs-local/lib/index.js",
     "specifier": "koffi",
     "occurrences": 1,
-    "importerSha256": "555aa01ff9f0bc394f2f8013187110ea7477e005a0a5a26f8615be58ceb1fa79",
+    "importerSha256": "0226c84a59ea64b7f7f651d5f0e400bae1bdc839b272f07f04c01024205a3b6b",
     "reason": "The fixed filesystem implementation enters Win32 ACL helpers only when process.platform is win32; OHOS takes the POSIX/publication branch."
   },
   {
@@ -61,7 +61,7 @@
     "importer": "node_modules/@deepseek-ai/dsh-session-persistence-jsonl/lib/index.js",
     "specifier": "koffi",
     "occurrences": 1,
-    "importerSha256": "0c7d60f8197b8574b3f1b28e5fb52b07d9d84e9f1277ecdd2be627686ef59433",
+    "importerSha256": "d59c4375ac53beb5b8d984a590d00692d50792e4f483c5f5fcc093394276c398",
     "reason": "The fixed session implementation selects Win32 semaphore/MoveFileEx only for win32; OHOS uses the linked publication owner and main-thread lock path."
   },
   {

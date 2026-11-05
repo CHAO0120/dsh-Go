@@ -27,6 +27,12 @@ REPOSITORY = Path(__file__).resolve().parents[2]
 IGNORED = {'.git', 'node_modules', '.dart_tool', '__pycache__', '.cache', '.vendor', 'build'}
 FLUTTER_ENV = {'PUB_CACHE', 'FLUTTER_ROOT', 'FLUTTER_SUPPRESS_ANALYTICS', 'CI',
                'DSH_LINUX_FLUTTER_TESTS', 'XDG_CONFIG_HOME', 'DSH_TEST_FONT_DIR'}
+FLUTTER_L10N_OUTPUTS = {
+    'app/lib/l10n/app_en.arb', 'app/lib/l10n/app_zh.arb',
+    'app/lib/l10n/gen/app_localizations.dart',
+    'app/lib/l10n/gen/app_localizations_en.dart',
+    'app/lib/l10n/gen/app_localizations_zh.dart',
+}
 # These existing controllers hide node:test output in their declared files.
 # Inspect only this explicit contract, never unrelated logs under the output.
 WRAPPED_TEST_LOGS = {
@@ -84,12 +90,18 @@ def flutter_inputs(root):
 
 def verify_flutter_inputs(root, expected):
     actual = flutter_inputs(root)
-    changed = [path for path, value in expected.items() if actual.get(path) != value]
+    regenerated = {path: actual[path] for path in FLUTTER_L10N_OUTPUTS
+                   if path in actual and actual[path]['type'] == 'file'
+                   and actual[path] != expected.get(path)}
+    changed = [path for path, value in expected.items()
+               if actual.get(path) != value and path not in regenerated]
     added = {path: value for path, value in actual.items() if path not in expected}
-    new_code = [path for path in added if path.endswith(('.dart', '.arb')) or Path(path).name == 'pubspec.yaml']
+    new_code = [path for path in added if path not in regenerated
+                and (path.endswith(('.dart', '.arb')) or Path(path).name == 'pubspec.yaml')]
     if changed or new_code:
         raise ValueError('Flutter candidate inputs changed: ' + ', '.join(changed + new_code))
-    return {'originalInputFilesUnchanged': len(expected), 'generatedFiles': added}
+    return {'originalInputFilesUnchanged': len(expected) - len(set(expected) & set(regenerated)),
+            'generatedFiles': {**added, **regenerated}}
 
 
 def verify_flutter_packages(root):
@@ -234,7 +246,7 @@ class Gates:
         # Test fixtures may select source files through these variables. Never
         # inherit a path to an older good tree; this invocation supplies inputs.
         self.base_env = {k: v for k, v in os.environ.items()
-                         if k not in {'NODE_OPTIONS', 'NODE_PATH', 'LD_PRELOAD'}
+                         if k not in {'NODE_OPTIONS', 'NODE_PATH', 'LD_PRELOAD', 'PNPM_BIN'}
                          and not k.startswith(('OHOS_', 'DSH_', 'M3_', 'M4_', 'M6_', 'P1_', 'DIAGNOSTICS_'))}
         self.base_env.update(PYTHONDONTWRITEBYTECODE='1', LANG='C.UTF-8', LC_ALL='C.UTF-8', TZ='UTC')
 
@@ -490,6 +502,43 @@ def main():
             if not shutil.which(name): raise Blocked('missing executable ' + name)
         return result
     g.internal('tools', toolchain)
+    def pnpm_inputs(_):
+        installed = p('pnpm_prefix')
+        build = (s / 'runtime/build-runtime.sh').read_text()
+        version_match = re.search(r'^PNPM_VERSION="\$\{PNPM_VERSION:-([^}]+)\}"$', build, re.M)
+        integrity_match = re.search(r'^PNPM_INTEGRITY="\$\{PNPM_INTEGRITY:-([^}]+)\}"$', build, re.M)
+        if not version_match or not integrity_match:
+            raise ValueError('Cannot identify the original pnpm version/integrity pins')
+        version, integrity = version_match[1], integrity_match[1]
+        lockdir = s / ('runtime/locks/pnpm-' + version)
+        for name in ('package.json', 'package-lock.json'):
+            if (installed / name).read_bytes() != (lockdir / name).read_bytes():
+                raise ValueError('pnpm installed prefix differs from original lock: ' + name)
+        package = json.loads((installed / 'package.json').read_text())
+        lock = json.loads((installed / 'package-lock.json').read_text())
+        pinned = lock['packages']['node_modules/pnpm']
+        if package['dependencies']['pnpm'] != version or pinned['version'] != version or pinned['integrity'] != integrity:
+            raise ValueError('pnpm original lock and build pins disagree')
+        hidden = json.loads((installed / 'node_modules/.package-lock.json').read_text())['packages']['node_modules/pnpm']
+        if any(hidden.get(key) != pinned[key] for key in ('version', 'resolved', 'integrity')):
+            raise ValueError('pnpm npm-ci installed lock does not match the original lock')
+        actual = json.loads((installed / 'node_modules/pnpm/package.json').read_text())
+        binary = installed / 'node_modules/pnpm/bin/pnpm.mjs'
+        if actual.get('name') != 'pnpm' or actual.get('version') != version:
+            raise ValueError('pnpm installed package version mismatch')
+        if binary.is_symlink() or not binary.is_file() or not os.access(binary, os.X_OK):
+            raise ValueError('pnpm executable must be an executable regular installed file')
+        # Include node_modules: the default source exclusions would omit the tool.
+        identity = source_files(installed, ignored=set())
+        save(o / 'pnpm-inputs.json', {'prefix': str(installed), 'version': version,
+            'integrity': integrity, 'files': identity})
+        return {'prefix': str(installed), 'version': version, 'integrity': integrity,
+                'bin': str(binary), 'binSha256': sha(binary),
+                'identitySha256': sha(o / 'pnpm-inputs.json'), 'fileCount': len(identity),
+                'packageSha256': sha(lockdir / 'package.json'),
+                'lockSha256': sha(lockdir / 'package-lock.json')}
+    g.internal('pnpm-inputs', pnpm_inputs, needs=('tools',),
+               scope='Original locked pnpm input for both complete shared suites; no install')
     def native_tools(_):
         header = g.path('node_root', 'include/node/node_api.h')
         return {'nodeApiHeaderSha256': sha(header)}
@@ -777,7 +826,7 @@ def main():
     g.run('performance-dart', lambda: g.py(rt + 'performance-linux.py', '--node', node(), '--dart', p('dart'), '--typescript-prefix', p('typescript_prefix'), '--out', o / 'performance-dart'), needs=('tools', 'dart-tools'), timeout=180)
     g.run('diagnostics-dart', lambda: g.py(rt + 'diagnostics-linux.py', '--node', node(), '--dart', p('dart'), '--typescript-prefix', p('typescript_prefix'), '--zlib-addon', o / 'zlib.node', '--output', o / 'diagnostics-dart'), needs=('tools', 'dart-tools', 'native-zlib-build'), timeout=240)
     g.internal('dart-consumer-evidence', lambda _: verify_dart_consumers(o), needs=('diagnostics-dart', 'performance-dart'))
-    channels = ['app-links-channel', 'frame-rate-channel', 'keyboard-log', 'connectivity-channel', 'notify-channel', 'paste-channel', 'voice-stop-control', 'liveview-fallback', 'files-media-channel', 'usage-channel', 'launch-channel', 'launcher-icon-channel', 'shortcuts-channel']
+    channels = ['app-links-channel', 'frame-rate-channel', 'keyboard-log', 'connectivity-channel', 'notify-channel', 'paste-channel', 'voice-stop-control', 'liveview-fallback', 'files-media-channel', 'usage-channel', 'launch-channel', 'launcher-icon-channel', 'shortcuts-channel', 'entry-ability-fixture']
     g.node_tests('ets-channels', [rt + n + '.test.mjs' for n in channels], needs=('native-opener-build',), extra=lambda: {'OHOS_USER_FILE_ADDON': str(o / 'user-file-access.node')}, timeout=240)
     def embedding_package(_):
         target = o / 'embedding-package'; target.mkdir()
@@ -840,7 +889,9 @@ def main():
         return {'extraOhosTarget': True, 'scope': 'Existing vendor switch generator for actual oh-flutter SDK'}
     g.internal('flutter-vendor', flutter_vendor, needs=('flutter-pub',))
     g.run('flutter-pub-vendored', lambda: g.flutter('pub', 'get', '--offline'), cwd=g.flutter_source / 'app', env=g.flutter_env, needs=('flutter-vendor',), timeout=180)
-    g.run('flutter-l10n', lambda: g.flutter('gen-l10n'), cwd=g.flutter_source / 'app', env=g.flutter_env, needs=('flutter-pub-vendored',), timeout=180)
+    g.run('flutter-l10n', lambda: [sys.executable, '-I', '-B', g.flutter_source / 'app/tool/l10n_merge.py'],
+          cwd=g.flutter_source / 'app', env=lambda: {**g.flutter_env, 'FLUTTER': str(p('flutter'))},
+          needs=('flutter-pub-vendored',), timeout=180)
     def flutter_identity(_):
         g.flutter_env['OHOS_INSTALL_RECORD_WIRE'] = str(o / 'install-record-wire.json')
         return {'source': verify_flutter_inputs(g.flutter_source, g.flutter_original_inputs),
@@ -879,7 +930,7 @@ def main():
     # the files they need and would miss the rest of runtime/tests.
     shared = sorted('runtime/tests/' + f.name for f in (s / 'runtime/tests').glob('*.test.mjs'))
     for target, label in (('candidate', 'android'), ('ohos', 'ohos')):
-        g.run('shared-suite-' + label, lambda: g.node('--test', '--test-reporter=tap', *[s / f for f in shared]), env=lambda t=target: {'TZ': 'Asia/Shanghai', 'DSH_JOB_RING_BENCH': '1', 'OHOS_TYPESCRIPT_PREFIX': str(p('typescript_prefix')), 'DSH_PREFIX': str(o / ('targets/' + t + '-prefix')), 'DSH_TEST_PREFIX': str(o / ('targets/' + t + '-prefix'))}, needs=('android-targets', 'native-static-resources'), timeout=600, tests=shared, scope='Every shared runtime test against the installed target on Linux')
+        g.run('shared-suite-' + label, lambda: g.node('--test', '--test-reporter=tap', *[s / f for f in shared]), env=lambda t=target: {'PNPM_BIN': str(p('pnpm_prefix') / 'node_modules/pnpm/bin/pnpm.mjs'), 'TZ': 'Asia/Shanghai', 'DSH_JOB_RING_BENCH': '1', 'OHOS_TYPESCRIPT_PREFIX': str(p('typescript_prefix')), 'DSH_PREFIX': str(o / ('targets/' + t + '-prefix')), 'DSH_TEST_PREFIX': str(o / ('targets/' + t + '-prefix'))}, needs=('android-targets', 'native-static-resources', 'pnpm-inputs'), timeout=600, tests=shared, scope='Every shared runtime test against the installed target on Linux')
         g.run('route-guard-' + label, lambda t=target: ['bash', s / 'runtime/tests/run-guard-tests.sh', o / ('targets/' + t + '-prefix'), '--port', free_port()], needs=('android-targets',), timeout=300, tests=['runtime/tests/run-guard-tests.sh'])
     g.run('direct-inventory', lambda: g.py('runtime/tests/test_direct_inventory.py', '-v'), needs=('tools',), tests=['runtime/tests/test_direct_inventory.py'])
     g.run('publication-kill', lambda: g.node(s / (rt + 'publication-kill.mjs'), '--node', node(), '--simulation', s / 'runtime/ohos/sim/preload.mjs', '--publication', s / 'runtime/ohos/publication', '--linked-lib', native() / 'libpublication-test-linked.so', '--prefix', prefix(), '--out', o / 'publication-kill.json'), needs=('native-publication-build', 'prepared-inputs'), timeout=300, scope='Real SIGKILL and restart with the current publication preload')

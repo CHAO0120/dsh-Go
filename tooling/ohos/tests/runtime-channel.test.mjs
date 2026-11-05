@@ -1,4 +1,5 @@
 import test, { after, afterEach, beforeEach } from 'node:test';
+import { assertEntryAbilityImports } from '../../../runtime/tests/ohos/entry-ability-fixture.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import os from 'node:os';
@@ -172,6 +173,7 @@ const { RuntimeController } = await import(pathToFileURL(controllerPath));
 const { util: recoveryUtil } = await import(fixtureUrl);
 recoveryUtil.generateRandomUUID = randomUUID;
 let entryText = await fs.readFile(path.join(source, '../entryability/EntryAbility.ets'), 'utf8');
+assertEntryAbilityImports(entryText);
 entryText = entryText.replace(/^import .*;\n/gm, '');
 await fs.writeFile(path.join(temp, 'EntryAbility.mts'),
   `import { RuntimeController } from './RuntimeController.mts';\nimport { FlutterAbility } from '${hostFixtureUrl}';\n` +
