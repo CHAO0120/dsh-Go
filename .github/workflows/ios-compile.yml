@@ -172,6 +172,12 @@ jobs:
           fi
           exit "$status"
 
+      - name: Record what this Node build has
+        if: ${{ !cancelled() && steps.prepare.outcome == 'success' }}
+        run: |
+          node="$(ls -d "$DSH_IOS_ENGINE_WORK"/node-v*-darwin-arm64/bin/node)"
+          "$node" tooling/ios/engine-smoke/env-probe.mjs --simulator "$DSH_SIMULATOR" --smoke "$RUNNER_TEMP/image-smoke" --frameworks "$RUNNER_TEMP/sim" --runtime "$RUNNER_TEMP/tree/files" --work "$RUNNER_TEMP/env-probe-work" || echo "::warning title=node env::the probe itself failed"
+
       - name: Install Flutter
         if: ${{ !cancelled() && steps.prepare.outcome == 'success' }}
         run: |
