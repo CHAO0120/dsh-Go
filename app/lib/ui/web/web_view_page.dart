@@ -1312,11 +1312,17 @@ class DshWebLink {
       ],
       if (!kIsWeb && defaultTargetPlatform == TargetPlatform.iOS) 'guardTextFallback': true,
     };
+    final script = 'window.__dshAppCompose && window.__dshAppCompose(${jsonEncode(draft)});';
     try {
-      await _send('window.__dshAppCompose && window.__dshAppCompose(${jsonEncode(draft)});');
+      await _send(script);
       return await done.future.timeout(timeout, onTimeout: () => const WebComposeResult());
     } finally {
-      if (requestId != null) _composeReplies.remove(requestId);
+      if (requestId != null) {
+        _composeReplies.remove(requestId);
+        // A failed paste must not be sent later, after its caller has fallen back.
+        _queued.remove(script);
+        _page?._pendingScripts.remove(script);
+      }
     }
   }
 
