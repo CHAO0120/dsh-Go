@@ -7164,6 +7164,18 @@ class L10nZh extends L10n {
   String get harmonyAlertsRequirementLong => '提醒要应用在运行才发得出：对话在后台继续时会提醒，应用被系统挂起后就没有了';
 
   @override
+  String get harmonySaveToFile => '保存到文件';
+
+  @override
+  String get harmonySaveChooseLocation => '选择保存位置';
+
+  @override
+  String get harmonySaving => '正在保存…';
+
+  @override
+  String get harmonySaved => '已保存';
+
+  @override
   String get hostDetailsConnectionType => '连接方式';
 
   @override

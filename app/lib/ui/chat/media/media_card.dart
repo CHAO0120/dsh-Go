@@ -782,6 +782,7 @@ Future<void> saveMediaItems(BuildContext context, WidgetRef ref, String sessionI
   }
   final media = ref.read(mediaChannelProvider);
   var saved = 0;
+  var chosen = false;
   String? failure;
   for (final item in pictures) {
     try {
@@ -795,17 +796,20 @@ Future<void> saveMediaItems(BuildContext context, WidgetRef ref, String sessionI
   }
   for (final item in videos) {
     try {
-      await ref
+      final where = await ref
           .read(artifactFilesProvider)
           .saveToDownloads(sessionId, Artifact(path: item.path, origin: ArtifactOrigin.linked, turn: 0));
+      chosen = chosen || savedInChosenPlace(where);
       saved++;
-    } catch (_) {
+    } catch (e) {
+      // Backed out of the save window: stop asking, and nothing to report for it.
+      if (saveWindowDismissed(e)) break;
       failure ??= 'failed';
     }
   }
   if (saved > 0) {
     HapticFeedback.lightImpact();
-    messenger?.showBriefNotice(l10n.mediaSavedCount(saved));
+    messenger?.showBriefNotice(chosen ? l10n.harmonySaved : l10n.mediaSavedCount(saved));
   }
   if (failure != null) {
     messenger?.showSnackBar(SnackBar(content: Text(gallerySaveErrorText(failure))));

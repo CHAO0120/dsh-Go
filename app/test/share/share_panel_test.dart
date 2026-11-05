@@ -51,6 +51,7 @@ class _Exporter extends ShareExporter {
 
   final shared = <ShareParams>[];
   final saved = <File>[];
+  Object? saveError;
 
   @override
   Future<void> share(File image, {String? text}) async =>
@@ -58,6 +59,7 @@ class _Exporter extends ShareExporter {
 
   @override
   Future<String> save(File image) async {
+    if (saveError case final error?) throw error;
     saved.add(image);
     return 'Download/DSH-Go/${image.uri.pathSegments.last}';
   }
@@ -69,6 +71,7 @@ class _Out extends ConversationOut {
   final shared = <(File, ConversationFormat)>[];
   final saved = <(File, ConversationFormat)>[];
   final texts = <String>[];
+  Object? saveError;
 
   @override
   Future<void> shareFile(File file, ConversationFormat format) async => shared.add((file, format));
@@ -78,6 +81,7 @@ class _Out extends ConversationOut {
 
   @override
   Future<String> save(String name, String content, ConversationFormat format) async {
+    if (saveError case final error?) throw error;
     final file = await write(name, content);
     saved.add((file, format));
     return 'Download/DSH-Go/${file.uri.pathSegments.last}';
@@ -689,6 +693,19 @@ void main() {
 
   // ── 文件 ──────────────────────────────────────────────────────────────────
 
+  testWidgets('文件: backing out of the save window reads as neither saved nor failed', (tester) async {
+    final panel = await _open(tester, state: _fixture(), reply: 'a6', scope: ShareScope.whole);
+    await _key(tester, 'share-to-file');
+    panel.out.saveError = PlatformException(code: 'cancelled');
+    await _key(tester, 'share-file-save');
+    expect(find.text('已保存'), findsNothing);
+    expect(find.text('没能保存，请重试'), findsNothing);
+
+    panel.out.saveError = PlatformException(code: 'failed');
+    await _key(tester, 'share-file-save');
+    expect(find.text('没能保存，请重试'), findsOneWidget);
+  });
+
   testWidgets('文件: a DSH Go file, a web page, Markdown; 预览 opens the replay', (tester) async {
     final panel = await _open(tester, state: _fixture(), reply: 'a6', scope: ShareScope.whole);
     await _key(tester, 'share-to-file');
@@ -807,6 +824,22 @@ void main() {
     await tester.pump(const Duration(seconds: 3));
     await tester.pumpAndSettle();
     expect(find.text('保存图片'), findsOneWidget);
+  });
+
+  testWidgets('图片: backing out of the save window reads as neither saved nor failed', (tester) async {
+    final panel = await _open(tester, state: _fixture(), reply: 'a6', scope: ShareScope.whole);
+    await _key(tester, 'share-to-image');
+    panel.exporter.saveError = PlatformException(code: 'cancelled');
+    await tester.tap(find.byKey(const ValueKey('share-save')));
+    await _settle(tester);
+    expect(find.text('已保存'), findsNothing);
+    expect(find.text('没能保存，请重试'), findsNothing);
+    expect(find.text('保存图片'), findsOneWidget);
+
+    panel.exporter.saveError = PlatformException(code: 'failed');
+    await tester.tap(find.byKey(const ValueKey('share-save')));
+    await _settle(tester);
+    expect(find.text('没能保存，请重试'), findsOneWidget);
   });
 
   // ── Large text, narrow phones ─────────────────────────────────────────────

@@ -13166,6 +13166,30 @@ abstract class L10n {
   /// **'提醒要应用在运行才发得出：对话在后台继续时会提醒，应用被系统挂起后就没有了'**
   String get harmonyAlertsRequirementLong;
 
+  /// No description provided for @harmonySaveToFile.
+  ///
+  /// In zh, this message translates to:
+  /// **'保存到文件'**
+  String get harmonySaveToFile;
+
+  /// No description provided for @harmonySaveChooseLocation.
+  ///
+  /// In zh, this message translates to:
+  /// **'选择保存位置'**
+  String get harmonySaveChooseLocation;
+
+  /// No description provided for @harmonySaving.
+  ///
+  /// In zh, this message translates to:
+  /// **'正在保存…'**
+  String get harmonySaving;
+
+  /// No description provided for @harmonySaved.
+  ///
+  /// In zh, this message translates to:
+  /// **'已保存'**
+  String get harmonySaved;
+
   /// No description provided for @hostDetailsConnectionType.
   ///
   /// In zh, this message translates to:

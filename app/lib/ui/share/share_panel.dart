@@ -797,6 +797,7 @@ class SharePanelModel extends ChangeNotifier {
         _notify();
       });
     } on PlatformException catch (e) {
+      if (saveWindowDismissed(e)) return;
       _error = e.code == 'permission' ? appL10n.viewShareNoPermission : appL10n.commonSaveFailedRetry;
     } catch (e) {
       _error = artifact != null ? artifactErrorText(e) : appL10n.commonSaveFailedRetry;

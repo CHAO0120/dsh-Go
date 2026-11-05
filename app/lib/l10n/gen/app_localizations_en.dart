@@ -7577,6 +7577,18 @@ class L10nEn extends L10n {
       'Alerts need the app running: they go out while a conversation carries on in the background, and stop once the system suspends the app';
 
   @override
+  String get harmonySaveToFile => 'Save to file';
+
+  @override
+  String get harmonySaveChooseLocation => 'Choose where to save';
+
+  @override
+  String get harmonySaving => 'Saving…';
+
+  @override
+  String get harmonySaved => 'Saved';
+
+  @override
   String get hostDetailsConnectionType => 'Connection type';
 
   @override
