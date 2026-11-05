@@ -505,6 +505,14 @@
           "after": "80b4e0d44f74add446f81e7e4e1895209c64f8732230cc628ce9d3e503df4433"
         }
       }
+    },
+    "ohos-discovery-response-cleanup.diff": {
+      "0.2.1-rc.4": {
+        "node_modules/@deepseek-ai/dsh-llm-pi-ai/lib/index.js": {
+          "before": "99b5c20830a52f69641df8a18a39206079b0c725201958cce2c4a934f1d4f7cd",
+          "after": "98d539a928892c368c815289fe7708349c573e61de052f04cdc4e48f3f5c40e9"
+        }
+      }
     }
   },
   "schema": 2,
@@ -561,7 +569,8 @@
       "file-upload-resolver-dispose.diff",
       "zzzzzzzz-schedule-authorization.diff",
       "ohos-mcp-stdio-unavailable.diff",
-      "ohos-provider-body-timeout.diff"
+      "ohos-provider-body-timeout.diff",
+      "ohos-discovery-response-cleanup.diff"
     ]
   }
 }
