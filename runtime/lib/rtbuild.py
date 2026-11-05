@@ -348,7 +348,9 @@ def select_dsh_patches(pins, directory, target):
         sys.exit("pins.json patches must be an object")
     if set(pins["patches"]) - present:
         sys.exit("pins.json contains patch entries absent from the declared files")
-    names = sorted(sets[target])
+    # Preserve main's Android filename order. OH declares the complete common
+    # chain first, then its overlays, whose names may sort before newer main diffs.
+    names = sorted(sets[target]) if target == "android" else list(sets[target])
     if not names:
         sys.exit("no patches configured for target " + target)
     return names, sorted(present)
@@ -414,7 +416,11 @@ def cmd_patch_dsh(args):
     # it silently installed. Common-chain files were checked above.
     excluded_original = {}
     selected_paths = {rel for diff in parsed.values() for rel, _ in diff}
-    for name in all_names:
+    # The first excluded pin on a path is its original only in that target's
+    # application order, which need not be lexicographic for OH overlays.
+    sets = pins["targetSets"]
+    excluded_names = sets["ohos"] if args.target == "android" else sorted(sets["android"])
+    for name in excluded_names:
         if name in names:
             continue
         for rel, pin in pins["patches"].get(name, {}).get(args.dsh_version, {}).items():

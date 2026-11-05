@@ -1,20 +1,7 @@
 # OH-only composition variants; shared Android inputs remain byte-identical.
 --- a/runtime/session-deletion/core.mjs
 +++ b/runtime/session-deletion/core.mjs
-@@ -62,6 +62,12 @@
-     const handle = await open(path, 'r');
-     try { await handle.sync(); } finally { await handle.close(); }
-   };
-+  const syncMarker = async (id) => {
-+    await syncDir(slot(id));
-+    await syncDir(control);
-+    await syncDir(root);
-+    await syncDir(dirname(root));
-+  };
-   const writeMarker = async (id, dir) => {
-     await mkdir(slot(id), { recursive: true, mode: 0o700 });
-     const temporary = join(slot(id), `.${randomUUID()}.tmp`);
-@@ -71,12 +77,21 @@
+@@ -77,7 +77,19 @@
          await handle.writeFile(JSON.stringify({ version: 1, directory: relative(root, dir) }));
          await handle.sync();
        } finally { await handle.close(); }
@@ -33,15 +20,9 @@
 +        }
 +      } else await link(temporary, marker(id));
      } finally { await rm(temporary, { force: true }); }
--    await syncDir(slot(id));
--    await syncDir(control);
--    await syncDir(root);
--    await syncDir(dirname(root));
-+    await syncMarker(id);
+     await syncMarkerDirectories(id);
    };
-   const savedDirectory = (id) => {
-     const record = JSON.parse(readFileSync(marker(id), 'utf8'));
-@@ -104,6 +119,12 @@
+@@ -107,6 +119,12 @@
    };
    return {
      version: 1, pending, deleted, assertAdmit, assertParent, withMutation: mutation,
@@ -54,14 +35,6 @@
      // Global identity lease closes the alternate-cwd create race; the original directory
      // lease also excludes older runtime writers. Neither inode is ever unlinked.
      async acquireWriter(id, dir, header) {
-@@ -176,6 +197,7 @@
-           }
-           const files = await logFiles(dir);
-           if (!retry) await writeMarker(id, dir); // Durable point of no return; retry completes cleanup.
-+          else if (process.platform === 'openharmony') await syncMarker(id); // Retry a commit whose directory sync previously failed.
-           storage.coldLogMemo.delete(id);
-           storage.migrationPreparations.get(id)?.controller.abort();
-           storage.migrationPreparations.delete(id);
 --- a/runtime/bridge/dsh-go-bridge/lib/session-deletion.js
 +++ b/runtime/bridge/dsh-go-bridge/lib/session-deletion.js
 @@ -32,7 +32,12 @@

@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:dsh_app/share_hosted/hosted_client.dart';
+import 'package:dsh_app/state/android_features.dart';
 import 'package:dsh_app/share_hosted/hosted_link.dart';
 import 'package:dsh_app/share_hosted/hosted_links_state.dart';
 import 'package:flutter/services.dart';
@@ -52,6 +53,7 @@ void main() {
     final host = FakeHost();
     final container = ProviderContainer(
       overrides: [
+        operatingSystemProvider.overrideWithValue('ohos'),
         hostedLinkStoreProvider.overrideWithValue(SecureHostedLinkStore(storage)),
         hostedShareClientProvider.overrideWithValue(
           HostedShareClient(client: host.client, origin: 'https://go.example'),
@@ -164,6 +166,7 @@ void main() {
         );
         final container = ProviderContainer(
           overrides: [
+            operatingSystemProvider.overrideWithValue('ohos'),
             hostedLinkStoreProvider.overrideWithValue(SecureHostedLinkStore(storage)),
             hostedShareClientProvider.overrideWithValue(client),
           ],
@@ -216,6 +219,7 @@ void main() {
     );
     final container = ProviderContainer(
       overrides: [
+        operatingSystemProvider.overrideWithValue('ohos'),
         hostedLinkStoreProvider.overrideWithValue(SecureHostedLinkStore(storage)),
         hostedShareClientProvider.overrideWithValue(client),
       ],

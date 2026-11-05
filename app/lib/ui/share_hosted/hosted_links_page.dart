@@ -12,6 +12,7 @@ import '../../l10n/l10n.dart';
 import '../../share_hosted/hosted_client.dart' show HostedShareError;
 import '../../share_hosted/hosted_link.dart';
 import '../../share_hosted/hosted_links_state.dart';
+import '../common/app_dialog.dart';
 import '../common/list_page_row.dart';
 import '../common/smooth_size.dart';
 import '../features/feature_kit.dart';
@@ -56,7 +57,10 @@ class _HostedLinksPageState extends ConsumerState<HostedLinksPage> {
     super.initState();
     // A previously failed read gets another attempt when the page opens.
     Future.microtask(() {
-      if (mounted) unawaited(ref.read(hostedLinksProvider.notifier).ensureLoaded());
+      if (mounted) {
+        final links = ref.read(hostedLinksProvider.notifier);
+        if (links.isHarmonyOS) unawaited(links.ensureLoaded());
+      }
     });
   }
 
@@ -75,7 +79,7 @@ class _HostedLinksPageState extends ConsumerState<HostedLinksPage> {
   }
 
   Future<void> _delete(BuildContext context, WidgetRef ref, HostedLink link) async {
-    final ok = await showDialog<bool>(
+    final ok = await showAppDialog<bool>(
       context: context,
       builder: (dialog) => AlertDialog(
         title: Text(context.l10n.remoteHostedDeleteTitle),
@@ -98,7 +102,7 @@ class _HostedLinksPageState extends ConsumerState<HostedLinksPage> {
     final links = ref.read(hostedLinksProvider.notifier);
     final removed = await links.remove(link.id);
     if (!context.mounted) return;
-    if (!removed) {
+    if (links.isHarmonyOS && !removed) {
       _toast(context, context.l10n.remoteHostedDeleteSaveFailed);
       return;
     }
@@ -111,8 +115,8 @@ class _HostedLinksPageState extends ConsumerState<HostedLinksPage> {
         onPressed: () async {
           final result = await links.undo(link.id);
           if (!context.mounted) return;
-          if (result == HostedUndoResult.sessionOnly) _toast(context, context.l10n.remoteHostedUndoUnsaved);
-          if (result == HostedUndoResult.unavailable) _toast(context, context.l10n.remoteHostedUndoFailed);
+          if (links.isHarmonyOS && result == HostedUndoResult.sessionOnly) _toast(context, context.l10n.remoteHostedUndoUnsaved);
+          if (links.isHarmonyOS && result == HostedUndoResult.unavailable) _toast(context, context.l10n.remoteHostedUndoFailed);
         },
       ),
     );

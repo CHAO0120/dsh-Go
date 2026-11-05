@@ -209,14 +209,17 @@ def transforms():
 
 def build(prefix):
     pins = json.loads((RUNTIME / 'patches/pins.json').read_text())
+    names, _ = rt.select_dsh_patches(pins, str(RUNTIME / 'patches'), 'android')
     changes = {}
     for rel, edits in transforms().items():
         raw = (prefix / rel).read_text()
-        # Normalize all older patches in memory, refusing custom code.
+        # Generate the shared Android seam; OH overlays belong to composition.
+        # Normalize only its common predecessors; later pins include this seam.
         stages = []
-        for patch in sorted((RUNTIME / 'patches').glob('*.diff')):
-            if patch.name == PATCH_NAME:
-                continue
+        for name in names:
+            if name == PATCH_NAME:
+                break
+            patch = RUNTIME / 'patches' / name
             pin = pins['patches'].get(patch.name, {}).get('0.2.1-rc.4', {}).get(rel)
             if pin:
                 hunks = dict(rt.parse_unified_diff(patch.read_text()))[rel]

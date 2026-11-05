@@ -23,6 +23,7 @@ import '../../share_code/conversation_share.dart';
 import '../../share_hosted/hosted_client.dart' show HostedShareException;
 import '../../share_hosted/hosted_links_state.dart' show HostedStorageException;
 import '../../state/app_info.dart';
+import '../../state/android_features.dart';
 import '../../state/artifact_files.dart';
 import '../../state/artifacts.dart';
 import '../../state/chat_state.dart';
@@ -335,6 +336,8 @@ class SharePanelModel extends ChangeNotifier {
   bool get isEmpty => conversation != null && !loading && shareable.isEmpty;
 
   /// The links this app can make (null: none).
+  bool get _harmony => _ref.read(operatingSystemProvider) == 'ohos';
+
   ConversationLinkMaker? get linkMaker => conversation == null ? null : _ref.read(conversationLinkMakerProvider);
 
   void chatChanged() {
@@ -376,6 +379,7 @@ class SharePanelModel extends ChangeNotifier {
   void setScope(ShareScope scope) {
     if (scope == _scope) return;
     _scope = scope;
+    _export = null;
     _changed();
     if (scope == ShareScope.whole) unawaited(_loadHistory());
   }
@@ -665,12 +669,12 @@ class SharePanelModel extends ChangeNotifier {
       _shared();
       HapticFeedback.lightImpact();
       _link = link;
-      _error = link.locallySaved ? null : appL10n.remoteHostedCreatedUnsaved;
+      if (_harmony) _error = link.locallySaved ? null : appL10n.remoteHostedCreatedUnsaved;
       _linkFor = key;
       _stopped = null;
       _stopTimer?.cancel();
     } catch (e) {
-      _error = e is HostedStorageException
+      _error = _harmony && e is HostedStorageException
           ? appL10n.remoteHostedLoadFailed
           : e is HostedShareException
           ? e.message
@@ -684,14 +688,18 @@ class SharePanelModel extends ChangeNotifier {
     final link = this.link;
     if (maker == null || link == null) return;
     final key = _linkFor!;
-    try {
+    if (_harmony) {
+      try {
+        await maker.revoke(link);
+      } catch (_) {
+        _error = appL10n.remoteHostedStopFailed;
+        _notify();
+        return;
+      }
+      _error = null;
+    } else {
       await maker.revoke(link);
-    } catch (_) {
-      _error = appL10n.remoteHostedStopFailed;
-      _notify();
-      return;
     }
-    _error = null;
     _link = null;
     _linkFor = null;
     _stopped = (link: link, key: key);
@@ -708,17 +716,22 @@ class SharePanelModel extends ChangeNotifier {
     final maker = linkMaker;
     final stopped = _stopped;
     if (maker == null || stopped == null) return;
-    try {
+    if (_harmony) {
+      try {
+        await maker.restore(stopped.link);
+        _error = null;
+      } on ConversationLinkRestoreUnsaved {
+        _error = appL10n.remoteHostedUndoUnsaved;
+      } catch (_) {
+        _error = appL10n.remoteHostedUndoFailed;
+        _notify();
+        return;
+      }
+      _stopTimer?.cancel();
+    } else {
+      _stopTimer?.cancel();
       await maker.restore(stopped.link);
-      _error = null;
-    } on ConversationLinkRestoreUnsaved {
-      _error = appL10n.remoteHostedUndoUnsaved;
-    } catch (_) {
-      _error = appL10n.remoteHostedUndoFailed;
-      _notify();
-      return;
     }
-    _stopTimer?.cancel();
     _stopped = null;
     _link = stopped.link;
     _linkFor = stopped.key;
@@ -773,8 +786,7 @@ class SharePanelModel extends ChangeNotifier {
         final out = _ref.read(conversationOutProvider);
         final built = await prepare();
         final content = built.of(_format).text;
-        final file = await out.write(ConversationOut.fileName(built.share.title, _format), content);
-        await out.save(file, _format);
+        await out.save(ConversationOut.fileName(built.share.title, _format), content, _format);
       }
       _shared();
       HapticFeedback.lightImpact();

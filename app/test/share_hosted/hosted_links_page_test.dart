@@ -3,6 +3,7 @@
 // `flutter test --update-goldens test/share_hosted/hosted_links_page_test.dart`.
 
 import 'package:dsh_app/share_hosted/hosted_client.dart';
+import 'package:dsh_app/state/android_features.dart';
 import 'package:dsh_app/share_hosted/hosted_crypto.dart';
 import 'package:dsh_app/share_hosted/hosted_link.dart';
 import 'package:dsh_app/share_hosted/hosted_links_state.dart';
@@ -80,7 +81,10 @@ void main() {
       await tester.pumpWidget(
         testApp(
           english ? inEnglish(const HostedLinksPage()) : const HostedLinksPage(),
-          overrides: [hostedLinkStoreProvider.overrideWithValue(SecureHostedLinkStore(storage))],
+          overrides: [
+            operatingSystemProvider.overrideWithValue('ohos'),
+            hostedLinkStoreProvider.overrideWithValue(SecureHostedLinkStore(storage)),
+          ],
         ),
       );
       await pumpFrames(tester, 6);
@@ -103,7 +107,10 @@ void main() {
     usePhoneView(tester);
     final storage = FaultStorage([_links.first])..readError = PlatformException(code: 'locked');
     final container = ProviderContainer(
-      overrides: [hostedLinkStoreProvider.overrideWithValue(SecureHostedLinkStore(storage))],
+      overrides: [
+            operatingSystemProvider.overrideWithValue('ohos'),
+            hostedLinkStoreProvider.overrideWithValue(SecureHostedLinkStore(storage)),
+          ],
     );
     addTearDown(container.dispose);
     final links = container.read(hostedLinksProvider.notifier);
@@ -139,6 +146,7 @@ void main() {
       testApp(
         const HostedLinksPage(),
         overrides: [
+          operatingSystemProvider.overrideWithValue('ohos'),
           hostedLinkStoreProvider.overrideWithValue(SecureHostedLinkStore(storage)),
           hostedShareClientProvider.overrideWithValue(
             HostedShareClient(client: host.client, origin: 'https://go.example'),

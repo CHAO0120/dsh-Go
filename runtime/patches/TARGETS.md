@@ -2,7 +2,7 @@
 
 ## 目的与边界
 
-Android 构建只应用 `targetSets.android` 里的公共补丁，现在是 15 个，补丁结果和 main 逐字节相同。OHOS 专用修改只在 `--target ohos` 中应用；平台判断为 false 并不等于 JavaScript 文件字节没有变化，因此不能把所有 diff 一起打进 Android 再依赖运行时判断。
+Android 构建只应用 `targetSets.android` 里的公共补丁，现在是 main-df4c9b2 的 57 个，公共 diff 和各版本 pin 对象保持 main 原字节与数值。OHOS 的 78 项先应用这 57 个公共补丁，再应用 21 个 OHOS 专用补丁；平台判断为 false 并不等于 JavaScript 文件字节没有变化，因此不能把所有 diff 一起打进 Android 再依赖运行时判断。
 
 本次恢复的是 **DSH npm 前缀树的文件字节**。构建工具自身、构建报告、时间戳或压缩器可能改变完整 runtime / APK 的字节；本包没有执行 Android APK、arm64 原生 runtime 或 HAP 构建，也不宣称这些整体产物与旧版完全相同。
 
@@ -21,7 +21,7 @@ Android 构建只应用 `targetSets.android` 里的公共补丁，现在是 15 �
 }
 ```
 
-上述 JSON 仅表示结构，不是实际配置。文件中的两组实际名字才是权威集合；补丁仍按文件名排序形成严格链。目标不是从文件名中是否包含 `ohos` 推断的。两个集合的并集必须等于目录中全部 `.diff`：新增未登记文件、声明了不存在的文件、集合中的重复项、缺少目标集合，均在改写前失败。`--record` 也不能自动把未知补丁归入 Android。
+上述 JSON 仅表示结构，不是实际配置。文件中的两组实际名字才是权威集合。Android 继续按文件名排序，与 main 一致；OHOS 严格按数组声明顺序应用：先完整的 main 链，再添加 OH 覆盖。这样，后续 main 补丁即使按文件名排在旧 OH 补丁之后，也不会被旧 OH 中间状态改变输入摘要；不需要改名或修改公共补丁。OH 覆盖仍按其原有相对顺序排列，其 rc.4 pin 必须从新的公共最终状态重新计算。目标不是从文件名中是否包含 `ohos` 推断的。两个集合的并集必须等于目录中全部 `.diff`：新增未登记文件、声明了不存在的文件、集合中的重复项、缺少目标集合，均在改写前失败。`--record` 也不能自动把未知补丁归入 Android。
 
 `--target` 必须显式指定为 `android` 或 `ohos`，没有默认值（M5-1）。遗漏目标、缺少目标值或填写其他值时，参数解析直接以 exit 2 结束，尚未读取 pins 或修改前缀、pins、输出报告；`--record` 也必须指定目标。正式 `build-runtime.sh` 已显式传 `--target android`，OHOS 的 `measure.sh` 已显式传 `--target ohos`，新增构建/测试脚本必须同样声明目标。历史对照工具运行的是 `afb5cdd` 的旧 patcher 时，保留旧版不支持 `--target` 的调用；这不构成当前 patcher 的默认值。
 
@@ -29,7 +29,7 @@ schema 1 不再用于新的补丁应用或记录。迁移前先为每个现有 d
 
 ## Android 集合是 OHOS 集合的子集
 
-`zzzzzzz-input-recovery.diff` 和 `zzzzzzzz-model-defaults.diff` 曾经不在 `targetSets.ohos`。前者和 `zzzzzzzzzzzzz-ohos-lifecycle.diff` 都改 `dsh-agent-loop`，后者的 before pin 接在前者之后。现在两个都在：lifecycle 的 agent-loop 前后 pin 按这条链重算，共享 diff 本身没变，Android 的 15 项和它们的 pin 也没变。
+`zzzzzzz-input-recovery.diff` 和 `zzzzzzzz-model-defaults.diff` 曾经不在 `targetSets.ohos`。前者和 `zzzzzzzzzzzzz-ohos-lifecycle.diff` 都改 `dsh-agent-loop`，后者的 before pin 接在前者之后。现在两个都在。此次合 main 后，Android 的完整 57 项作为 OH 的公共前缀；包括 lifecycle 在内的 OH rc.4 前后 pin 按新链重算，共享 diff 与 main pin 对象不改。
 
 `runtime/tests/input-recovery.test.mjs` 从 agent-loop 里摘几个 region 来跑。鸿蒙的 agent 在领取输入前会调用 region 之外的 `ohosLifecycle()`，所以它要把这个函数一起摘进去，否则是 ReferenceError，而不是输入丢了。
 
@@ -54,7 +54,7 @@ M4-7 将公共 fs diff 恢复到 `afb5cdd` 的精确内容，恢复两版 pins�
 
 patcher 先选本目标集合，再构造本目标的 before/after 链。它在写入前核实所有选中 diff 的文件列表、版本 pins 和输入状态，且只接受该链明确列出的原始、中间或最终摘要。较长链的已知中间状态也可继续；这允许先有完整公共链，再添加 OHOS 专用补丁。
 
-Android 不接受 OHOS 最终摘要。对被排除的 OHOS diff，如果它触及 Android 集合没有修改的文件，patcher 还核对其原始 before 摘要，防止把已有 OHOS 修改的目录当作 Android 输出而静默保留。错误目标必须换一个干净前缀；工具不自动反向移除某个平台的补丁。
+Android 不接受 OHOS 最终摘要。对被排除的 OHOS diff，如果它触及 Android 集合没有修改的文件，patcher 按 OH 的实际声明顺序取得第一个 before 摘要并核对原始文件，防止把已有 OHOS 修改的目录当作 Android 输出而静默保留。错误目标必须换一个干净前缀；工具不自动反向移除某个平台的补丁。
 
 原 `--out` 仍输出补丁名 JSON 数组，以兼容 runtime manifest。新的 `--target-report` 记录目标、选中/排除集合，以及只由选中 patch 字节、该版本 pins 和对应 companion 形成的 `inputSha256`。Android 构建 recipe 使用这个字段代替对整个 patches 目录取摘要；单独修改未选 OHOS 补丁不会改变这一段 Android 输入指纹。构建脚本和 patcher 自身仍保留原有的 recipe 哈希，不能因此推断整个旧 runtime 归档相同。
 

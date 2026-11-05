@@ -40,14 +40,19 @@ class HostedConversationLinkMaker implements ConversationLinkMaker {
   /// undo window (as a delete there).
   @override
   Future<void> revoke(ConversationLink link) async {
-    if (link.id == null || !await _links.remove(link.id!)) throw const HostedStorageException();
+    if (link.id == null) {
+      if (_links.isHarmonyOS) throw const HostedStorageException();
+      return;
+    }
+    final saved = await _links.remove(link.id!);
+    if (_links.isHarmonyOS && !saved) throw const HostedStorageException();
   }
 
   @override
   Future<void> restore(ConversationLink link) async {
     final result = link.id == null ? HostedUndoResult.unavailable : await _links.undo(link.id!);
-    if (result == HostedUndoResult.sessionOnly) throw const ConversationLinkRestoreUnsaved();
-    if (result == HostedUndoResult.unavailable) throw const HostedStorageException();
+    if (_links.isHarmonyOS && result == HostedUndoResult.sessionOnly) throw const ConversationLinkRestoreUnsaved();
+    if (_links.isHarmonyOS && result == HostedUndoResult.unavailable) throw const HostedStorageException();
   }
 
   @override

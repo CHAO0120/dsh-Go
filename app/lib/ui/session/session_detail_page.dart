@@ -46,8 +46,8 @@ import '../shell/page_frame.dart';
 import '../terminal/terminal_page.dart';
 import '../theme/app_icons.dart';
 import '../theme/theme.dart';
+import 'conversation_panes.dart';
 import 'session_tab.dart';
-import 'workspace_files.dart';
 
 export 'session_tab.dart';
 
@@ -63,6 +63,10 @@ enum SessionDetailMode {
   /// The two-height bottom sheet (medium windows).
   sheet,
 }
+
+/// Whether [items] show this conversation having sent out a subagent.
+bool dispatchedSubagents(Iterable<ChatItem> items) =>
+    items.whereType<ToolChatItem>().any((t) => toolKindOf(t) == ToolKind.agent);
 
 /// The whole conversation's details (a detail page): the head carries the
 /// title and a few figures, with a row of capsule tabs under it, swiped
@@ -131,9 +135,7 @@ class _SessionDetailPageState extends ConsumerState<SessionDetailPage> with Tick
   void initState() {
     super.initState();
     final items = ref.read(chatProvider(widget.sessionId)).items;
-    final delegated =
-        items.whereType<ToolChatItem>().any((t) => toolKindOf(t) == ToolKind.agent) ||
-        ref.read(subagentLineageProvider(widget.sessionId)).isNotEmpty;
+    final delegated = dispatchedSubagents(items) || ref.read(subagentLineageProvider(widget.sessionId)).isNotEmpty;
     final SessionTab initial =
         widget.initialTab ??
         (_mode == SessionDetailMode.page ? SessionTab.trajectory : ref.read(sessionDetailTabProvider));
@@ -348,7 +350,7 @@ class _SessionDetailPageState extends ConsumerState<SessionDetailPage> with Tick
               key: _heroKey,
               child: Padding(
                 padding: EdgeInsets.symmetric(horizontal: column),
-                child: _SessionHero(
+                child: SessionHero(
                   sessionId: id,
                   // The panel and the sheet are named in their bar; the hero
                   // keeps the figures.
@@ -400,16 +402,7 @@ class _SessionDetailPageState extends ConsumerState<SessionDetailPage> with Tick
           child: TabBarView(
             controller: _controller,
             children: [
-              for (final tab in _tabs)
-                switch (tab) {
-                  SessionTab.trajectory => TrajectoryTab(sessionId: id),
-                  SessionTab.changes => ChangesTab(sessionId: id),
-                  SessionTab.files => WorkspaceFilesTab(sessionId: id),
-                  SessionTab.progress => ProgressTab(sessionId: id),
-                  SessionTab.context => ContextTab(sessionId: id),
-                  SessionTab.subagents => SubagentsTab(sessionId: id),
-                  SessionTab.plugins => SessionPluginsTab(sessionId: id),
-                },
+              for (final tab in _tabs) ConversationPane.ofTab(tab).build(id),
             ],
           ),
         ),
@@ -506,8 +499,8 @@ class _FadeTop extends StatelessWidget {
 /// The page head: the conversation's title (two lines at most), how many
 /// rounds and whether one runs, then 用时 / 步骤 / 改动文件. Without a [title]
 /// (the panel and the sheet, named in their bar) the rounds line leads.
-class _SessionHero extends ConsumerWidget {
-  const _SessionHero({required this.sessionId, required this.title, this.gutter = 24});
+class SessionHero extends ConsumerWidget {
+  const SessionHero({super.key, required this.sessionId, required this.title, this.gutter = 24});
 
   final String sessionId;
   final String? title;

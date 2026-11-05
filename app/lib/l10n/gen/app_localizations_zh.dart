@@ -8616,6 +8616,12 @@ class L10nZh extends L10n {
   String get performanceSystemMotion => '同时遵循系统的移除动画设置';
 
   @override
+  String get performanceFluid => '灵动动效';
+
+  @override
+  String get performanceFluidHint => '弹性回弹、按压光晕、卡片展开成页面。几乎不增加耗电';
+
+  @override
   String get performanceFollowMode => '效果跟随性能模式';
 
   @override
@@ -13865,6 +13871,9 @@ class L10nZh extends L10n {
   String get searchNeedsEngineField => '当前主机提供时可用';
 
   @override
+  String get searchNeedsAnimations => '开启动画时可用';
+
+  @override
   String get searchNeedsChat => '打开对话时可用';
 
   @override
@@ -14037,6 +14046,9 @@ class L10nZh extends L10n {
 
   @override
   String get searchKwAnimations => '动画,动效,减少动画';
+
+  @override
+  String get searchKwFluidMotion => '灵动,弹性,回弹,光晕,丝滑';
 
   @override
   String get searchKwNotifyEnabled => '通知开关,关闭通知';
@@ -15155,6 +15167,24 @@ class L10nZh extends L10n {
   String shellChatsArchivedPartial(int count, int failed) {
     return '已归档 $count 个对话，$failed 个没能归档';
   }
+
+  @override
+  String get shellPanelOverview => '信息';
+
+  @override
+  String get shellPanelWorkspace => '工作区';
+
+  @override
+  String get shellPanelModel => '模型';
+
+  @override
+  String get shellPanelHost => '主机';
+
+  @override
+  String get shellPanelOpenFull => '打开完整页面';
+
+  @override
+  String get shellPanelNoPlugins => '这段对话还没有插件面板';
 
   @override
   String get shellQuickPanel => '快捷入口';

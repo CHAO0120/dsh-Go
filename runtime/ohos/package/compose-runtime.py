@@ -335,8 +335,8 @@ def deletion_variants(repo: Path, prefix: Path, output: Path):
     rows = [
         ('runtime/session-deletion/core.mjs',
          'node_modules/@deepseek-ai/dsh-session-persistence-jsonl/lib/dsh-go-deletion.mjs', 'core.mjs',
-         '0513530a6589c9fc3f64d865ad5750a7d53632861eac6fafd67c8d186279e937',
-         '0ebc2fcfc1b1390dffc66ad7a8d079d90edf5e5ee05cec4e4cadd9ac6d7a0952'),
+         '85d4678533627422d4c00cd7a92b6e5c1a97172a40b3b432338e0ffa579bcfe8',
+         'f5abbfbc616f6e002c4dfa33bbfbef321f614c56ab61f09041218988e9ccea91'),
         ('runtime/bridge/dsh-go-bridge/lib/session-deletion.js',
          'runtime/bridge/dsh-go-bridge/lib/session-deletion.js', 'session-deletion.js',
          '89a6161ff3ad6370ea7f31b74e8a3e165d2365f745a3ae8134309eea6f18381f',

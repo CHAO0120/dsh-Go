@@ -174,7 +174,8 @@ class ThemeModePicker extends ConsumerWidget {
                 selected: mode == m,
                 light: m == ThemeMode.dark ? null : light,
                 dark: m == ThemeMode.light ? null : dark,
-                onTap: () => unawaited(ref.read(settingsProvider.notifier).setThemeMode(m)),
+                onTap: () =>
+                    unawaited(ThemeRevealHost.run(context, () => ref.read(settingsProvider.notifier).setThemeMode(m))),
               ),
             ),
           ],

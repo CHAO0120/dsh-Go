@@ -320,6 +320,59 @@ class PatchDsh(unittest.TestCase):
                 self.assertEqual(result.returncode, 0, result.stdout)
                 self.assertEqual(read(self.target), final)
 
+    def test_ohos_declared_overlay_follows_android_even_if_name_sorts_first(self):
+        _, android, _, final = self.target_fixture()
+        os.rename(os.path.join(self.patches, "zzz-feature.diff"),
+                  os.path.join(self.patches, "aa-feature.diff"))
+        pins = load(os.path.join(self.patches, "pins.json"))
+        pins["patches"]["aa-feature.diff"] = pins["patches"].pop("zzz-feature.diff")
+        pins["targetSets"]["ohos"][-1] = "aa-feature.diff"
+        self.write_pins(pins)
+        for initial in (ORIGINAL, android, final):
+            with self.subTest(initial=sha(initial)):
+                with open(self.target, "w") as out:
+                    out.write(initial)
+                result = self.run_cli("--dsh-version", "1.0.0", "--target", "ohos")
+                self.assertEqual(result.returncode, 0, result.stdout)
+                self.assertEqual(read(self.target), final)
+
+    def test_android_retains_filename_order_if_declaration_is_reversed(self):
+        _, final = self.chain_fixture()
+        pins = load(os.path.join(self.patches, "pins.json"))
+        pins["targetSets"]["android"].reverse()
+        self.write_pins(pins)
+        result = self.run_cli("--dsh-version", "1.0.0", "--target", "android")
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertEqual(read(self.target), final)
+
+    def test_android_checks_excluded_original_in_ohos_application_order(self):
+        _, android, rel, intermediate = self.target_fixture(same_file=False)
+        final = intermediate + "later feature\n"
+        name = "aa-later-feature.diff"
+        import difflib
+        with open(os.path.join(self.patches, name), "w") as out:
+            out.write("".join(difflib.unified_diff(intermediate.splitlines(True), final.splitlines(True),
+                                                  fromfile="a/" + rel, tofile="b/" + rel)))
+        pins = load(os.path.join(self.patches, "pins.json"))
+        pins["targetSets"]["ohos"].append(name)
+        pins["patches"][name] = {"1.0.0": {rel: {"before": sha(intermediate), "after": sha(final)}}}
+        self.write_pins(pins)
+        result = self.run_cli("--dsh-version", "1.0.0", "--target", "android")
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertEqual(read(self.target), android)
+        self.assertEqual(read(os.path.join(self.prefix, rel)), "feature off\n")
+        for polluted in (intermediate, final):
+            with self.subTest(polluted=sha(polluted)):
+                with open(self.target, "w") as out:
+                    out.write(ORIGINAL)
+                with open(os.path.join(self.prefix, rel), "w") as out:
+                    out.write(polluted)
+                before = self.fixture_state()
+                result = self.run_cli("--dsh-version", "1.0.0", "--target", "android")
+                self.assertNotEqual(result.returncode, 0, result.stdout)
+                self.assertIn("excludes changes", result.stdout)
+                self.assertEqual(self.fixture_state(), before)
+
     def test_android_refuses_ohos_final_state_on_shared_file(self):
         _, _, _, final = self.target_fixture()
         with open(self.target, "w") as out:
