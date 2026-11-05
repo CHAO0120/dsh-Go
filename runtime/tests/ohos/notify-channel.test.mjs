@@ -147,12 +147,13 @@ function fixture(t, { directory, hooks = {}, launchWant = {} } = {}) {
   };
 }
 
-test('exact channels, unknown methods and explicit live boundary', async t => {
+test('exact channels, unknown methods and truthful ordinary live capability', async t => {
   const f = fixture(t);
   assert.deepEqual(f.channels.map(x => x.name), ['dsh/notify', 'dsh/notify/taps', 'dsh/notify/actions']);
   assert.deepEqual(await f.call('unknown'), { missing: true });
-  assert.deepEqual((await f.call('liveStatus')).value, { supported: false, allowed: false, settings: true, xiaomiFocus: false });
-  assert.equal((await f.call('live', { enabled: true, activity: {} })).error, 'ohos_unsupported');
+  assert.deepEqual((await f.call('liveStatus')).value, { supported: false, allowed: false, settings: true, xiaomiFocus: false,
+    ordinaryFallback: true, ordinaryAllowed: true, backend: 'ordinary' });
+  assert.equal((await f.call('live', { enabled: true, activity: {} })).error, 'bad_args');
   assert.deepEqual(await f.call('live', { enabled: false, activity: {} }), { value: null });
   assert.deepEqual(await f.call('live', { enabled: true }), { value: null });
   assert.deepEqual(await f.call('actionResult'), { value: null });

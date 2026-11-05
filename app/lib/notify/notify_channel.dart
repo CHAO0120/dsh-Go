@@ -240,6 +240,9 @@ class LiveSystemStatus {
     this.allowed = false,
     this.settings = false,
     this.xiaomiFocus = false,
+    this.ordinaryFallback = false,
+    this.ordinaryAllowed = false,
+    this.backend = 'none',
   });
 
   const LiveSystemStatus.unavailable() : this(native: false);
@@ -249,6 +252,9 @@ class LiveSystemStatus {
     allowed: m['allowed'] == true,
     settings: m['settings'] == true,
     xiaomiFocus: m['xiaomiFocus'] == true,
+    ordinaryFallback: m['ordinaryFallback'] == true,
+    ordinaryAllowed: m['ordinaryAllowed'] == true,
+    backend: m['backend'] == 'ordinary' ? 'ordinary' : 'none',
   );
 
   final bool native;
@@ -265,6 +271,16 @@ class LiveSystemStatus {
   /// HyperOS shows DSH Go's focus notifications.
   final bool xiaomiFocus;
 
+  /// The native implementation offers ordinary status notifications, not a
+  /// system live activity. This is a capability, not proof of display.
+  final bool ordinaryFallback;
+
+  /// Ordinary notifications are currently allowed for this app.
+  final bool ordinaryAllowed;
+
+  /// The fallback implementation: 'ordinary', or 'none' when unavailable.
+  final String backend;
+
   @override
   bool operator ==(Object other) =>
       other is LiveSystemStatus &&
@@ -272,10 +288,14 @@ class LiveSystemStatus {
       other.supported == supported &&
       other.allowed == allowed &&
       other.settings == settings &&
-      other.xiaomiFocus == xiaomiFocus;
+      other.xiaomiFocus == xiaomiFocus &&
+      other.ordinaryFallback == ordinaryFallback &&
+      other.ordinaryAllowed == ordinaryAllowed &&
+      other.backend == backend;
 
   @override
-  int get hashCode => Object.hash(native, supported, allowed, settings, xiaomiFocus);
+  int get hashCode =>
+      Object.hash(native, supported, allowed, settings, xiaomiFocus, ordinaryFallback, ordinaryAllowed, backend);
 }
 
 /// Notification group of one conversation on one host.
