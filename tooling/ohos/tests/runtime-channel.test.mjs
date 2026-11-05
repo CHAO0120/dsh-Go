@@ -1329,3 +1329,262 @@ test('failed initial subscription settles without recursive rejection and later 
  await c.controller.install(false);
  assert.equal(c.controller.snapshot().get('phase'),'installed');
 });
+
+// Observe the actual FS boundary; never replace the install algorithm.
+async function observeInstallFs(work, failSync) {
+  const original = { open: fileIo.open, close: fileIo.close, fsync: fileIo.fsync };
+  const descriptors = new Map();
+  const events = [];
+  fileIo.open = async (name, flags) => {
+    const file = await original.open(name, flags);
+    descriptors.set(file.fd, { path: name, directory: (flags & fileIo.OpenMode.DIR) !== 0 });
+    return file;
+  };
+  fileIo.close = async file => {
+    await original.close(file);
+    descriptors.delete(file.fd);
+  };
+  fileIo.fsync = async fd => {
+    const entry = descriptors.get(fd);
+    if (entry && failSync?.(entry)) throw new Error('injected directory fsync failure');
+    await original.fsync(fd);
+    if (entry) events.push({ ...entry });
+  };
+  try { return await work(events); }
+  finally { Object.assign(fileIo, original); }
+}
+
+test('install install batches payload directory commit after every file data sync', async () => {
+  const c = await makeCase('install-commit-order');
+  await observeInstallFs(async events => {
+    let start = 0;
+    await c.installer.install(c.manifest, e => {
+      if (e.step === 'extract' && e.done === 0) start = events.length;
+    });
+    const batch = events.slice(start);
+    const data = batch.map((e, i) => !e.directory && e.path.startsWith(c.dir + '/runtime/staging/') ? i : -1).filter(i => i >= 0);
+    const directories = batch.map((e, i) => e.directory && (e.path === c.installer.root || e.path.startsWith(c.installer.root + '/') || e.path === c.dir + '/runtime/staging') ? i : -1).filter(i => i >= 0);
+    assert.equal(data.length, c.manifest.files.length, 'every payload inode retains its data fsync');
+    assert(directories.length > 0, 'the batch must actually commit payload directories');
+    assert(directories[0] > data.at(-1), 'payload directory commit must follow all payload data syncs');
+    const names = directories.map(i => batch[i].path);
+    assert.equal(new Set(names).size, names.length, 'each payload directory has one commit sync');
+    assert(names.includes(c.dir + '/runtime/staging'), 'the rename source directory must be committed too');
+  });
+  assert.equal((await c.installer.installed()).runtimeVersion, 'v1');
+  for (const [name, text] of Object.entries(files)) assert.equal(await fs.readFile(c.installer.root + '/' + name, 'utf8'), text);
+});
+
+test('install directory commit failure keeps journal and a fresh installer safely retries matching files', async () => {
+  const c = await makeCase('install-flush-failure');
+  let configuring = false;
+  let failed = false;
+  await observeInstallFs(async () => {
+    await assert.rejects(c.installer.install(c.manifest, e => {
+      if (e.step === 'configure' && e.done === 0) configuring = true;
+    }), /injected directory fsync failure/);
+  }, e => {
+    if (configuring && !failed && e.directory && e.path === c.installer.root + '/runtime/ohos') {
+      failed = true; return true;
+    }
+    return false;
+  });
+  assert.equal(failed, true);
+  assert.equal(await c.installer.installed(), null);
+  await fs.access(c.dir + '/runtime/installing.json');
+  await assert.rejects(fs.access(c.dir + '/runtime/installed.json'));
+  const storage = new OhosRuntimeStorage(c.resources, c.dir);
+  const installer = new core.RuntimeInstaller(storage, c.dir + '/runtime');
+  const inflatedBefore = inflateActivity.initialized;
+  await observeInstallFs(async events => {
+    await installer.install(c.manifest, () => {});
+    assert(events.some(e => e.directory && e.path === installer.root + '/runtime/ohos'));
+    assert(events.some(e => e.directory && e.path === c.dir + '/runtime/staging'));
+  });
+  assert.equal(inflateActivity.initialized, inflatedBefore, 'existing SHA-matching data are reused');
+  assert.equal((await installer.installed()).runtimeVersion, 'v1');
+  assert.deepEqual(await fs.readdir(c.dir + '/runtime/staging'), []);
+});
+
+test('install retry syncs the surviving parent of obsolete files already deleted before interruption', async () => {
+  const c = await makeCase('install-obsolete-retry', { ...files, 'old/nested/obsolete.txt': 'owned' });
+  await c.installer.install(c.manifest, () => {});
+  await fs.writeFile(c.installer.root + '/old/foreign.txt', 'foreign');
+  const next = await makePack(path.join(c.dir, 'next.hap'), files, 'v2');
+  const first = new core.RuntimeInstaller(new OhosRuntimeStorage(next.resources, c.dir), c.dir + '/runtime');
+  await assert.rejects(first.install(next.manifest, e => {
+    if (e.step === 'verify') throw new Error('interrupt after removal');
+  }), /interrupt after removal/);
+  await assert.rejects(fs.access(c.installer.root + '/old/nested/obsolete.txt'));
+  assert.equal(await first.installed(), null);
+  const retry = new core.RuntimeInstaller(new OhosRuntimeStorage(next.resources, c.dir), c.dir + '/runtime');
+  await observeInstallFs(async events => {
+    await retry.install(next.manifest, () => {});
+    assert(events.some(e => e.directory && e.path === retry.root + '/old'), 'old journal parent remains in the commit set');
+  });
+  assert.equal(await fs.readFile(retry.root + '/old/foreign.txt', 'utf8'), 'foreign');
+  assert.equal((await retry.installed()).runtimeVersion, 'v2');
+});
+
+test('install metadata outside the payload retains immediate atomic durability', async () => {
+  const c = await makeCase('install-metadata');
+  await c.installer.install(c.manifest, () => {});
+  await observeInstallFs(async events => {
+    await c.storage.withInstallFiles(c.dir + '/runtime', c.manifest.files.map(f => f.path), async () => {
+      const before = events.length;
+      await c.storage.writeTextAtomic(c.dir + '/runtime/independent.json', '{"ok":true}');
+      const written = events.slice(before);
+      assert(written.some(e => !e.directory && e.path.endsWith('/independent.json.tmp')));
+      assert(written.some(e => e.directory && e.path === c.dir + '/runtime'));
+      assert.equal(await fs.readFile(c.dir + '/runtime/independent.json', 'utf8'), '{"ok":true}');
+    });
+  });
+});
+
+// A power cut keeps a file's bytes only once that file was fsynced, and a directory's
+// entries only once that directory was. Replay every point of a real install against
+// that rule and require the same two things of each: what the installer calls installed
+// is whole, and the next install finishes the job.
+async function powerCutPoints(root, work) {
+  const original = {};
+  for (const name of ['open', 'close', 'fsync', 'write', 'rename', 'unlink', 'mkdir', 'rmdir']) original[name] = fileIo[name];
+  const list = async directory => {
+    const entries = new Map();
+    for (const entry of await fs.readdir(directory, { withFileTypes: true })) {
+      const stat = await fs.lstat(path.join(directory, entry.name));
+      entries.set(entry.name, { directory: entry.isDirectory(), ino: stat.ino });
+    }
+    return entries;
+  };
+  const walk = async (root, dirs = new Map(), data = new Map()) => {
+    const entries = await list(root);
+    dirs.set(root, entries);
+    for (const [name, entry] of entries) {
+      if (entry.directory) await walk(path.join(root, name), dirs, data);
+      else data.set(entry.ino, await fs.readFile(path.join(root, name)));
+    }
+    return { dirs, data };
+  };
+  const durable = await walk(root);
+  const points = [];
+  const descriptors = new Map();
+  const mark = async () => {
+    const live = await walk(root);
+    points.push({ durableDirs: new Map(durable.dirs), durableData: new Map(durable.data), liveDirs: live.dirs, liveData: live.data });
+  };
+  fileIo.open = async (name, flags) => {
+    const file = await original.open(name, flags);
+    descriptors.set(file.fd, { name, directory: (flags & fileIo.OpenMode.DIR) !== 0 });
+    if ((flags & fileIo.OpenMode.CREATE) !== 0) await mark();
+    return file;
+  };
+  fileIo.close = async file => { await original.close(file); descriptors.delete(file.fd); };
+  fileIo.fsync = async fd => {
+    await original.fsync(fd);
+    const entry = descriptors.get(fd);
+    if (entry.directory) durable.dirs.set(entry.name, await list(entry.name));
+    else durable.data.set((await fs.lstat(entry.name)).ino, await fs.readFile(entry.name));
+    await mark();
+  };
+  for (const name of ['write', 'rename', 'unlink', 'mkdir', 'rmdir']) {
+    fileIo[name] = async (...args) => { const result = await original[name](...args); await mark(); return result; };
+  }
+  try { await work(); }
+  finally { Object.assign(fileIo, original); }
+  return points;
+}
+
+async function materialize(point, root, skip, out, mode, random) {
+  const build = async (from, to) => {
+    await fs.mkdir(to, { recursive: true });
+    const live = point.liveDirs.get(from) ?? new Map(), kept = point.durableDirs.get(from) ?? new Map();
+    const entries = mode === 'process' || (mode === 'mixed' && random() < 0.5) ? live : kept;
+    for (const [name, entry] of entries) {
+      if (from === root && name === skip) continue;
+      if (entry.directory) await build(path.join(from, name), path.join(to, name));
+      else await fs.writeFile(path.join(to, name), (mode === 'process' ? point.liveData : point.durableData).get(entry.ino) ?? Buffer.alloc(0));
+    }
+  };
+  await build(root, out);
+}
+
+async function whole(installer, payload, version) {
+  const manifest = await installer.installed();
+  if (manifest === null) return null;
+  assert.equal(manifest.runtimeVersion, version);
+  assert.deepEqual(manifest.files.map(file => file.path).sort(), Object.keys(payload).sort());
+  for (const [name, text] of Object.entries(payload)) assert.equal(await fs.readFile(installer.root + '/' + name, 'utf8'), text);
+  return manifest;
+}
+
+function seeded(seed) {
+  let state = seed >>> 0;
+  return () => { state = (Math.imul(state, 1664525) + 1013904223) >>> 0; return state / 4294967296; };
+}
+
+function dropPack(point, root) {
+  const without = dirs => {
+    const copy = new Map(dirs);
+    const entries = new Map(copy.get(root));
+    entries.delete('next.hap');
+    copy.set(root, entries);
+    return copy;
+  };
+  return { ...point, durableDirs: without(point.durableDirs), liveDirs: without(point.liveDirs) };
+}
+
+async function replayPowerCuts(label, c, points, resources, manifest, payload, version, older) {
+  const random = seeded(points.length);
+  let readyAt = 0, unready = 0;
+  for (const [index, point] of points.entries()) {
+    for (const mode of ['power', 'process', 'mixed']) {
+      const out = path.join(temp, `${label}-${index}-${mode}`);
+      await materialize(point, c.dir, 'payload.hap', out, mode, random);
+      const storage = new OhosRuntimeStorage(resources, out);
+      const installer = new core.RuntimeInstaller(storage, out + '/runtime');
+      const at = `${label} point ${index} (${mode})`;
+      let found = null;
+      try {
+        // Before the new journal is durable the previous install is still the good one.
+        const current = await installer.installed();
+        if (current !== null && older !== undefined && current.runtimeVersion === older.version) {
+          await whole(installer, older.payload, older.version);
+        } else {
+          found = await whole(installer, payload, version);
+        }
+      } catch (error) { error.message = `${at}: ${error.message}`; throw error; }
+      if (found === null) unready++; else readyAt = Math.max(readyAt, index);
+      try {
+        await new core.RuntimeInstaller(new OhosRuntimeStorage(resources, out), out + '/runtime').install(manifest, () => {});
+        assert.notEqual(await whole(installer, payload, version), null);
+      } catch (error) { error.message = `${at}, retry: ${error.message}`; throw error; }
+      await fs.rm(out, { recursive: true, force: true });
+    }
+  }
+  return { readyAt, unready, points: points.length };
+}
+
+test('a power cut at any point of a first install never reads as installed unless it is whole', async () => {
+  const c = await makeCase('install-power-cut');
+  const points = await powerCutPoints(c.dir, () => c.installer.install(c.manifest, () => {}));
+  const seen = await replayPowerCuts('first', c, points, c.resources, c.manifest, files, 'v1');
+  assert(seen.points > 40, `saw only ${seen.points} points`);
+  assert(seen.unready > 0, 'an interrupted install must read as not installed');
+  assert.equal(seen.readyAt, points.length - 1, 'the finished install reads as installed');
+});
+
+test('a power cut at any point of an update keeps the old install or a whole new one', async () => {
+  const c = await makeCase('install-power-cut-update', { ...files, 'old/nested/obsolete.txt': 'owned' });
+  const older = { payload: { ...files, 'old/nested/obsolete.txt': 'owned' }, version: 'v1' };
+  await c.installer.install(c.manifest, () => {});
+  const changed = { ...files, 'runtime/ohos/preload.mjs': 'changed preload' };
+  const next = await makePack(path.join(c.dir, 'next.hap'), changed, 'v2');
+  const storage = new OhosRuntimeStorage(next.resources, c.dir);
+  const installer = new core.RuntimeInstaller(storage, c.dir + '/runtime');
+  await fs.rm(path.join(c.dir, 'payload.hap'));
+  const points = await powerCutPoints(c.dir, () => installer.install(next.manifest, () => {}));
+  const seen = await replayPowerCuts('update', c, points.map(point => dropPack(point, c.dir)), next.resources, next.manifest, changed, 'v2', older);
+  assert(seen.points > 20, `saw only ${seen.points} points`);
+  assert(seen.unready > 0, 'an interrupted update must read as not the new install');
+  assert.equal(seen.readyAt, points.length - 1, 'the finished update reads as installed');
+});

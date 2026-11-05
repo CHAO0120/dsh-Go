@@ -28,7 +28,14 @@ export const fileIo = {
   OpenMode: { CREATE: fs.constants.O_CREAT, READ_WRITE: fs.constants.O_RDWR, TRUNC: fs.constants.O_TRUNC,
     NOFOLLOW: fs.constants.O_NOFOLLOW, READ_ONLY: fs.constants.O_RDONLY, DIR: fs.constants.O_DIRECTORY },
   async access(name) { try { await fsp.access(name); return true; } catch (e) { if (['ENOENT','ENOTDIR'].includes(e.code)) return false; throw e; } },
-  lstat: fsp.lstat, rename: fsp.rename, unlink: fsp.unlink,
+  async lstat(name) {
+    try { return await fsp.lstat(name); } catch (error) {
+      if (error.code === 'ENOENT') error.code = 13900002;
+      if (error.code === 'ENOTDIR') error.code = 13900018;
+      throw error;
+    }
+  },
+  rename: fsp.rename, unlink: fsp.unlink,
   async mkdir(name) { try { await fsp.mkdir(name); } catch (e) { if (e.code === 'EEXIST') e.code = 13900015; throw e; } },
   readText: name => fsp.readFile(name, 'utf8'),
   async open(name, flags) { const handle = await fsp.open(name, flags, 0o600); observation.fd.add(handle.fd); return { fd: handle.fd, handle }; },

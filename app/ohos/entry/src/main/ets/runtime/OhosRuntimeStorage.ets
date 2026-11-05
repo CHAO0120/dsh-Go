@@ -4,7 +4,7 @@ import fileHash from '@ohos.file.hash';
 import resourceManager from '@ohos.resourceManager';
 import util from '@ohos.util';
 import { BusinessError } from '@ohos.base';
-import { RuntimeChannelError, RuntimeFile, RuntimeManifest, RuntimeStorage } from './RuntimeCore';
+import { RuntimeChannelError, RuntimeFile, RuntimeManifest, RuntimeStorage, validPayloadPath } from './RuntimeCore';
 import { OhosRuntimeArchive } from './OhosRuntimeArchive';
 
 export class OhosRuntimeStorage implements RuntimeStorage {
@@ -13,6 +13,8 @@ export class OhosRuntimeStorage implements RuntimeStorage {
   private static closes: Promise<void> = Promise.resolve();
   private filesDir: string;
   private archive: OhosRuntimeArchive;
+  private installBase: string | null = null;
+  private installDirectories: Set<string> | null = null;
 
   constructor(resources: resourceManager.ResourceManager, filesDir: string) {
     this.filesDir = filesDir;
@@ -25,6 +27,82 @@ export class OhosRuntimeStorage implements RuntimeStorage {
 
   withBundledRuntime(work: () => Promise<void>): Promise<void> {
     return this.archive.withBundledRuntime(work);
+  }
+
+
+  async withInstallFiles(base: string, ownedPaths: string[], work: () => Promise<void>): Promise<void> {
+    if (this.installBase !== null) throw new RuntimeChannelError('install_busy', '运行时正在安装。');
+    const relative = base.substring(this.filesDir.length + 1);
+    if (!base.startsWith(this.filesDir + '/') || relative.split('/').some((part: string) =>
+        part === '' || part === '.' || part === '..') || !ownedPaths.every((path: string) => validPayloadPath(path))) {
+      throw new RuntimeChannelError('ohos_path_outside', '运行时安装目录或归属路径无效。');
+    }
+    await this.checkParents(base + '/tree');
+    // Include the validated journal's OLD paths as well as the current manifest.
+    // A previous interrupted batch may be reused by SHA or may already have
+    // removed an obsolete directory; its surviving ancestors still need sync.
+    const directories = new Set<string>([base, base + '/tree', base + '/staging']);
+    for (const path of ownedPaths) {
+      let parent = base + '/tree';
+      for (const part of path.split('/').slice(0, -1)) {
+        parent += '/' + part;
+        directories.add(parent);
+      }
+    }
+    this.installBase = base;
+    this.installDirectories = directories;
+    try {
+      await work();
+      await this.flushInstallDirectories(base, directories);
+    } finally {
+      this.installDirectories = null;
+      this.installBase = null;
+    }
+  }
+
+  private async flushInstallDirectories(base: string, directories: Set<string>): Promise<void> {
+    const live: string[] = [];
+    const absent = new Set<string>();
+    // Inspect top-down so a legitimate old directory replaced by a file does
+    // not turn descendant lstat into ENOTDIR. Only actual ENOENT is ignored.
+    for (const directory of Array.from(directories).sort((a: string, b: string) => a.length - b.length)) {
+      const parent = directory.substring(0, directory.lastIndexOf('/'));
+      if (absent.has(parent)) { absent.add(directory); continue; }
+      let stat: fs.Stat;
+      try {
+        stat = await fs.lstat(directory);
+      } catch (error) {
+        if ((error as BusinessError).code !== 13900002) throw error as Error;
+        if (directory === base || directory === base + '/tree' || directory === base + '/staging') throw error as Error;
+        absent.add(directory);
+        continue;
+      }
+      if (stat.isSymbolicLink()) throw new RuntimeChannelError('ohos_path_link', '运行时提交目录不能为符号链接。');
+      if (!stat.isDirectory()) {
+        if (!stat.isFile() || directory === base || directory === base + '/tree' || directory === base + '/staging') {
+          throw new RuntimeChannelError('ohos_path_link', '运行时提交路径不是目录。');
+        }
+        absent.add(directory);
+        continue;
+      }
+      live.push(directory);
+    }
+    // File data was already fsynced before each rename. Publish directory
+    // entries children-first, before installed.json or journal removal.
+    for (const directory of live.reverse()) {
+      await this.checkParents(directory + '/.entry');
+      await this.syncDirectory(directory);
+    }
+  }
+
+  private async statIfPresent(path: string): Promise<fs.Stat | null> {
+    try {
+      return await fs.lstat(path);
+    } catch (error) {
+      const code = (error as BusinessError).code;
+      if (code === 13900002 || code === 13900018) return null;
+      throw error as Error;
+    }
   }
 
   private static closeRetiredFiles(): Promise<void> {
@@ -85,7 +163,8 @@ export class OhosRuntimeStorage implements RuntimeStorage {
     let current = this.filesDir;
     for (const part of path.substring(this.filesDir.length + 1).split('/')) {
       current += '/' + part;
-      if (!await this.present(current)) {
+      let stat: fs.Stat | null = await this.statIfPresent(current);
+      if (stat === null) {
         try {
           await fs.mkdir(current);
         } catch (error) {
@@ -93,8 +172,8 @@ export class OhosRuntimeStorage implements RuntimeStorage {
           if ((error as BusinessError).code !== 13900015) throw error as Error;
         }
         await this.syncParent(current);
+        stat = await fs.lstat(current);
       }
-      const stat = await fs.lstat(current);
       if (!stat.isDirectory() || stat.isSymbolicLink()) {
         throw new RuntimeChannelError('ohos_path_link', '运行时目录含符号链接或非目录项。');
       }
@@ -140,9 +219,9 @@ export class OhosRuntimeStorage implements RuntimeStorage {
 
   async matches(path: string, file: RuntimeFile): Promise<boolean> {
     // Parents may not exist yet on the first install; they are created before writes.
-    if (!await this.present(path)) return false;
+    const stat = await this.statIfPresent(path);
+    if (stat === null) return false;
     await this.checkParents(path);
-    const stat = await fs.lstat(path);
     if (stat.isSymbolicLink()) throw new RuntimeChannelError('ohos_path_link', '运行时文件不能为符号链接。');
     if (!stat.isFile() || stat.size !== file.size) return false;
     return (await fileHash.hash(path, 'sha256')).toLowerCase() === file.sha256;
@@ -179,8 +258,8 @@ export class OhosRuntimeStorage implements RuntimeStorage {
   async rename(from: string, to: string): Promise<void> {
     await this.checkParents(from);
     await this.checkParents(to);
-    if (await this.present(to)) {
-      const stat = await fs.lstat(to);
+    const stat = await this.statIfPresent(to);
+    if (stat !== null) {
       if (stat.isSymbolicLink()) throw new RuntimeChannelError('ohos_path_link', '拒绝替换运行时符号链接。');
       if (stat.isDirectory()) {
         if ((await fs.listFile(to, {recursion: false, listNum: 1})).length !== 0) {
@@ -195,8 +274,20 @@ export class OhosRuntimeStorage implements RuntimeStorage {
   }
 
   private async syncParent(path: string): Promise<void> {
+    const directory = path.substring(0, path.lastIndexOf('/'));
+    const base = this.installBase;
+    if (base !== null && this.installDirectories !== null &&
+        (path === base + '/tree' || path.startsWith(base + '/tree/') ||
+         path === base + '/staging' || path.startsWith(base + '/staging/'))) {
+      this.installDirectories.add(directory);
+      return;
+    }
+    await this.syncDirectory(directory);
+  }
+
+  private async syncDirectory(directory: string): Promise<void> {
     await OhosRuntimeStorage.closeRetiredFiles();
-    const parent = await fs.open(path.substring(0, path.lastIndexOf('/')), fs.OpenMode.READ_ONLY | fs.OpenMode.DIR);
+    const parent = await fs.open(directory, fs.OpenMode.READ_ONLY | fs.OpenMode.DIR | fs.OpenMode.NOFOLLOW);
     try {
       await fs.fsync(parent.fd);
     } finally {
@@ -205,9 +296,9 @@ export class OhosRuntimeStorage implements RuntimeStorage {
   }
 
   async removeFile(path: string, keepDirectory: boolean = false): Promise<void> {
-    if (!await this.present(path)) return;
+    const stat = await this.statIfPresent(path);
+    if (stat === null) return;
     await this.checkParents(path);
-    const stat = await fs.lstat(path);
     if (keepDirectory && stat.isDirectory() && !stat.isSymbolicLink()) return;
     if (!stat.isFile() || stat.isSymbolicLink()) throw new RuntimeChannelError('ohos_path_link', '拒绝删除运行时清单以外的目录或链接。');
     await fs.unlink(path);
@@ -217,9 +308,9 @@ export class OhosRuntimeStorage implements RuntimeStorage {
   async removeEmptyParents(path: string, boundary: string): Promise<void> {
     let parent = path.substring(0, path.lastIndexOf('/'));
     while (parent.startsWith(boundary + '/')) {
-      if (await this.present(parent)) {
+      const stat = await this.statIfPresent(parent);
+      if (stat !== null) {
         await this.checkParents(parent);
-        const stat = await fs.lstat(parent);
         if (!stat.isDirectory() || stat.isSymbolicLink()) return;
         if ((await fs.listFile(parent, {recursion: false, listNum: 1})).length > 0) return;
         await fs.rmdir(parent);

@@ -22,7 +22,7 @@ export interface RuntimeManifest {
   files: RuntimeFile[];
 }
 
-function validPayloadPath(path: string): boolean {
+export function validPayloadPath(path: string): boolean {
   return typeof path === 'string' && path.length > 0 && !path.includes('\\') && !path.includes('\0') &&
     !path.split('/').some((part: string) => part === '' || part === '.' || part === '..') && !/(?:\.node|\.so(?:\.\d+)*)$/i.test(path);
 }
@@ -151,6 +151,7 @@ export class RuntimeLogs {
 }
 
 export interface RuntimeStorage {
+  withInstallFiles(base: string, ownedPaths: string[], work: () => Promise<void>): Promise<void>;
   exists(path: string): Promise<boolean>;
   readText(path: string): Promise<string>;
   writeTextAtomic(path: string, content: string): Promise<void>;
@@ -233,45 +234,47 @@ export class RuntimeInstaller {
         ownedPaths: Array.from(owned), stagingHashes: Array.from(staged)
       };
       await this.storage.writeTextAtomic(this.base + '/installing.json', JSON.stringify(journal));
-      const current = new Set<string>(manifest.files.map((file: RuntimeFile) => file.path));
-      const directories = new Set<string>();
-      for (const file of manifest.files) {
-        let parent = file.path;
-        while (parent.includes('/')) {
-          parent = parent.substring(0, parent.lastIndexOf('/'));
-          directories.add(parent);
+      await this.storage.withInstallFiles(this.base, Array.from(owned), async (): Promise<void> => {
+        const current = new Set<string>(manifest.files.map((file: RuntimeFile) => file.path));
+        const directories = new Set<string>();
+        for (const file of manifest.files) {
+          let parent = file.path;
+          while (parent.includes('/')) {
+            parent = parent.substring(0, parent.lastIndexOf('/'));
+            directories.add(parent);
+          }
         }
-      }
-      for (const path of Array.from(owned).sort((a: string, b: string) => b.length - a.length)) {
-        if (!current.has(path)) {
-          await this.storage.removeFile(this.root + '/' + path, directories.has(path));
-          await this.storage.removeEmptyParents(this.root + '/' + path, this.root);
+        for (const path of Array.from(owned).sort((a: string, b: string) => b.length - a.length)) {
+          if (!current.has(path)) {
+            await this.storage.removeFile(this.root + '/' + path, directories.has(path));
+            await this.storage.removeEmptyParents(this.root + '/' + path, this.root);
+          }
         }
-      }
-      const changed: RuntimeFile[] = [];
-      let checked = 0;
-      for (const file of manifest.files) {
-        if (!await this.storage.matches(this.root + '/' + file.path, file)) changed.push(file);
-        progress({step: 'verify', done: ++checked, total: manifest.files.length});
-      }
-      let total = 0;
-      for (const file of changed) total += file.size;
-      let done = 0;
-      progress({step: 'extract', done: done, total: total});
-      for (const file of changed) {
-        const target = this.root + '/' + file.path;
-        const staging = this.base + '/staging/' + file.sha256 + '.tmp';
-        await this.storage.ensureDirectory(target.substring(0, target.lastIndexOf('/')));
-        await this.storage.copyRawFile('dsh-runtime/files/' + file.path, staging, file);
-        if (!await this.storage.matches(staging, file)) {
-          throw new RuntimeChannelError('ohos_checksum_failed', '随包运行时文件校验失败，安装未提交。');
+        const changed: RuntimeFile[] = [];
+        let checked = 0;
+        for (const file of manifest.files) {
+          if (!await this.storage.matches(this.root + '/' + file.path, file)) changed.push(file);
+          progress({step: 'verify', done: ++checked, total: manifest.files.length});
         }
-        await this.storage.rename(staging, target);
-        done += file.size;
+        let total = 0;
+        for (const file of changed) total += file.size;
+        let done = 0;
         progress({step: 'extract', done: done, total: total});
-      }
-      progress({step: 'configure', done: 0, total: 1});
-      for (const hash of staged) await this.storage.removeFile(this.base + '/staging/' + hash + '.tmp');
+        for (const file of changed) {
+          const target = this.root + '/' + file.path;
+          const staging = this.base + '/staging/' + file.sha256 + '.tmp';
+          await this.storage.ensureDirectory(target.substring(0, target.lastIndexOf('/')));
+          await this.storage.copyRawFile('dsh-runtime/files/' + file.path, staging, file);
+          if (!await this.storage.matches(staging, file)) {
+            throw new RuntimeChannelError('ohos_checksum_failed', '随包运行时文件校验失败，安装未提交。');
+          }
+          await this.storage.rename(staging, target);
+          done += file.size;
+          progress({step: 'extract', done: done, total: total});
+        }
+        progress({step: 'configure', done: 0, total: 1});
+        for (const hash of staged) await this.storage.removeFile(this.base + '/staging/' + hash + '.tmp');
+      });
       await this.storage.writeTextAtomic(this.base + '/installed.json', JSON.stringify(manifest));
       await this.storage.removeFile(this.base + '/installing.json');
       progress({step: 'configure', done: 1, total: 1});

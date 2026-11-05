@@ -318,6 +318,67 @@ for (const kind of ['metadata', 'payload']) {
       else assert((await fs.lstat(c.staging)).isSymbolicLink());
     });
   }
+  if (kind === 'payload') {
+    test('payload staging directory batch commit failure blocks installed publication and retry succeeds', async () => {
+      const c = await hardlinkStage('batch-directory-fsync', kind);
+      const originalOpen = fileIo.open, originalClose = fileIo.close, originalSync = fileIo.fsync;
+      const directories = new Set();
+      let failed = false;
+      fileIo.open = async (name, flags) => {
+        const file = await originalOpen(name, flags);
+        if (name === path.dirname(c.staging) && (flags & fileIo.OpenMode.DIR) !== 0) directories.add(file.fd);
+        return file;
+      };
+      fileIo.close = async file => { await originalClose(file); directories.delete(file.fd); };
+      fileIo.fsync = async fd => {
+        if (directories.has(fd) && !failed) { failed = true; throw new Error('injected staging directory commit failure'); }
+        return originalSync(fd);
+      };
+      try { await assert.rejects(install(c), /staging directory commit failure/); }
+      finally { fileIo.open = originalOpen; fileIo.close = originalClose; fileIo.fsync = originalSync; }
+      assert.equal(failed, true);
+      await assert.rejects(fs.access(c.staging), {code:'ENOENT'});
+      assert.equal(await fs.readFile(c.victim, 'utf8'), 'outside data');
+      assert.deepEqual(await fs.readFile(c.target), Buffer.from(baseFiles['runtime/ohos/preload.mjs']));
+      assert.equal(await c.installer.installed(), null);
+      await fs.access(c.installer.base + '/installing.json');
+      await assert.rejects(fs.access(c.installer.base + '/installed.json'), {code:'ENOENT'});
+      await install(c);
+      assert.equal((await c.installer.installed()).runtimeVersion, 'v1');
+      for (const [name, bytes] of Object.entries(baseFiles))
+        assert.deepEqual(await fs.readFile(c.installer.root + '/' + name), Buffer.from(bytes));
+      assert.equal(await fs.readFile(c.victim, 'utf8'), 'outside data');
+    });
+    test('payload data fsync failure preserves the old target and outside hardlink bytes', async () => {
+      const c = await hardlinkStage('payload-data-fsync', kind);
+      const originalOpen = fileIo.open, originalClose = fileIo.close, originalSync = fileIo.fsync;
+      const payloads = new Set();
+      let failed = false;
+      fileIo.open = async (name, flags) => {
+        const file = await originalOpen(name, flags);
+        if (name === c.staging && (flags & fileIo.OpenMode.DIR) === 0) payloads.add(file.fd);
+        return file;
+      };
+      fileIo.close = async file => { await originalClose(file); payloads.delete(file.fd); };
+      fileIo.fsync = async fd => {
+        if (payloads.has(fd) && !failed) { failed = true; throw new Error('injected payload data fsync failure'); }
+        return originalSync(fd);
+      };
+      try { await assert.rejects(install(c), /payload data fsync failure/); }
+      finally { fileIo.open = originalOpen; fileIo.close = originalClose; fileIo.fsync = originalSync; }
+      assert.equal(failed, true);
+      assert.equal(await fs.readFile(c.target, 'utf8'), c.previous);
+      assert.equal(await fs.readFile(c.victim, 'utf8'), 'outside data');
+      assert.deepEqual(await fs.readFile(c.staging), Buffer.from(baseFiles['runtime/ohos/preload.mjs']));
+      assert.notEqual((await fs.stat(c.staging)).ino, (await fs.stat(c.victim)).ino);
+      assert.equal(await c.installer.installed(), null);
+      await fs.access(c.installer.base + '/installing.json');
+      await install(c);
+      assert.equal((await c.installer.installed()).runtimeVersion, 'v1');
+      assert.equal(await fs.readFile(c.victim, 'utf8'), 'outside data');
+    });
+    continue;
+  }
   test(`${kind} staging unlink fsync failure stops before replacement and retry succeeds`, async () => {
     const c = await hardlinkStage('unlink-fsync-' + kind, kind);
     const originalUnlink = fileIo.unlink, originalSync = fileIo.fsync;
@@ -340,7 +401,7 @@ for (const kind of ['metadata', 'payload']) {
 
 // This is the failure contract of the new native CRC boundary, not evidence
 // that the former synchronous CRC accepted corrupt bytes.
-test('447 native CRC failure refuses completion and an explicit retry preserves all payload bytes', async () => {
+test('native CRC failure refuses completion and an explicit retry preserves all payload bytes', async () => {
   const c = await scenario('native-crc-failure');
   observation.failCrc = 1;
   await assert.rejects(install(c), /injected native CRC failure/);
@@ -353,7 +414,7 @@ test('447 native CRC failure refuses completion and an explicit retry preserves 
     assert.deepEqual(await fs.readFile(c.installer.root + '/' + name), Buffer.from(bytes));
 });
 
-test('447 native CRC uses unsigned incremental standard vectors and empty input', async () => {
+test('native CRC uses unsigned incremental standard vectors and empty input', async () => {
   const checksum = await nativeZlib.createChecksum();
   const buffer = text => Uint8Array.from(Buffer.from(text)).buffer;
   assert.equal(await checksum.crc32(0, buffer('123456789')), 0xcbf43926);
@@ -363,7 +424,7 @@ test('447 native CRC uses unsigned incremental standard vectors and empty input'
   assert.equal(await checksum.crc32(0, new ArrayBuffer(0)), 0);
 });
 
-test('447 asynchronous native CRC checks only valid output bytes and retains them until write', async () => {
+test('asynchronous native CRC checks only valid output bytes and retains them until write', async () => {
   const data = randomBytes(256 * 1024 + 29);
   const files = {...baseFiles, 'chunked.bin': data, 'full-output.bin': Buffer.alloc(2 * 256 * 1024, 0x61),
     'short.txt': '123456789'};
@@ -382,7 +443,7 @@ test('447 asynchronous native CRC checks only valid output bytes and retains the
     assert.deepEqual(await fs.readFile(c.installer.root + '/' + name), Buffer.from(bytes));
 });
 
-test('447 incorrect payload CRC still refuses completion when manifest SHA and length match', async () => {
+test('incorrect payload CRC still refuses completion when manifest SHA and length match', async () => {
   const c = await scenario('native-crc-corrupt');
   await mutate(c, (bytes, rows) => {
     const member = rows.find(row => row.name.endsWith('/bin.js'));
