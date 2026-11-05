@@ -150,6 +150,7 @@ let entryText = await fs.readFile(path.join(source, '../entryability/EntryAbilit
 entryText = entryText.replace(/^import .*;\n/gm, '');
 await fs.writeFile(path.join(temp, 'EntryAbility.mts'),
   `import { RuntimeController } from './RuntimeController.mts';\nimport { FlutterAbility } from '${hostFixtureUrl}';\n` +
+  `const OhosKeyboardLog = class { attach() {} detach() {} };\n` +
   `const VoicePlugin = { onForeground() {}, onBackground() {} };\n` +
   `const NativeFilesPlugin = { onForeground() {}, onBackground() {} };\n` +
   `const NativeMediaPlugin = { onForeground() {}, onBackground() {} };\n` + entryText);
