@@ -33,15 +33,15 @@
     removeListeners.push(() => target.removeEventListener(type, invalidate, true));
   }
   function hidden(el, child = null) {
-    for (let at = el; at; child = at, at = parent(at) || at.ownerDocument.defaultView?.frameElement) {
+    for (let at = el; at; child = at, at = at.assignedSlot || parent(at) || at.ownerDocument.defaultView?.frameElement) {
       // Closed details content can retain layout boxes while its anonymous content is hidden.
       if (child && tag(at) === 'details' && !at.open && child !== at.querySelector(':scope > summary') &&
           at.ownerDocument.defaultView.getComputedStyle(at, '::details-content').contentVisibility === 'hidden') return true;
       if (at.hidden || at.inert || attr(at, 'aria-hidden') === 'true') return true;
       const style = at.ownerDocument.defaultView.getComputedStyle(at);
-      if (style.display === 'none' || style.visibility === 'hidden' || style.visibility === 'collapse' || style.contentVisibility === 'hidden') return true;
+      if (style.display === 'none' || (style.display !== 'contents' && style.contentVisibility === 'hidden') || ((at === el || tag(at) === 'iframe') && (style.visibility === 'hidden' || style.visibility === 'collapse'))) return true;
       // A native control laid invisibly over something the page draws is still what a person taps.
-      if (Number(style.opacity) === 0 && !(at === el && ['input', 'select'].includes(tag(el)))) return true;
+      if (style.display !== 'contents' && Number(style.opacity) === 0 && !(at === el && ['input', 'select'].includes(tag(el)))) return true;
     }
     return false;
   }
@@ -278,7 +278,7 @@
     function walk(node, context) {
       if (++visits > LIMIT_VISITS) { result.truncated = true; return; }
       if (node.nodeType === Node.TEXT_NODE) {
-        if (node.parentElement && !hidden(node.parentElement, node)) {
+        if (node.parentElement && !hidden(node.assignedSlot || node.parentElement, node)) {
           const range = node.ownerDocument.createRange();
           range.selectNodeContents(node);
           if (Array.from(range.getClientRects()).some(r => r.width > 0 && r.height > 0)) text(node.nodeValue);
