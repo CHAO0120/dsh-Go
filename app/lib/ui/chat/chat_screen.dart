@@ -6,6 +6,7 @@ import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:dsh_client/dsh_client.dart';
+import 'package:flutter/foundation.dart' show defaultTargetPlatform;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -119,6 +120,8 @@ class ChatScreen extends ConsumerStatefulWidget {
 }
 
 class _ChatScreenState extends ConsumerState<ChatScreen> with WidgetsBindingObserver {
+  final _toTop = defaultTargetPlatform == TargetPlatform.iOS ? StatusBarTop() : null;
+
   void Function()? _endInteraction;
   bool _routeCurrent = true;
   ModalRoute<Object?>? _interactionRoute;
@@ -373,6 +376,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> with WidgetsBindingObse
 
   @override
   void dispose() {
+    _toTop?.dispose();
     WidgetsBinding.instance.removeObserver(this);
     _endInteraction?.call();
     _endInteraction = null;
@@ -1522,7 +1526,11 @@ class _ChatScreenState extends ConsumerState<ChatScreen> with WidgetsBindingObse
     );
     final headerHeight = typing ? MediaQuery.paddingOf(context).top + AppSpace.sm : ChatHeader.heightOf(context);
 
-    Widget backdrop(Widget child) => widget.backdrop ? WallpaperBackdrop(child: child) : child;
+    Widget backdrop(Widget child) {
+      final framed = widget.backdrop ? WallpaperBackdrop(child: child) : child;
+      return _toTop == null ? framed : PrimaryScrollController(controller: _toTop, child: framed);
+    }
+
     final screen = AnnotatedRegion<SystemUiOverlayStyle>(
       value: dshSystemOverlay(Theme.of(context).brightness),
       child: backdrop(
@@ -1604,6 +1612,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> with WidgetsBindingObse
                                 child: ChatList(
                                   key: ValueKey(sessionId),
                                   sessionId: sessionId,
+                                  toTop: _toTop,
                                   topInset: headerHeight,
                                   bottomInset: _ChatLayout.overlap,
                                   scrolledUnder: _scrolledUnder,

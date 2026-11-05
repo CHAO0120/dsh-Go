@@ -122,7 +122,7 @@ ThemeData _build(
   final onKnob = knobBlends ? scheme.onPrimary : lightKnob;
   final checkOn = knobBlends ? scheme.primary : (isDark ? scheme.inversePrimary : scheme.primary);
   final textTheme = AppType.withGlyphLocale(
-    AppType.textTheme,
+    AppType.tracked(AppType.textTheme),
     glyphLocale,
   ).apply(bodyColor: scheme.onSurface, displayColor: scheme.onSurface);
   // 输入框 / Chip 的填充:与卡片玻璃同值,保证"表单是长在页面上的"。
@@ -132,6 +132,7 @@ ThemeData _build(
 
   return ThemeData(
     useMaterial3: true,
+    adaptations: const [_SwitchAdaptation()],
     platform: themePlatformFor(Platform.operatingSystem),
     colorScheme: scheme,
     scaffoldBackgroundColor: scheme.surface,
@@ -512,4 +513,19 @@ ThemeData _build(
       crossAxisMargin: 2,
     ),
   );
+}
+
+/// `Switch.adaptive` on iOS draws the system's switch, in the app's colours and without Material's
+/// check mark. Other platforms keep the theme as it is.
+class _SwitchAdaptation extends Adaptation<SwitchThemeData> {
+  const _SwitchAdaptation();
+
+  @override
+  SwitchThemeData adapt(ThemeData theme, SwitchThemeData defaultValue) => theme.platform == TargetPlatform.iOS
+      ? SwitchThemeData(
+          thumbColor: defaultValue.thumbColor,
+          trackColor: defaultValue.trackColor,
+          trackOutlineColor: defaultValue.trackOutlineColor,
+        )
+      : defaultValue;
 }

@@ -901,7 +901,7 @@ class _WallpaperRow extends ConsumerWidget {
         title: l10n.pluginsFollowWallpaper,
         value: AccentDot(color: seed),
         onTap: () => set(!on),
-        trailing: Switch(value: on, onChanged: set),
+        trailing: Switch.adaptive(value: on, onChanged: set),
       ),
     );
   }

@@ -61,13 +61,17 @@ class SheetRecedePage extends StatelessWidget {
   Widget build(BuildContext context) {
     if (!_available) return child;
     final sits = _sitsBack(context);
+    final top = MediaQuery.paddingOf(context).top;
     return ValueListenableBuilder<double>(
       valueListenable: SheetRecede._amount,
       child: child,
       builder: (context, amount, child) {
         final t = sits ? amount : 0.0;
-        return Transform.scale(
-          scale: 1 - (1 - SheetRecede.scale) * t,
+        final scale = 1 - (1 - SheetRecede.scale) * t;
+        return Transform(
+          alignment: Alignment.topCenter,
+          // Below the status bar, whose text stays on the dark edge.
+          transform: Matrix4.translationValues(0, top * t, 0)..scaleByDouble(scale, scale, 1, 1),
           child: ClipRRect(
             borderRadius: BorderRadius.circular(AppShape.lg * t),
             clipBehavior: t == 0 ? Clip.none : Clip.antiAlias,

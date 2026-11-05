@@ -260,7 +260,7 @@ class _PhoneDndPageState extends ConsumerState<PhoneDndPage> {
         // What keeping means is the consent: never cut short.
         subtitleMaxLines: 8,
         onTap: _busy ? null : () => toggle(!keep.enabled),
-        trailing: Switch(value: keep.enabled, onChanged: _busy ? null : toggle),
+        trailing: Switch.adaptive(value: keep.enabled, onChanged: _busy ? null : toggle),
       ),
     );
   }

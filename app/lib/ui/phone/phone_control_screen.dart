@@ -293,7 +293,7 @@ class _PhoneControlScreenState extends ConsumerState<PhoneControlScreen> {
                   dimension: 22,
                   child: CircularProgressIndicator(strokeWidth: 2, strokeCap: StrokeCap.round),
                 )
-              : Switch(value: status.enabled, onChanged: toggle),
+              : Switch.adaptive(value: status.enabled, onChanged: toggle),
         ),
         if (state.policies?.unlocks.isNotEmpty ?? false)
           Padding(
@@ -486,7 +486,7 @@ class _PhoneControlScreenState extends ConsumerState<PhoneControlScreen> {
             spot: Spots.phoneAutoCollapse,
             subtitle: context.l10n.phoneAutoCollapseHint,
             onTap: () => unawaited(_setAutoCollapse(!overlay.autoCollapse)),
-            trailing: Switch(value: overlay.autoCollapse, onChanged: (v) => unawaited(_setAutoCollapse(v))),
+            trailing: Switch.adaptive(value: overlay.autoCollapse, onChanged: (v) => unawaited(_setAutoCollapse(v))),
           ),
         ),
         MergeSemantics(
@@ -495,7 +495,7 @@ class _PhoneControlScreenState extends ConsumerState<PhoneControlScreen> {
             spot: Spots.phoneReturn,
             subtitle: context.l10n.phoneReturnAfterDoneHint,
             onTap: () => unawaited(_setReturn(!returnAfterDone)),
-            trailing: Switch(value: returnAfterDone, onChanged: (v) => unawaited(_setReturn(v))),
+            trailing: Switch.adaptive(value: returnAfterDone, onChanged: (v) => unawaited(_setReturn(v))),
           ),
         ),
       ],

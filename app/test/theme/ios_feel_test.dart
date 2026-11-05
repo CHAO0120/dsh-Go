@@ -12,21 +12,19 @@ const _page = Key('page');
 const _open = Key('open');
 
 const _screen = 400.0;
+const _statusBar = 59.0;
 
-Widget _app({required bool fluid}) => MediaQuery(
-  data: const MediaQueryData(size: Size(_screen, 800)),
-  child: MaterialApp(
-    theme: buildLightTheme(),
-    builder: (context, child) => AppMotionScope(fluid: fluid, child: child!),
-    home: Scaffold(
-      key: _page,
-      body: Builder(
-        builder: (context) => Center(
-          child: TextButton(
-            key: _open,
-            onPressed: () => showAppSheet<void>(context, builder: (_) => const SizedBox(height: 300)),
-            child: const Text('open'),
-          ),
+Widget _app({required bool fluid}) => MaterialApp(
+  theme: buildLightTheme(),
+  builder: (context, child) => AppMotionScope(fluid: fluid, child: child!),
+  home: Scaffold(
+    key: _page,
+    body: Builder(
+      builder: (context) => Center(
+        child: TextButton(
+          key: _open,
+          onPressed: () => showAppSheet<void>(context, builder: (_) => const SizedBox(height: 300)),
+          child: const Text('open'),
         ),
       ),
     ),
@@ -37,6 +35,8 @@ void main() {
   void useScreen(WidgetTester tester) {
     tester.view.devicePixelRatio = 1;
     tester.view.physicalSize = const Size(_screen, 800);
+    tester.view.padding = const FakeViewPadding(top: _statusBar);
+    tester.view.viewPadding = const FakeViewPadding(top: _statusBar);
     addTearDown(tester.view.reset);
   }
 
@@ -44,6 +44,30 @@ void main() {
     expect(buildLightTheme().splashFactory, NoSplash.splashFactory);
     expect(buildDarkTheme().splashFactory, NoSplash.splashFactory);
   }, variant: TargetPlatformVariant.only(TargetPlatform.iOS));
+
+  testWidgets('type isn\'t tracked for Roboto on iOS', (tester) async {
+    final text = buildLightTheme().textTheme;
+    expect(text.bodyLarge?.letterSpacing, 0);
+    expect(text.bodyMedium?.letterSpacing, 0);
+    expect(text.labelLarge?.letterSpacing, 0);
+    expect(text.headlineMedium?.letterSpacing, lessThan(0));
+  }, variant: TargetPlatformVariant.only(TargetPlatform.iOS));
+
+  testWidgets('other platforms keep their tracking', (tester) async {
+    expect(buildLightTheme().textTheme.bodyMedium?.letterSpacing, isNot(0));
+  }, variant: TargetPlatformVariant.only(TargetPlatform.android));
+
+  testWidgets('the adaptive switch drops the check mark on iOS and keeps the colours', (tester) async {
+    final theme = buildLightTheme();
+    final adapted = theme.getAdaptation<SwitchThemeData>()!.adapt(theme, theme.switchTheme);
+    expect(adapted.thumbIcon, isNull);
+    expect(adapted.trackColor, same(theme.switchTheme.trackColor));
+  }, variant: TargetPlatformVariant.only(TargetPlatform.iOS));
+
+  testWidgets('the switch theme stays as it is elsewhere', (tester) async {
+    final theme = buildLightTheme();
+    expect(theme.getAdaptation<SwitchThemeData>()!.adapt(theme, theme.switchTheme), same(theme.switchTheme));
+  }, variant: TargetPlatformVariant.only(TargetPlatform.android));
 
   testWidgets('other platforms keep their ripple', (tester) async {
     expect(buildLightTheme().splashFactory, isNot(NoSplash.splashFactory));
@@ -88,7 +112,10 @@ void main() {
 
     await tester.tap(find.byKey(_open));
     await tester.pumpAndSettle();
-    expect(tester.getRect(find.byKey(_page)).width, closeTo(_screen * SheetRecede.scale, 0.5));
+    final back = tester.getRect(find.byKey(_page));
+    expect(back.width, closeTo(_screen * SheetRecede.scale, 0.5));
+    // Its top edge lands under the status bar, whose text stays on the dark.
+    expect(back.top, closeTo(_statusBar, 0.5));
 
     await tester.tapAt(const Offset(_screen / 2, 40));
     await tester.pumpAndSettle();
