@@ -25,21 +25,23 @@ final class ShareViewController: UIViewController {
     guard !started else { return }
     started = true
     let items = extensionContext?.inputItems.compactMap { $0 as? NSExtensionItem } ?? []
-    work.async { self.collect(items) }
+    guard let inbox = ShareInbox.folder else { return finish(open: false) }
+    collect(items, in: inbox) { self.finish(open: $0) }
   }
 
-  private func collect(_ items: [NSExtensionItem]) {
-    guard let inbox = ShareInbox.folder else { return finish(open: false) }
-    let unfinished = inbox.appendingPathComponent(ShareInbox.unfinishedPrefix + UUID().uuidString, isDirectory: true)
-    do {
-      try FileManager.default.createDirectory(at: unfinished, withIntermediateDirectories: true)
-    } catch {
-      return finish(open: false)
-    }
-    manifest.subject = Self.trimmed(items.first?.attributedTitle?.string)
-    items.compactMap { Self.trimmed($0.attributedContentText?.string) }.forEach(addText)
-    read(items.flatMap { $0.attachments ?? [] }[...], into: unfinished) { [self] in
-      seal(unfinished, in: inbox)
+  func collect(_ items: [NSExtensionItem], in inbox: URL, then done: @escaping (Bool) -> Void) {
+    work.async { [self] in
+      let unfinished = inbox.appendingPathComponent(ShareInbox.unfinishedPrefix + UUID().uuidString, isDirectory: true)
+      do {
+        try FileManager.default.createDirectory(at: unfinished, withIntermediateDirectories: true)
+      } catch {
+        return done(false)
+      }
+      manifest.subject = Self.trimmed(items.first?.attributedTitle?.string)
+      items.compactMap { Self.trimmed($0.attributedContentText?.string) }.forEach(addText)
+      read(items.flatMap { $0.attachments ?? [] }[...], into: unfinished) { [self] in
+        seal(unfinished, in: inbox, then: done)
+      }
     }
   }
 
@@ -133,17 +135,17 @@ final class ShareViewController: UIViewController {
     texts.append(text)
   }
 
-  private func seal(_ unfinished: URL, in inbox: URL) {
+  private func seal(_ unfinished: URL, in inbox: URL, then done: (Bool) -> Void) {
     manifest.text = texts.isEmpty ? nil : String(texts.joined(separator: "\n\n").prefix(Self.maxTextCharacters))
     let finished = inbox.appendingPathComponent(UUID().uuidString, isDirectory: true)
     do {
       let data = try JSONEncoder().encode(manifest)
       try data.write(to: unfinished.appendingPathComponent(ShareInbox.manifestName), options: .atomic)
       try FileManager.default.moveItem(at: unfinished, to: finished)
-      finish(open: true)
+      done(true)
     } catch {
       try? FileManager.default.removeItem(at: unfinished)
-      finish(open: false)
+      done(false)
     }
   }
 

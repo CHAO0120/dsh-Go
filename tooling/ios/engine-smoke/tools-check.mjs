@@ -49,6 +49,15 @@ clearTimeout(deadline);
 const rowsFile = join(work, 'rows.jsonl');
 const rows = existsSync(rowsFile) ? readFileSync(rowsFile, 'utf8').split('\n').filter(Boolean).map((line) => JSON.parse(line)) : [];
 const problems = checkSiriRows(rows);
+const shareRows = rows.filter((row) => row.group === 'share');
+const files = shareRows.filter((row) => row.name === 'file-collection');
+const total = shareRows.filter((row) => row.name === 'total-byte-limit');
+if (shareRows.length !== 2 || files.length !== 1 || files[0].files !== 9
+  || files[0].uniqueNames !== 9 || JSON.stringify(files[0].skipped) !== '["too_large","too_many"]'
+  || total.length !== 1 || total[0].files !== 2 || total[0].bytes !== 400 * 1024 * 1024
+  || JSON.stringify(total[0].skipped) !== '["too_large"]') {
+  problems.push('share: missing or incorrect collection result');
+}
 const lines = [];
 // A page read is mostly a list of elements, and what matters is whether it saw the page.
 const brief = (row) => {
@@ -69,7 +78,7 @@ for (const row of rows) {
       const action = systemAction(row.name, row.args);
       if (!row.isError) resultFor(action, JSON.parse(row.text));
     } else if (row.group === 'browser') browserAction(row.name, row.args);
-    else if (row.group !== 'siri') throw new Error(`unknown group ${row.group}`);
+    else if (!['siri', 'share'].includes(row.group)) throw new Error(`unknown group ${row.group}`);
   } catch (error) {
     contract = ` CONTRACT: ${error.message}`;
     problems.push(`${row.group} ${row.name}: ${error.message}`);
@@ -79,7 +88,7 @@ for (const row of rows) {
   const shown = JSON.stringify(row.args).slice(0, 60);
   lines.push(`${wrong ? 'WRONG ' : ''}${row.name} ${shown} ${row.ms}ms ${row.isError ? 'error' : 'ok'}${row.imageBytes ? ` image ${row.imageBytes}` : ''}: ${answer}${contract}`);
 }
-for (const group of ['system', 'browser', 'siri']) {
+for (const group of ['system', 'browser', 'siri', 'share']) {
   const all = lines.filter((_, index) => rows[index].group === group).join('\n') || 'no calls recorded';
   // An annotation holds about 4 KB.
   for (let at = 0, part = 1; at < all.length; at += 3400, part++) notice(`${group} tools ${part}`, all.slice(at, at + 3400));

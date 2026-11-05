@@ -196,6 +196,113 @@ final class NativeToolsTests: XCTestCase {
       "isError": received != expected, "text": "perform after attach; no replay", "ms": 0, "entries": received])
   }
 
+  /// Real NSItemProvider file loading and the extension's original copy/seal path, without UI.
+  func testShareFileCollection() async throws {
+    let manager = FileManager.default
+    let root = manager.temporaryDirectory.appendingPathComponent("share-test-" + UUID().uuidString)
+    try manager.createDirectory(at: root, withIntermediateDirectories: true)
+    defer { try? manager.removeItem(at: root) }
+    let source = root.appendingPathComponent("payload.bin")
+    try Data("share payload 中文".utf8).write(to: source)
+    let large = root.appendingPathComponent("large.bin")
+    XCTAssertTrue(manager.createFile(atPath: large.path, contents: nil))
+    let handle = try FileHandle(forWritingTo: large)
+    try handle.truncate(atOffset: 200 * 1024 * 1024 + 1)
+    try handle.close()
+
+    func provider(_ url: URL, name: String) -> NSItemProvider {
+      let item = NSItemProvider()
+      item.suggestedName = name
+      item.registerFileRepresentation(forTypeIdentifier: "public.data", fileOptions: [], visibility: .all) { completion in
+        completion(url, false, nil)
+        return nil
+      }
+      return item
+    }
+    let input = NSExtensionItem()
+    input.attributedTitle = NSAttributedString(string: "  Shared files  ")
+    input.attributedContentText = NSAttributedString(string: "synthetic share")
+    // Oversized rejection must not use an accepted-file slot. Duplicate names must
+    // remain distinct, and the reserved manifest filename must not overwrite metadata.
+    input.attachments = [provider(large, name: "large.bin")]
+      + (0..<10).map { provider(source, name: $0 == 0 ? "manifest.json" : "same.bin") }
+    let inbox = root.appendingPathComponent("inbox")
+    let collected = expectation(description: "extension sealed files")
+    let collector = ShareViewController()
+    collector.collect([input], in: inbox) { ok in
+      XCTAssertTrue(ok)
+      collected.fulfill()
+    }
+    await fulfillment(of: [collected], timeout: 120)
+    let folders = try manager.contentsOfDirectory(at: inbox, includingPropertiesForKeys: nil)
+    XCTAssertEqual(folders.count, 1)
+    let folder = try XCTUnwrap(folders.first)
+    XCTAssertFalse(folder.lastPathComponent.hasPrefix(ShareInbox.unfinishedPrefix))
+    // Decode from disk after collection, just as a later app launch must do.
+    let manifest = try JSONDecoder().decode(ShareInbox.Manifest.self,
+      from: Data(contentsOf: folder.appendingPathComponent(ShareInbox.manifestName)))
+    XCTAssertEqual(manifest.subject, "Shared files")
+    XCTAssertEqual(manifest.text, "synthetic share")
+    XCTAssertEqual(manifest.files.count, 9)
+    XCTAssertEqual(Set(manifest.files.map(\.name)).count, 9)
+    XCTAssertFalse(manifest.files.contains { $0.name == ShareInbox.manifestName })
+    XCTAssertEqual(manifest.skipped.map(\.reason), ["too_large", "too_many"])
+    for file in manifest.files {
+      XCTAssertEqual(try Data(contentsOf: folder.appendingPathComponent(file.name)), try Data(contentsOf: source))
+    }
+    try note(["group": "share", "name": "file-collection", "args": [String: String](), "expect": "ok", "isError": false,
+      "text": "real file providers and sealed inbox", "ms": 0, "files": manifest.files.count,
+      "uniqueNames": Set(manifest.files.map(\.name)).count, "skipped": manifest.skipped.map(\.reason)])
+  }
+
+  func testShareTotalByteLimit() async throws {
+    let manager = FileManager.default
+    let root = manager.temporaryDirectory.appendingPathComponent("share-total-" + UUID().uuidString)
+    try manager.createDirectory(at: root, withIntermediateDirectories: true)
+    defer { try? manager.removeItem(at: root) }
+    let source = root.appendingPathComponent("boundary.bin")
+    XCTAssertTrue(manager.createFile(atPath: source.path, contents: nil))
+    let handle = try FileHandle(forWritingTo: source)
+    try handle.truncate(atOffset: 200 * 1024 * 1024)
+    try handle.close()
+    let small = root.appendingPathComponent("one.bin")
+    try Data([42]).write(to: small)
+    let input = NSExtensionItem()
+    input.attachments = [source, source, small].map { url in
+      let item = NSItemProvider()
+      item.suggestedName = url.lastPathComponent
+      item.registerFileRepresentation(forTypeIdentifier: "public.data", fileOptions: [], visibility: .all) { completion in
+        completion(url, false, nil)
+        return nil
+      }
+      return item
+    }
+    let inbox = root.appendingPathComponent("inbox")
+    let collected = expectation(description: "extension enforced total bytes")
+    let collector = ShareViewController()
+    collector.collect([input], in: inbox) { ok in
+      XCTAssertTrue(ok)
+      collected.fulfill()
+    }
+    await fulfillment(of: [collected], timeout: 120)
+    let folders = try manager.contentsOfDirectory(at: inbox, includingPropertiesForKeys: nil)
+    XCTAssertEqual(folders.count, 1)
+    let folder = try XCTUnwrap(folders.first)
+    let manifest = try JSONDecoder().decode(ShareInbox.Manifest.self,
+      from: Data(contentsOf: folder.appendingPathComponent(ShareInbox.manifestName)))
+    XCTAssertEqual(manifest.files.count, 2)
+    XCTAssertEqual(manifest.skipped.map(\.reason), ["too_large"])
+    var total: Int64 = 0
+    for file in manifest.files {
+      let size = try manager.attributesOfItem(atPath: folder.appendingPathComponent(file.name).path)[.size] as? Int64
+      XCTAssertEqual(size, 200 * 1024 * 1024)
+      total += size ?? 0
+    }
+    try note(["group": "share", "name": "total-byte-limit", "args": [String: String](), "expect": "ok", "isError": false,
+      "text": "two boundary-sized files, one byte beyond total refused", "ms": 0,
+      "files": manifest.files.count, "bytes": total, "skipped": manifest.skipped.map(\.reason)])
+  }
+
   // MARK: The system tools
 
   @discardableResult
