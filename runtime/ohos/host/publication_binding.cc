@@ -9,6 +9,8 @@
 #include <deviceinfo.h>
 
 #include <cerrno>
+#include <dirent.h>
+#include <sys/stat.h>
 #include <dlfcn.h>
 #include <cstdlib>
 #include <limits.h>
@@ -190,6 +192,72 @@ napi_value ThrowAttributeError(napi_env env, int error_number, const char* opera
       napi_set_named_property(env, error, "syscall", syscall_name) != napi_ok) return nullptr;
   napi_throw(env, error);
   return nullptr;
+}
+
+std::thread::id& CloneOwnerThread() { static std::thread::id value; return value; }
+
+// Narrow Git-clone cleanup: all traversal is anchored to descriptors retained
+// by the main job owner. Never recursively remove a pathname after checking it.
+bool SameDirectory(const struct stat& a, const struct stat& b) {
+  return S_ISDIR(a.st_mode) && S_ISDIR(b.st_mode) && a.st_dev == b.st_dev && a.st_ino == b.st_ino;
+}
+int EmptyCloneDirectory(int descriptor, unsigned depth) {
+  if (depth > 128) return ELOOP;
+  const int copy = fcntl(descriptor, F_DUPFD_CLOEXEC, 0);
+  if (copy < 0) return errno;
+  DIR* directory = fdopendir(copy);
+  if (!directory) { const int error = errno; close(copy); return error; }
+  int error = 0;
+  for (;;) {
+    errno = 0;
+    const dirent* entry = readdir(directory);
+    if (!entry) { error = errno; break; }
+    const char* name = entry->d_name;
+    if (strcmp(name, ".") == 0 || strcmp(name, "..") == 0) continue;
+    struct stat before;
+    if (fstatat(descriptor, name, &before, AT_SYMLINK_NOFOLLOW) != 0) { error = errno; break; }
+    if (S_ISDIR(before.st_mode)) {
+      const int child = openat(descriptor, name, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
+      if (child < 0) { error = errno; break; }
+      struct stat opened, current;
+      if (fstat(child, &opened) != 0) error = errno;
+      else if (!SameDirectory(before, opened)) error = ESTALE;
+      else error = EmptyCloneDirectory(child, depth + 1);
+      if (!error && fstatat(descriptor, name, &current, AT_SYMLINK_NOFOLLOW) != 0) error = errno;
+      if (!error && !SameDirectory(opened, current)) error = ESTALE;
+      if (!error && unlinkat(descriptor, name, AT_REMOVEDIR) != 0) error = errno;
+      close(child);
+    } else {
+      // unlinkat without AT_REMOVEDIR never follows a work-tree symlink.
+      if (unlinkat(descriptor, name, 0) != 0) error = errno;
+    }
+    if (error) break;
+  }
+  closedir(directory);
+  return error;
+}
+napi_value ClearOwnedClone(napi_env env, napi_callback_info info) {
+  if (std::this_thread::get_id() != CloneOwnerThread()) {
+    napi_throw_error(env, "ERR_OHOS_OWNERSHIP_MAIN_THREAD", "Clone cleanup belongs to the main engine"); return nullptr;
+  }
+  size_t argc = 5; napi_value argv[5];
+  if (napi_get_cb_info(env, info, &argc, argv, nullptr, nullptr) != napi_ok) return nullptr;
+  int directory, parent; std::string name, device, inode;
+  if (argc != 5) { napi_throw_type_error(env, "ERR_INVALID_ARG_TYPE", "Clone and parent descriptors, basename and owner receipt required"); return nullptr; }
+  if (!ReadDescriptor(env, argv[0], &directory) || !ReadDescriptor(env, argv[1], &parent) || !ReadPath(env, argv[2], &name) || !ReadPath(env, argv[3], &device) || !ReadPath(env, argv[4], &inode)) return nullptr;
+  if (name.empty() || name == "." || name == ".." || name.find('/') != std::string::npos) {
+    napi_throw_type_error(env, "ERR_INVALID_ARG_VALUE", "Clone cleanup requires one basename"); return nullptr;
+  }
+  struct stat opened, named; int error = 0;
+  if (fstat(directory, &opened) != 0 || fstatat(parent, name.c_str(), &named, AT_SYMLINK_NOFOLLOW) != 0) error = errno;
+  else if (!SameDirectory(opened, named) || device != std::to_string(opened.st_dev) || inode != std::to_string(opened.st_ino)) error = ESTALE;
+  else error = EmptyCloneDirectory(directory, 0);
+  if (!error && fstatat(parent, name.c_str(), &named, AT_SYMLINK_NOFOLLOW) != 0) error = errno;
+  if (!error && !SameDirectory(opened, named)) error = ESTALE;
+  // Keep the now-empty staging root. POSIX has no compare-inode-and-rmdir
+  // primitive; even an empty foreign root must not be removed in that gap.
+  if (error) { napi_throw_error(env, error == ESTALE ? "ERR_OHOS_GIT_CLONE_REPLACED" : ErrorName(error), "Owned clone cleanup refused or failed; remaining contents preserved"); return nullptr; }
+  napi_value result; if (napi_get_undefined(env, &result) != napi_ok) return nullptr; return result;
 }
 
 napi_value SetOwnershipMarker(napi_env env, napi_callback_info info) {
@@ -386,6 +454,10 @@ napi_value PhoneCall(napi_env env,napi_callback_info info) {
 }
 
 napi_value Initialize(napi_env env, napi_value exports) {
+#ifdef DSH_PUBLICATION_TEST_ADDON
+  // Standalone Linux test-addon entry; production is set at pre-Start registration.
+  if (syscall(SYS_gettid) == getpid()) CloneOwnerThread() = std::this_thread::get_id();
+#endif
   const napi_node_version* version;
   if (napi_get_node_version(env, &version) != napi_ok) return nullptr;
   if (version->major != DSH_NODE_VERSION_MAJOR || version->minor != DSH_NODE_VERSION_MINOR ||
@@ -394,6 +466,9 @@ napi_value Initialize(napi_env env, napi_value exports) {
     return nullptr;
   }
   napi_value function;
+  if (napi_create_function(env, "clearOwnedClone", NAPI_AUTO_LENGTH, ClearOwnedClone,
+                           nullptr, &function) != napi_ok ||
+      napi_set_named_property(env, exports, "clearOwnedClone", function) != napi_ok) return nullptr;
   const char* phoneNames[]={"bindPhoneEngine","getPhoneSnapshot","claimPhonePermit","revokePhonePermit","completePhonePermit"};
   for(uint32_t i=0;i<5;++i) {
     if(napi_create_function(env,phoneNames[i],NAPI_AUTO_LENGTH,PhoneCall,reinterpret_cast<void*>(static_cast<uintptr_t>(i+1)),&function)!=napi_ok||
@@ -431,6 +506,7 @@ napi_module publication_module = {
 }  // namespace
 
 void RegisterPublicationBinding() {
+  CloneOwnerThread() = std::this_thread::get_id();
   HostReader().thread=std::this_thread::get_id();
   const char* root=std::getenv("DSH_GO_OHOS_NATIVE_LIBRARY_DIR");char canonical[PATH_MAX];
   if(root && root[0]=='/') {

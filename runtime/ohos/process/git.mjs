@@ -329,10 +329,24 @@ export async function executeGit(input, context) {
       const http = fetchTransport(ctx);
       const dir = resolve(ctx.cwd, positional[1] ?? basename(url.pathname).replace(/\.git$/, ''));
       if (await ctx.fs.exists(dir) && (await ctx.fs.readdir(dir)).length) fault('Clone destination is not empty');
-      await ctx.fs.mkdir(dir, { recursive: true });
-      try { await git.clone({ fs: createGitFs(ctx, { gitdir: join(dir, '.git') }), http, dir,
-        url: url.href, ref, depth, singleBranch: singleBranch || depth !== undefined }); }
-      catch (error) { abort(ctx); throw Object.assign(new Error('Git clone transport or repository operation failed'), { code: error.code }); }
+      const owner = requireGitOwnership(ctx);
+      if (['createClone', 'commitClone', 'releaseClone'].some(name => typeof owner[name] !== 'function')) {
+        throw Object.assign(new Error('Git clone requires main-engine directory ownership'), { code: 'ERR_OHOS_OWNERSHIP_UNAVAILABLE' });
+      }
+      await ctx.fs.mkdir(dirname(dir), { recursive: true });
+      const staging = await owner.createClone({ target: dir });
+      try {
+        await git.clone({ fs: createGitFs(ctx, { gitdir: join(staging.path, '.git') }), http, dir: staging.path,
+          url: url.href, ref, depth, singleBranch: singleBranch || depth !== undefined });
+        abort(ctx);
+        await owner.commitClone(staging.id);
+      } catch (error) {
+        // A terminated Worker cannot run this branch. The main job owner also
+        // releases uncommitted clones, after joining Worker and pending writes.
+        if (!ctx.signal?.aborted) await owner.releaseClone(staging.id);
+        abort(ctx);
+        throw Object.assign(new Error('Git clone transport or repository operation failed'), { code: error.code });
+      }
       return output('Repository cloned.\n');
     }
     const options = gitStorage(ctx, await repository(ctx));

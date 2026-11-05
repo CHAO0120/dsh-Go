@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as fs from 'node:fs/promises';
-import { constants } from 'node:fs';
+import { constants, renameSync, mkdirSync, writeFileSync } from 'node:fs';
+import { Worker } from 'node:worker_threads';
 import { tmpdir } from 'node:os';
 import { join, isAbsolute } from 'node:path';
 import { createRequire } from 'node:module';
@@ -318,3 +319,64 @@ test('cleanup must not retry an identity-only unlink after closing its held fd',
   assert.equal(await fs.readFile(index.path, 'utf8'), 'preserve');
   assert.equal((await records(f.directory)).length, 1);
 });
+
+async function cloneFixture(fn) {
+  const root=await fs.mkdtemp(join(tmpdir(),'clone-native-'));
+  try {await fn(root);} finally {await fs.rm(root,{recursive:true,force:true});}
+}
+async function cloneHeld(root) {
+  const found=[];
+  for(const fd of await fs.readdir('/proc/self/fd')) {
+    try {if((await fs.readlink('/proc/self/fd/'+fd)).startsWith(root)) found.push(fd);} catch{}
+  }
+  return found;
+}
+test('native cleanup clears only owned contents and keeps an empty root; worktree symlinks never traverse',()=>cloneFixture(async root=>{
+  const owner=createOwnedGitResources({clearOwnedClone:binding.clearOwnedClone,roots:[root]});
+  const item=await owner.createClone({target:join(root,'destination')});
+  const external=join(root,'external'); await fs.mkdir(external);await fs.writeFile(join(external,'user'),'keep');
+  await fs.mkdir(join(item.path,'nested'));await fs.writeFile(join(item.path,'nested','owned'),'clear');
+  await fs.symlink(external,join(item.path,'link'));
+  await owner.releaseClone(item.id);await owner.finish();
+  assert.deepEqual(await fs.readdir(item.path),[]);
+  assert.equal(await fs.readFile(join(external,'user'),'utf8'),'keep');
+  assert.deepEqual(await cloneHeld(root),[]);
+}));
+for(const when of ['before-verify','before-native']) test(`real replacement ${when} preserves foreign and moved content and closes descriptors`,()=>cloneFixture(async root=>{
+  let item, foreign;
+  const swap=()=>{renameSync(item.path,item.path+'-moved');mkdirSync(item.path);foreign=join(item.path,'user');writeFileSync(foreign,'keep');};
+  const owner=createOwnedGitResources({clearOwnedClone:binding.clearOwnedClone,roots:[root],clearOwnedClone(...args){swap();return binding.clearOwnedClone(...args);}});
+  item=await owner.createClone({target:join(root,'destination')});
+  await fs.writeFile(join(item.path,'own'),'owned-original');
+  if(when==='before-verify') swap();
+  await assert.rejects(owner.releaseClone(item.id));await assert.rejects(owner.finish());
+  assert.equal(await fs.readFile(foreign,'utf8'),'keep');
+  assert.equal(await fs.readFile(join(item.path+'-moved','own'),'utf8'),'owned-original');
+  assert.deepEqual(await cloneHeld(root),[]);
+}));
+test('native clone cleanup rejects wrong receipt, invalid descriptors, and Worker access',()=>cloneFixture(async root=>{
+  await fs.mkdir(join(root,'owned'));await fs.writeFile(join(root,'owned','user'),'keep');
+  const parent=await fs.open(root,'r'), directory=await fs.open(join(root,'owned'),'r');
+  try {
+    const info=await directory.stat({bigint:true}), args=[directory.fd,parent.fd,'owned',String(info.dev),String(info.ino)];
+    assert.throws(()=>binding.clearOwnedClone(...args.slice(0,4),'0'),{code:'ERR_OHOS_GIT_CLONE_REPLACED'});
+    assert.throws(()=>binding.clearOwnedClone(-1,...args.slice(1)),{code:'ERR_INVALID_ARG_VALUE'});
+    const worker=new Worker(`const {parentPort,workerData}=require('node:worker_threads');try{require(process.env.DSH_TEST_PUBLICATION_BINDING).clearOwnedClone(...workerData);parentPort.postMessage('accepted');}catch(e){parentPort.postMessage(e.code)}`,{eval:true,workerData:args});
+    const result=await new Promise((resolve,reject)=>{worker.once('message',resolve);worker.once('error',reject);});
+    await new Promise(resolve=>worker.once('exit',resolve));
+    assert.equal(result,'ERR_OHOS_OWNERSHIP_MAIN_THREAD');
+    assert.equal(await fs.readFile(join(root,'owned','user'),'utf8'),'keep');
+  } finally {await directory.close();await parent.close();}
+}));
+test('clone refuses readonly, workspace root, outward symlink and foreign owner id',()=>cloneFixture(async root=>{
+  const workspace=join(root,'workspace'),outside=join(root,'outside');await fs.mkdir(workspace);await fs.mkdir(outside);
+  await fs.symlink(outside,join(workspace,'link'));
+  const owner=createOwnedGitResources({clearOwnedClone:binding.clearOwnedClone,roots:[workspace]});
+  const ro=createOwnedGitResources({clearOwnedClone:binding.clearOwnedClone,roots:[workspace],policy:{mode:'read-only'}});
+  await assert.rejects(ro.createClone({target:join(workspace,'repo')}),{code:'EACCES'});
+  await assert.rejects(owner.createClone({target:workspace}),{code:'EACCES'});
+  await assert.rejects(owner.createClone({target:join(workspace,'link','repo')}),{code:'EACCES'});
+  await assert.rejects(owner.releaseClone('not-owned'),{code:'ERR_OHOS_GIT_RESOURCE_ID'});
+  await owner.finish();await ro.finish();
+  assert.deepEqual(await fs.readdir(outside),[]);
+}));
