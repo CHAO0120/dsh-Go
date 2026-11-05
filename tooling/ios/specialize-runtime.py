@@ -165,6 +165,40 @@ def attachments_for_ios(original):
     return text.encode()
 
 
+# Activity budgets are specialized only in the iOS output. Shared inputs stay intact.
+ACTIVITY_CLOCK = 'runtime/ios/lifecycle/clock.mjs'
+ACTIVITY_EDITS = {
+    'runtime/ohos/lifecycle/budget.mjs': (
+        ("import { performance } from 'node:perf_hooks';", "import { activeNow } from '../../ios/lifecycle/clock.mjs';"),
+        (" * Only explicit, confirmed logical pauses in this process affect this clock.\n * Unannounced SIGSTOP, busy CPU and delayed callbacks remain elapsed budget.",
+         " * iOS activity time also excludes native-detected scheduling gaps.\n * Confirmed logical pauses are measured in the same adjusted time domain."),
+        ('this.#pauseStart ?? performance.now()', 'this.#pauseStart ?? activeNow()'),
+        ('this.#pauseStart = performance.now();', 'this.#pauseStart = activeNow();'),
+        ('this.#excluded += performance.now() - this.#pauseStart;', 'this.#excluded += activeNow() - this.#pauseStart;'),
+        ('// Without a confirmed pause, elapsed monotonic time is still charged.',
+         '// Without a confirmed pause, elapsed iOS activity time is still charged.'),
+    ),
+    'node_modules/@deepseek-ai/dsh-jobs-local/lib/index.js': (
+        ('\t\t\t\t\td.signal.addEventListener("abort", onAbort, { once: true });',
+         '\t\t\t\t\tif (d.signal.aborted) onAbort();\n\t\t\t\t\telse d.signal.addEventListener("abort", onAbort, { once: true });'),
+    ),
+    'node_modules/@deepseek-ai/dsh-timeout/lib/index.js': (
+        ('code === "TOOL_TIMEOUT" || code === "BASH_TIMEOUT"',
+         'code === "TOOL_TIMEOUT" || code === "BASH_TIMEOUT" || code === "TASK_WAIT_TIMEOUT"'),
+    ),
+}
+
+
+def activity_for_ios(name, original):
+    data = original
+    for before, after in ACTIVITY_EDITS[name]:
+        before, after = before.encode(), after.encode()
+        if data.count(before) != 1:
+            raise ValueError('iOS activity edit differs from composed input: ' + name)
+        data = data.replace(before, after)
+    return data
+
+
 def specialize(expanded, out, composer):
     expanded = expanded.resolve(strict=True)
     output = out.resolve()
@@ -178,6 +212,9 @@ def specialize(expanded, out, composer):
     manifest = json.loads((expanded / 'manifest.json').read_bytes())
     entries = {row['path']: row for row in manifest['files']}
     attachments = attachments_for_ios((expanded / 'files' / ATTACHMENTS).read_bytes())
+    activity = {name: activity_for_ios(name, (expanded / "files" / name).read_bytes())
+                for name in ACTIVITY_EDITS}
+    clock = (Path(__file__).resolve().parents[2] / ACTIVITY_CLOCK).read_bytes()
     diagnostics = {}
     for name, edits in DIAGNOSTIC_EDITS.items():
         data = attachments if name == ATTACHMENTS else (expanded / 'files' / name).read_bytes()
@@ -198,6 +235,12 @@ def specialize(expanded, out, composer):
         data = (expanded / 'files' / name).read_bytes()
         if entries[name]['sha256'] != composer.digest(data) or entries[name]['size'] != len(data):
             raise ValueError('iOS specialization input differs from shared manifest: ' + name)
+    for name in ACTIVITY_EDITS:
+        data = (expanded / 'files' / name).read_bytes()
+        if entries[name]['sha256'] != composer.digest(data) or entries[name]['size'] != len(data):
+            raise ValueError('iOS specialization input differs from shared manifest: ' + name)
+    if ACTIVITY_CLOCK in entries:
+        raise ValueError('The shared composition already has an iOS activity clock')
     provenance = json.loads((expanded / 'files' / PROVENANCE).read_bytes())
     module = 'chunks/chunk-GN6CQ3J4.js'
     if provenance['upstream']['version'] != '3.6.0' or provenance['modules'][module] != PIN:
@@ -227,6 +270,17 @@ def specialize(expanded, out, composer):
         manifest['files'].sort(key=lambda item: item['path'])
         for name, data in ((HELPER, changed), (PROVENANCE, composer.json_bytes(provenance)), (ATTACHMENTS, attachments),
                            (PRELOAD, preload), *diagnostics.items()):
+            (tree / 'files' / name).write_bytes(data)
+            entries[name]['sha256'] = composer.digest(data)
+            entries[name]['size'] = len(data)
+        clock_row = {'path': ACTIVITY_CLOCK, 'size': len(clock), 'sha256': composer.digest(clock)}
+        entries[ACTIVITY_CLOCK] = clock_row
+        manifest['files'].append(clock_row)
+        manifest['files'].sort(key=lambda item: item['path'])
+        clock_path = tree / 'files' / ACTIVITY_CLOCK
+        clock_path.parent.mkdir(parents=True, exist_ok=True)
+        clock_path.write_bytes(clock)
+        for name, data in activity.items():
             (tree / 'files' / name).write_bytes(data)
             entries[name]['sha256'] = composer.digest(data)
             entries[name]['size'] = len(data)

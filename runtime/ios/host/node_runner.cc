@@ -9,6 +9,7 @@
 
 #include <algorithm>
 #include <cstdio>
+#include <condition_variable>
 #include <cstdlib>
 #include <cstring>
 #include <memory>
@@ -19,6 +20,7 @@
 #include "publication_binding.h"
 #include "image_binding.h"
 #include "phone_binding.h"
+#include "activity_clock_binding.h"
 
 namespace {
 // Secondary threads get 512 KiB by default here, less than V8's stack limit assumes.
@@ -140,13 +142,25 @@ int RunEnvironment(const std::vector<std::string>& args, const std::vector<std::
 }
 
 struct Run {
+  dsh_ios::RunActivityClock activity;
+  std::mutex finished_mutex;
+  std::condition_variable finished_changed;
+  bool finished = false;
   std::vector<std::string> arguments;
   int result = 1;
 };
 
 void* RunOnEngineThread(void* raw) {
   auto* run = static_cast<Run*>(raw);
+  struct Finished {
+    Run* run;
+    ~Finished() {
+      { std::lock_guard<std::mutex> lock(run->finished_mutex); run->finished = true; }
+      run->finished_changed.notify_one();
+    }
+  } finished{run};
   if (!initialization) {
+    dsh_ios::RegisterActivityClockBinding();
     RegisterPhoneBinding();
     RegisterImageBinding();
     // Options parsed here hold for every later Environment. The host's argv is fixed
@@ -232,7 +246,17 @@ extern "C" __attribute__((visibility("default"))) int dsh_node_start(int argc, c
   pthread_attr_setstacksize(&attributes, kEngineStackBytes);
   const int created = pthread_create(&thread, &attributes, RunOnEngineThread, &run);
   pthread_attr_destroy(&attributes);
-  if (created == 0) pthread_join(thread, nullptr);
+  if (created == 0) {
+    // This existing native parent thread remains independent of Node's JS loop.
+    // It used to wait only in pthread_join; no extra heartbeat thread is added.
+    std::unique_lock<std::mutex> lock(run.finished_mutex);
+    run.activity.clock->Tick();
+    while (!run.finished_changed.wait_for(lock, dsh_ios::ActivityClock::kPeriod, [&] { return run.finished; })) {
+      run.activity.clock->Tick();
+    }
+    lock.unlock();
+    pthread_join(thread, nullptr);
+  }
   else run.result = RejectStartup("ERR_IOS_HOST_THREAD");
   {
     std::lock_guard<std::mutex> lock(environment_mutex);
