@@ -323,6 +323,60 @@ private final class LauncherIconChannel {
 
 // MARK: - dsh/files
 
+/// Only the engine's committed, private migration record authorizes old-root aliases.
+/// No history text is rewritten, and callers still validate the resolved file.
+private enum RelocatedGuestPaths {
+  private struct Marker: Decodable {
+    let version: Int
+    let currentRoot: String
+    let previousRoots: [String]
+  }
+
+  private static func validRoot(_ path: String) -> Bool {
+    guard path.hasPrefix("/"), path != "/", !path.contains("\0") else { return false }
+    return path.dropFirst().split(separator: "/", omittingEmptySubsequences: false)
+      .allSatisfy { !$0.isEmpty && $0 != "." && $0 != ".." }
+  }
+
+  static func map(_ path: String, root: String) -> String {
+    guard validRoot(root), path.hasPrefix("/"), !path.contains("\0") else { return path }
+    if path == root || path.hasPrefix(root + "/") { return path }
+    let home = root + "/root/.dsh"
+    guard let resolved = realpath(home, nil) else { return path }
+    let privateHome = String(cString: resolved)
+    free(resolved)
+    guard privateHome == home else { return path }
+    let fd = open(home + "/ios-container-paths.json", O_RDONLY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC)
+    guard fd >= 0 else { return path }
+    defer { close(fd) }
+    var info = stat()
+    let limit = 64 * 1024
+    guard fstat(fd, &info) == 0, (info.st_mode & mode_t(S_IFMT)) == mode_t(S_IFREG),
+      info.st_size > 0, info.st_size <= limit
+    else { return path }
+    var data = Data()
+    var buffer = [UInt8](repeating: 0, count: 4096)
+    while true {
+      let count = read(fd, &buffer, min(buffer.count, limit + 1 - data.count))
+      if count < 0 && errno == EINTR { continue }
+      guard count >= 0 else { return path }
+      if count == 0 { break }
+      data.append(contentsOf: buffer.prefix(count))
+      guard data.count <= limit else { return path }
+    }
+    guard let marker = try? JSONDecoder().decode(Marker.self, from: data), marker.version == 1,
+      validRoot(marker.currentRoot), marker.previousRoots.allSatisfy(validRoot)
+    else { return path }
+    // A second move can occur before JS updates currentRoot. Both it and the
+    // older roots therefore map to the native root of this launch.
+    let aliases = ([marker.currentRoot] + marker.previousRoots).sorted { $0.count > $1.count }
+    for old in aliases where path == old || path.hasPrefix(old + "/") {
+      return root + path.dropFirst(old.count)
+    }
+    return path
+  }
+}
+
 /// iOS tool paths are already absolute sandbox paths, not Android guest paths.
 /// This is a point-in-time lookup; the Dart caller opens the returned path later.
 private struct LocalEngineFiles {
@@ -336,7 +390,8 @@ private struct LocalEngineFiles {
 
   func resolve(_ path: String) -> String? {
     guard
-      let root = canonical(guestRoot.path), let file = canonical(path),
+      let root = canonical(guestRoot.path),
+      let file = canonical(RelocatedGuestPaths.map(path, root: root)),
       file.hasPrefix(root + "/"),
       let values = try? FileManager.default.attributesOfItem(atPath: file),
       values[.type] as? FileAttributeType == .typeRegular,

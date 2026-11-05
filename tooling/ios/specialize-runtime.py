@@ -21,6 +21,10 @@ AFTER = 'let e=y.encode(t),o=[];for(let r=0;r<e.length;r+=8192)o.push(String.fro
 # write WebP, so alpha stays in PNG. Each has to match exactly once, or the build stops.
 ATTACHMENTS = 'node_modules/@deepseek-ai/dsh-attachment-local/lib/index.js'
 IMAGE_CODEC = 'node_modules/@deepseek-ai/dsh-attachment-local/lib/ios-sharp.cjs'
+PRELOAD = 'runtime/ohos/preload.mjs'
+RELOCATION_FILES = ('runtime/ios/storage/relocate.mjs', 'runtime/ios/storage/preload.mjs')
+PRELOAD_BEFORE = "await import('./publication/preload.mjs');\n"
+PRELOAD_AFTER = PRELOAD_BEFORE + "await import('../ios/storage/preload.mjs');\n"
 # Keep platform diagnostics local to the iOS output; each exact edit must match once.
 DIAGNOSTIC_EDITS = {
     'runtime/ohos/process/rg.mjs': (
@@ -175,7 +179,13 @@ def specialize(expanded, out, composer):
             data = data.replace(before, after)
         diagnostics[name] = data
     codec = (Path(__file__).resolve().parents[2] / 'runtime/ios/image/ios-sharp.cjs').read_bytes()
-    for name in (HELPER, PROVENANCE, ATTACHMENTS, *DIAGNOSTIC_EDITS):
+    relocation = {name: (Path(__file__).resolve().parents[2] / name).read_bytes()
+                  for name in RELOCATION_FILES}
+    preload = (expanded / 'files' / PRELOAD).read_text()
+    if preload.count(PRELOAD_BEFORE) != 1 or '../ios/storage/preload.mjs' in preload:
+        raise ValueError('iOS relocation preload differs from the shared input')
+    preload = preload.replace(PRELOAD_BEFORE, PRELOAD_AFTER).encode()
+    for name in (HELPER, PROVENANCE, ATTACHMENTS, PRELOAD, *DIAGNOSTIC_EDITS):
         data = (expanded / 'files' / name).read_bytes()
         if entries[name]['sha256'] != composer.digest(data) or entries[name]['size'] != len(data):
             raise ValueError('iOS specialization input differs from shared manifest: ' + name)
@@ -197,14 +207,17 @@ def specialize(expanded, out, composer):
         stage = Path(temp) / 'result'
         tree = stage / 'expanded/dsh-runtime'
         shutil.copytree(expanded, tree)
-        if IMAGE_CODEC in entries:
-            raise ValueError('The shared composition already has an iOS image codec')
-        row = {'path': IMAGE_CODEC, 'size': len(codec), 'sha256': composer.digest(codec)}
-        entries[IMAGE_CODEC] = row
-        manifest['files'] = sorted([*manifest['files'], row], key=lambda item: item['path'])
-        (tree / 'files' / IMAGE_CODEC).write_bytes(codec)
+        for name, data in {IMAGE_CODEC: codec, **relocation}.items():
+            if name in entries:
+                raise ValueError('The shared composition already has an iOS-only file: ' + name)
+            row = {'path': name, 'size': len(data), 'sha256': composer.digest(data)}
+            entries[name] = row
+            manifest['files'].append(row)
+            (tree / 'files' / name).parent.mkdir(parents=True, exist_ok=True)
+            (tree / 'files' / name).write_bytes(data)
+        manifest['files'].sort(key=lambda item: item['path'])
         for name, data in ((HELPER, changed), (PROVENANCE, composer.json_bytes(provenance)), (ATTACHMENTS, attachments),
-                           *diagnostics.items()):
+                           (PRELOAD, preload), *diagnostics.items()):
             (tree / 'files' / name).write_bytes(data)
             entries[name]['sha256'] = composer.digest(data)
             entries[name]['size'] = len(data)

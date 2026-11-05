@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "host_core.h"
+#include "relocation_origin.h"
 
 extern "C" int dsh_node_start(int argc, char** argv);
 extern "C" int dsh_node_stop();
@@ -68,6 +69,7 @@ int dsh_host_start(const char* runtime_root, const char* guest_root, const char*
       if (phase != "exited" && phase != "error") throw dsh::HostError("ERR_IOS_HOST_ALREADY_STARTED", "The engine is still running");
       host.reset();
     }
+    dsh::ios::PreserveRelocationOrigin(options);
     auto next = std::make_unique<dsh::Host>();
     next->Start(std::move(options), dsh_node_start, dsh_node_stop);
     host = std::move(next);

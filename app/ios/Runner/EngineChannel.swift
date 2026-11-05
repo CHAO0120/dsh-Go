@@ -87,6 +87,110 @@ private final class NativeEngine {
   }
 }
 
+/// Read-only roots for preference relocation before the first engine start.
+private enum IOSContainerPaths {
+  private struct Marker: Decodable {
+    let version: Int
+    let currentRoot: String
+    let previousRoots: [String]
+  }
+  private static func valid(_ path: String) -> Bool {
+    path.hasPrefix("/") && path != "/" && !path.contains("\0") &&
+      path.dropFirst().split(separator: "/", omittingEmptySubsequences: false)
+        .allSatisfy { !$0.isEmpty && $0 != "." && $0 != ".." }
+  }
+  private static func canonical(_ path: String) -> String? {
+    guard valid(path), let result = realpath(path, nil) else { return nil }
+    defer { free(result) }
+    return String(cString: result)
+  }
+  // Missing is distinct from malformed: an invalid newer record cannot authorize
+  // falling back to a different older root.
+  private static func readRecord(_ path: String) -> (exists: Bool, data: Data?) {
+    let fd = open(path, O_RDONLY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC)
+    guard fd >= 0 else { return (errno != ENOENT, nil) }
+    defer { close(fd) }
+    var info = stat()
+    let limit = 64 * 1024
+    guard fstat(fd, &info) == 0, (info.st_mode & mode_t(S_IFMT)) == mode_t(S_IFREG),
+      info.st_size > 0, info.st_size <= limit else { return (true, nil) }
+    var data = Data()
+    var buffer = [UInt8](repeating: 0, count: 4096)
+    while true {
+      let count = read(fd, &buffer, min(buffer.count, limit + 1 - data.count))
+      if count < 0 && errno == EINTR { continue }
+      guard count >= 0 else { return (true, nil) }
+      if count == 0 { return (true, data) }
+      data.append(contentsOf: buffer.prefix(count))
+      guard data.count <= limit else { return (true, nil) }
+    }
+  }
+  // A malformed alias map cannot partially change workspace selection. Roots
+  // remain independently useful. Flatten chains, rejecting cycles and self maps.
+  private static func workspaceAliases(_ data: Data) -> [String: String] {
+    guard let object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+      let raw = object["workspaceAliases"] as? [String: String] else { return [:] }
+    func validID(_ id: String) -> Bool {
+      !id.isEmpty && !id.contains("\0")
+    }
+    guard raw.allSatisfy({ validID($0.key) && validID($0.value) }) else { return [:] }
+    var result: [String: String] = [:]
+    for source in raw.keys {
+      var target = source
+      var seen = Set<String>()
+      while let next = raw[target] {
+        guard seen.insert(target).inserted else { return [:] }
+        target = next
+      }
+      result[source] = target
+    }
+    return result
+  }
+  private static func record(in home: String) -> (roots: [String], aliases: [String: String]) {
+    let marker = readRecord(home + "/ios-container-paths.json")
+    if marker.exists {
+      guard let data = marker.data, let value = try? JSONDecoder().decode(Marker.self, from: data),
+        value.version == 1, valid(value.currentRoot), value.previousRoots.allSatisfy(valid) else { return ([], [:]) }
+      return ([value.currentRoot] + value.previousRoots, workspaceAliases(data))
+    }
+    for name in ["ios-relocation-origin.json", "ohos-host.patch.json"] {
+      let input = readRecord(home + "/" + name)
+      if !input.exists { continue }
+      guard let data = input.data,
+        let top = (try? JSONSerialization.jsonObject(with: data)) as? [[String: Any]] else { return ([], [:]) }
+      let entries = top + top.flatMap { $0["insert"] as? [[String: Any]] ?? [] }
+      func config(_ id: String) -> [String: Any]? {
+        let matches = entries.filter { $0["id"] as? String == id }
+        return matches.count == 1 ? matches[0]["config"] as? [String: Any] : nil
+      }
+      guard let working = config("working-directory")?["defaultDirectory"] as? String,
+        let sandbox = config("sandbox-policy")?["workspaceRoot"] as? String,
+        let subprocess = config("ohos-subprocess")?["workspaceRoots"] as? [String],
+        subprocess.count == 1, working == sandbox, subprocess[0] == working,
+        working.hasSuffix("/root/workspace") else { return ([], [:]) }
+      let root = String(working.dropLast("/root/workspace".count))
+      return (valid(root) ? [root] : [], [:])
+    }
+    return ([], [:])
+  }
+  static func snapshot(guestRoot: URL, support: URL) -> [String: Any] {
+    guard let guest = canonical(guestRoot.path) else { return [:] }
+    let home = guest + "/root/.dsh"
+    let saved = canonical(home) == home ? record(in: home) : (roots: [], aliases: [:])
+    let aliases = Array(Set(saved.roots)).sorted()
+    var result: [String: Any] = ["guestRoot": guest, "previousRoots": aliases, "workspaceAliases": saved.aliases]
+    if let currentSupport = canonical(support.path), guest == currentSupport + "/runtime/rootfs" {
+      result["supportRoot"] = currentSupport
+      result["previousSupportRoots"] = aliases.compactMap { old -> String? in
+        guard old.hasSuffix("/runtime/rootfs") else { return nil }
+        let oldSupport = String(old.dropLast("/runtime/rootfs".count))
+        return valid(oldSupport) ? oldSupport : nil
+      }
+    }
+    return result
+  }
+}
+
 /// Tells the engine when the app moves between foreground and background. It only ever
 /// repeats this idempotent observation, never a tool or a prompt.
 private final class EngineLifecycle: NSObject, URLSessionTaskDelegate {
@@ -437,6 +541,9 @@ final class EngineChannel: NSObject, FlutterStreamHandler {
     let arguments = call.arguments as? [String: Any] ?? [:]
     // guestRoot is read before the first frame and touches no engine state.
     if call.method == "guestRoot" { return result(guestRoot.path) }
+    if call.method == "containerPaths" {
+      return result(IOSContainerPaths.snapshot(guestRoot: guestRoot, support: filesDirectory))
+    }
     queue.async { [self] in
       do {
         initialize()
