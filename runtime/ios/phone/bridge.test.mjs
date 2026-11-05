@@ -81,9 +81,11 @@ test('only one native request is leased at a time and declining releases the nex
 });
 test('timeout after begin reports unknown; no automatic replay', async t => {
   const { bridge, post, execution } = await fixture(t, 100);
+  t.mock.timers.enable({ apis: ['setTimeout'] });
   const waiting = bridge.call('clipboard', { set: 'one' }, execution);
   const { request } = (await post('/claim')).body;
-  await post('/begin', { id: request.id });
+  assert.equal((await post('/begin', { id: request.id })).status, 200);
+  t.mock.timers.tick(100);
   assert.match((await waiting).content[0].text, /结果未知/);
   assert.equal((await post('/claim')).body.request, null);
 });
