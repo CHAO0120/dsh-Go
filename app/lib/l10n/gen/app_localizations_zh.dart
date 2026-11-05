@@ -6941,13 +6941,13 @@ class L10nZh extends L10n {
   String get harmonySchedulesLocal => '本机的任务只在应用运行时触发：应用被系统挂起时，到点不会运行';
 
   @override
-  String get harmonyPageUnavailable => '鸿蒙版暂时没有这个页面';
+  String get harmonyPageUnavailable => '鸿蒙不支持这项功能';
 
   @override
   String get harmonyNotificationSettingsFailed => '没能打开系统设置。到「设置 → 通知和状态栏 → DSH Go」里开启';
 
   @override
-  String get harmonySearchUnavailable => '鸿蒙版暂时没有这项功能';
+  String get harmonySearchUnavailable => '鸿蒙版没有这项功能';
 
   @override
   String get harmonyCredentialsSection => '密钥';
@@ -7050,10 +7050,10 @@ class L10nZh extends L10n {
   String get harmonyKwEngineUninstall => '卸载,删除运行环境,清理本机数据';
 
   @override
-  String get harmonyUpdateNoticeTitle => '到发布页下载新版';
+  String get harmonyUpdateNoticeTitle => '到发布页看获取方式';
 
   @override
-  String get harmonyUpdateNoticeText => '鸿蒙版不能在应用内更新。发布页可能还没有鸿蒙安装包，有的话下载后手动安装。';
+  String get harmonyUpdateNoticeText => '鸿蒙版不能在应用内更新。发布页可能还没有鸿蒙安装包。';
 
   @override
   String get harmonyUpdateNoticeNoPage => '这个版本没有给出下载页，过些时候再看看。';
@@ -7105,6 +7105,48 @@ class L10nZh extends L10n {
 
   @override
   String get harmonyVoiceLocalLine => '鸿蒙本机用系统识别，没有语音模型';
+
+  @override
+  String get harmonyPasswordStorageHelp => '只保存在这台手机上，由系统密钥库加密';
+
+  @override
+  String get harmonyKeyStorageHelp => '只保存在这台手机上，由系统密钥库加密。支持 Ed25519、RSA、ECDSA';
+
+  @override
+  String get harmonyUsageNotSent => '鸿蒙版暂不发送使用统计';
+
+  @override
+  String get harmonyVoiceSystemHint => '使用系统的语音识别';
+
+  @override
+  String get harmonyVoiceSystemHintChinese => '使用系统的语音识别，只认中文';
+
+  @override
+  String get harmonyVoiceAutoHint => '用系统的语音识别';
+
+  @override
+  String get harmonyVoiceSystemUnavailable => '系统语音识别不可用';
+
+  @override
+  String get harmonyNetworkRelayOnly => '当前版本走 Relay 中继，全程端到端加密。';
+
+  @override
+  String get harmonyNetworkFallbackRelayOnly => '当前版本只走 Relay 中继';
+
+  @override
+  String get harmonySetupStay => '安装时请留在这个页面';
+
+  @override
+  String get harmonyLaunchEmbedded => '应用内启动';
+
+  @override
+  String get harmonyLaunchNodeExited => '引擎已退出';
+
+  @override
+  String get harmonyKwAccent => '颜色,主题色,强调色';
+
+  @override
+  String get harmonyKwPets => '宠物,小鲸,桌宠,鲸鱼';
 
   @override
   String get hostDetailsConnectionType => '连接方式';

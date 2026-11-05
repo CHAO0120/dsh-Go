@@ -19,11 +19,11 @@ DSH_NODE_HEADERS=/path/to/node-v24.22.1/src \
 - 图标是 1024px 分层图，来自 `app/assets/brand/tile.svg`；三个备用图标和两个快捷方式图标由 `tooling/ohos/make-launcher-icons.py` 生成。
 - 长按桌面图标有新对话和语音输入。最近对话发不到桌面，公开的 `shortcutManager` 没有发布接口。语音输入只在系统说明是桌面快捷方式拉起时才开麦克风，其他应用带同样参数只会开新对话。
 - 设置 › 主题可以换桌面图标（`bundleManager.setAlternateIcon`）。文档没有提到确认弹窗，切换后的表现待真机确认；图片快捷方式没有公开接口，仍然隐藏。
-- 冷启动有默认启动动画（`dsh/launch`）。系统启动页的图标不能跟着备用图标换，所以动画里总是默认图标；自定义启动画面仍然隐藏。
+- 冷启动有启动动画（`dsh/launch`），设置 › 主题可以换自定义启动画面。系统启动页的图标不能跟着备用图标换，所以系统启动页上总是默认图标。
 
 ## 依赖
 
-插件的鸿蒙实现在 `pubspec_overrides.ohos.yaml`，按 tag 锁定，只在构建 HAP 时生效。`material_ui`、`cupertino_ui`、`xterm`、`gpt_markdown` 没有鸿蒙 fork，它们的 `switch (defaultTargetPlatform)` 因为多出 `TargetPlatform.ohos` 而编不过，构建时由 `tooling/ohos/vendor_platform_switches.py` 复制到 `.vendor` 并让 `ohos` 走 android 分支。框架里长按振动、长按拖选的放大镜、滚动时工具栏淡出直接读 `defaultTargetPlatform`，`ThemeData.platform` 改不到，由 `tooling/ohos/patch_framework.py` 在 SDK 里改这几处分支（Dart 由 Actions 编译，所以要走那边才生效）。`flutter_webrtc` 没有鸿蒙实现，远程连接会自动退回中继。`share_plus`、`connectivity_plus` 没有可用的公开 fork，由 ArkTS 侧实现它们的通道（待做）。
+插件的鸿蒙实现在 `pubspec_overrides.ohos.yaml`，按 tag 锁定，只在构建 HAP 时生效。`material_ui`、`cupertino_ui`、`xterm`、`gpt_markdown` 没有鸿蒙 fork，它们的 `switch (defaultTargetPlatform)` 因为多出 `TargetPlatform.ohos` 而编不过，构建时由 `tooling/ohos/vendor_platform_switches.py` 复制到 `.vendor` 并让 `ohos` 走 android 分支。框架里长按振动、长按拖选的放大镜、滚动时工具栏淡出直接读 `defaultTargetPlatform`，`ThemeData.platform` 改不到，由 `tooling/ohos/patch_framework.py` 在 SDK 里改这几处分支（Dart 由 Actions 编译，所以要走那边才生效）。`flutter_webrtc` 没有鸿蒙实现，远程连接会自动退回中继。`share_plus`、`connectivity_plus` 没有可用的公开 fork，由 ArkTS 侧实现它们的通道（`HmsSharePlugin.ets`、`ConnectivityPlugin.ets`）。
 
 ## 宿主
 

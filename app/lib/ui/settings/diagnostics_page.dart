@@ -164,6 +164,7 @@ class RuntimeLaunchFacts extends StatelessWidget {
     String method(String mode) => switch (mode) {
       'direct' => l10n.phoneLaunchDirect,
       'proot' => l10n.phoneLaunchCompatible,
+      'ohos-embedded' => l10n.harmonyLaunchEmbedded,
       _ => mode,
     };
     // One child of the card: keep SheetGroup's 2dp between its rows.
@@ -198,6 +199,8 @@ class RuntimeLaunchFacts extends StatelessWidget {
             label: l10n.phoneLaunchFailureReason,
             value: reason == 'startFailed'
                 ? l10n.phoneLaunchStartFailed
+                : reason == 'ohos_node_exited'
+                ? l10n.harmonyLaunchNodeExited
                 : reason.startsWith('exit:') && int.tryParse(reason.substring(5)) != null
                 ? l10n.phoneLaunchExited(reason.substring(5))
                 : reason,

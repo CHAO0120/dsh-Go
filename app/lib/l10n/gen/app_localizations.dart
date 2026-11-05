@@ -12725,7 +12725,7 @@ abstract class L10n {
   /// No description provided for @harmonyPageUnavailable.
   ///
   /// In zh, this message translates to:
-  /// **'鸿蒙版暂时没有这个页面'**
+  /// **'鸿蒙不支持这项功能'**
   String get harmonyPageUnavailable;
 
   /// No description provided for @harmonyNotificationSettingsFailed.
@@ -12737,7 +12737,7 @@ abstract class L10n {
   /// No description provided for @harmonySearchUnavailable.
   ///
   /// In zh, this message translates to:
-  /// **'鸿蒙版暂时没有这项功能'**
+  /// **'鸿蒙版没有这项功能'**
   String get harmonySearchUnavailable;
 
   /// No description provided for @harmonyCredentialsSection.
@@ -12941,13 +12941,13 @@ abstract class L10n {
   /// No description provided for @harmonyUpdateNoticeTitle.
   ///
   /// In zh, this message translates to:
-  /// **'到发布页下载新版'**
+  /// **'到发布页看获取方式'**
   String get harmonyUpdateNoticeTitle;
 
   /// No description provided for @harmonyUpdateNoticeText.
   ///
   /// In zh, this message translates to:
-  /// **'鸿蒙版不能在应用内更新。发布页可能还没有鸿蒙安装包，有的话下载后手动安装。'**
+  /// **'鸿蒙版不能在应用内更新。发布页可能还没有鸿蒙安装包。'**
   String get harmonyUpdateNoticeText;
 
   /// No description provided for @harmonyUpdateNoticeNoPage.
@@ -13051,6 +13051,90 @@ abstract class L10n {
   /// In zh, this message translates to:
   /// **'鸿蒙本机用系统识别，没有语音模型'**
   String get harmonyVoiceLocalLine;
+
+  /// No description provided for @harmonyPasswordStorageHelp.
+  ///
+  /// In zh, this message translates to:
+  /// **'只保存在这台手机上，由系统密钥库加密'**
+  String get harmonyPasswordStorageHelp;
+
+  /// No description provided for @harmonyKeyStorageHelp.
+  ///
+  /// In zh, this message translates to:
+  /// **'只保存在这台手机上，由系统密钥库加密。支持 Ed25519、RSA、ECDSA'**
+  String get harmonyKeyStorageHelp;
+
+  /// No description provided for @harmonyUsageNotSent.
+  ///
+  /// In zh, this message translates to:
+  /// **'鸿蒙版暂不发送使用统计'**
+  String get harmonyUsageNotSent;
+
+  /// No description provided for @harmonyVoiceSystemHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'使用系统的语音识别'**
+  String get harmonyVoiceSystemHint;
+
+  /// No description provided for @harmonyVoiceSystemHintChinese.
+  ///
+  /// In zh, this message translates to:
+  /// **'使用系统的语音识别，只认中文'**
+  String get harmonyVoiceSystemHintChinese;
+
+  /// No description provided for @harmonyVoiceAutoHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'用系统的语音识别'**
+  String get harmonyVoiceAutoHint;
+
+  /// No description provided for @harmonyVoiceSystemUnavailable.
+  ///
+  /// In zh, this message translates to:
+  /// **'系统语音识别不可用'**
+  String get harmonyVoiceSystemUnavailable;
+
+  /// No description provided for @harmonyNetworkRelayOnly.
+  ///
+  /// In zh, this message translates to:
+  /// **'当前版本走 Relay 中继，全程端到端加密。'**
+  String get harmonyNetworkRelayOnly;
+
+  /// No description provided for @harmonyNetworkFallbackRelayOnly.
+  ///
+  /// In zh, this message translates to:
+  /// **'当前版本只走 Relay 中继'**
+  String get harmonyNetworkFallbackRelayOnly;
+
+  /// No description provided for @harmonySetupStay.
+  ///
+  /// In zh, this message translates to:
+  /// **'安装时请留在这个页面'**
+  String get harmonySetupStay;
+
+  /// No description provided for @harmonyLaunchEmbedded.
+  ///
+  /// In zh, this message translates to:
+  /// **'应用内启动'**
+  String get harmonyLaunchEmbedded;
+
+  /// No description provided for @harmonyLaunchNodeExited.
+  ///
+  /// In zh, this message translates to:
+  /// **'引擎已退出'**
+  String get harmonyLaunchNodeExited;
+
+  /// No description provided for @harmonyKwAccent.
+  ///
+  /// In zh, this message translates to:
+  /// **'颜色,主题色,强调色'**
+  String get harmonyKwAccent;
+
+  /// No description provided for @harmonyKwPets.
+  ///
+  /// In zh, this message translates to:
+  /// **'宠物,小鲸,桌宠,鲸鱼'**
+  String get harmonyKwPets;
 
   /// No description provided for @hostDetailsConnectionType.
   ///

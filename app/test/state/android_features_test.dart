@@ -241,6 +241,28 @@ void main() {
       expect(ids('日历', android: true), isNot(contains('page:systemActions')));
     });
 
+    test('on HarmonyOS: the words for what isn\'t there don\'t lead to pages without it', () {
+      for (final q in ['取色', 'wallpaper']) {
+        expect(ids(q, android: false), isNot(contains('accent')), reason: q);
+        expect(ids(q, android: true), contains('accent'), reason: q);
+      }
+      for (final q in ['悬浮', 'overlay']) {
+        expect(ids(q, android: false), isNot(contains('page:pets')), reason: q);
+        expect(ids(q, android: true), contains('page:pets'), reason: q);
+      }
+      expect(ids('主题色', android: false), contains('accent'));
+      expect(ids('桌宠', android: false), contains('page:pets'));
+    });
+
+    test('what isn\'t there isn\'t promised for later', () {
+      for (final l in [_zh, _en]) {
+        for (final text in [l.harmonyPageUnavailable, l.harmonySearchUnavailable]) {
+          expect(text, isNot(contains('暂时')), reason: text);
+          expect(text, isNot(contains('yet')), reason: text);
+        }
+      }
+    });
+
     test('the progress notification goes by its own name on HarmonyOS, the live activity on Android', () {
       for (final q in ['进度通知', '通知栏进度', '显示进度通知', 'progress notification']) {
         expect(ids(q, android: false), contains('notify-live'), reason: q);

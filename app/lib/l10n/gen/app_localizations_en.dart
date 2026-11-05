@@ -7336,14 +7336,14 @@ class L10nEn extends L10n {
       'Tasks on this phone only fire while the app is running: they won\'t run on time while the system has it suspended';
 
   @override
-  String get harmonyPageUnavailable => 'This page isn\'t available on HarmonyOS yet';
+  String get harmonyPageUnavailable => 'HarmonyOS doesn\'t support this';
 
   @override
   String get harmonyNotificationSettingsFailed =>
       'Couldn’t open system settings. Turn on notifications in Settings → Notifications & status bar → DSH Go.';
 
   @override
-  String get harmonySearchUnavailable => 'This isn\'t available on HarmonyOS yet';
+  String get harmonySearchUnavailable => 'This isn\'t available on HarmonyOS';
 
   @override
   String get harmonyCredentialsSection => 'Keys';
@@ -7456,11 +7456,11 @@ class L10nEn extends L10n {
   String get harmonyKwEngineUninstall => 'uninstall,remove runtime,clear local data';
 
   @override
-  String get harmonyUpdateNoticeTitle => 'Download it from the release page';
+  String get harmonyUpdateNoticeTitle => 'See the release page for how to get it';
 
   @override
   String get harmonyUpdateNoticeText =>
-      'The HarmonyOS build can\'t update itself. The release page may not have a HarmonyOS package yet; if it does, download and install it by hand.';
+      'HarmonyOS can\'t update inside the app, and the release page may not have a HarmonyOS package yet.';
 
   @override
   String get harmonyUpdateNoticeNoPage => 'This version has no download page yet. Check again later.';
@@ -7514,6 +7514,49 @@ class L10nEn extends L10n {
 
   @override
   String get harmonyVoiceLocalLine => 'On-device HarmonyOS uses the system\'s recognition. There\'s no voice model';
+
+  @override
+  String get harmonyPasswordStorageHelp => 'Saved only on this phone, encrypted by the system keystore';
+
+  @override
+  String get harmonyKeyStorageHelp =>
+      'Saved only on this phone, encrypted by the system keystore. Supports Ed25519, RSA and ECDSA.';
+
+  @override
+  String get harmonyUsageNotSent => 'Usage statistics aren\'t sent on HarmonyOS for now';
+
+  @override
+  String get harmonyVoiceSystemHint => 'Uses the system\'s speech recognition';
+
+  @override
+  String get harmonyVoiceSystemHintChinese => 'Uses the system\'s speech recognition, Chinese only';
+
+  @override
+  String get harmonyVoiceAutoHint => 'Uses the system\'s speech recognition';
+
+  @override
+  String get harmonyVoiceSystemUnavailable => 'The system\'s speech recognition isn\'t available';
+
+  @override
+  String get harmonyNetworkRelayOnly => 'This version goes through the relay, end-to-end encrypted the whole way.';
+
+  @override
+  String get harmonyNetworkFallbackRelayOnly => 'This version only uses the relay';
+
+  @override
+  String get harmonySetupStay => 'Stay on this page while it installs';
+
+  @override
+  String get harmonyLaunchEmbedded => 'Inside the app';
+
+  @override
+  String get harmonyLaunchNodeExited => 'The engine exited';
+
+  @override
+  String get harmonyKwAccent => 'color,colour,accent,palette';
+
+  @override
+  String get harmonyKwPets => 'pet,pets,companion,whale';
 
   @override
   String get hostDetailsConnectionType => 'Connection type';

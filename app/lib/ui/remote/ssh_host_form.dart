@@ -9,6 +9,7 @@ import '../../l10n/l10n.dart';
 import '../../remote/ssh/ssh_link.dart';
 import '../../state/attachments.dart';
 import '../../state/connection_state.dart';
+import '../../state/android_features.dart';
 import '../../state/hosts_state.dart';
 import '../providers/provider_widgets.dart' show FormFieldBlock, FormFieldGroup;
 import '../common/app_dialog.dart';
@@ -481,9 +482,12 @@ class _SshHostFormPageState extends ConsumerState<SshHostFormPage> {
             ),
             SettingsSection(
               title: l10n.remoteAuthentication,
-              footer: Text(
-                _auth == SshAuthMethod.password ? l10n.remotePasswordStorageHelp : l10n.remoteKeyStorageHelp,
-              ),
+              footer: Text(switch ((_auth == SshAuthMethod.password, ref.watch(operatingSystemProvider) == 'ohos')) {
+                (true, true) => l10n.harmonyPasswordStorageHelp,
+                (false, true) => l10n.harmonyKeyStorageHelp,
+                (true, false) => l10n.remotePasswordStorageHelp,
+                (false, false) => l10n.remoteKeyStorageHelp,
+              }),
               children: [
                 FormFieldGroup(
                   children: [

@@ -165,7 +165,13 @@ String _join(List<Object?> parts, {bool mono = false}) {
 String _android(Map<String, Object?> device) {
   final version = device['android'];
   final sdk = device['sdkInt'];
-  if (version == null && sdk == null) return '';
+  if (version == null && sdk == null) {
+    // HarmonyOS names them itself (OhosDeviceFacts.ets).
+    final os = device['osVersion'];
+    final api = device['apiVersion'];
+    if (os == null && api == null) return '';
+    return os == null ? 'API $api' : '$os${api == null ? '' : ' (API $api)'}';
+  }
   return version == null ? 'SDK $sdk' : 'Android $version${sdk == null ? '' : ' (SDK $sdk)'}';
 }
 

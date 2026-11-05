@@ -2,12 +2,16 @@ import 'package:dsh_app/l10n/l10n.dart';
 import 'package:dsh_app/state/android_features.dart';
 import 'package:dsh_app/state/hosts_state.dart';
 import 'package:dsh_app/state/voice_settings.dart';
+import 'package:dsh_app/state/voice_state.dart';
+import 'package:dsh_app/ui/chat/voice/voice_bridge.dart';
 import 'package:dsh_app/ui/settings/voice_settings_page.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../chat/support/composer_fakes.dart' show FakeVoiceBridge;
 import '../chat/support/harness.dart';
 import '../phone/support.dart' show FixedActiveHost, FixedHosts;
 
@@ -37,7 +41,12 @@ void main() {
 
   group('语音模型 on HarmonyOS', () {
     final zh = lookupL10n(AppLocale.zhCN);
-    Future<void> page(WidgetTester tester, String os, {HostRef host = HostRef.local}) async {
+    Future<void> page(
+      WidgetTester tester,
+      String os, {
+      HostRef host = HostRef.local,
+      List<String> languages = const [],
+    }) async {
       tester.view.devicePixelRatio = 1;
       tester.view.physicalSize = const Size(390, 1400);
       addTearDown(tester.view.reset);
@@ -48,6 +57,9 @@ void main() {
             operatingSystemProvider.overrideWithValue(os),
             activeHostProvider.overrideWith(() => FixedActiveHost(host)),
             hostsProvider.overrideWith(FixedHosts.new),
+            voiceBridgeProvider.overrideWithValue(
+              FakeVoiceBridge(caps: VoiceCapabilities(recognizer: true, recorder: true, languages: languages)),
+            ),
           ],
         ),
       );
@@ -55,6 +67,40 @@ void main() {
     }
 
     const engine = ValueKey('voice-mode-engine');
+
+    testWidgets('系统 says it is the system\'s, and Chinese only when that is all it takes', (tester) async {
+      await page(tester, 'ohos', languages: const ['zh-CN']);
+      expect(find.text(zh.harmonyVoiceSystemHintChinese), findsOneWidget);
+      expect(find.text(zh.voiceModeSystemHint), findsNothing);
+      expect(find.text(zh.harmonyVoiceAutoHint), findsOneWidget);
+    });
+
+    testWidgets('with no word on languages it doesn\'t guess', (tester) async {
+      await page(tester, 'ohos');
+      expect(find.text(zh.harmonyVoiceSystemHint), findsOneWidget);
+      expect(find.text(zh.harmonyVoiceSystemHintChinese), findsNothing);
+    });
+
+    testWidgets('on Android its hints stay', (tester) async {
+      await page(tester, 'android', languages: const ['zh-CN']);
+      expect(find.text(zh.voiceModeSystemHint), findsOneWidget);
+      expect(find.text(zh.voiceModeAutoHint), findsOneWidget);
+    });
+
+    test('the bridge reads what the native side says it takes', () async {
+      const methods = MethodChannel('dsh/voice');
+      final messenger = TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+      messenger.setMockMethodCallHandler(
+        methods,
+        (call) async => {
+          'recognizer': true,
+          'recorder': true,
+          'languages': ['zh-CN', 7],
+        },
+      );
+      addTearDown(() => messenger.setMockMethodCallHandler(methods, null));
+      expect((await MethodChannelVoiceBridge().capabilities()).languages, ['zh-CN']);
+    });
 
     testWidgets('on its own engine: a plain line instead of a mode that can only loop', (tester) async {
       await page(tester, 'ohos');

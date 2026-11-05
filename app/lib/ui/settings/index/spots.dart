@@ -474,6 +474,7 @@ final _pages = <SettingsPageMeta>[
     title: (l) => l.botsPets,
     group: _look,
     keywords: (l) => l.searchKwPets,
+    ohosKeywords: (l) => l.harmonyKwPets,
     freq: Freq.medium,
     links: const ['pets'],
   ),
@@ -787,6 +788,7 @@ abstract final class Spots {
     page: SettingsPageId.appearance,
     title: (l) => l.pluginsColors,
     keywords: (l) => l.searchKwAccent,
+    ohosKeywords: (l) => l.harmonyKwAccent,
   );
   static final tileStyle = SettingSpot(
     'tile-style',

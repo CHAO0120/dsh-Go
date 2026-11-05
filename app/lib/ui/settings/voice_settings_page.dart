@@ -4,8 +4,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../l10n/l10n.dart';
+import '../../state/android_features.dart';
 import '../../state/voice_model_state.dart';
 import '../../state/voice_settings.dart';
+import '../../state/voice_state.dart';
 import '../common/app_dialog.dart';
 import '../shell/page_frame.dart';
 import '../theme/app_icons.dart';
@@ -103,6 +105,9 @@ class _VoiceSettingsPageState extends ConsumerState<VoiceSettingsPage> {
     final harmonyLocal = ref.watch(harmonyLocalVoiceProvider);
     final stored = ref.watch(voiceSettingsProvider);
     final selected = harmonyLocal ? voiceModeOnHarmonyLocal(stored) : stored;
+    final ohos = ref.watch(operatingSystemProvider) == 'ohos';
+    final languages = ohos ? ref.watch(voiceCapabilitiesProvider).value?.languages : null;
+    final chineseOnly = languages != null && languages.isNotEmpty && languages.every((l) => l.startsWith('zh'));
     return AppPage.list(
       title: l10n.voiceSettingsTitle,
       children: [
@@ -119,8 +124,13 @@ class _VoiceSettingsPageState extends ConsumerState<VoiceSettingsPage> {
                     key: ValueKey('voice-mode-${mode.name}'),
                     title: voiceModeLabel(l10n, mode),
                     subtitle: switch (mode) {
-                      VoiceMode.auto => l10n.voiceModeAutoHint,
-                      VoiceMode.system => l10n.voiceModeSystemHint,
+                      VoiceMode.auto => harmonyLocal ? l10n.harmonyVoiceAutoHint : l10n.voiceModeAutoHint,
+                      VoiceMode.system =>
+                        !ohos
+                            ? l10n.voiceModeSystemHint
+                            : chineseOnly
+                            ? l10n.harmonyVoiceSystemHintChinese
+                            : l10n.harmonyVoiceSystemHint,
                       VoiceMode.engine => l10n.voiceModeEngineHint,
                     },
                     trailing: SizedBox.square(
