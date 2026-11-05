@@ -163,11 +163,15 @@ export class RuntimeController {
 
   private async prepareRecovery(): Promise<void> {
     if (this.resetRequested) throw new RuntimeChannelError('ohos_restart_required', '重置已请求，请重新打开应用后继续。');
+    const recovering = this.recovery.status().resetPending;
     await this.readInstallation();
     await this.recovery.initialize(Date.now(), (): Promise<void> => this.installPayload(), nativeHostTouched);
     if (this.manifest !== null) {
       this.installed = await this.installer.installed();
-      if (this.current() && !(await this.storage.exists(this.installer.base + '/installing.json'))) this.setupError = null;
+      if (this.current() && !(await this.storage.exists(this.installer.base + '/installing.json'))) {
+        this.setupError = null;
+        if (recovering && !this.recovery.status().resetPending) this.lastError = null;
+      }
     }
   }
 
@@ -363,6 +367,7 @@ export class RuntimeController {
       this.installed = await this.installer.installed();
       this.setupError = null;
     } catch (error) {
+      if (this.recovery.status().resetPending) this.initialized = null;
       this.lastError = error instanceof RuntimeChannelError ? error.message : '运行时安装失败，保留中断记录；请重试安装。';
       throw error as Error;
     } finally {

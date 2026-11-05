@@ -1071,6 +1071,98 @@ function resetPlugin(c) {
   return {call:(args)=>new Promise(resolve=>plugin.onMethodCall(new MethodCall('reset',new Map(Object.entries(args))),{
     success:value=>resolve({value}),error:(code,message)=>resolve({code,message}),notImplemented:()=>resolve({missing:true})})),close:()=>plugin.onDetachedFromEngine(binding)};
 }
+
+test('卸载后显式安装的载荷 I/O 失败可在同一 Controller 重试并恢复保留项', async () => {
+  let c = await controllerCase('uninstall-install-retry');
+  await c.controller.install(false);
+  const kept = c.dir + '/runtime/rootfs/root/.dsh/.env';
+  await fs.mkdir(path.dirname(kept), { recursive: true });
+  await fs.writeFile(kept, 'kept-settings');
+  const reset = resetPlugin(c);
+  try {
+    assert.equal((await reset.call({ keep: ['pluginsAndSettings'], reinstall: false })).code, 'ohos_reset_committed');
+  } finally { reset.close(); }
+  c = await reopenCase(c);
+  assert.equal(c.controller.snapshot().get('waitingInstall'), true);
+  const plugin = new RuntimePlugin();
+  const binding = { getApplicationContext: () => c.context,
+    getBinaryMessenger: () => ({ setMessageHandler() {} }) };
+  plugin.onAttachedToEngine(binding);
+  const invoke = method => new Promise(resolve => plugin.onMethodCall(new MethodCall(method, new Map()), {
+    success: value => resolve({ value }), error: (code, message) => resolve({ code, message }),
+    notImplemented: () => resolve({ missing: true })
+  }));
+  const install = () => invoke('install');
+  const open = fileIo.open;
+  let interrupted = false;
+  fileIo.open = async (...args) => {
+    if (!interrupted && String(args[0]).includes('/dsh-runtime/')) {
+      interrupted = true;
+      throw new Error('transient payload filesystem I/O');
+    }
+    return open(...args);
+  };
+  try {
+    const first = await install();
+    fileIo.open = open;
+    assert.equal(interrupted, true);
+    assert.equal(first.code, 'ohos_runtime_error');
+    assert.match(c.controller.snapshot().get('error'), /请重试安装/);
+    const record = JSON.parse(await fs.readFile(c.dir + '/dsh-recovery/reset.json', 'utf8'));
+    assert.equal(record.stage, 'installing');
+    assert.equal(c.controller.snapshot().get('resetPending'), true);
+    assert.equal(nativeHostModule.nativeHostTouched(), false);
+    const keptCopy = c.dir + '/dsh-recovery/keep-' + record.id + '/root/.dsh/.env';
+    assert.equal(await fs.readFile(keptCopy, 'utf8'), 'kept-settings');
+    fileIo.open = async (...args) => {
+      if (String(args[0]).includes('/dsh-runtime/')) throw new Error('payload I/O still unavailable');
+      return open(...args);
+    };
+    assert.equal((await install()).code, 'ohos_runtime_error');
+    assert.equal(c.controller.snapshot().get('resetPending'), true);
+    assert.equal(nativeHostModule.nativeHostTouched(), false);
+    assert.equal(JSON.parse(await fs.readFile(c.dir + '/dsh-recovery/reset.json', 'utf8')).stage, 'installing');
+    assert.equal(await fs.readFile(keptCopy, 'utf8'), 'kept-settings');
+    fileIo.open = open;
+    const recoveredStatus = await invoke('getStatus');
+    assert.equal(recoveredStatus.code, undefined);
+    assert.equal(recoveredStatus.value.get('phase'), 'installed');
+    assert.equal(recoveredStatus.value.get('error'), null);
+    assert.equal((await install()).code, undefined);
+    assert.equal(c.controller.snapshot().get('phase'), 'installed');
+    assert.equal(c.controller.snapshot().get('resetPending'), false);
+    assert.equal(c.controller.snapshot().get('waitingInstall'), false);
+    assert.equal(await fs.readFile(kept, 'utf8'), 'kept-settings');
+    assert.equal(nativeHostModule.nativeHostTouched(), false);
+    await assert.rejects(fs.access(c.dir + '/dsh-recovery/reset.json'), { code: 'ENOENT' });
+  } finally { fileIo.open = open; plugin.onDetachedFromEngine(binding); }
+});
+
+test('恢复完成后最后一次启动记录读取失败不使两层初始化缓存失配', async () => {
+  let c = await controllerCase('install-finished-boot-read');
+  await c.controller.install(false);
+  await assert.rejects(c.controller.reset([], false), { code: 'ohos_reset_committed' });
+  c = await reopenCase(c);
+  const readText = fileIo.readText;
+  let interrupted = false;
+  fileIo.readText = async (...args) => {
+    if (!interrupted && args[0] === c.dir + '/dsh-recovery/boot.json') {
+      const resetExists = await fs.access(c.dir + '/dsh-recovery/reset.json').then(() => true, () => false);
+      if (!resetExists) { interrupted = true; throw new Error('final boot read interrupted'); }
+    }
+    return readText(...args);
+  };
+  try {
+    await assert.rejects(c.controller.install(false), /final boot read interrupted/);
+    assert.equal(interrupted, true);
+    assert.equal(c.controller.snapshot().get('resetPending'), false);
+    fileIo.readText = readText;
+    await c.controller.install(false);
+    await c.controller.start(null, false, null, false);
+    assert.equal(native.starts.length, 1);
+  } finally { fileIo.readText = readText; c.controller.stop(); }
+});
+
 test('recovery: two unclean engine generations persist strikes/failure; clearing notice cannot reopen automatic-start budget',async()=>{
  let c=await controllerCase('rescue-two-exits');await c.controller.install(false);
  for(let i=0;i<2;i++){

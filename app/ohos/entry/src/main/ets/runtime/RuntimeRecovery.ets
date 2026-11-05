@@ -216,7 +216,7 @@ export class RuntimeRecovery {
       this.waitingInstall = false;
       await this.recoverReset(record, install, nativeLoaded);
       this.boot = bootRecord(await this.storage.read(this.directory + '/boot.json'));
-    });
+    }).catch((error: Error): void => { if (this.resetPending) this.initialized = null; throw error; });
   }
 
   private failure(kind: string, at: number, exitCode: number): RecoveryFailure {
