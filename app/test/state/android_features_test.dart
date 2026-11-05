@@ -540,6 +540,25 @@ void main() {
       expect(find.byKey(const SpotKey('page:background')), findsOneWidget);
     });
 
+    testWidgets('on HarmonyOS, a build that may ask for a long task: its hint says so', (tester) async {
+      tester.view.devicePixelRatio = 2;
+      tester.view.physicalSize = const Size(390 * 2, 3600 * 2);
+      addTearDown(tester.view.reset);
+      await tester.pumpWidget(
+        goldenApp(
+          home: const EngineScreen(),
+          brightness: Brightness.light,
+          overrides: [
+            ..._on(android: false, status: const RuntimeStatus(phase: RuntimePhase.running, longTaskEligible: true)),
+            ...bridge(),
+          ],
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text(_zh.harmonyEngineBackgroundHintLong), findsOneWidget);
+      expect(find.text(_zh.harmonyEngineBackgroundHint), findsNothing);
+    });
+
     testWidgets('on HarmonyOS: 后台运行 under 更多, and what it says is true there', (tester) async {
       await _pump(tester, const EngineScreen(), android: false, overrides: bridge());
       expect(find.byKey(const SpotKey('page:background')), findsOneWidget);

@@ -7149,6 +7149,18 @@ class L10nZh extends L10n {
   String get harmonyKwPets => '宠物,小鲸,桌宠,鲸鱼';
 
   @override
+  String get harmonyBackgroundSubtitleLong => '应用离开屏幕后，正在跑的对话会尽量继续';
+
+  @override
+  String get harmonyBackgroundLocalLong => '这个版本可以申请长时任务：对话留在后台继续跑，通知栏会有一条提示。系统不批准或中途收回时，对话跟着应用暂停，回到应用后会尽量接着跑';
+
+  @override
+  String get harmonyEngineBackgroundHintLong => '离开屏幕后，正在跑的对话会尽量继续';
+
+  @override
+  String get harmonyAlertsRequirementLong => '提醒要应用在运行才发得出：对话在后台继续时会提醒，应用被系统挂起后就没有了';
+
+  @override
   String get hostDetailsConnectionType => '连接方式';
 
   @override

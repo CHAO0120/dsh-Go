@@ -13136,6 +13136,30 @@ abstract class L10n {
   /// **'宠物,小鲸,桌宠,鲸鱼'**
   String get harmonyKwPets;
 
+  /// No description provided for @harmonyBackgroundSubtitleLong.
+  ///
+  /// In zh, this message translates to:
+  /// **'应用离开屏幕后，正在跑的对话会尽量继续'**
+  String get harmonyBackgroundSubtitleLong;
+
+  /// No description provided for @harmonyBackgroundLocalLong.
+  ///
+  /// In zh, this message translates to:
+  /// **'这个版本可以申请长时任务：对话留在后台继续跑，通知栏会有一条提示。系统不批准或中途收回时，对话跟着应用暂停，回到应用后会尽量接着跑'**
+  String get harmonyBackgroundLocalLong;
+
+  /// No description provided for @harmonyEngineBackgroundHintLong.
+  ///
+  /// In zh, this message translates to:
+  /// **'离开屏幕后，正在跑的对话会尽量继续'**
+  String get harmonyEngineBackgroundHintLong;
+
+  /// No description provided for @harmonyAlertsRequirementLong.
+  ///
+  /// In zh, this message translates to:
+  /// **'提醒要应用在运行才发得出：对话在后台继续时会提醒，应用被系统挂起后就没有了'**
+  String get harmonyAlertsRequirementLong;
+
   /// No description provided for @hostDetailsConnectionType.
   ///
   /// In zh, this message translates to:

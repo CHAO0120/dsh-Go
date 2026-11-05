@@ -58,6 +58,7 @@ export class RuntimeController {
   private recovery: RuntimeRecovery;
   private resetRequested: boolean = false;
   private attempt: string | null = null;
+  private longTaskAllowed: boolean | null = null;
   private runningSince: number | null = null;
   private markedHealthy: boolean = false;
 
@@ -241,10 +242,20 @@ export class RuntimeController {
       ['directEngineFallbackReason', null], ['currentExecutionMode', active ? 'ohos-embedded' : null],
       ['launchSelectedMode', native.consumed ? 'ohos-embedded' : null], ['launchSpawned', native.consumed],
       ['launchFailureReason', failure], ['resetPending', recovery.resetPending], ['waitingInstall', recovery.waitingInstall], ['tidyingFiles', false], ['lifecycle', this.lifecycle.status()],
+      ['longTaskEligible', native.consumed && this.longTaskEligible()],
       ['transientTask', this.taskOwner?.status() ?? null],
       ['transientCleanup', this.retiredOwners.filter((owner: TransientTaskOwner): boolean => owner.cleanupPending())
         .map((owner: TransientTaskOwner): Map<string, Object | null> => owner.status())]
     ]);
+  }
+
+  // Eligibility only: whether the system accepts a task when asked is a later answer.
+  // Asked once the engine has started; a remote-only app has no turn to keep going.
+  private longTaskEligible(): boolean {
+    if (this.longTaskAllowed === null) {
+      this.longTaskAllowed = backgroundComputePermission(this.context.applicationInfo.accessTokenId) === 'granted';
+    }
+    return this.longTaskAllowed;
   }
 
   private lifecycleChanged(): void {

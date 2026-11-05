@@ -5,6 +5,8 @@
 
 import 'package:dsh_app/l10n/l10n.dart';
 import 'package:dsh_app/notify/notify_channel.dart';
+import 'package:dsh_app/runtime/runtime_bridge.dart';
+import 'package:dsh_app/runtime/runtime_state.dart';
 import 'package:dsh_app/state/android_features.dart';
 import 'package:dsh_app/state/notify_state.dart' show notifyChannelProvider;
 import 'package:dsh_app/ui/settings/notification_settings.dart';
@@ -196,6 +198,33 @@ void main() {
     expect(zh.harmonyLiveFooter, contains('不再更新'));
     expect(zh.harmonyLiveFooter, isNot(contains('实况窗')));
     expect(en.harmonyLiveFooter, isNot(contains('Live View')));
+  });
+
+  testWidgets('on HarmonyOS: a build that may ask for a long task says alerts go on with the turn', (tester) async {
+    tester.view.devicePixelRatio = 2;
+    tester.view.physicalSize = const Size(390 * 2, 2400 * 2);
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(
+      goldenApp(
+        home: const NotificationSettingsPage(),
+        brightness: Brightness.light,
+        overrides: [
+          operatingSystemProvider.overrideWithValue('ohos'),
+          notifyChannelProvider.overrideWithValue(_Ordinary()),
+          localRuntimeProvider.overrideWith(
+            () => FakeRuntime(
+              const LocalRuntimeState(
+                loaded: true,
+                status: RuntimeStatus(phase: RuntimePhase.running, longTaskEligible: true),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text(zh.harmonyAlertsRequirementLong), findsOneWidget);
+    expect(find.text(zh.harmonyAlertsRequirement), findsNothing);
   });
 
   testWidgets('on HarmonyOS: alerts need the app running, wherever the reply runs', (tester) async {

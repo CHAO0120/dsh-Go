@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../l10n/l10n.dart';
+import '../../runtime/runtime_state.dart';
 import '../../state/android_features.dart';
 import '../../state/live_activity_state.dart';
 import '../../state/notify_state.dart';
@@ -215,7 +216,11 @@ class _NotificationSettingsPageState extends ConsumerState<NotificationSettingsP
         ),
         SettingsSection(
           title: l10n.pluginsAlerts,
-          footer: Text(ohos ? l10n.harmonyAlertsRequirement : l10n.pluginsRemoteAlertsRequirement),
+          footer: Text(switch ((ohos, ref.watch(localRuntimeProvider.select((s) => s.status.longTaskEligible)))) {
+            (true, true) => l10n.harmonyAlertsRequirementLong,
+            (true, false) => l10n.harmonyAlertsRequirement,
+            (false, _) => l10n.pluginsRemoteAlertsRequirement,
+          }),
           children: [
             SettingsSwitchTile(
               spot: Spots.notifyDone,

@@ -1174,6 +1174,23 @@ test('recovery: two unclean engine generations persist strikes/failure; clearing
  const state=c.controller.snapshot();assert.equal(state.get('strikes'),2);assert.equal(state.get('failure').get('kind'),'killed');assert.equal(state.get('safeState'),'off');assert.equal(state.get('autoSafe'),false);
  await c.controller.clearFailure();assert.equal(c.controller.snapshot().get('failure'),null);assert.equal(c.controller.snapshot().get('strikes'),2);
 });
+for (const [permission, eligible] of [['granted', true], ['denied', false], ['unknown', false]]) {
+  test(`long task eligibility reports ${permission} as ${eligible}, asked once, and only with an engine started`, async () => {
+    lifecycleControl.permission = permission;
+    try {
+      const c = await controllerCase(`long-task-${permission}`);
+      await c.controller.install(false);
+      const queries = lifecycleControl.queries;
+      assert.equal(c.controller.snapshot().get('longTaskEligible'), false);
+      assert.equal(lifecycleControl.queries, queries, 'nothing started, nothing asked');
+      await c.controller.start(null, false, null, false);
+      assert.equal(c.controller.snapshot().get('longTaskEligible'), eligible);
+      const asked = lifecycleControl.queries;
+      assert.equal(c.controller.snapshot().get('longTaskEligible'), eligible);
+      assert.equal(lifecycleControl.queries, asked);
+    } finally { delete lifecycleControl.permission; }
+  });
+}
 test('recovery: the failure says its cause is unknown; thirty seconds running clears the count, sooner does not',async()=>{
  let c=await controllerCase('rescue-healthy');await c.controller.install(false);
  await c.controller.start(null,false,null,false);c=await reopenCase(c);
