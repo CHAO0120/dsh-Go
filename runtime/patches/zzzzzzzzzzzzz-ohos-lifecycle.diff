@@ -1,92 +1,30 @@
+# rc.1: agent admission/recovery stays in agent-loop; durable logged calls follow tools BatchSettlement.
 --- a/node_modules/@deepseek-ai/dsh-agent-loop/lib/index.js
 +++ b/node_modules/@deepseek-ai/dsh-agent-loop/lib/index.js
-@@ -503,6 +503,11 @@
- * @param signal - abort signal shared by the step.
- * @param acceptContext - accepts committed result context for the next step boundary.
- */
+@@ -532,6 +532,11 @@
+ 		/* v8 ignore next -- cancel accepts the closed AgentCancelCause union */
+ 		default: return assertNever(cause);
+ 	}
++}
 +const ohosLifecycleProtocol = 1;
 +function ohosLifecycle() {
 +	if (process.platform !== "openharmony" && globalThis[Symbol.for("dsh.go.ohos.sim")] !== true) return;
 +	return globalThis[Symbol.for("dsh.go.ohos.lifecycle")];
-+}
- async function executeToolCalls(ctx, turn, step, toolCalls, signal, acceptContext) {
- 	const agent = ctx.agents.requireInitiator();
- 	const { session } = agent;
-@@ -550,6 +555,8 @@
- */
- async function runGroup(ctx, turn, step, group, mode, signal, acceptContext) {
- 	const { session } = ctx.agents.requireInitiator();
-+	const lifecycle = ohosLifecycle();
-+	const metaFor = (index) => ({ session, block: group[index].block, callSeq: callSeqs[index], turn, step, signal });
- 	const maxParallelToolCalls = ctx.agentLoop.config.maxParallelToolCalls.get();
- 	const slots = group.map(() => void 0);
- 	const callSeqs = group.map(() => void 0);
-@@ -567,23 +574,30 @@
- 			const slot = slots[committed];
- 			if (slot === void 0) break;
- 			const call = group[committed];
--			const result = slot.needsPost ? await ctx.tools[TOOL_RUNTIME_SCHEDULER].finalize(slot.exec, slot.result) : ctx.tools[TOOL_RUNTIME_SCHEDULER].finish(slot.exec, slot.result);
--			appendToolResult(session, turn, step, call.block, result, callSeqs[committed]);
-+			const finish = () => slot.needsPost ? ctx.tools[TOOL_RUNTIME_SCHEDULER].finalize(slot.exec, slot.result) : ctx.tools[TOOL_RUNTIME_SCHEDULER].finish(slot.exec, slot.result);
-+			const result = lifecycle ? await lifecycle.withinCall(metaFor(committed), finish) : slot.needsPost ? await finish() : finish();
-+			const durableSessionData = lifecycle ? await lifecycle.outcome(metaFor(committed), result) : void 0;
-+			appendToolResult(session, turn, step, call.block, result, callSeqs[committed], durableSessionData);
- 			for (const context of result.additionalContexts ?? []) acceptContext(context);
- 			concluded ||= result.concludesTurn === true;
-+			if (lifecycle) await lifecycle.committed(metaFor(committed));
- 			committed++;
- 		}
- 	};
- 	const inFlight = /* @__PURE__ */ new Map();
- 	const startCall = async (index) => {
-+		if (lifecycle) await lifecycle.gate(session.id, signal);
- 		const call = group[index];
- 		callSeqs[index] = appendToolCall(session, turn, step, call.block);
- 		started++;
--		const prepared = await ctx.tools[TOOL_RUNTIME_SCHEDULER].prepare(call.exec);
-+		if (lifecycle) await lifecycle.prepared(metaFor(index));
-+		const prepare = () => ctx.tools[TOOL_RUNTIME_SCHEDULER].prepare(call.exec);
-+		const prepared = await (lifecycle ? lifecycle.withinCall(metaFor(index), prepare) : prepare());
- 		throwSchedulerFailure();
- 		switch (prepared.kind) {
- 			case "dispatch": {
--				const promise = ctx.tools[TOOL_RUNTIME_SCHEDULER].dispatch(prepared.exec).then((outcome) => {
-+				const dispatch = () => ctx.tools[TOOL_RUNTIME_SCHEDULER].dispatch(prepared.exec);
-+				const promise = (lifecycle ? lifecycle.run(metaFor(index), dispatch) : dispatch()).then((outcome) => {
- 					slots[index] = {
- 						exec: prepared.exec,
- 						result: outcome.result,
-@@ -641,6 +655,7 @@
- 	} catch (error) {
- 		schedulerFailure ??= { error };
- 		await Promise.allSettled(inFlight.values());
-+		if (lifecycle) lifecycle.failedGroup(session.id, callSeqs);
- 		throw schedulerFailure.error;
- 	}
- 	if (aborted) {
-@@ -688,7 +703,11 @@
- 	}).seq;
  }
- /** Append a model-ordered result linked to its call event. */
--function appendToolResult(session, turn, step, block, result, callSeq) {
-+function appendToolResult(session, turn, step, block, result, callSeq, durableSessionData) {
-+	if (durableSessionData !== void 0) {
-+		session.append("tool/result", durableSessionData, { surfaceOp: "append", sourceEventSeqs: [callSeq] });
-+		return;
-+	}
- 	const message = createToolResultMessage({
- 		callId: block.id,
- 		content: result.content,
-@@ -909,6 +928,8 @@
+ /** Drives one session through turn and step boundaries. */
+ var ReactLoopAgent = class {
+@@ -715,6 +720,10 @@
  		/* v8 ignore next -- private callers establish the running phase before proposing a step */
  		if (this.phase.kind !== "running") throw new Error(`agent "${this.id}": pre-step outside running phase`);
  		const signal = this.phase.abort.signal;
 +		const lifecycle = ohosLifecycle();
-+		if (lifecycle) await lifecycle.gate(this.session.id, signal);
++		if (lifecycle) {
++			await lifecycle.gate(this.session.id, signal);
++		}
  		const claimed = this.inbox.claim(target, position.turn);
- 		const assembly = await this.loopCtx.systemPrompt.assemble(assembleContextFor(this, signal));
- 		signal.throwIfAborted();
-@@ -2010,8 +2031,14 @@
+ 		const selection = this.model.current();
+ 		if (selection === void 0) throw new Error(`agent "${this.id}" has no provider/model: set AgentOptions.provider and AgentOptions.model or record a model selection`);
+@@ -1819,8 +1828,14 @@
  					const coldRead = await handle.read(0, void 0, { signal: fused });
  					fused.throwIfAborted();
  					const persisted = coldRead.events;
@@ -102,12 +40,12 @@
  					preparation = SessionPreparation.create(this.runtime.ctx.sessions.prepare(id, {
  						seed: [...persisted, ...closers],
  						meta: structuredClone(handle.header),
-@@ -2041,4 +2068,4 @@
+@@ -1858,4 +1873,4 @@
  	}
  };
  //#endregion
--export { AgentLoop, AgentLoop as default, CONFIGURED_AGENT_IDENTITIES_KEY, DEFAULT_MAX_PARALLEL_TOOL_CALLS, turnBoundaryProjectionDefinition };
-+export { ohosLifecycleProtocol, AgentLoop, AgentLoop as default, CONFIGURED_AGENT_IDENTITIES_KEY, DEFAULT_MAX_PARALLEL_TOOL_CALLS, turnBoundaryProjectionDefinition };
+-export { AgentLoop, AgentLoop as default, CONFIGURED_AGENT_IDENTITIES_KEY, DEFAULT_MAX_PARALLEL_TOOL_CALLS };
++export { ohosLifecycleProtocol, AgentLoop, AgentLoop as default, CONFIGURED_AGENT_IDENTITIES_KEY, DEFAULT_MAX_PARALLEL_TOOL_CALLS };
 --- a/node_modules/@deepseek-ai/dsh-timeout/lib/index.js
 +++ b/node_modules/@deepseek-ai/dsh-timeout/lib/index.js
 @@ -60,6 +60,8 @@
@@ -170,7 +108,7 @@
  	const { Agent, Pool, ProxyAgent } = await import("undici");
 --- a/node_modules/@deepseek-ai/dsh-tool-fs-search/lib/index.js
 +++ b/node_modules/@deepseek-ai/dsh-tool-fs-search/lib/index.js
-@@ -311,7 +311,9 @@
+@@ -312,7 +312,9 @@
  		content
  	};
  	try {
@@ -191,3 +129,78 @@
  			return merged;
  		} catch (error) {
  			ctx.logger.warn(`spill-policy: ${String(error)}; keeping the inline content`);
+--- a/node_modules/@deepseek-ai/dsh-tools/lib/pipeline.js
++++ b/node_modules/@deepseek-ai/dsh-tools/lib/pipeline.js
+@@ -77,7 +77,15 @@
+ * returns an aborted outcome. Scheduler failure drains dispatches and rejects
+ * for the owning step to record recovery results.
+ */
++function ohosLifecycle() {
++	if (process.platform !== "openharmony" && globalThis[Symbol.for("dsh.go.ohos.sim")] !== true) return;
++	return globalThis[Symbol.for("dsh.go.ohos.lifecycle")];
++}
+ async function runGroup(pipeline, settlement, maxParallelToolCalls, group, mode, signal) {
++	const owner = settlement.input.log === void 0 ? void 0 : settlement.input;
++	const lifecycle = owner ? ohosLifecycle() : void 0;
++	const session = owner?.agent.session;
++	const metaFor = (index) => ({ session, block: group[index].block, callSeq: callSeqs[index], turn: owner.log.turn, step: owner.log.step, signal });
+ 	const slots = group.map(() => void 0);
+ 	const callSeqs = group.map(() => void 0);
+ 	let nextToStart = 0;
+@@ -94,22 +102,31 @@
+ 			const slot = slots[committed];
+ 			if (slot === void 0) break;
+ 			const call = group[committed];
+-			const result = await pipeline.complete(slot.exec, slot);
+-			settlement.commit(call.block, result, callSeqs[committed]);
++			const finish = () => pipeline.complete(slot.exec, slot);
++			const result = await (lifecycle ? lifecycle.withinCall(metaFor(committed), finish) : finish());
++			const durableSessionData = lifecycle ? await lifecycle.outcome(metaFor(committed), result) : void 0;
++			settlement.commit(call.block, result, callSeqs[committed], durableSessionData);
+ 			concluded ||= result.concludesTurn === true;
++			if (lifecycle) await lifecycle.committed(metaFor(committed));
+ 			committed++;
+ 		}
+ 	};
+ 	const inFlight = /* @__PURE__ */ new Map();
+ 	const startCall = async (index) => {
++		if (lifecycle) {
++			await lifecycle.gate(session.id, signal);
++		}
+ 		const call = group[index];
+ 		callSeqs[index] = settlement.start(call.block);
+ 		started++;
+-		const prepared = await pipeline.prepare(call.exec);
++		if (lifecycle) await lifecycle.prepared(metaFor(index));
++		const prepare = () => pipeline.prepare(call.exec);
++		const prepared = await (lifecycle ? lifecycle.withinCall(metaFor(index), prepare) : prepare());
+ 		throwSchedulerFailure();
+ 		switch (prepared.kind) {
+ 			case "dispatch": {
+-				const promise = pipeline.dispatch(prepared.exec).then((outcome) => {
++				const dispatch = () => pipeline.dispatch(prepared.exec);
++				const promise = (lifecycle ? lifecycle.run(metaFor(index), dispatch) : dispatch()).then((outcome) => {
+ 					slots[index] = {
+ 						...outcome,
+ 						exec: prepared.exec
+@@ -156,6 +173,7 @@
+ 	} catch (error) {
+ 		schedulerFailure ??= { error };
+ 		await Promise.allSettled(inFlight.values());
++		if (lifecycle) lifecycle.failedGroup(session.id, callSeqs);
+ 		throw schedulerFailure.error;
+ 	}
+ 	if (aborted) {
+@@ -193,10 +211,10 @@
+ 			arguments: block.arguments
+ 		}).seq;
+ 	}
+-	commit(block, result, callSeq) {
++	commit(block, result, callSeq, durableSessionData) {
+ 		if (this.input.log !== void 0) {
+ 			const { agent, log: { turn, step } } = this.input;
+-			agent.session.append("tool/result", {
++			agent.session.append("tool/result", durableSessionData ?? {
+ 				turn,
+ 				step,
+ 				message: createToolResultMessage({

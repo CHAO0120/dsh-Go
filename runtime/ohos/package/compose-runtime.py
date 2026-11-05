@@ -314,13 +314,14 @@ def check_patches(repo: Path, prefix: Path, target_report: Path):
     spec.loader.exec_module(module)
     pins = json.loads((repo / 'runtime/patches/pins.json').read_text())
     names, _ = module.select_dsh_patches(pins, str(repo / 'runtime/patches'), 'ohos')
-    _, identity = module.dsh_patch_inputs(pins, str(repo / 'runtime/patches'), names, 'ohos', '0.2.1-rc.4')
+    version = json.loads((repo / 'runtime/ohos/package/composition.json').read_text())['dshVersion']
+    _, identity = module.dsh_patch_inputs(pins, str(repo / 'runtime/patches'), names, 'ohos', version)
     report = json.loads(target_report.read_text())
-    if report.get('target') != 'ohos' or report.get('dshVersion') != '0.2.1-rc.4' or report.get('inputSha256') != identity:
+    if report.get('target') != 'ohos' or report.get('dshVersion') != version or report.get('inputSha256') != identity:
         raise ValueError('Requires the current actual --target ohos patch report')
     final = {}
     for name in names:
-        final.update(pins['patches'][name]['0.2.1-rc.4'])
+        final.update(pins['patches'][name][version])
     for relative, pin in final.items():
         if digest((prefix / relative).read_bytes()) != pin['after']:
             raise ValueError(f'Patched input is not the final selected OHOS state: {relative}')
@@ -335,8 +336,8 @@ def deletion_variants(repo: Path, prefix: Path, output: Path):
     rows = [
         ('runtime/session-deletion/core.mjs',
          'node_modules/@deepseek-ai/dsh-session-persistence-jsonl/lib/dsh-go-deletion.mjs', 'core.mjs',
-         '0513530a6589c9fc3f64d865ad5750a7d53632861eac6fafd67c8d186279e937',
-         '0ebc2fcfc1b1390dffc66ad7a8d079d90edf5e5ee05cec4e4cadd9ac6d7a0952'),
+         '85d4678533627422d4c00cd7a92b6e5c1a97172a40b3b432338e0ffa579bcfe8',
+         'f5abbfbc616f6e002c4dfa33bbfbef321f614c56ab61f09041218988e9ccea91'),
         ('runtime/bridge/dsh-go-bridge/lib/session-deletion.js',
          'runtime/bridge/dsh-go-bridge/lib/session-deletion.js', 'session-deletion.js',
          '89a6161ff3ad6370ea7f31b74e8a3e165d2365f745a3ae8134309eea6f18381f',

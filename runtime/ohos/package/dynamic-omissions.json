@@ -33,14 +33,14 @@
     "importer": "node_modules/@deepseek-ai/dsh-fs-local/lib/index.js",
     "specifier": "koffi",
     "occurrences": 1,
-    "importerSha256": "6848888183b4f25c9a21ba59840c5ea38dfb265e152668051e7fe4873a80e058",
+    "importerSha256": "555aa01ff9f0bc394f2f8013187110ea7477e005a0a5a26f8615be58ceb1fa79",
     "reason": "The fixed filesystem implementation enters Win32 ACL helpers only when process.platform is win32; OHOS takes the POSIX/publication branch."
   },
   {
     "importer": "node_modules/@deepseek-ai/dsh-host-directory-picker-native/lib/index.js",
     "specifier": "koffi",
     "occurrences": 1,
-    "importerSha256": "a6f52d4d235d8c6238c591563e6f819dabe7f5ac2d50ce9d23a12f4d9d6daf90",
+    "importerSha256": "ba6332090bdfbe262d7f3b38b03c9702c09df508ca65a9ee0ec3030f17663c50",
     "reason": "The fixed driver selector creates the Windows dialog/abort path only for win32; OHOS does not start that dialog worker."
   },
   {
@@ -61,21 +61,21 @@
     "importer": "node_modules/@deepseek-ai/dsh-session-persistence-jsonl/lib/index.js",
     "specifier": "koffi",
     "occurrences": 1,
-    "importerSha256": "9f79f3db67a32578d1a57ba4145e2265b333d7258001c0fd2b50592905511359",
+    "importerSha256": "0c7d60f8197b8574b3f1b28e5fb52b07d9d84e9f1277ecdd2be627686ef59433",
     "reason": "The fixed session implementation selects Win32 semaphore/MoveFileEx only for win32; OHOS uses the linked publication owner and main-thread lock path."
   },
   {
     "importer": "node_modules/@deepseek-ai/dsh-session-persistence-jsonl/lib/worker.cjs",
     "specifier": "koffi",
     "occurrences": 1,
-    "importerSha256": "4b0f235e772792d7d2ccffc8446ef1a47b080fafc00b71fca899af5886f91066",
+    "importerSha256": "c5c8ccb7a661ef343e9d0c792d8d5cba376ed783ea48c6489fe90eab264ae321",
     "reason": "Win32 helpers in this worker are selected only by its fixed platform branches; OHOS does not enter them."
   },
   {
     "importer": "node_modules/@deepseek-ai/dsh-tool-fs-search/lib/index.js",
     "specifier": "@vscode/ripgrep",
     "occurrences": 1,
-    "importerSha256": "16d30013167a7881f66f07f2263f6412a32340614fdeeb27957ee524899d1086",
+    "importerSha256": "ffdac06d530134e35a4ea2182f09ace344fcf48e2fa0e312419f69e3e73db255",
     "reason": "getRgPath returns the virtual rg token immediately on openharmony, before the native binary import; the actual strict grep round covers this path."
   },
   {

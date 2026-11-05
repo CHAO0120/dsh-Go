@@ -1,19 +1,19 @@
 {
   "schema": 1,
-  "baseline": "f3875f2",
+  "baseline": "16cb44b7fd652d3545cfe6596a127a7968c18eb3",
   "target": "android",
   "sources": {
     "build-runtime.sh": {
-      "sha256": "ec369e1714aeb8fdc7fc1bf31d1766c1bbac87b2ee6fb3cd5b8ec62ee54be6a7",
-      "legacySha256": "a3a4d9e73ec60b24b502ac094cb44dbb528ec492daea18331291d7bce95ae326"
+      "sha256": "bcb01e4db6feb3327703f03c0a1e7aec8a6857f598d33b65a79e0335bae3828e",
+      "legacySha256": "1ddfc945b7a59fe9243178303d982b04caf6f4178787a5b09a4a5dc1bbfb88ab"
     },
     "lib/rtbuild.py": {
-      "sha256": "f527d91b56e108305ec84de512db67fbb64060cf60f39727596490b020b6dc5a",
+      "sha256": "6ac8fceedd0e9fc38f6e09c4f606f05c0bd7b20d2ba8fb0915ebe5419dacaed6",
       "legacySha256": "235370e7cfd7173a34cd71a348a909b083cc49d118e5ac8ed27a298d6aa821aa"
     }
   },
   "helperSha256": "bae82a36e20ea0ff8938b8aa94a005dfc485c0e2a910dba75251d5e67ea7b7e8",
-  "pinsCanonicalSha256": "1094a5e6803a561a2fe465eeb1ec1908f29e07dafa89f75acdb077a05c3d3c48",
-  "pinsLegacySha256": "5a9c275e416a5187f186c4cb9682cd57be2c0215966d80e6c5cbdc5eb2bcfabe",
-  "companionSha256": "0513530a6589c9fc3f64d865ad5750a7d53632861eac6fafd67c8d186279e937"
+  "pinsCanonicalSha256": "d46db070796faee975029c19de7a1270d07e9073003b2fae1e4816a9e97d7451",
+  "pinsLegacySha256": "2bb2760d1383fd60017ea606258490a88bdd877c581873e52fec698804d9cb0f",
+  "companionSha256": "85d4678533627422d4c00cd7a92b6e5c1a97172a40b3b432338e0ffa579bcfe8"
 }

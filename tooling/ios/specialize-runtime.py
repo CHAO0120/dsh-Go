@@ -117,7 +117,7 @@ DIAGNOSTIC_EDITS = {
         ('Node scripts require the inherited OHOS product preload', 'Node scripts require the inherited iOS product preload'),
     ),
     'runtime/ohos/net/bootstrap.mjs': (
-        ('OHOS network bootstrap requires the locked DSH 0.2.1-rc.4 entry with Undici 8.11.2', 'iOS network bootstrap requires the locked DSH 0.2.1-rc.4 entry with Undici 8.11.2'),
+        ('OHOS network bootstrap requires the locked DSH 0.2.2-rc.1 entry with Undici 8.11.2', 'iOS network bootstrap requires the locked DSH 0.2.2-rc.1 entry with Undici 8.11.2'),
         ('OHOS network bootstrap was initialized for another DSH entry', 'iOS network bootstrap was initialized for another DSH entry'),
         ('OHOS DSH network preload must run before the first Undici/global-dispatcher API import', 'iOS DSH network preload must run before the first Undici/global-dispatcher API import'),
     ),

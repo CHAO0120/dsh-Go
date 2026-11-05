@@ -1,12 +1,12 @@
 # dsh-go OHOS only: permit EACCES fallback after the unchanged common patch chain.
 --- a/node_modules/@deepseek-ai/dsh-fs-local/lib/index.js
 +++ b/node_modules/@deepseek-ai/dsh-fs-local/lib/index.js
-@@ -561,7 +561,7 @@
- 		if (createIfAbsent !== void 0) try {
+@@ -588,7 +588,7 @@
+ 		if (options.createIfAbsent) try {
  			await linkFile(tempPath, absolutePath);
  		} catch (error) {
 -			if (!(error instanceof Error && "code" in error && typeof error.code === "string" && ["EPERM", "EXDEV", "ENOTSUP", "EMLINK"].includes(error.code))) {
 +			if (!(error instanceof Error && "code" in error && typeof error.code === "string" && (["EPERM", "EXDEV", "ENOTSUP", "EMLINK"].includes(error.code) || platform === "openharmony" && error.code === "EACCES"))) {
- 				await throwGuardedCreateFailure(error, absolutePath, createIfAbsent.displayPath, inspectPublicationTarget);
+ 				await throwGuardedCreateFailure(error, absolutePath, displayPath, inspectPublicationTarget);
  			}
  			throwIfAborted(signal, "write");

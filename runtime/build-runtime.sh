@@ -37,7 +37,7 @@ PY=(python3 -I "$HERE/lib/rtbuild.py")
 
 # ---- pinned inputs (override via environment; pinned hashes then must be updated too) ----
 RUNTIME_REVISION="${RUNTIME_REVISION:-r15}"  # r14 + per-family DNS under PRoot, input recovery, session deletion and upload resolver fixes, title and boot cache work; DSH as r12
-DSH_VERSION="${DSH_VERSION:-0.2.1-rc.4}"
+DSH_VERSION="${DSH_VERSION:-0.2.2-rc.1}"
 NODE_VERSION="${NODE_VERSION:-24.22.1}"
 # pnpm runs DSH's plugin installs (pluginManager / `dsh plugin`); the version the DSH repo pins.
 PNPM_VERSION="${PNPM_VERSION:-11.28.5}"
@@ -387,8 +387,8 @@ PYEOF
   local prefix="$work/dsh-prefix"
   install_dsh "$npm_cpu" "$prefix"
   log "patching DSH (runtime/patches, pinned for $DSH_VERSION)"
-  "${PY[@]}" patch-dsh --prefix "$prefix" --dsh-version "$DSH_VERSION" --target android --patches "$HERE/patches" \
-    --out "$work/dsh-patches.json" --target-report "$work/dsh-patch-target.json" >&2
+  "${PY[@]}" patch-dsh --target android --prefix "$prefix" --dsh-version "$DSH_VERSION" --patches "$HERE/patches" \
+    --out "$work/dsh-patches.json" >&2
   local bridge="$HERE/bridge/dsh-go-bridge"
   local bridge_version
   bridge_version="$(python3 -I -c 'import json,sys; print(json.load(open(sys.argv[1]))["version"])' "$bridge/package.json")"
@@ -404,7 +404,6 @@ PYEOF
       sha256 "$base"; sha256 "$node"; sha256 "$python"; sha256sum "${extra_debs[@]}" | cut -d' ' -f1
       sha256 "$proot_deb"; sha256 "$talloc_deb"; sha256 "$shmem_deb"
       sha256 "$lockfile"; sha256 "$pnpm_lockfile"
-      # Preserve the reviewed pre-OHOS Android identity; changed Android inputs still invalidate it.
       python3 -I "$HERE/lib/android_recipe.py" --dsh-version "$DSH_VERSION"
     } | sha256sum | cut -c1-12 )"
   local runtime_version="${RUNTIME_REVISION}-dsh${DSH_VERSION}-node${NODE_VERSION}-ubuntu${UBUNTU_VERSION}-${inputs_sha}"
