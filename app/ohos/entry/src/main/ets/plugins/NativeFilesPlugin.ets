@@ -251,7 +251,7 @@ export default class NativeFilesPlugin implements FlutterPlugin, AbilityAware {
     for (const entry of selected.files) {
       if (entry.file === null) continue;
       try { await fs.close(entry.file); entry.file = null; }
-      catch (_) { hilog.warn(0xD003F00, 'DshNativeFiles', '所选文件句柄关闭失败，保留物理占用'); }
+      catch (_) { hilog.warn(0x3F00, 'DshNativeFiles', '所选文件句柄关闭失败，保留物理占用'); }
     }
   }
 }

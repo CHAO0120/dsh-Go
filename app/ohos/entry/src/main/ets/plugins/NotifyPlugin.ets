@@ -196,7 +196,7 @@ export default class NotifyPlugin implements FlutterPlugin, AbilityAware, NewWan
       if (route.eventId !== '') tap.set('eventId', route.eventId);
       const sink = NotifyPlugin.receiver?.sink;
       if (sink) sink.success(tap); else NotifyPlugin.pendingTap = tap;
-    }).catch((_error: Error) => { hilog.warn(0xD003F00, 'DshNotify', '通知跳转校验未完成'); });
+    }).catch((_error: Error) => { hilog.warn(0x3F00, 'DshNotify', '通知跳转校验未完成'); });
   }
 
   private serial(work: () => Promise<Any>): Promise<Any> {

@@ -73,7 +73,7 @@ export default class FilesMediaPlugin implements FlutterPlugin, AbilityAware {
   onDetachedFromAbility(): void {
     this.generation++; this.ability = undefined;
     const pdf = this.pdf; this.pdf = undefined;
-    if (pdf) pdf.retire().catch((): void => { hilog.warn(0xD003F00, 'DshFiles', 'PDF资源清理尚未完成'); });
+    if (pdf) pdf.retire().catch((): void => { hilog.warn(0x3F00, 'DshFiles', 'PDF资源清理尚未完成'); });
   }
 
   private reply(work: Promise<Any>, result: MethodResult): void {
@@ -150,7 +150,7 @@ export default class FilesMediaPlugin implements FlutterPlugin, AbilityAware {
   private async removeTemporary(directory: string, path?: string): Promise<void> {
     if (path) {
       try { await fs.unlink(path); }
-      catch (_error) { hilog.warn(0xD003F00, 'DshFiles', '临时文件清理失败'); }
+      catch (_error) { hilog.warn(0x3F00, 'DshFiles', '临时文件清理失败'); }
     }
     try {
       const stat = await fs.lstat(directory);
@@ -158,7 +158,7 @@ export default class FilesMediaPlugin implements FlutterPlugin, AbilityAware {
       if (stat.isDirectory() && !stat.isSymbolicLink() && (await fs.listFile(directory)).length === 0) {
         await fs.rmdir(directory);
       }
-    } catch (_error) { hilog.warn(0xD003F00, 'DshFiles', '临时目录清理失败'); }
+    } catch (_error) { hilog.warn(0x3F00, 'DshFiles', '临时目录清理失败'); }
   }
 
   private async copy(input: number, output: number, generation: number): Promise<void> {
@@ -362,7 +362,7 @@ export default class FilesMediaPlugin implements FlutterPlugin, AbilityAware {
     } finally {
       this.picking = false;
       if (helper) {
-        try { await helper.release(); } catch (_error) { hilog.warn(0xD003F00, 'DshFiles', '相册句柄释放失败'); }
+        try { await helper.release(); } catch (_error) { hilog.warn(0x3F00, 'DshFiles', '相册句柄释放失败'); }
       }
       if (directory) await this.removeTemporary(directory, path);
     }
