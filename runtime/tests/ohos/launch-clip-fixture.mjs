@@ -31,7 +31,7 @@ function png(width, height) {
 }
 const unrelated = new Set(['AppLinksPlugin','SecretsPlugin','AttachmentFilesPlugin','IslandsPlugin','NotifyPlugin','PastePlugin',
   'ConnectivityPlugin','GeneratedPluginRegistrant','RuntimePlugin','RuntimeController','FilesMediaPlugin',
-  'NativeFilesPlugin','NativeMediaPlugin','PerformancePlugin','OhosKeyboardLog','DiagnosticsPlugin','UsagePlugin',
+  'NativeFilesPlugin','NativeMediaPlugin','NativeVoiceStopControl','PerformancePlugin','OhosKeyboardLog','DiagnosticsPlugin','UsagePlugin',
   'WebFilesPlugin','HmsSharePlugin','HmsShareInbox','ShortcutsPlugin','LauncherIconPlugin','VoicePlugin']);
 export function launchFixture(repo, filesDir, options = {}) {
   const ts = createRequire(resolve(process.env.OHOS_TYPESCRIPT_PREFIX, 'package.json'))('typescript');
