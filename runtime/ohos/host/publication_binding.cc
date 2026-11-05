@@ -401,7 +401,6 @@ bool PhoneJson(napi_env env,napi_value value,std::string* output,bool result) {
   return ReadPath(env,encoded,output);
 }
 napi_value PhoneCall(napi_env env,napi_callback_info info) {
- try {
   size_t count=3;napi_value args[3];void* data=nullptr;
   if(napi_get_cb_info(env,info,&count,args,nullptr,&data)!=napi_ok)return nullptr;
   const auto operation=static_cast<uint32_t>(reinterpret_cast<uintptr_t>(data));
@@ -450,7 +449,6 @@ napi_value PhoneCall(napi_env env,napi_callback_info info) {
      !putText("engineId",snapshot.engine_id)||!putText("ownerHash",snapshot.owner_hash)||
      !putNumber("bridgeGeneration",snapshot.generation)||!putNumber("nowMs",snapshot.now_ms))return nullptr;
   return result;
- }catch(...){napi_throw_error(env,"ERR_OHOS_PHONE_NATIVE","Phone native operation failed");return nullptr;}
 }
 
 napi_value Initialize(napi_env env, napi_value exports) {
