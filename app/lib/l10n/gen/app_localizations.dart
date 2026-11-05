@@ -15878,6 +15878,24 @@ abstract class L10n {
   /// **'自动：动时用最高刷新率，停下交回系统；系统：完全由系统决定。'**
   String get performanceRefreshHint;
 
+  /// No description provided for @performanceRefreshHintOhos.
+  ///
+  /// In zh, this message translates to:
+  /// **'自动：动画和滚动时用最高刷新率，停下交回系统；最高：一直最高，更耗电也更热；系统：不额外要求。'**
+  String get performanceRefreshHintOhos;
+
+  /// No description provided for @performanceFrameCache.
+  ///
+  /// In zh, this message translates to:
+  /// **'帧缓存'**
+  String get performanceFrameCache;
+
+  /// No description provided for @performanceFrameCacheHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'更顺滑，触摸响应略慢一点'**
+  String get performanceFrameCacheHint;
+
   /// No description provided for @searchKwRefreshRate.
   ///
   /// In zh, this message translates to:

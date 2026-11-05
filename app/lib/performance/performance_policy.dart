@@ -61,6 +61,7 @@ class PerformancePrefs {
     this.blur,
     this.animations,
     this.refreshRate = RefreshRateMode.auto,
+    this.frameCache = true,
     this.loaded = false,
   });
 
@@ -68,6 +69,10 @@ class PerformancePrefs {
   final bool? blur;
   final bool? animations;
   final RefreshRateMode refreshRate;
+
+  /// HarmonyOS's engine holds back one frame to smooth rate changes, at slightly more touch
+  /// delay. A switch because the difference can only be judged on a device.
+  final bool frameCache;
   final bool loaded;
 
   PerformancePrefs copyWith({
@@ -75,6 +80,7 @@ class PerformancePrefs {
     bool? blur,
     bool? animations,
     RefreshRateMode? refreshRate,
+    bool? frameCache,
     bool? loaded,
     bool resetEffects = false,
   }) => PerformancePrefs(
@@ -82,6 +88,7 @@ class PerformancePrefs {
     blur: resetEffects ? null : blur ?? this.blur,
     animations: resetEffects ? null : animations ?? this.animations,
     refreshRate: refreshRate ?? this.refreshRate,
+    frameCache: frameCache ?? this.frameCache,
     loaded: loaded ?? this.loaded,
   );
 }

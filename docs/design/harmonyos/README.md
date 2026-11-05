@@ -110,7 +110,7 @@ flowchart TD
 |---|---|---|
 | `dsh/runtime` | status/install/start/stop/logs/events、guestRoot、reopenApp、托管技能 | 一进程一次 Node；目标装载/重启/后台真实行为待设备 |
 | `dsh/files`、`dsh/media` | 安全 FD 后复制，系统打开/保存、相册确认、DSH-Go 产出列表 | 强制选择打开 App 不支持；URI 提供方写入无跨提供方原子回滚保证 |
-| `dsh/app`、`dsh/links` | 时区、固定自身 Ability 回前台、冷/热深链及外来文件及时复制 | 强制高刷新率不支持，采用 system；后台拉起不绕过系统限制 |
+| `dsh/app`、`dsh/links` | 时区、固定自身 Ability 回前台、冷/热深链及外来文件及时复制 | 刷新率的 auto/max 靠引擎的 `LTPODispatchHighFrameRate`，真实帧率待设备；后台拉起不绕过系统限制 |
 | connectivity_plus | 承载类型列表和事件，失败不伪装 none | 有网络不等于互联网可达；真实 observer 回收待设备 |
 | `dsh/notify` | 普通锁屏安全文字提醒、HMAC 导航点击、串行取消 | 通知外审批/拒绝、实况窗不支持；publish 成功不证明已展示 |
 | `dsh/web-files` | 系统文档选择、accept 后缀提示、owner 取消与迟到结果隔离 | 无已证的原生可见 WebView 校验；回调取消不等于关闭系统 picker；ArkWeb 临时 URI 上传待设备 |

@@ -41,6 +41,7 @@ class PerformancePage extends ConsumerWidget {
     final defaults = ref.watch(performanceDefaultsProvider);
     final thermal = ref.watch(performanceProvider.select((s) => s.thermalLightweight));
     final notifier = ref.read(performancePrefsProvider.notifier);
+    final ohos = ref.watch(operatingSystemProvider) == 'ohos';
     return AppPage.list(
       title: l10n.performanceTitle,
       children: [
@@ -68,20 +69,31 @@ class PerformancePage extends ConsumerWidget {
               ),
           ],
         ),
-        if (ref.watch(androidSystemFeaturesProvider))
+        SettingsSection(
+          footer: Text(ohos ? l10n.performanceRefreshHintOhos : l10n.performanceRefreshHint),
+          children: [
+            SettingsSegmentTile<RefreshRateMode>(
+              key: const ValueKey('performance-refresh-rate'),
+              spot: Spots.refreshRate,
+              segments: [
+                PillSegment(RefreshRateMode.auto, l10n.performanceAuto),
+                PillSegment(RefreshRateMode.max, l10n.performanceRefreshMax),
+                PillSegment(RefreshRateMode.system, l10n.performanceRefreshSystem),
+              ],
+              selected: prefs.refreshRate,
+              onChanged: (mode) => unawaited(notifier.setRefreshRate(mode)),
+            ),
+          ],
+        ),
+        if (ohos)
           SettingsSection(
-            footer: Text(l10n.performanceRefreshHint),
             children: [
-              SettingsSegmentTile<RefreshRateMode>(
-                key: const ValueKey('performance-refresh-rate'),
-                spot: Spots.refreshRate,
-                segments: [
-                  PillSegment(RefreshRateMode.auto, l10n.performanceAuto),
-                  PillSegment(RefreshRateMode.max, l10n.performanceRefreshMax),
-                  PillSegment(RefreshRateMode.system, l10n.performanceRefreshSystem),
-                ],
-                selected: prefs.refreshRate,
-                onChanged: (mode) => unawaited(notifier.setRefreshRate(mode)),
+              SettingsSwitchTile(
+                key: const ValueKey('performance-frame-cache'),
+                title: l10n.performanceFrameCache,
+                subtitle: l10n.performanceFrameCacheHint,
+                value: prefs.frameCache,
+                onChanged: (value) => unawaited(notifier.setFrameCache(value)),
               ),
             ],
           ),
