@@ -41,6 +41,7 @@ final class DshPlugin: NSObject, FlutterPlugin, FlutterSceneLifeCycleDelegate {
       DiagnosticsChannel(messenger: messenger),
       UsageChannel(messenger: messenger),
       LaunchChannel(messenger: messenger),
+      StartupChannel(messenger: messenger),
       LaunchClipChannel(messenger: messenger, textures: registrar.textures()),
       NativeFilesChannel(messenger: messenger),
       NativeMediaChannel(messenger: messenger),

@@ -34,7 +34,12 @@ final class LaunchChannel {
       switch call.method {
       case "begin", "snapshot": result(Self.describe())
       case "reveal": result(false)
-      case "mark", "done": result(nil)
+      case "mark":
+        StartupWatch.shared.mark("launch screen: \(call.arguments.map { "\($0)" } ?? "")")
+        result(nil)
+      case "done":
+        StartupWatch.shared.finished()
+        result(nil)
       default: result(FlutterMethodNotImplemented)
       }
     }
@@ -355,5 +360,118 @@ private final class LaunchClip: NSObject, FlutterTexture {
     lock.lock()
     latest = nil
     lock.unlock()
+  }
+}
+
+// MARK: - Startup watch
+
+/// dsh/startup: how far Dart has got (lib/launch/startup_trace.dart).
+final class StartupChannel {
+  private let channel: FlutterMethodChannel
+
+  init(messenger: any FlutterBinaryMessenger) {
+    channel = FlutterMethodChannel(name: "dsh/startup", binaryMessenger: messenger)
+    channel.setMethodCallHandler { call, result in
+      switch call.method {
+      case "mark":
+        StartupWatch.shared.mark(call.arguments as? String ?? "")
+        result(nil)
+      case "finished":
+        StartupWatch.shared.finished()
+        result(nil)
+      default: result(FlutterMethodNotImplemented)
+      }
+    }
+  }
+}
+
+/// A launch that never gets to the app is a blank page, and a TestFlight build has no console to
+/// read. If Flutter hasn't drawn anything after a few seconds, or the launch screen is still up
+/// well after that, this says on the screen how far things got, so a photo is enough to tell.
+/// It goes away by itself if the app gets there. Main thread only.
+final class StartupWatch {
+  static let shared = StartupWatch()
+
+  private static let noFrameAfter: TimeInterval = 6
+  private static let stillUpAfter: TimeInterval = 15
+
+  private var stages: [String] = []
+  private var isFinished = false
+  private var armedAt: Date?
+  private weak var note: UILabel?
+
+  func mark(_ stage: String) {
+    NSLog("[dsh-startup] %@", stage)
+    stages.append(stage)
+    if let note { note.text = report(note.window) }
+  }
+
+  func finished() {
+    isFinished = true
+    NSLog("[dsh-startup] finished")
+    note?.removeFromSuperview()
+  }
+
+  /// From the scene, once it's active.
+  func arm(_ window: UIWindow?) {
+    guard armedAt == nil, let window else { return }
+    armedAt = Date()
+    check(window)
+  }
+
+  private func check(_ window: UIWindow?) {
+    guard let window, let armedAt, !isFinished else { return }
+    let flutter = window.rootViewController as? FlutterViewController
+    let waited = Date().timeIntervalSince(armedAt)
+    let drawing = flutter?.isDisplayingFlutterUI == true
+    if waited >= (drawing ? Self.stillUpAfter : Self.noFrameAfter) {
+      show(in: window)
+    }
+    DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self, weak window] in self?.check(window) }
+  }
+
+  private func show(in window: UIWindow) {
+    let text = report(window)
+    if let note {
+      note.text = text
+      return
+    }
+    NSLog("[dsh-startup] stuck:\n%@", text)
+    let label = UILabel()
+    label.numberOfLines = 0
+    label.font = .monospacedSystemFont(ofSize: 12, weight: .regular)
+    label.textColor = .label
+    label.backgroundColor = .secondarySystemBackground
+    label.text = text
+    label.isUserInteractionEnabled = false
+    label.translatesAutoresizingMaskIntoConstraints = false
+    window.addSubview(label)
+    NSLayoutConstraint.activate([
+      label.leadingAnchor.constraint(equalTo: window.safeAreaLayoutGuide.leadingAnchor, constant: 16),
+      label.trailingAnchor.constraint(equalTo: window.safeAreaLayoutGuide.trailingAnchor, constant: -16),
+      label.topAnchor.constraint(equalTo: window.safeAreaLayoutGuide.topAnchor, constant: 16),
+    ])
+    note = label
+  }
+
+  private func report(_ window: UIWindow?) -> String {
+    let frameworks = Bundle.main.privateFrameworksURL
+    func has(_ path: String) -> String {
+      guard let url = frameworks?.appendingPathComponent(path) else { return "?" }
+      return FileManager.default.fileExists(atPath: url.path) ? "yes" : "NO"
+    }
+    let root = window?.rootViewController
+    let flutter = root as? FlutterViewController
+    let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?"
+    let build = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "?"
+    return [
+      "DSH Go is stuck starting. Please send a photo of this.",
+      "\(version) (\(build))  iOS \(UIDevice.current.systemVersion)",
+      "root \(root.map { "\(type(of: $0))" } ?? "none")  drawing \(flutter?.isDisplayingFlutterUI == true)",
+      "App.framework \(has("App.framework/App"))  assets \(has("App.framework/flutter_assets"))",
+      "Flutter \(has("Flutter.framework/Flutter"))  engine \(has("DshNodeHost.framework"))",
+      "stages:",
+      stages.isEmpty ? "  (Dart has said nothing)" : stages.suffix(16).map { "  \($0)" }.joined(separator: "\n"),
+    ].joined(separator: "\n")
   }
 }
