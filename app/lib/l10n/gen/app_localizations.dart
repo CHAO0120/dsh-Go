@@ -13868,6 +13868,84 @@ abstract class L10n {
   /// **'没有选择，左滑不会打开'**
   String get hubQuickPanelItemsNone;
 
+  /// No description provided for @iosSaveToFiles.
+  ///
+  /// In zh, this message translates to:
+  /// **'存到「文件」'**
+  String get iosSaveToFiles;
+
+  /// No description provided for @iosFilesFolderHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'文件 App 的 DSH Go 文件夹'**
+  String get iosFilesFolderHint;
+
+  /// No description provided for @iosSavingToFiles.
+  ///
+  /// In zh, this message translates to:
+  /// **'正在存到「文件」…'**
+  String get iosSavingToFiles;
+
+  /// No description provided for @iosCommandExportDescription.
+  ///
+  /// In zh, this message translates to:
+  /// **'把这个对话的完整记录打包成 ZIP，分享或存到「文件」'**
+  String get iosCommandExportDescription;
+
+  /// No description provided for @iosEnableBanners.
+  ///
+  /// In zh, this message translates to:
+  /// **'横幅不弹时，到系统设置打开「横幅」'**
+  String get iosEnableBanners;
+
+  /// No description provided for @iosNotificationSettingsFailed.
+  ///
+  /// In zh, this message translates to:
+  /// **'没能打开系统设置。到「设置 → DSH Go → 通知」里开启'**
+  String get iosNotificationSettingsFailed;
+
+  /// No description provided for @iosVoiceSystemHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'使用系统的语音识别'**
+  String get iosVoiceSystemHint;
+
+  /// No description provided for @iosVoiceAllowSystem.
+  ///
+  /// In zh, this message translates to:
+  /// **'请在系统设置里允许语音识别'**
+  String get iosVoiceAllowSystem;
+
+  /// No description provided for @iosPluginsPermissionLocalThirdParty.
+  ///
+  /// In zh, this message translates to:
+  /// **'插件以 DSH 的权限运行：能读写文件、执行命令、读取 API Key，不受工作区沙箱限制。由第三方提供，DSH 官方未审核。'**
+  String get iosPluginsPermissionLocalThirdParty;
+
+  /// No description provided for @iosPluginsPermissionLocalTrusted.
+  ///
+  /// In zh, this message translates to:
+  /// **'插件以 DSH 的权限运行：能读写文件、执行命令、读取 API Key，不受工作区沙箱限制。只装你信任的插件。'**
+  String get iosPluginsPermissionLocalTrusted;
+
+  /// No description provided for @iosIconChanged.
+  ///
+  /// In zh, this message translates to:
+  /// **'桌面图标已更换'**
+  String get iosIconChanged;
+
+  /// No description provided for @iosPhotosDenied.
+  ///
+  /// In zh, this message translates to:
+  /// **'没有相册权限，未能保存'**
+  String get iosPhotosDenied;
+
+  /// No description provided for @iosAccessSubtitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'各项功能用到的系统权限'**
+  String get iosAccessSubtitle;
+
   /// No description provided for @launchScreenTitle.
   ///
   /// In zh, this message translates to:

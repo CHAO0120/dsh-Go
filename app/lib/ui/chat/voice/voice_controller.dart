@@ -279,7 +279,7 @@ class VoiceInputController extends ChangeNotifier with WidgetsBindingObserver {
         _runMode == VoiceMode.system || (_runMode == VoiceMode.auto && _caps.recognizer && !_caps.systemUnreliable);
     if (system && !_caps.recognizer) {
       _finish();
-      _say(VoiceMessage(appL10n.voiceChooseSystem, change: true));
+      _say(VoiceMessage(wordsForIos ? appL10n.iosVoiceAllowSystem : appL10n.voiceChooseSystem, change: true));
       return;
     }
     final value = input.value;

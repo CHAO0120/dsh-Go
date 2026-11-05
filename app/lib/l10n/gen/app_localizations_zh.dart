@@ -7561,6 +7561,45 @@ class L10nZh extends L10n {
   String get hubQuickPanelItemsNone => '没有选择，左滑不会打开';
 
   @override
+  String get iosSaveToFiles => '存到「文件」';
+
+  @override
+  String get iosFilesFolderHint => '文件 App 的 DSH Go 文件夹';
+
+  @override
+  String get iosSavingToFiles => '正在存到「文件」…';
+
+  @override
+  String get iosCommandExportDescription => '把这个对话的完整记录打包成 ZIP，分享或存到「文件」';
+
+  @override
+  String get iosEnableBanners => '横幅不弹时，到系统设置打开「横幅」';
+
+  @override
+  String get iosNotificationSettingsFailed => '没能打开系统设置。到「设置 → DSH Go → 通知」里开启';
+
+  @override
+  String get iosVoiceSystemHint => '使用系统的语音识别';
+
+  @override
+  String get iosVoiceAllowSystem => '请在系统设置里允许语音识别';
+
+  @override
+  String get iosPluginsPermissionLocalThirdParty => '插件以 DSH 的权限运行：能读写文件、执行命令、读取 API Key，不受工作区沙箱限制。由第三方提供，DSH 官方未审核。';
+
+  @override
+  String get iosPluginsPermissionLocalTrusted => '插件以 DSH 的权限运行：能读写文件、执行命令、读取 API Key，不受工作区沙箱限制。只装你信任的插件。';
+
+  @override
+  String get iosIconChanged => '桌面图标已更换';
+
+  @override
+  String get iosPhotosDenied => '没有相册权限，未能保存';
+
+  @override
+  String get iosAccessSubtitle => '各项功能用到的系统权限';
+
+  @override
   String get launchScreenTitle => '启动画面';
 
   @override

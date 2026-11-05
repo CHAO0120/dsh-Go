@@ -75,7 +75,7 @@ class VoiceSettingsTile extends ConsumerWidget {
     icon: AppIcons.voice,
     tint: tint,
     spot: SettingsIndex.entry(SettingsPageId.voice),
-    value: Text(voiceModeLabel(context.l10n, ref.watch(voiceSettingsProvider))),
+    value: Text(voiceModeLabel(context.l10n, wordsForIos ? VoiceMode.system : ref.watch(voiceSettingsProvider))),
     onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const VoiceSettingsPage())),
   );
 }
@@ -101,6 +101,18 @@ class _VoiceSettingsPageState extends ConsumerState<VoiceSettingsPage> {
   Widget build(BuildContext context) {
     final l10n = context.l10n;
     final selected = ref.watch(voiceSettingsProvider);
+    // iOS has the system's recogniser and no model to download, so there is nothing to choose.
+    if (wordsForIos) {
+      return AppPage.list(
+        title: l10n.voiceSettingsTitle,
+        children: [
+          SettingsSection(
+            title: l10n.voiceModeSection,
+            children: [SettingsTile(title: voiceModeLabel(l10n, VoiceMode.system), subtitle: l10n.iosVoiceSystemHint)],
+          ),
+        ],
+      );
+    }
     return AppPage.list(
       title: l10n.voiceSettingsTitle,
       children: [
@@ -162,10 +174,7 @@ class VoiceModelCard extends ConsumerWidget {
       VoiceModelStatus.waiting => (l10n.voiceModelWaiting, colors.textTertiary),
       VoiceModelStatus.unsupported => (l10n.voiceModelUnsupported, colors.textTertiary),
       VoiceModelStatus.absent => (l10n.voiceModelAbsent, theme.colorScheme.onSurfaceVariant),
-      VoiceModelStatus.downloading => (
-        '${((model.fraction ?? 0) * 100).floor()}%',
-        theme.colorScheme.onSurfaceVariant,
-      ),
+      VoiceModelStatus.downloading => ('${((model.fraction ?? 0) * 100).floor()}%', theme.colorScheme.onSurfaceVariant),
       VoiceModelStatus.preparing => (l10n.voiceModelPreparing, theme.colorScheme.onSurfaceVariant),
       VoiceModelStatus.ready => (l10n.voiceModelReady, colors.success),
       VoiceModelStatus.failed => (l10n.voiceModelFailed, colors.danger),
@@ -176,16 +185,20 @@ class VoiceModelCard extends ConsumerWidget {
       VoiceModelStatus.ready => l10n.voiceModelReadyNote(total),
       VoiceModelStatus.failed => voiceModelFailureText(l10n, model.failure, neededBytes: model.neededBytes),
       VoiceModelStatus.waiting when model.wanted => l10n.voiceModelWaitingNote,
-      VoiceModelStatus.absent || VoiceModelStatus.waiting when partial => l10n.voiceModelBytes(
-        voiceModelMegabytes(model.doneBytes),
-        total,
-      ),
+      VoiceModelStatus.absent ||
+      VoiceModelStatus.waiting when partial => l10n.voiceModelBytes(voiceModelMegabytes(model.doneBytes), total),
       VoiceModelStatus.absent || VoiceModelStatus.waiting => l10n.voiceModelAbsentNote(total),
       VoiceModelStatus.unsupported => null,
     };
 
-    (String, Widget) primary(String label, VoidCallback onPressed, {Key? key}) =>
-        (label, FilledButton(key: key, onPressed: onPressed, child: Text(label, maxLines: 1, overflow: TextOverflow.ellipsis)));
+    (String, Widget) primary(String label, VoidCallback onPressed, {Key? key}) => (
+      label,
+      FilledButton(
+        key: key,
+        onPressed: onPressed,
+        child: Text(label, maxLines: 1, overflow: TextOverflow.ellipsis),
+      ),
+    );
     (String, Widget) secondary(String label, VoidCallback onPressed, {Key? key, bool danger = false}) => (
       label,
       OutlinedButton(
@@ -225,7 +238,11 @@ class VoiceModelCard extends ConsumerWidget {
         ),
       ],
       VoiceModelStatus.failed => [
-        primary(l10n.commonRetry, () => unawaited(downloadVoiceModel(context, ref)), key: const ValueKey('voice-model-retry')),
+        primary(
+          l10n.commonRetry,
+          () => unawaited(downloadVoiceModel(context, ref)),
+          key: const ValueKey('voice-model-retry'),
+        ),
       ],
     };
     final buttons = [for (final (_, b) in actions) b];
@@ -356,11 +373,7 @@ class _Actions extends StatelessWidget {
           ],
         );
       }
-      return Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        spacing: 8,
-        children: children,
-      );
+      return Column(crossAxisAlignment: CrossAxisAlignment.stretch, spacing: 8, children: children);
     },
   );
 }

@@ -92,7 +92,13 @@ class _NotificationSettingsPageState extends ConsumerState<NotificationSettingsP
 
   void _settingsFailed() => ScaffoldMessenger.of(context).showSnackBar(
     SnackBar(
-      content: Text(_ohos ? appL10n.harmonyNotificationSettingsFailed : appL10n.pluginsNotificationSettingsFailed),
+      content: Text(
+        wordsForIos
+            ? appL10n.iosNotificationSettingsFailed
+            : _ohos
+            ? appL10n.harmonyNotificationSettingsFailed
+            : appL10n.pluginsNotificationSettingsFailed,
+      ),
     ),
   );
 
@@ -226,29 +232,31 @@ class _NotificationSettingsPageState extends ConsumerState<NotificationSettingsP
           ],
         ),
         if (liveBlocked) _liveNote(),
-        SettingsSection(
-          title: l10n.liveSettingsTitle,
-          footer: ohos ? null : Text(l10n.liveSettingsFooter),
-          children: [
-            SettingsSwitchTile(
-              spot: Spots.notifyLive,
-              subtitle: ohos
-                  ? l10n.harmonyLiveUnavailable
-                  : liveSupported
-                  ? l10n.liveSettingsSubtitle
-                  : l10n.liveUnsupported,
-              value: prefs.live && liveSupported,
-              onChanged: on && liveSupported ? (v) => unawaited(notifier.setLive(v)) : null,
-            ),
-          ],
-        ),
+        // The system has them, this app doesn't yet: nothing to switch on.
+        if (!wordsForIos)
+          SettingsSection(
+            title: l10n.liveSettingsTitle,
+            footer: ohos ? null : Text(l10n.liveSettingsFooter),
+            children: [
+              SettingsSwitchTile(
+                spot: Spots.notifyLive,
+                subtitle: ohos
+                    ? l10n.harmonyLiveUnavailable
+                    : liveSupported
+                    ? l10n.liveSettingsSubtitle
+                    : l10n.liveUnsupported,
+                value: prefs.live && liveSupported,
+                onChanged: on && liveSupported ? (v) => unawaited(notifier.setLive(v)) : null,
+              ),
+            ],
+          ),
         SettingsSection(
           title: l10n.pluginsSystemSettings,
           footer: Text(l10n.pluginsLockScreenPrivacy),
           children: [
             SettingsTile(
               spot: Spots.notifySystem,
-              subtitle: l10n.pluginsEnableFloatingNotifications,
+              subtitle: wordsForIos ? l10n.iosEnableBanners : l10n.pluginsEnableFloatingNotifications,
               onTap: () => unawaited(_openSystem()),
             ),
           ],

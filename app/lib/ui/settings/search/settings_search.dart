@@ -122,6 +122,7 @@ List<SearchHit> searchSettings(
   final hits = <SearchHit>[];
   for (final spot in spots) {
     if (!androidFeatures && SettingsIndex.androidOnly(spot) && !(ios && spot.iosToo)) continue;
+    if (ios && identical(spot, Spots.notifyLive)) continue;
     final langs = [
       for (final l in [zh, en])
         _Words(spot.title(l), [

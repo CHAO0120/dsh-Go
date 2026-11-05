@@ -1,0 +1,16 @@
+{
+  "@@locale": "en",
+  "iosSaveToFiles": "Save to Files",
+  "iosFilesFolderHint": "DSH Go folder in the Files app",
+  "iosSavingToFiles": "Saving to Files…",
+  "iosCommandExportDescription": "Export this chat’s full history as a ZIP to share or save to Files",
+  "iosEnableBanners": "Turn on Banners in Settings if they don’t appear",
+  "iosNotificationSettingsFailed": "Couldn’t open system settings. Turn on notifications in Settings → DSH Go → Notifications.",
+  "iosVoiceSystemHint": "Use the system’s speech recognition",
+  "iosVoiceAllowSystem": "Allow speech recognition in Settings",
+  "iosPluginsPermissionLocalThirdParty": "Plugins run with DSH’s permissions: they can read and write files, run commands, and read API keys. They aren’t restricted by the workspace sandbox. Provided by a third party and not reviewed by DSH.",
+  "iosPluginsPermissionLocalTrusted": "Plugins run with DSH’s permissions: they can read and write files, run commands, and read API keys. They aren’t restricted by the workspace sandbox. Only install plugins you trust.",
+  "iosIconChanged": "Icon changed",
+  "iosPhotosDenied": "Couldn’t save. Photos access is off.",
+  "iosAccessSubtitle": "What each feature needs from iOS"
+}
