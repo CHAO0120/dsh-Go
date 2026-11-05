@@ -7196,6 +7196,24 @@ class L10nZh extends L10n {
   }
 
   @override
+  String get harmonyRemindersTitle => '闹钟和计时器';
+
+  @override
+  String get harmonyRemindersCanHint => '到点由系统提醒，引擎不会因此运行。系统也可能不接受，AI 会告诉你';
+
+  @override
+  String get harmonyRemindersNoBuild => '这个版本没有开通系统提醒';
+
+  @override
+  String get harmonyRemindersNoDevice => '这台设备没有系统提醒';
+
+  @override
+  String get harmonyReminderSet => '已设提醒';
+
+  @override
+  String get harmonyReminderRefused => '系统没有接受提醒，没有设置。';
+
+  @override
   String get hostDetailsConnectionType => '连接方式';
 
   @override
@@ -16701,7 +16719,7 @@ class L10nZh extends L10n {
   String get systemActionsCannotScreenHint => '系统不允许';
 
   @override
-  String get systemActionsCannotOther => '读剪贴板、按名字找应用、闹钟和计时器、短信';
+  String get systemActionsCannotOther => '读剪贴板、按名字找应用、短信';
 
   @override
   String get systemActionsCannotOtherHint => '没有可靠的公开接口，AI 会直接告诉你不支持';
@@ -16746,7 +16764,7 @@ class L10nZh extends L10n {
   String get systemActionsDisclosureWhatTitle => '能做什么';
 
   @override
-  String get systemActionsDisclosureWhatBody => '打开应用或链接，打开日历、拨号、分享、导航界面，发通知，写剪贴板，把步骤交还给你。';
+  String get systemActionsDisclosureWhatBody => '打开应用或链接，打开日历、拨号、分享、导航界面，发通知，写剪贴板，把步骤交还给你。这个版本开通了系统提醒时，还能设闹钟和计时器。';
 
   @override
   String get systemActionsDisclosureWhenTitle => '什么时候做';
@@ -16824,7 +16842,7 @@ class L10nZh extends L10n {
   String get catalogSystemActionsSummary => '打开应用和系统页面';
 
   @override
-  String get searchKwSystemActions => '手机操控,操作手机,代操作,打开应用,打开链接,日历,拨号,分享,导航,发通知,写剪贴板,交还';
+  String get searchKwSystemActions => '手机操控,操作手机,代操作,打开应用,打开链接,日历,拨号,分享,导航,发通知,写剪贴板,交还,闹钟,计时器';
 
   @override
   String get updateCheck => '检查更新';

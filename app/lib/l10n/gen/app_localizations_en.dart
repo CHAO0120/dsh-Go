@@ -7610,6 +7610,26 @@ class L10nEn extends L10n {
   }
 
   @override
+  String get harmonyRemindersTitle => 'Alarms and timers';
+
+  @override
+  String get harmonyRemindersCanHint =>
+      'The system reminds you when it\'s time; the engine doesn\'t run for it. The system can still say no, and the AI is told';
+
+  @override
+  String get harmonyRemindersNoBuild => 'This version doesn\'t have system reminders';
+
+  @override
+  String get harmonyRemindersNoDevice => 'This device doesn\'t have system reminders';
+
+  @override
+  String get harmonyReminderSet => 'Reminder set';
+
+  @override
+  String get harmonyReminderRefused =>
+      'The system didn\'t accept the reminder, so nothing was set. It may be at its limit, or this version may not have the service.';
+
+  @override
   String get hostDetailsConnectionType => 'Connection type';
 
   @override
@@ -17622,7 +17642,7 @@ class L10nEn extends L10n {
   String get systemActionsCannotScreenHint => 'The system doesn\'t allow it';
 
   @override
-  String get systemActionsCannotOther => 'Read the clipboard, find apps by name, alarms and timers, SMS';
+  String get systemActionsCannotOther => 'Read the clipboard, find apps by name, SMS';
 
   @override
   String get systemActionsCannotOtherHint => 'No reliable public API; the AI is told it\'s not supported';
@@ -17671,7 +17691,7 @@ class L10nEn extends L10n {
 
   @override
   String get systemActionsDisclosureWhatBody =>
-      'Opens apps or links, opens the calendar, dialer, share and navigation pages, sends notifications, writes the clipboard and hands steps back to you.';
+      'Opens apps or links, opens the calendar, dialer, share and navigation pages, sends notifications, writes the clipboard and hands steps back to you. Where this version has system reminders, it can also set alarms and timers.';
 
   @override
   String get systemActionsDisclosureWhenTitle => 'When';
@@ -17757,7 +17777,7 @@ class L10nEn extends L10n {
 
   @override
   String get searchKwSystemActions =>
-      'phone control,control phone,open app,open link,calendar,dialer,share,navigation,notification,clipboard,hand back';
+      'phone control,control phone,open app,open link,calendar,dialer,share,navigation,notification,clipboard,hand back,alarm,timer';
 
   @override
   String get updateCheck => 'Check for updates';

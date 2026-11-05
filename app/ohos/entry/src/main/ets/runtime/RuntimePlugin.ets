@@ -149,6 +149,7 @@ export class RuntimePlugin implements FlutterPlugin, MethodCallHandler, StreamHa
     }
     // Preview must not trigger pending recovery writes through initialization.
     if (call.method === 'lastKnownGood') { result.success(await controller.lastKnownGood()); return; }
+    if (call.method === 'reminderAccess') { result.success(controller.reminderAccess()); return; }
     await controller.initialize().catch((error: Error): void => {
       // Recovery failures must remain inspectable while mutating calls stay closed.
       if (!['getStatus', 'getLogs', 'getLogSnapshot', 'failureLog'].includes(call.method)) throw error;

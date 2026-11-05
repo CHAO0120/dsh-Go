@@ -16,10 +16,29 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../phone/phone_channel.dart' show PhoneLogEntry;
 import '../runtime/phone_callback_bridge.dart';
+import '../runtime/runtime_state.dart';
 import 'connection_state.dart';
 
 /// [OhosPhoneNative]; tests swap it.
 final systemActionsNativeProvider = Provider<DshPhoneNative>((ref) => const OhosPhoneNative());
+
+/// Whether this build and device can set alarms and timers. Even then the service
+/// can say no when asked: it may not be turned on, or be at its limit.
+enum ReminderAccess { available, notThisBuild, notThisDevice }
+
+/// Null while it's being asked, or if the native side couldn't say.
+final reminderAccessProvider = FutureProvider<ReminderAccess?>((ref) async {
+  try {
+    return switch (await ref.read(runtimeBridgeProvider).reminderAccess()) {
+      'granted' => ReminderAccess.available,
+      'denied' => ReminderAccess.notThisBuild,
+      'unsupported' => ReminderAccess.notThisDevice,
+      _ => null,
+    };
+  } catch (_) {
+    return null;
+  }
+});
 
 /// Where the switch stands right now.
 enum SystemActionsLink {
@@ -87,6 +106,7 @@ class SystemActionsState {
 String phoneResultDecision(DshPhoneResult result) => switch (result.status) {
   DshPhoneStatus.succeeded when result.evidence == DshPhoneEvidence.userConfirmed => 'continue',
   DshPhoneStatus.succeeded when result.evidence == DshPhoneEvidence.openedUi => 'opened_ui',
+  DshPhoneStatus.succeeded when result.effect == DshPhoneEffect.reminderScheduled => 'reminder_scheduled',
   DshPhoneStatus.succeeded => 'ok',
   DshPhoneStatus.unknown => 'result_unknown',
   DshPhoneStatus.cancelled => 'stopped',

@@ -400,6 +400,19 @@ void main() {
       message: '',
     );
     expect(phoneResultDecision(_opened), 'opened_ui');
+    expect(
+      phoneResultDecision(
+        const DshPhoneResult(
+          status: DshPhoneStatus.succeeded,
+          effect: DshPhoneEffect.reminderScheduled,
+          evidence: DshPhoneEvidence.unknown,
+          dispatched: true,
+          code: 'reminder_scheduled',
+          message: 'x',
+        ),
+      ),
+      'reminder_scheduled',
+    );
     expect(phoneResultDecision(_confirmed), 'continue');
     expect(phoneResultDecision(result(DshPhoneStatus.unknown, 'sdk_failed')), 'result_unknown');
     expect(phoneResultDecision(result(DshPhoneStatus.failed, 'unsupported')), 'unsupported');

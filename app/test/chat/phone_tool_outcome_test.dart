@@ -64,7 +64,7 @@ void main() {
       'a reminder handed to the system',
       ToolStatus.succeeded,
       _json('succeeded', 'reminder_scheduled', 'unknown', true, 'reminder_scheduled'),
-      _zh.phoneDecisionDone,
+      _zh.harmonyReminderSet,
       _zh.systemActionsResultReminder,
       false,
     ),
@@ -93,6 +93,22 @@ void main() {
       false,
     ),
     (
+      'the system refusing a reminder: its reason, and nothing set',
+      ToolStatus.failed,
+      'Error: ${_json('failed', 'none', 'unknown', true, 'reminder_refused', '系统没有接受提醒：有效提醒已达上限，或这个版本还没开通系统代理提醒。')}',
+      _zh.systemActionsNotRun,
+      '系统没有接受提醒：有效提醒已达上限，或这个版本还没开通系统代理提醒。',
+      true,
+    ),
+    (
+      'a build without the permission',
+      ToolStatus.failed,
+      'Error: ${_json('failed', 'none', 'unknown', false, 'permission_denied', '系统提醒权限尚未授予；请检查应用签名和提醒权限。')}',
+      _zh.systemActionsNotRun,
+      '系统提醒权限尚未授予；请检查应用签名和提醒权限。',
+      true,
+    ),
+    (
       'off screen',
       ToolStatus.failed,
       'Error: ${_json('failed', 'none', 'unknown', false, 'not_foreground')}',
@@ -118,6 +134,18 @@ void main() {
       expect(ToolView.of(item).phoneResult!.isFault, fault);
     });
   }
+
+  test('a refused reminder in English says so, where the native reason only has Chinese', () {
+    final view = _item(
+      ToolStatus.failed,
+      'Error: ${_json('failed', 'none', 'unknown', true, 'reminder_refused', '系统没有接受提醒。')}',
+    );
+    AppLocale.use(AppLocale.en);
+    addTearDown(() => AppLocale.use(AppLocale.zhCN));
+    final en = lookupL10n(AppLocale.en);
+    expect(ToolView.of(view).phoneResult!.sentence, en.harmonyReminderRefused);
+    expect(ToolView.of(view).phoneResult!.word, en.systemActionsNotRun);
+  });
 
   test('an unknown or unsupported call isn\'t counted as a failure of the turn', () {
     expect(

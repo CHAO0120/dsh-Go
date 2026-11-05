@@ -71,6 +71,7 @@ export class OhosLifecycleTransport {
   }
   cancel() { lifecycleControl.cancels++; }
 }
+export function agentReminderAccess() { return lifecycleControl.reminders ?? 'denied'; }
 export function backgroundComputePermission() { lifecycleControl.queries++; return lifecycleControl.permission ?? 'denied'; }
 export class FlutterAbility {
   superCalls = [];

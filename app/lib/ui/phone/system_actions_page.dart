@@ -58,6 +58,7 @@ class _SystemActionsPageState extends ConsumerState<SystemActionsPage> {
     final state = ref.watch(systemActionsProvider);
     final status = systemActionsLine(l10n, state.link);
     final recent = state.log.take(SystemActionsPage.recentCount).toList();
+    final reminders = ref.watch(reminderAccessProvider).value;
     const gap = SizedBox(height: 24);
     return AppPage.list(
       title: l10n.systemActionsTitle,
@@ -120,6 +121,13 @@ class _SystemActionsPageState extends ConsumerState<SystemActionsPage> {
               title: l10n.systemActionsCanClipboard,
               subtitle: l10n.systemActionsCanClipboardHint,
             ),
+            if (reminders == ReminderAccess.available)
+              ListPageRow(
+                icon: AppIcons.alarmClock,
+                title: l10n.harmonyRemindersTitle,
+                subtitle: l10n.harmonyRemindersCanHint,
+                subtitleMaxLines: 3,
+              ),
             ListPageRow(
               icon: AppIcons.lock,
               title: l10n.systemActionsCanHandoff,
@@ -137,6 +145,14 @@ class _SystemActionsPageState extends ConsumerState<SystemActionsPage> {
               title: l10n.systemActionsCannotScreen,
               subtitle: l10n.systemActionsCannotScreenHint,
             ),
+            if (reminders == ReminderAccess.notThisBuild || reminders == ReminderAccess.notThisDevice)
+              ListPageRow(
+                icon: AppIcons.blocked,
+                title: l10n.harmonyRemindersTitle,
+                subtitle: reminders == ReminderAccess.notThisBuild
+                    ? l10n.harmonyRemindersNoBuild
+                    : l10n.harmonyRemindersNoDevice,
+              ),
             ListPageRow(
               icon: AppIcons.blocked,
               title: l10n.systemActionsCannotOther,

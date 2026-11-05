@@ -29,7 +29,7 @@
   "systemActionsCannotTitle": "做不到的",
   "systemActionsCannotScreen": "看屏幕、点按其他应用",
   "systemActionsCannotScreenHint": "系统不允许",
-  "systemActionsCannotOther": "读剪贴板、按名字找应用、闹钟和计时器、短信",
+  "systemActionsCannotOther": "读剪贴板、按名字找应用、短信",
   "systemActionsCannotOtherHint": "没有可靠的公开接口，AI 会直接告诉你不支持",
   "systemActionsConfirmTitle": "确认方式",
   "systemActionsConfirmValue": "跟随权限",
@@ -44,7 +44,7 @@
   "systemActionsDisclosureTitle": "开启系统操作前",
   "systemActionsDisclosureIntro": "开启后，AI 可以在对话里替你打开应用和系统页面。先了解这几点：",
   "systemActionsDisclosureWhatTitle": "能做什么",
-  "systemActionsDisclosureWhatBody": "打开应用或链接，打开日历、拨号、分享、导航界面，发通知，写剪贴板，把步骤交还给你。",
+  "systemActionsDisclosureWhatBody": "打开应用或链接，打开日历、拨号、分享、导航界面，发通知，写剪贴板，把步骤交还给你。这个版本开通了系统提醒时，还能设闹钟和计时器。",
   "systemActionsDisclosureWhenTitle": "什么时候做",
   "systemActionsDisclosureWhenBody": "只在对话用到、DSH Go 在屏幕上时。默认每次先问你，选了完全权限的对话不问。",
   "systemActionsDisclosureWhoTitle": "发给谁",
@@ -70,5 +70,5 @@
   "systemActionsResultNotRun": "没有执行。",
   "catalogSystemActions": "系统操作",
   "catalogSystemActionsSummary": "打开应用和系统页面",
-  "searchKwSystemActions": "手机操控,操作手机,代操作,打开应用,打开链接,日历,拨号,分享,导航,发通知,写剪贴板,交还"
+  "searchKwSystemActions": "手机操控,操作手机,代操作,打开应用,打开链接,日历,拨号,分享,导航,发通知,写剪贴板,交还,闹钟,计时器"
 }

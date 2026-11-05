@@ -17,7 +17,7 @@ export function tickRetry() {
   timers.delete(id); timer.callback(); return timer.delay;
 }
 export const permission = { grants: 0, modes: 0, status: 0, supported: true,
-  accessCapability: true, backgroundCapability: true, error: null, requestedModes: null, systemStatus: null };
+  accessCapability: true, backgroundCapability: true, reminderCapability: true, error: null, requestedModes: null, systemStatus: null };
 export const abilityAccessCtrl = {
   GrantStatus: { PERMISSION_GRANTED: 0, PERMISSION_DENIED: -1 },
   createAtManager() { return { checkAccessTokenSync(id, name) {
@@ -35,8 +35,8 @@ export const backgroundTaskManager = {
     }
   },
 };
-export const canIUse = name => name === 'SystemCapability.Security.AccessToken'
-  ? permission.accessCapability : permission.backgroundCapability;
+export const canIUse = name => name === 'SystemCapability.Security.AccessToken' ? permission.accessCapability
+  : name === 'SystemCapability.Notification.ReminderAgent' ? permission.reminderCapability : permission.backgroundCapability;
 
 export async function loadHostModules(sourceOverride) {
   const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');

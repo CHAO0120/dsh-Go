@@ -13226,6 +13226,42 @@ abstract class L10n {
   /// **'我的 DSH 正常模式出了问题（{what}）。现在是安全模式，用的是随包的默认配置，我原来的配置没有动。请帮我找原因，动手改之前先告诉我要改什么。'**
   String harmonySafeRepairPrompt(String what);
 
+  /// No description provided for @harmonyRemindersTitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'闹钟和计时器'**
+  String get harmonyRemindersTitle;
+
+  /// No description provided for @harmonyRemindersCanHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'到点由系统提醒，引擎不会因此运行。系统也可能不接受，AI 会告诉你'**
+  String get harmonyRemindersCanHint;
+
+  /// No description provided for @harmonyRemindersNoBuild.
+  ///
+  /// In zh, this message translates to:
+  /// **'这个版本没有开通系统提醒'**
+  String get harmonyRemindersNoBuild;
+
+  /// No description provided for @harmonyRemindersNoDevice.
+  ///
+  /// In zh, this message translates to:
+  /// **'这台设备没有系统提醒'**
+  String get harmonyRemindersNoDevice;
+
+  /// No description provided for @harmonyReminderSet.
+  ///
+  /// In zh, this message translates to:
+  /// **'已设提醒'**
+  String get harmonyReminderSet;
+
+  /// No description provided for @harmonyReminderRefused.
+  ///
+  /// In zh, this message translates to:
+  /// **'系统没有接受提醒，没有设置。'**
+  String get harmonyReminderRefused;
+
   /// No description provided for @hostDetailsConnectionType.
   ///
   /// In zh, this message translates to:
@@ -30617,7 +30653,7 @@ abstract class L10n {
   /// No description provided for @systemActionsCannotOther.
   ///
   /// In zh, this message translates to:
-  /// **'读剪贴板、按名字找应用、闹钟和计时器、短信'**
+  /// **'读剪贴板、按名字找应用、短信'**
   String get systemActionsCannotOther;
 
   /// No description provided for @systemActionsCannotOtherHint.
@@ -30707,7 +30743,7 @@ abstract class L10n {
   /// No description provided for @systemActionsDisclosureWhatBody.
   ///
   /// In zh, this message translates to:
-  /// **'打开应用或链接，打开日历、拨号、分享、导航界面，发通知，写剪贴板，把步骤交还给你。'**
+  /// **'打开应用或链接，打开日历、拨号、分享、导航界面，发通知，写剪贴板，把步骤交还给你。这个版本开通了系统提醒时，还能设闹钟和计时器。'**
   String get systemActionsDisclosureWhatBody;
 
   /// No description provided for @systemActionsDisclosureWhenTitle.
@@ -30863,7 +30899,7 @@ abstract class L10n {
   /// No description provided for @searchKwSystemActions.
   ///
   /// In zh, this message translates to:
-  /// **'手机操控,操作手机,代操作,打开应用,打开链接,日历,拨号,分享,导航,发通知,写剪贴板,交还'**
+  /// **'手机操控,操作手机,代操作,打开应用,打开链接,日历,拨号,分享,导航,发通知,写剪贴板,交还,闹钟,计时器'**
   String get searchKwSystemActions;
 
   /// No description provided for @updateCheck.

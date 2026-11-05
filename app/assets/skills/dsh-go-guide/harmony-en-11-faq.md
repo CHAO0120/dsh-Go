@@ -48,7 +48,7 @@ The top of the system actions page says where things stand:
 - **Not available in this version**: this version doesn't support system actions.
 - **You're connected to a remote host**: switch to **This phone**.
 
-If the AI says it isn't supported: seeing the screen, tapping inside other apps, reading the clipboard, finding apps by name, alarms and timers, and SMS can't be done. See [System actions](04-phone-control.md).
+If the AI says it isn't supported: seeing the screen, tapping inside other apps, reading the clipboard, finding apps by name and SMS can't be done. Alarms and timers need a version with system reminders. See [System actions](04-phone-control.md).
 
 ## The pet is gone
 

@@ -29,7 +29,7 @@
   "systemActionsCannotTitle": "What it can't do",
   "systemActionsCannotScreen": "See the screen or tap inside other apps",
   "systemActionsCannotScreenHint": "The system doesn't allow it",
-  "systemActionsCannotOther": "Read the clipboard, find apps by name, alarms and timers, SMS",
+  "systemActionsCannotOther": "Read the clipboard, find apps by name, SMS",
   "systemActionsCannotOtherHint": "No reliable public API; the AI is told it's not supported",
   "systemActionsConfirmTitle": "Confirmation",
   "systemActionsConfirmValue": "Follows permissions",
@@ -44,7 +44,7 @@
   "systemActionsDisclosureTitle": "Before turning on system actions",
   "systemActionsDisclosureIntro": "Once on, the AI can open apps and system pages for you from a chat. Worth knowing first:",
   "systemActionsDisclosureWhatTitle": "What it does",
-  "systemActionsDisclosureWhatBody": "Opens apps or links, opens the calendar, dialer, share and navigation pages, sends notifications, writes the clipboard and hands steps back to you.",
+  "systemActionsDisclosureWhatBody": "Opens apps or links, opens the calendar, dialer, share and navigation pages, sends notifications, writes the clipboard and hands steps back to you. Where this version has system reminders, it can also set alarms and timers.",
   "systemActionsDisclosureWhenTitle": "When",
   "systemActionsDisclosureWhenBody": "Only when a chat calls for it and DSH Go is on screen. It asks each time by default, and not in chats with full access.",
   "systemActionsDisclosureWhoTitle": "Who gets what",
@@ -70,5 +70,5 @@
   "systemActionsResultNotRun": "Nothing ran.",
   "catalogSystemActions": "System actions",
   "catalogSystemActionsSummary": "Open apps and system pages",
-  "searchKwSystemActions": "phone control,control phone,open app,open link,calendar,dialer,share,navigation,notification,clipboard,hand back"
+  "searchKwSystemActions": "phone control,control phone,open app,open link,calendar,dialer,share,navigation,notification,clipboard,hand back,alarm,timer"
 }

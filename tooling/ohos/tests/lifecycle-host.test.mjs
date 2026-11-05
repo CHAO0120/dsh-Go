@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { loadHostModules, timers, tickRetry, permission } from './lifecycle-host-fixture.mjs';
 
 const modules = await loadHostModules(process.env.DSH_LIFECYCLE_ETS_SOURCE);
-const { RuntimeLifecycle, LifecycleFailure, backgroundComputePermission } = modules;
+const { RuntimeLifecycle, LifecycleFailure, agentReminderAccess, backgroundComputePermission } = modules;
 after(() => modules.close());
 const models = [];
 afterEach(() => {
@@ -93,6 +93,17 @@ test('stopping while backoff is armed clears it and prevents any extra permissio
   const f = setup(); start(f.model); f.sends[0].reject(new Error('transient')); await flush();
   assert.equal(timers.size, 1); f.model.runtime(null, null); assert.equal(timers.size, 0);
   assert.equal(f.sends.length, 1); assert.equal(f.queries, 1);
+});
+test('reminder access: granted, a build without the permission, a device without the service', () => {
+  const reset = () => Object.assign(permission, { grants: 0, modes: 0, status: 0, supported: true,
+    accessCapability: true, backgroundCapability: true, reminderCapability: true, error: null, requestedModes: null, systemStatus: null });
+  reset(); assert.equal(agentReminderAccess(42), 'granted');
+  assert.deepEqual(permission.last, { id: 42, name: 'ohos.permission.PUBLISH_AGENT_REMINDER' });
+  reset(); permission.status = -1; assert.equal(agentReminderAccess(42), 'denied');
+  reset(); permission.error = Object.assign(new Error('no such permission'), { code: 12100001 });
+  assert.equal(agentReminderAccess(42), 'denied');
+  reset(); permission.reminderCapability = false; assert.equal(agentReminderAccess(42), 'unsupported');
+  assert.equal(permission.grants, 0, 'nothing asked on a device without it');
 });
 test('public eligibility query distinguishes prerequisite denial from unsupported or failed observation', () => {
   const reset = () => Object.assign(permission, { grants: 0, modes: 0, status: 0, supported: true,

@@ -454,6 +454,7 @@ extension PhoneResultText on DshPhoneResult {
   String get word => switch (status) {
     DshPhoneStatus.succeeded when evidence == DshPhoneEvidence.openedUi => appL10n.systemActionsOpenedUi,
     DshPhoneStatus.succeeded when evidence == DshPhoneEvidence.userConfirmed => appL10n.phoneDecisionContinued,
+    DshPhoneStatus.succeeded when effect == DshPhoneEffect.reminderScheduled => appL10n.harmonyReminderSet,
     DshPhoneStatus.succeeded => appL10n.phoneDecisionDone,
     DshPhoneStatus.unknown => appL10n.systemActionsResultUnknown,
     DshPhoneStatus.cancelled => appL10n.commonStopped,
@@ -477,6 +478,7 @@ extension PhoneResultText on DshPhoneResult {
       'unsupported' => appL10n.systemActionsResultUnsupported,
       'not_foreground' => appL10n.systemActionsResultOffScreen,
       'native_unavailable' || 'owner_retired' || 'closed' => appL10n.systemActionsResultUnavailable,
+      'reminder_refused' when AppLocale.isEnglish => appL10n.harmonyReminderRefused,
       // The native side's own reason says which part of it; it only has Chinese.
       _ => AppLocale.isEnglish ? appL10n.systemActionsResultNotRun : message,
     },

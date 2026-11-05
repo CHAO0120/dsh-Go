@@ -18,7 +18,7 @@ import { PersistedRuntimeLog } from './PersistedRuntimeLog';
 import { TransientTaskOwner } from './TransientTaskOwner';
 import { RuntimeLifecycle, HostLifecycleAck } from './RuntimeLifecycle';
 import { OhosLifecycleTransport } from './OhosLifecycleTransport';
-import { backgroundComputePermission } from './BackgroundCompute';
+import { agentReminderAccess, backgroundComputePermission } from './BackgroundCompute';
 
 type RuntimeSink = (event: Map<string, Object | null>) => void;
 const LIFECYCLE_NOTICE = '前后台状态尚未同步，本机任务可能仍在暂停或运行；正在重试。';
@@ -384,6 +384,8 @@ export class RuntimeController {
       this.logNote('上次正常配置尚未确认保存；本次运行仍可继续。');
     });
   }
+
+  reminderAccess(): string { return agentReminderAccess(this.context.applicationInfo.accessTokenId); }
 
   // For the log. Notices reach the person as they are, and these name the engine's
   // internals; what they need to know the app says itself, in their language.

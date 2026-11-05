@@ -1618,6 +1618,24 @@ test('a power cut at any point of an update keeps the old install or a whole new
 });
 
 
+test('reminder access answers through the real plugin, with nothing installed or started', async () => {
+  const c = await controllerCase('reminder-access');
+  const plugin = new RuntimePlugin();
+  plugin.onAttachedToEngine({ getApplicationContext: () => c.context,
+    getBinaryMessenger: () => ({ setMessageHandler() {} }) });
+  const invoke = method => new Promise(resolve => plugin.onMethodCall(
+    new MethodCall(method, new Map()), {
+      success: value => resolve({kind: 'success', value}),
+      error: (code, message) => resolve({kind: 'error', code, message}),
+      notImplemented: () => resolve({kind: 'unknown'}),
+    }));
+  for (const answer of ['granted', 'denied', 'unsupported']) {
+    lifecycleControl.reminders = answer;
+    try { assert.deepEqual(await invoke('reminderAccess'), {kind: 'success', value: answer}); }
+    finally { delete lifecycleControl.reminders; }
+  }
+});
+
 test('public start selects the manual safe profile through actual Controller', async () => {
   const c = await controllerCase('manual-safe-public');
   const plugin = new RuntimePlugin();

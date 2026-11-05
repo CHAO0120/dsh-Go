@@ -2,12 +2,14 @@
 // switch without the disclosure, and only continue tells the AI to go on.
 
 import 'package:dsh_app/l10n/l10n.dart';
+import 'package:dsh_app/runtime/runtime_bridge.dart';
 import 'package:dsh_app/runtime/runtime_state.dart';
 import 'package:dsh_app/state/android_features.dart';
 import 'package:dsh_app/state/hosts_state.dart';
 import 'package:dsh_app/state/settings_state.dart';
 import 'package:dsh_app/state/system_actions_state.dart';
 import 'package:dsh_app/phone/phone_channel.dart' show PhoneLogEntry;
+import 'package:dsh_app/ui/common/list_page_row.dart';
 import 'package:dsh_app/ui/features/permission_page.dart';
 import 'package:dsh_app/ui/phone/action_log_page.dart';
 import 'package:dsh_app/ui/phone/phone_disclosure_sheet.dart';
@@ -59,11 +61,24 @@ class _Actions extends SystemActionsController {
   void end() => state = state.copyWith(clearHandoff: true);
 }
 
+class _Reminders extends RuntimeBridge {
+  _Reminders(this.answer);
+
+  final String answer;
+
+  @override
+  Future<String?> reminderAccess() async => answer;
+
+  @override
+  Stream<RuntimeEvent> get events => const Stream.empty();
+}
+
 Future<_Actions> _pump(
   WidgetTester tester,
   Widget home, {
   SystemActionsState state = const SystemActionsState(loaded: true),
   HostRef host = HostRef.local,
+  String? reminders,
 }) async {
   tester.view.devicePixelRatio = 2;
   tester.view.physicalSize = const Size(390 * 2, 2000 * 2);
@@ -75,6 +90,7 @@ Future<_Actions> _pump(
       brightness: Brightness.light,
       overrides: [
         operatingSystemProvider.overrideWithValue('ohos'),
+        if (reminders != null) runtimeBridgeProvider.overrideWithValue(_Reminders(reminders)),
         systemActionsProvider.overrideWith(() => actions),
         activeHostProvider.overrideWith(() => FixedActiveHost(host)),
         hostsProvider.overrideWith(FixedHosts.new),
@@ -126,13 +142,39 @@ void main() {
     expect(find.textContaining('悬浮'), findsNothing);
   });
 
+  group('闹钟和计时器 say what is true of this build', () {
+    Finder under(String card, String title) => find.descendant(
+      of: find.ancestor(of: find.text(card), matching: find.byType(ListPageCard)),
+      matching: find.text(title),
+    );
+
+    for (final (native, card, hint) in [
+      ('granted', _zh.systemActionsCanTitle, _zh.harmonyRemindersCanHint),
+      ('denied', _zh.systemActionsCannotTitle, _zh.harmonyRemindersNoBuild),
+      ('unsupported', _zh.systemActionsCannotTitle, _zh.harmonyRemindersNoDevice),
+    ]) {
+      testWidgets('$native: under 「$card」', (tester) async {
+        await _pump(tester, const SystemActionsPage(), reminders: native);
+        expect(find.text(_zh.harmonyRemindersTitle), findsOneWidget);
+        expect(under(card, _zh.harmonyRemindersTitle), findsOneWidget);
+        expect(find.text(hint), findsOneWidget);
+      });
+    }
+
+    testWidgets('a native side that can\'t say: no claim either way', (tester) async {
+      await _pump(tester, const SystemActionsPage());
+      expect(find.text(_zh.harmonyRemindersTitle), findsNothing);
+    });
+  });
+
   test('what the native side refuses isn\'t on the can-do list', () {
     final can = [_zh.systemActionsCanOpen, _zh.systemActionsCanPages, _zh.systemActionsCanSettings];
     for (final line in can) {
       expect(line, isNot(contains('短信')), reason: 'sms_draft says unsupported');
-      expect(line, isNot(contains('闹钟')), reason: 'alarm says unsupported');
+      expect(line, isNot(contains('闹钟')), reason: 'alarms have their own row, by what this build can do');
     }
-    expect(_zh.systemActionsCannotOther, allOf(contains('短信'), contains('闹钟'), contains('读剪贴板')));
+    expect(_zh.systemActionsCannotOther, allOf(contains('短信'), contains('读剪贴板')));
+    expect(_zh.systemActionsCannotOther, isNot(contains('闹钟')), reason: 'there is a public way now');
   });
 
   group('the switch', () {
@@ -199,6 +241,7 @@ void main() {
 
     for (final (decision, word) in [
       ('opened_ui', _zh.systemActionsOpenedUi),
+      ('reminder_scheduled', _zh.harmonyReminderSet),
       ('result_unknown', _zh.systemActionsResultUnknown),
       ('unsupported', _zh.systemActionsNotSupported),
       ('continue', _zh.phoneDecisionContinued),

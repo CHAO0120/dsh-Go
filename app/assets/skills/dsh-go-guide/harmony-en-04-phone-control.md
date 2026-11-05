@@ -20,12 +20,14 @@ Once on, the top of the page says where things stand; if it isn't working, see [
 - Some system settings pages: mobile network, display, sound, NFC and this app's notifications.
 - Send a notification: sending it doesn't mean you've seen it.
 - Write the clipboard: write only, never read.
+- Alarms and timers: where this version has system reminders, they're listed under What it can do. The system reminds you when it's time, and the engine doesn't run for it. The system can still say no, for example if the service isn't turned on or it's at its limit, and the AI is told.
 - Hand back to you: you do steps like sign-in or codes, then press **Continue**.
 
 ## What it can't do
 
 - See the screen or tap inside other apps: the system doesn't allow it.
-- Read the clipboard, find apps by name, alarms and timers, SMS: no reliable public API; the AI is told it's not supported.
+- Read the clipboard, find apps by name, SMS: no reliable public API; the AI is told it's not supported.
+- Alarms and timers, on a version or device without system reminders: What it can't do says so.
 
 ## Confirmation
 

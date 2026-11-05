@@ -633,6 +633,10 @@ class RuntimeBridge {
     return map == null ? const LastKnownGood.none() : LastKnownGood.fromMap({...map, 'available': true});
   }
 
+  /// HarmonyOS: whether this build may schedule system reminders: `granted`,
+  /// `denied` or `unsupported`.
+  Future<String?> reminderAccess() => _methods.invokeMethod<String>('reminderAccess');
+
   Future<List<SafeHazard>> safePreflight() async {
     final list = await _methods.invokeListMethod<Object?>('safePreflight') ?? const [];
     return [
