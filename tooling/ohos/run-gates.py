@@ -746,6 +746,11 @@ def main():
             g.node_tests(name + '-' + mode, [rt + name + '.test.mjs'], mode=mode, imports=['tooling/ohos/tests/ets-fixture-loader.mjs'] if mode == 'strict' else [],
                          needs=('native-publication-build', 'prepared-inputs'), extra=lambda: {**linked_env(), 'DSH_HOME': str(o / 'phone-home'),
                              'NODE_PATH': str(p('android_pristine') / 'node_modules'), 'OHOS_ETS_FIXTURE_ARTIFACTS': str(o / 'ets-fixture-artifacts')}, timeout=240)
+    for mode in ['marker', 'strict']:
+        g.node_tests('phone-calendar-all-day-' + mode, [rt + 'phone-calendar-all-day.test.mjs'], mode=mode,
+                     imports=['tooling/ohos/tests/ets-fixture-loader.mjs'] if mode == 'strict' else [],
+                     needs=('native-publication-build', 'prepared-inputs'), extra=lambda: {**linked_env(),
+                         'TZ': 'America/New_York', 'OHOS_ETS_FIXTURE_ARTIFACTS': str(o / 'ets-fixture-artifacts')}, timeout=240)
     for label in ('crash', 'freeze'):
         def lifecycle_command(label=label):
             values = g.py(rt + 'lifecycle-' + label + '-controller.py', '--node', node(), '--prefix', prefix(), '--linked', native() / 'libpublication-test-linked.so', '--native-library-dir', p('native_library_dir'), '--out', o / ('lifecycle-' + label))

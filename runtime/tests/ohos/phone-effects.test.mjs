@@ -117,9 +117,9 @@ test('content whitespace is retained; preparatory and synchronous SDK errors pre
   const s=fixture();await s.run('intent',{kind:'share',text:' text '});assert.equal(s.payloads[0].data.content,' text ');
   const bad=fixture({permission:()=>{throw new Error('preparation');}});const r=await bad.run('notify',{title:'x',text:'y'});assert.equal(r.dispatched,false);assert.equal(bad.guards,0);
 });
-test('calendar local timezone and unsupported all-day are explicit',async()=>{
+test('calendar local timezone and all-day mapping are explicit',async()=>{
   const f=fixture();await f.run('intent',{kind:'calendar',title:'x',begin:'2026-10-24 19:00'});assert.equal(f.payloads[0].startTime,new Date(2026,9,24,19,0).getTime());
-  for(const args of [{begin:'2026-10-24'},{begin:'2026-10-24T19:00',all_day:true}]){const z=fixture();const r=await z.run('intent',{kind:'calendar',title:'x',...args});assert.equal(r.code,'unsupported');assert.equal(z.guards,0);}
+  for(const args of [{begin:'2026-10-24'},{begin:'2026-10-24T19:00',all_day:true}]){const z=fixture();const r=await z.run('intent',{kind:'calendar',title:'x',...args});assert.equal(r.effect,'opened_ui');assert.equal(z.payloads[0].isAllDay,true);assert.equal(z.guards,1);}
 });
 
 test('synchronous SDK throw follows the same consumed boundary',async()=>{

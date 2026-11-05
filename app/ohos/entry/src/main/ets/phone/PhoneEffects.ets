@@ -67,6 +67,30 @@ function timestamp(value: string): number {
   return result;
 }
 
+// Bare dates are phone-local civil dates, never Date.parse's UTC date-only form.
+function calendarTimestamp(value: string): number {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return timestamp(value);
+  const result = timestamp(value + 'T00:00');
+  const date = new Date(result);
+  if (date.getFullYear() !== Number(value.substring(0, 4)) ||
+    date.getMonth() + 1 !== Number(value.substring(5, 7)) || date.getDate() !== Number(value.substring(8, 10))) {
+    throw new PhoneEffectDenied('invalid_arguments', '日程日期在手机时区中不存在。');
+  }
+  return result;
+}
+
+function localDayStart(value: number): number {
+  const date = new Date(value);
+  date.setHours(0, 0, 0, 0);
+  return date.getTime();
+}
+
+function nextLocalDay(value: number): number {
+  const date = new Date(localDayStart(value));
+  date.setDate(date.getDate() + 1);
+  return date.getTime();
+}
+
 // The caller validates the Android-compatible schema, owns the Ability lifetime,
 // and supplies a synchronous native permit check. This class never owns a queue,
 // retries an effect, reads the clipboard, or interprets UI launch as completion.
@@ -151,15 +175,22 @@ export class PhoneEffects {
       } else if (kind === 'calendar') {
         const title = required(args, 'title');
         const begin = required(args, 'begin').trim();
-        if (args.get('all_day') === true || /^\d{4}-\d{2}-\d{2}$/.test(begin)) {
-          unsupported('全天日程的结束边界尚未确认，不能代建。');
-        }
-        const startTime = timestamp(begin);
+        const allDayValue: Object | undefined = args.get('all_day');
+        const allDay = typeof allDayValue === 'boolean' ? allDayValue : /^\d{4}-\d{2}-\d{2}$/.test(begin);
+        const beginTime = calendarTimestamp(begin);
         const endText = text(args, 'end');
-        const endTime = endText === '' ? startTime + 3600000 : timestamp(endText);
-        if (endTime < startTime) throw new PhoneEffectDenied('invalid_arguments', '日程结束早于开始。');
+        const exclusiveEnd = endText === '' ? (allDay ? nextLocalDay(beginTime) : beginTime + 3600000) : calendarTimestamp(endText);
+        if (exclusiveEnd < beginTime) throw new PhoneEffectDenied('invalid_arguments', '日程结束早于开始。');
+        if (allDay && exclusiveEnd === beginTime) {
+          throw new PhoneEffectDenied('invalid_arguments', '全天日程结束必须晚于开始。');
+        }
+        // Calendar Kit expands an all-day endTime to 24:00 of its own date.
+        // The wire end is exclusive: midnight therefore belongs to the previous day.
+        // editEvent uses the phone time zone and does not accept Event.timeZone.
+        const startTime = allDay ? localDayStart(beginTime) : beginTime;
+        const endTime = allDay ? exclusiveEnd - 1 : exclusiveEnd;
         const event: calendarManager.Event = { type: calendarManager.EventType.NORMAL, title, startTime, endTime,
-          isAllDay: false, description: rawText(args, 'description'), location: { location: rawText(args, 'location') } };
+          isAllDay: allDay, description: rawText(args, 'description'), location: { location: rawText(args, 'location') } };
         const calendar = calendarManager.getCalendarManager(this.context);
         dispatch();
         const id = await calendar.editEvent(event);
