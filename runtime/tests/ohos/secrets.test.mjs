@@ -473,3 +473,22 @@ test('an empty-vault probe blames the key only when the key itself fails', async
   f.change({ keyQueryError: undefined });
   assert.deepEqual(await f.request('readAll'), { value: {} });
 });
+
+for (const code of [12000005,12000014]) for (const empty of [false,true]) {
+  test(`transient HUKS session failure ${code}, empty=${empty}, preserves credential and retries`, async t => {
+    const f=await secretsFixture(t);
+    await f.request('write',{key:'deepseek_api_key',value:'fixture-only-not-a-real-key'});
+    const original=await fs.readFile(f.vaultPath);
+    if(empty) await fs.unlink(f.vaultPath);
+    f.change({beforeFinish:async()=>{throw Object.assign(new Error('controlled transient HUKS failure'),{code});}});
+    const reply=await f.request('readAll');
+    assert.equal(reply.error,'secrets_unavailable');
+    assert.equal(f.sessions.size,0);
+    assert.equal(f.events.filter(row=>row.op==='deleteKey').length,0);
+    assert.equal(f.events.filter(row=>row.op==='generate').length,1);
+    if(empty) await assert.rejects(fs.stat(f.vaultPath),{code:'ENOENT'});
+    else assert.deepEqual(await fs.readFile(f.vaultPath),original);
+    f.change({beforeFinish:undefined});
+    assert.deepEqual(await f.request('readAll'),{value:empty?{}:{deepseek_api_key:'fixture-only-not-a-real-key'}});
+  });
+}

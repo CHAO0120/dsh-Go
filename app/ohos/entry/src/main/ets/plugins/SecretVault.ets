@@ -10,6 +10,11 @@ export class SecretStorageError extends Error {
   constructor(code: string, message: string) { super(message); this.code = code; }
 }
 
+// These failures describe the service call, not invalid ciphertext or key material.
+class RetryableSecretStorageError extends SecretStorageError {
+  constructor() { super('secrets_unavailable', '系统安全密钥暂不可用，请重试。'); }
+}
+
 class SecretRecord {
   key: string;
   value: string;
@@ -121,7 +126,8 @@ export class SecretVault {
     let encrypted: Uint8Array;
     try { encrypted = await this.crypt(true, plaintext, nonce, current); }
     catch (error) {
-      if (error instanceof SecretStorageError && error.code === 'cancelled') throw error;
+      if (error instanceof RetryableSecretStorageError ||
+          (error instanceof SecretStorageError && error.code === 'cancelled')) throw error;
       throw this.keyUnusable();
     }
     if (encrypted.byteLength !== plaintext.byteLength + 16) throw this.keyUnusable();
@@ -182,6 +188,10 @@ export class SecretVault {
       return this.join(parts);
     } catch (error) {
       if (error instanceof SecretStorageError) throw error;
+      const code = (error as BusinessError).code;
+      // Public HUKS API: IPC communication failure / insufficient memory.
+      // A later attempt can succeed with exactly the same key and ciphertext.
+      if (code === 12000005 || code === 12000014) throw new RetryableSecretStorageError();
       if (encrypt) throw this.unavailable();
       throw this.unreadable();
     } finally {
