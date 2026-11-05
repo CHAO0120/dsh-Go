@@ -1285,3 +1285,30 @@ for (const [name, content] of [
     assert.equal(nativeHostModule.nativeHostTouched(), false);
   });
 }
+
+for (const operation of ['install','start']) for (const badFirst of [true,false]) test(`342: failed status delivery must not wedge ${operation} retries (badFirst=${badFirst})`, async () => {
+ const c=await controllerCase('observer-retry-'+operation+'-'+badFirst);
+ if(operation==='start') await c.controller.install(false);
+ const sink=()=>{throw new Error('retired messenger');};
+ const received=[]; const healthy=event=>received.push(event);
+ c.controller.sinks.push(...(badFirst?[sink,healthy]:[healthy,sink]));
+ try {
+  await c.controller[operation](...(operation==='install'?[false]:[null,false,null,false]));
+ } finally { c.controller.unsubscribe(sink); c.controller.unsubscribe(healthy); }
+ assert.ok(received.some(event=>event.get('type')==='status'),'healthy observer receives status');
+ assert.equal(c.controller.pending,null,'failed observer must not retain operation admission');
+ if(operation==='install') await c.controller.install(false);
+ else { await c.controller.start(null,false,null,false); assert.equal(native.starts.length,1); }
+});
+
+test('342: failed initial subscription settles without recursive rejection and later observer works', async()=>{
+ const c=await controllerCase('observer-initial'); const seen=[];
+ const bad=()=>{throw new Error('retired messenger');};
+ const good=event=>seen.push(event);
+ c.controller.subscribe(bad); c.controller.subscribe(good);
+ await new Promise(resolve=>setImmediate(resolve));
+ assert.ok(seen.some(event=>event.get('type')==='status'));
+ c.controller.unsubscribe(bad); c.controller.unsubscribe(good);
+ await c.controller.install(false);
+ assert.equal(c.controller.snapshot().get('phase'),'installed');
+});

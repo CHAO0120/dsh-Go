@@ -268,7 +268,10 @@ export class RuntimeController {
   }
 
   private emit(event: Map<string, Object | null>): void {
-    this.sinks.forEach((sink: RuntimeSink) => sink(event));
+    this.sinks.forEach((sink: RuntimeSink): void => {
+      try { sink(event); }
+      catch (_) { /* Observer delivery must not alter runtime operation admission or completion. */ }
+    });
   }
 
   private emitStatus(): void {
