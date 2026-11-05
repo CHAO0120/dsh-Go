@@ -23,6 +23,26 @@
     {
       "name": "dsh_pasteboard_reason",
       "value": "Read the clipboard when you choose Paste."
+    },
+    {
+      "name": "dsh_paste_prompt",
+      "value": "Tap the system Paste button to allow this clipboard read."
+    },
+    {
+      "name": "dsh_paste_cancel",
+      "value": "Cancel"
+    },
+    {
+      "name": "dsh_paste_denied",
+      "value": "Paste was not authorized. Tap the Paste button again."
+    },
+    {
+      "name": "dsh_paste_empty",
+      "value": "The clipboard has no text to paste."
+    },
+    {
+      "name": "dsh_paste_failed",
+      "value": "Could not read the clipboard. Try again or enter the text manually."
     }
   ]
 }

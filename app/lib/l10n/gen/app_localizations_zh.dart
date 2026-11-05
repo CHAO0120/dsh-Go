@@ -16582,6 +16582,18 @@ class L10nZh extends L10n {
   String get appSlogan => '随时随刻，想go就Go！';
 
   @override
+  String get statePasteEmpty => '剪贴板中没有可粘贴的文本。';
+
+  @override
+  String get statePasteDenied => '系统未授予粘贴权限，请重新点击粘贴按钮。';
+
+  @override
+  String get statePasteBusy => '粘贴窗口尚未结束或仍在关闭，请完成或取消后重试。';
+
+  @override
+  String get statePasteFailed => '无法读取剪贴板，请重试或手动输入。';
+
+  @override
   String get systemActionsTitle => '系统操作';
 
   @override

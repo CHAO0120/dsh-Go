@@ -1,3 +1,4 @@
+import PastePlugin from '../plugins/PastePlugin';
 import AppLinksPlugin from '../plugins/AppLinksPlugin';
 import SecretsPlugin from '../plugins/SecretsPlugin';
 import AttachmentFilesPlugin from '../plugins/AttachmentFilesPlugin';
@@ -97,6 +98,7 @@ export default class EntryAbility extends FlutterAbility {
     flutterEngine.getPlugins()?.add(new PerformancePlugin())
     flutterEngine.getPlugins()?.add(new DiagnosticsPlugin())
     flutterEngine.getPlugins()?.add(new UsagePlugin())
+    flutterEngine.getPlugins()?.add(new PastePlugin())
     flutterEngine.getPlugins()?.add(new HmsSharePlugin())
     flutterEngine.getPlugins()?.add(new VoicePlugin())
     flutterEngine.getPlugins()?.add(new ShortcutsPlugin())

@@ -30380,6 +30380,30 @@ abstract class L10n {
   /// **'随时随刻，想go就Go！'**
   String get appSlogan;
 
+  /// No description provided for @statePasteEmpty.
+  ///
+  /// In zh, this message translates to:
+  /// **'剪贴板中没有可粘贴的文本。'**
+  String get statePasteEmpty;
+
+  /// No description provided for @statePasteDenied.
+  ///
+  /// In zh, this message translates to:
+  /// **'系统未授予粘贴权限，请重新点击粘贴按钮。'**
+  String get statePasteDenied;
+
+  /// No description provided for @statePasteBusy.
+  ///
+  /// In zh, this message translates to:
+  /// **'粘贴窗口尚未结束或仍在关闭，请完成或取消后重试。'**
+  String get statePasteBusy;
+
+  /// No description provided for @statePasteFailed.
+  ///
+  /// In zh, this message translates to:
+  /// **'无法读取剪贴板，请重试或手动输入。'**
+  String get statePasteFailed;
+
   /// No description provided for @systemActionsTitle.
   ///
   /// In zh, this message translates to:

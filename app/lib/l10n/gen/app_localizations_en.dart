@@ -17501,6 +17501,18 @@ class L10nEn extends L10n {
   String get appSlogan => 'Anytime, anywhere. Just Go!';
 
   @override
+  String get statePasteEmpty => 'The clipboard has no text to paste.';
+
+  @override
+  String get statePasteDenied => 'Paste was not authorized. Tap the Paste button again.';
+
+  @override
+  String get statePasteBusy => 'The paste window is still active or closing. Finish or cancel it, then try again.';
+
+  @override
+  String get statePasteFailed => 'Could not read the clipboard. Try again or enter the text manually.';
+
+  @override
   String get systemActionsTitle => 'System actions';
 
   @override
