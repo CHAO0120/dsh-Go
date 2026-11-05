@@ -13,9 +13,10 @@ import {openBoundaryJournal} from '../../ohos/lifecycle/journal.mjs';
 const require=createRequire(join(process.env.DSH_LIFECYCLE_TEST_PREFIX,'package.json'));
 const {Context}=await import(pathToFileURL(require.resolve('@deepseek-ai/cordis')));
 const {AgentRegistry}=await import(pathToFileURL(require.resolve('@deepseek-ai/dsh-agent')));
+const {SessionProjectionRegistry}=await import(pathToFileURL(require.resolve('@deepseek-ai/dsh-session-projection')));
 globalThis[Symbol.for('dsh.go.ohos.sim')]=true;
 test('actual ReactLoopAgent preStep does not claim or prepare a model after a resolved-gate revoke; registry busy covers pre-step waiting',async t=>{
- const f=fixture();const ctx=new Context();await ctx.plugin(AgentRegistry);const detach=ctx.agents.enter(f.agent);
+ const f=fixture();const ctx=new Context();await ctx.plugin(SessionProjectionRegistry);await ctx.plugin(AgentRegistry);const detach=ctx.agents.enter(f.agent);
  const root=await mkdtemp(join(tmpdir(),'native-agent-'));
  const journal=await openBoundaryJournal({directory:root,lockExclusive:process._linkedBinding('dsh_ohos_publication').lockExclusive});
  const state={version:1,engineGeneration:1,ownerGeneration:1,revision:1,grantGeneration:0,nowMs:1000,deadlineMs:0,drainAtMs:0,phase:0,available:1,foreground:1,clockFailed:0};

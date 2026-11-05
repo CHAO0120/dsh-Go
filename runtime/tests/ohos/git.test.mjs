@@ -19,7 +19,7 @@ const git = require('isomorphic-git');
 const nodeRequire = createRequire(join(resolve(process.env.DSH_TEST_PREFIX ?? process.cwd()), 'package.json'));
 const providerPath = nodeRequire.resolve('@deepseek-ai/dsh-workspace-changes');
 const source = await readFile(providerPath, 'utf8');
-assert.equal(createHash('sha256').update(source).digest('hex'), '027c3246d8174ad2c519fd989e0ab157eedbe3535a5afa41121dc05e5e5615d3');
+assert.equal(createHash('sha256').update(source).digest('hex'), '070ee9457f96e8682ee74378d2108f36812849c49fc217cdc4223807d81f8c23');
 const providerFixture = await mkdtemp(join(tmpdir(), 'dsh-owned-git-provider-'));
 await symlink(resolve(dirname(providerPath), '../../..'), join(providerFixture, 'node_modules'), 'dir');
 const sibling = join(providerFixture, 'index.mjs');

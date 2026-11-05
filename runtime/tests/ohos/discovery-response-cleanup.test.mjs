@@ -16,9 +16,9 @@ const prefix = resolve(process.env.DSH_DISCOVERY_PREFIX);
 const source = await readFile(join(prefix, 'node_modules/@deepseek-ai/dsh-llm-pi-ai/lib/index.js'), 'utf8');
 const digest = createHash('sha256').update(source).digest('hex');
 // Upstream, the common chain before the fix, and the fix itself.
-assert(['99b5c20830a52f69641df8a18a39206079b0c725201958cce2c4a934f1d4f7cd',
-        '7d4812ef6d10126807ccd4211107cf22d6579ef59c5adfd375e104d4773bdfd5',
-        'b6b2aa1edb6c2ec8db1d9c828daaa79fc36ee9daaf07a66f2501480263bed69c'].includes(digest), 'unreviewed adapter bytes');
+assert(['1a3ae58f9b4493e15459cc5000ec80f21b5d3f4a9dea6ffb6bc28e5b8817ae8a',
+        '070c839e2c00e2d5f7c5d82307ca3d84dbb2323e46979daf265908751bbe8ae8',
+        '2d43d15d51b97f6d87eadb15761d2347b4ef42dffa5c16c4b766b79158840d4f'].includes(digest), 'unreviewed adapter bytes');
 const require = createRequire(join(prefix, 'package.json'));
 const {LlmError} = await import(pathToFileURL(require.resolve('@deepseek-ai/dsh-llm')).href);
 const begin = 'const LISTABLE_PROTOCOLS = new Set([';

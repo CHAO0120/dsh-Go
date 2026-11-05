@@ -5,7 +5,10 @@ import { getEventListeners } from 'node:events';
 import { Context } from '@deepseek-ai/cordis';
 import { SystemPrompt } from '@deepseek-ai/dsh-system-prompt';
 import { ToolRuntime } from '@deepseek-ai/dsh-tools';
+import { NativeToolExecutor } from '@deepseek-ai/dsh-tool-executor-native';
 import { ApprovalService } from '@deepseek-ai/dsh-user-approval';
+import { Session } from '@deepseek-ai/dsh-session';
+import { SessionProjectionRegistry } from '@deepseek-ai/dsh-session-projection';
 import { PhoneQueue, PHONE_PENDING_LIMIT } from '../../ohos/phone/queue.mjs';
 import { registerPhoneTools } from '../../ohos/phone/tools.mjs';
 import { phoneCatalog } from '../../ohos/phone/catalog.mjs';
@@ -179,13 +182,13 @@ test('a throwing subscriber cannot orphan enqueue or interrupt closing the remai
 
 async function registryFixture(t) {
   const f = fixture(t), ctx = new Context();
-  await ctx.plugin(SystemPrompt, {}); await ctx.plugin(ToolRuntime, { mode: 'native' });
+  await ctx.plugin(SystemPrompt, {}); await ctx.plugin(ToolRuntime, {}); ctx.tools.setExecutor(new NativeToolExecutor(ctx));
   const dispose = registerPhoneTools(ctx, f.queue), agent = { id: 'actual-registry-session', ctx };
   t.after(async () => { dispose(); await ctx.fiber.dispose(); });
   let calls = 0;
-  return { ...f, ctx, run: (name, args, signal = new AbortController().signal) => ctx.tools.execute({
-    name: `mcp__phone__${name}`, callId: `actual-call-${++calls}`, agent, arguments: args, signal,
-  }) };
+  return { ...f, ctx, run: async (name, args, signal = new AbortController().signal) => (await ctx.tools.execute({
+    calls: [{ id: `actual-call-${++calls}`, name: `mcp__phone__${name}`, arguments: JSON.stringify(args) }], agent, signal,
+  })).results[0].result };
 }
 
 test('the real ToolRuntime rejects bad schemas and unsupported actions with isError=true', async t => {
@@ -207,22 +210,25 @@ test('the real ToolRuntime rejects bad schemas and unsupported actions with isEr
   assert.equal(f.counts().claims, 0);
 });
 
-// The engine's own ApprovalService; only the session log and the answerer are stand-ins.
+// The engine's own ApprovalService and session log; only the answerer is a stand-in.
 async function approvalFixture(t, policy, { auto = false } = {}) {
   const f = fixture(t), ctx = new Context();
-  await ctx.plugin(SystemPrompt, {}); await ctx.plugin(ToolRuntime, { mode: 'native' });
+  await ctx.plugin(SystemPrompt, {}); await ctx.plugin(ToolRuntime, {}); ctx.tools.setExecutor(new NativeToolExecutor(ctx));
+  await ctx.plugin(SessionProjectionRegistry);
   await ctx.plugin(ApprovalService, { policy });
   await ctx.inject(['approval'], () => {});
   if (auto) ctx.provide('permissionPresets', { current: () => 'auto' });
-  const events = [{ type: 'turn/start' }], asks = [];
-  const session = { get seq() { return events.length; }, eventAt: seq => events[seq], append: (type, data) => { events.push({ type, data }); } };
+  const asks = [];
+  const session = Session.create('approval-session', undefined, { version: 4, id: 'approval-session', createdAt: Date.now(), isSeeded: false, cwd: process.cwd() });
+  session.append('turn/start', { turn: 1 });
   let answer = 'allowed-once';
   ctx.on('approval/request', async request => { asks.push(request); return answer; });
   const dispose = registerPhoneTools(ctx, f.queue), agent = { id: 'approval-session', ctx, session };
   t.after(async () => { dispose(); await ctx.fiber.dispose(); });
   let calls = 0;
-  return { ...f, asks, answer: value => { answer = value; }, run: (name, args) => ctx.tools.execute({ name: `mcp__phone__${name}`,
-    callId: `approval-call-${++calls}`, agent, arguments: args, signal: new AbortController().signal }) };
+  return { ...f, asks, answer: value => { answer = value; }, run: async (name, args) => (await ctx.tools.execute({
+    calls: [{ id: `approval-call-${++calls}`, name: `mcp__phone__${name}`, arguments: JSON.stringify(args) }],
+    agent, signal: new AbortController().signal })).results[0].result };
 }
 
 test('a phone call asks through the engine approval first and a refusal never reaches the queue', async t => {
@@ -270,7 +276,7 @@ for (const [name, policy, options] of [['full access', 'never', {}], ['Auto revi
 
 test('a registration conflict rolls back only this phone plugin contribution', async t => {
   const f = fixture(t), ctx = new Context();
-  await ctx.plugin(SystemPrompt, {}); await ctx.plugin(ToolRuntime, { mode: 'native' });
+  await ctx.plugin(SystemPrompt, {}); await ctx.plugin(ToolRuntime, {}); ctx.tools.setExecutor(new NativeToolExecutor(ctx));
   const original = { name: 'mcp__phone__notify', description: 'existing', parameters: { type: 'object' },
     output: { schema: { type: 'string' }, render: () => [] }, execute: async () => 'existing' };
   ctx.tools.register(original); t.after(() => ctx.fiber.dispose());

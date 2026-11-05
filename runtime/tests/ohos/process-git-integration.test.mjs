@@ -18,7 +18,7 @@ const dependency = createRequire(new URL('../../ohos/process/package.json', impo
 const isomorphicGit = dependency('isomorphic-git');
 const providerPath = require.resolve('@deepseek-ai/dsh-workspace-changes');
 const providerSource = await readFile(providerPath, 'utf8');
-assert.equal(createHash('sha256').update(providerSource).digest('hex'), '027c3246d8174ad2c519fd989e0ab157eedbe3535a5afa41121dc05e5e5615d3');
+assert.equal(createHash('sha256').update(providerSource).digest('hex'), '070ee9457f96e8682ee74378d2108f36812849c49fc217cdc4223807d81f8c23');
 const instrumented = join(dirname(providerPath), `.ohos-worker-test-${randomUUID()}.mjs`);
 await writeFile(instrumented, providerSource + '\nexport { GitRunner, TurnRecorder, workspaceTemporaryRoot };\n', { flag: 'wx' });
 let provider;

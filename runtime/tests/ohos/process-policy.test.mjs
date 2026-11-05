@@ -11,6 +11,7 @@ import OhSandboxProvider from '../../ohos/process/sandbox.mjs';
 const require = createRequire(join(resolve(process.env.OHOS_TEST_PROCESS_PREFIX), 'package.json'));
 const load = name => import(pathToFileURL(require.resolve(`@deepseek-ai/${name}`)));
 const { default: z } = await load('schemastery');
+const { NativeToolExecutor } = await load('dsh-tool-executor-native');
 const [{ Context }, { SystemPrompt }, { ToolRuntime }, { SessionProjectionRegistry }, { SandboxPolicyService }, { LocalFileSystem }, { WorkingDirectoryService }, { ShellEnvRegistry }, { ApprovalService }, { SandboxBashExecutor }, { Session }, toolBash] = await Promise.all([
   'cordis', 'dsh-system-prompt', 'dsh-tools', 'dsh-session-projection', 'dsh-sandbox-policy', 'dsh-fs-local', 'dsh-working-directory', 'dsh-shell-env', 'dsh-user-approval', 'dsh-bash-sandbox', 'dsh-session', 'dsh-tool-bash',
 ].map(load));
@@ -21,7 +22,8 @@ before(async () => {
   await Promise.all([work, temp, outside].map(path => mkdir(path)));
   ctx = new Context();
   await ctx.plugin(SystemPrompt, {});
-  await ctx.plugin(ToolRuntime, { mode: 'native' });
+  await ctx.plugin(ToolRuntime, {});
+  ctx.tools.setExecutor(new NativeToolExecutor(ctx));
   await ctx.plugin(SessionProjectionRegistry);
   ctx.sessionProjections.register({
     key: 'ohos-test-approval-audit', stateVersion: 1,
@@ -49,10 +51,11 @@ function agent(cwd = work) {
   session.append('turn/start', { turn: 1 });
   return { id: name, session, ctx, inject() {} };
 }
-const execute = (owner, command, args = {}) => ctx.tools.execute({
-  name: 'bash', callId: `call-${++id}`, agent: owner, signal: new AbortController().signal,
-  arguments: { description: '验证鸿蒙虚拟 shell 权限', command, ...args },
-});
+const execute = async (owner, command, args = {}) => (await ctx.tools.execute({
+  calls: [{ id: `call-${++id}`, name: 'bash',
+    arguments: JSON.stringify({ description: '验证鸿蒙虚拟 shell 权限', command, ...args }) }],
+  agent: owner, signal: new AbortController().signal,
+})).results[0].result;
 
 test('真实tool-bash展示同源命令清单及现有sandbox审批参数', async () => {
   const tool = ctx.tools.get('bash');

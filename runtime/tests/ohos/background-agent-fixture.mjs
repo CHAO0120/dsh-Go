@@ -21,6 +21,8 @@ if (!deps) throw Error('Set INPUT_RECOVERY_DEPS_PREFIX to an isolated or install
 const require = createRequire(resolve(deps, 'package.json'));
 const { z } = require('zod');
 const sessionApi = await import(pathToFileURL(join(deps, 'node_modules/@deepseek-ai/dsh-session/lib/index.js')));
+const { AgentModel, modelSelectionProjectionDefinition } = await import(pathToFileURL(join(deps, 'node_modules/@deepseek-ai/dsh-agent/lib/index.js')));
+const { ToolActivationError } = await import(pathToFileURL(join(deps, 'node_modules/@deepseek-ai/dsh-tools/lib/index.js')));
 
 function region(name) {
   const start = source.indexOf(`//#region lib/types/${name}.js`);
@@ -31,7 +33,7 @@ function region(name) {
 
 class LlmError extends Error {}
 const bindings = {
-  z$1: z,
+  z$1: z, AgentModel, ToolActivationError,
   agentEvents: (ctx, agent) => { ctx.constructingAgent = agent; return ctx.dispatch; },
   createScope: ctx => ({ ctx }),
   assembleContextFor: (agent, signal) => ({ agent, signal }),
@@ -105,6 +107,7 @@ function fixture({ events = [], assemble, preStep, prepareCall, failAppend, noti
   };
   const ctx = {
     dispatch, sessionProjections: projections,
+    tools: { resolve: async () => ({ dispose() {} }) },
     get: () => undefined,
     on: (type, listener) => { assert.equal(type, 'session/event'); listeners.add(listener); return () => listeners.delete(listener); },
     agents: { withInitiator: (_agent, fn) => fn() },
@@ -119,7 +122,9 @@ function fixture({ events = [], assemble, preStep, prepareCall, failAppend, noti
       },
     },
   };
-  const agent = new api.ReactLoopAgent(ctx, session.id, { provider: 'synthetic', model: 'test', reasoningEffort: 'max' }, session);
+  const agent = new api.ReactLoopAgent(ctx, session.id, { provider: 'synthetic', model: 'test', reasoningEffort: 'max' }, session, { modelSelection: () => modelSelectionProjectionDefinition.init(), inbox: () => state }, log.findLast(e => e.type === 'turn/start')?.data.turn ?? 0);
+  // The factory now calls recovery after SessionStore announcement; this isolated class fixture models that handoff.
+  agent.inbox.recover();
   // Exercise the real step/admission path, then stop before starting any real model request.
   agent.buildRequest = () => { throw Error('synthetic post-admission failure'); };
   const originalWake = agent.wakeDriver;
