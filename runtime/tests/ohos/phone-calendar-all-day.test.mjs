@@ -39,7 +39,11 @@ function fixture(hooks = {}) {
     };}},
   };
   const module = {exports:{}};
-  vm.runInNewContext(compiled,{module,exports:module.exports,require:name=>{assert(name in api, name);return api[name];}});
+  vm.runInNewContext(compiled,{module,exports:module.exports,require:name=>{
+    // Calendars never reach the reminder module; its import only has to resolve.
+    if(name==='./PhoneReminders') return {PhoneReminders:{},PhoneReminderDenied:class extends Error{},PhoneReminderRefused:class extends Error{}};
+    assert(name in api, name);return api[name];
+  }});
   const executor = new module.exports.PhoneEffects(context);
   let guards=0;
   const guard = () => {guards++;calls.push('guard');hooks.guard?.(module.exports.PhoneEffectDenied);};
