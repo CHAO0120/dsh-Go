@@ -21,8 +21,113 @@ AFTER = 'let e=y.encode(t),o=[];for(let r=0;r<e.length;r+=8192)o.push(String.fro
 # write WebP, so alpha stays in PNG. Each has to match exactly once, or the build stops.
 ATTACHMENTS = 'node_modules/@deepseek-ai/dsh-attachment-local/lib/index.js'
 IMAGE_CODEC = 'node_modules/@deepseek-ai/dsh-attachment-local/lib/ios-sharp.cjs'
-RG = 'runtime/ohos/process/rg.mjs'
-RG_PREFIX = 'rg: 鸿蒙本机尚不支持'.encode()
+# Keep platform diagnostics local to the iOS output; each exact edit must match once.
+DIAGNOSTIC_EDITS = {
+    'runtime/ohos/process/rg.mjs': (
+        ('rg: 鸿蒙本机尚不支持', 'rg: iOS 本机尚不支持'),
+    ),
+    'runtime/ohos/process/commands.mjs': (
+        ('这个命令在鸿蒙本机不可用，可以连接电脑执行', '这个命令在 iOS 本机不可用，可以连接电脑执行'),
+    ),
+    'runtime/ohos/process/git.mjs': (
+        ('这个命令在鸿蒙本机不可用，可以连接电脑执行', '这个命令在 iOS 本机不可用，可以连接电脑执行'),
+        ('(OHOS subset)', '(iOS subset)'),
+    ),
+    'runtime/ohos/process/rg-select.mjs': (
+        ('遍历检查超过鸿蒙本机上限', '遍历检查超过 iOS 本机上限'),
+        ('候选文件数超过鸿蒙本机上限', '候选文件数超过 iOS 本机上限'),
+    ),
+    'runtime/ohos/process/runtime.mjs': (
+        ("prepare(argv, policy, signal) {\n    if (this.closed) throw new Error('鸿蒙虚拟进程服务已关闭')", "prepare(argv, policy, signal) {\n    if (this.closed) throw new Error('iOS 虚拟进程服务已关闭')"),
+        ('鸿蒙本机没有 PTY，可以连接电脑执行', 'iOS 本机没有 PTY，可以连接电脑执行'),
+        ("spawn(spec) {\n    if (this.closed) throw new Error('鸿蒙虚拟进程服务已关闭')", "spawn(spec) {\n    if (this.closed) throw new Error('iOS 虚拟进程服务已关闭')"),
+        ('无效或已使用的鸿蒙执行票据', '无效或已使用的 iOS 执行票据'),
+        ('鸿蒙虚拟进程临时根的身份已改变，拒绝删除替换目录', 'iOS 虚拟进程临时根的身份已改变，拒绝删除替换目录'),
+    ),
+    'runtime/ohos/process/child-process.mjs': (
+        ('OS child processes are unavailable on OpenHarmony; use the virtual runtime or a remote service.', 'OS child processes are unavailable on iOS; use the virtual runtime or a remote service.'),
+    ),
+    'runtime/ohos/process/index.mjs': (
+        ('鸿蒙虚拟进程后端只能由鸿蒙 profile 或仿真显式启用', 'iOS 虚拟进程后端只能由 iOS profile 或仿真显式启用'),
+        ('鸿蒙虚拟进程无法保留完整输出', 'iOS 虚拟进程无法保留完整输出'),
+    ),
+    'runtime/ohos/process/sandbox.mjs': (
+        ('鸿蒙沙箱后端只能由鸿蒙 profile 或仿真显式启用', 'iOS 沙箱后端只能由 iOS profile 或仿真显式启用'),
+    ),
+    'runtime/ohos/publication/index.mjs': (
+        ('OpenHarmony publication requires Node', 'iOS publication requires Node'),
+        ('OpenHarmony publication service is already registered', 'iOS publication service is already registered'),
+        ('OpenHarmony publication linked binding is unavailable', 'iOS publication linked binding is unavailable'),
+        ('OpenHarmony publication binding lacks required ownership operations', 'iOS publication binding lacks required ownership operations'),
+        ('OpenHarmony publication requires an explicit valid DSH_HOME', 'iOS publication requires an explicit valid DSH_HOME'),
+        ('OpenHarmony publication is using exclusive copy', 'iOS publication is using exclusive copy'),
+    ),
+    'node_modules/node-addon-native-custom-loader/lib/index.js': (
+        ('OpenHarmony packages only the pinned N-API backend', 'iOS packages only the pinned N-API backend'),
+    ),
+    'node_modules/@dsh-go/ohos-native/index.cjs': (
+        ('This native product is not packaged for OpenHarmony', 'This native product is not packaged for iOS'),
+    ),
+    'node_modules/proxy-agent-negotiate/dist/index.js': (
+        ('鸿蒙不提供 Kerberos 原生认证', 'iOS 不提供 Kerberos 原生认证'),
+    ),
+    'node_modules/@deepseek-ai/dsh-office-to-pdf/lib/index.js': (
+        ('鸿蒙本机不支持 Office 转换', 'iOS 本机不支持 Office 转换'),
+    ),
+    'node_modules/@deepseek-ai/dsh-tool-fs-search/lib/index.js': (
+        ('鸿蒙搜索需要提供受限执行票据的 subprocess 后端', 'iOS 搜索需要提供受限执行票据的 subprocess 后端'),
+        ('鸿蒙本机不读取全局 gitignore 或 core.excludesFile', 'iOS 本机不读取全局 gitignore 或 core.excludesFile'),
+    ),
+    'node_modules/@deepseek-ai/dsh-session-persistence-jsonl/lib/index.js': (
+        ('OpenHarmony publication preload is required', 'iOS publication preload is required'),
+        ('OpenHarmony session storage must run in the main Node thread', 'iOS session storage must run in the main Node thread'),
+    ),
+    'node_modules/@deepseek-ai/dsh-attachment-local/lib/index.js': (
+        ('OpenHarmony publication preload is required', 'iOS publication preload is required'),
+    ),
+    'node_modules/@deepseek-ai/dsh-tool-bash/lib/index.js': (
+        ('鸿蒙本机使用虚拟 shell', 'iOS 本机使用虚拟 shell'),
+    ),
+    'node_modules/@deepseek-ai/dsh-mcp-client/lib/index.js': (
+        ('鸿蒙本机不支持 stdio MCP 子进程', 'iOS 本机不支持 stdio MCP 子进程'),
+    ),
+    'node_modules/@deepseek-ai/dsh-skill-office/lib/index.js': (
+        ('鸿蒙本机不提供 LibreOffice 转换、重算或渲染运行时', 'iOS 本机不提供 LibreOffice 转换、重算或渲染运行时'),
+    ),
+    'node_modules/@deepseek-ai/dsh-experimental-speech-to-text-sensevoice/lib/index.js': (
+        ('鸿蒙本机不提供 Sherpa 语音模型', 'iOS 本机不提供 Sherpa 语音模型'),
+    ),
+    'node_modules/@deepseek-ai/dsh-plugin-manager/lib/index.js': (
+        ('鸿蒙本机不支持安装、更新或卸载插件包', 'iOS 本机不支持安装、更新或卸载插件包'),
+    ),
+    'node_modules/@deepseek-ai/dsh-plugin-manager/lib/types/operations.js': (
+        ('鸿蒙本机不支持安装、更新或卸载插件包', 'iOS 本机不支持安装、更新或卸载插件包'),
+    ),
+    'runtime/ohos/process/git-index.mjs': (
+        ('OHOS Git currently supports index version 2 and 3', 'iOS Git currently supports index version 2 and 3'),
+    ),
+    'runtime/ohos/process/node-worker-paths.mjs': (
+        ('child_process is unavailable in the OHOS Node script Worker', 'child_process is unavailable in the iOS Node script Worker'),
+    ),
+    'runtime/ohos/process/node-script.mjs': (
+        ('Node scripts require the inherited OHOS product preload', 'Node scripts require the inherited iOS product preload'),
+    ),
+    'runtime/ohos/net/bootstrap.mjs': (
+        ('OHOS network bootstrap requires the locked DSH 0.2.1-rc.4 entry with Undici 8.11.2', 'iOS network bootstrap requires the locked DSH 0.2.1-rc.4 entry with Undici 8.11.2'),
+        ('OHOS network bootstrap was initialized for another DSH entry', 'iOS network bootstrap was initialized for another DSH entry'),
+        ('OHOS DSH network preload must run before the first Undici/global-dispatcher API import', 'iOS DSH network preload must run before the first Undici/global-dispatcher API import'),
+    ),
+    'node_modules/@deepseek-ai/dsh-http-proxy/lib/index.js': (
+        ('OHOS network preload is required', 'iOS network preload is required'),
+        ('OHOS DSH network bootstrap is required before proxy installation', 'iOS DSH network bootstrap is required before proxy installation'),
+    ),
+    'node_modules/@deepseek-ai/dsh-workspace-changes/lib/index.js': (
+        ('OHOS workspace snapshots require the subprocess private temporaryRoot', 'iOS workspace snapshots require the subprocess private temporaryRoot'),
+    ),
+    'node_modules/@deepseek-ai/dsh-web-fetch-http/lib/index.js': (
+        ('OHOS network preload is required', 'iOS network preload is required'),
+    ),
+}
 ATTACHMENT_EDITS = (
     ('const loadSharp = createLazyRequire("sharp", import.meta.url);',
      'const loadSharp = createLazyRequire("./ios-sharp.cjs", import.meta.url);'),
@@ -60,11 +165,17 @@ def specialize(expanded, out, composer):
     manifest = json.loads((expanded / 'manifest.json').read_bytes())
     entries = {row['path']: row for row in manifest['files']}
     attachments = attachments_for_ios((expanded / 'files' / ATTACHMENTS).read_bytes())
-    rg = (expanded / 'files' / RG).read_bytes()
-    if rg.count(RG_PREFIX) != 1:
-        raise ValueError('iOS rg diagnostic prefix differs from the composed input')
+    diagnostics = {}
+    for name, edits in DIAGNOSTIC_EDITS.items():
+        data = attachments if name == ATTACHMENTS else (expanded / 'files' / name).read_bytes()
+        for before, after in edits:
+            before, after = before.encode(), after.encode()
+            if data.count(before) != 1:
+                raise ValueError('iOS diagnostic differs from composed input: ' + name)
+            data = data.replace(before, after)
+        diagnostics[name] = data
     codec = (Path(__file__).resolve().parents[2] / 'runtime/ios/image/ios-sharp.cjs').read_bytes()
-    for name in (HELPER, PROVENANCE, ATTACHMENTS, RG):
+    for name in (HELPER, PROVENANCE, ATTACHMENTS, *DIAGNOSTIC_EDITS):
         data = (expanded / 'files' / name).read_bytes()
         if entries[name]['sha256'] != composer.digest(data) or entries[name]['size'] != len(data):
             raise ValueError('iOS specialization input differs from shared manifest: ' + name)
@@ -93,7 +204,7 @@ def specialize(expanded, out, composer):
         manifest['files'] = sorted([*manifest['files'], row], key=lambda item: item['path'])
         (tree / 'files' / IMAGE_CODEC).write_bytes(codec)
         for name, data in ((HELPER, changed), (PROVENANCE, composer.json_bytes(provenance)), (ATTACHMENTS, attachments),
-                           (RG, rg.replace(RG_PREFIX, 'rg: iOS 本机尚不支持'.encode()))):
+                           *diagnostics.items()):
             (tree / 'files' / name).write_bytes(data)
             entries[name]['sha256'] = composer.digest(data)
             entries[name]['size'] = len(data)
