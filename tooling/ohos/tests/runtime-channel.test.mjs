@@ -1286,7 +1286,7 @@ for (const [name, content] of [
   });
 }
 
-for (const operation of ['install','start']) for (const badFirst of [true,false]) test(`342: failed status delivery must not wedge ${operation} retries (badFirst=${badFirst})`, async () => {
+for (const operation of ['install','start']) for (const badFirst of [true,false]) test(`failed status delivery must not wedge ${operation} retries (badFirst=${badFirst})`, async () => {
  const c=await controllerCase('observer-retry-'+operation+'-'+badFirst);
  if(operation==='start') await c.controller.install(false);
  const sink=()=>{throw new Error('retired messenger');};
@@ -1301,7 +1301,7 @@ for (const operation of ['install','start']) for (const badFirst of [true,false]
  else { await c.controller.start(null,false,null,false); assert.equal(native.starts.length,1); }
 });
 
-test('342: failed initial subscription settles without recursive rejection and later observer works', async()=>{
+test('failed initial subscription settles without recursive rejection and later observer works', async()=>{
  const c=await controllerCase('observer-initial'); const seen=[];
  const bad=()=>{throw new Error('retired messenger');};
  const good=event=>seen.push(event);

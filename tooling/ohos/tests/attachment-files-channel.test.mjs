@@ -384,7 +384,7 @@ test('failed startup cleanup diagnoses retained cache but does not prevent a fre
   assert.deepEqual(await f.invoke('release', { owner: 'test-1' }).done, { value: null });
 });
 
-for (const retirement of ['ability','engine']) test(`345: throwing retired reply cannot retain global picker slot (${retirement})`, async t=>{
+for (const retirement of ['ability','engine']) test(`throwing retired reply cannot retain global picker slot (${retirement})`, async t=>{
  const f=await attachmentFixture(t); let replyAttempts=0;
  const args=new Map(Object.entries(request('old')));
  f.channel.handler.onMethodCall({method:'pick',args}, {

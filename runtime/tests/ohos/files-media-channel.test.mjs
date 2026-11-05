@@ -437,7 +437,7 @@ test('late old engine detach cannot remove the current file channel owner', asyn
 });
 
 // 125: real source file -> production resolveGuest snapshot, not a private helper mirror.
-test('125 valid long Chinese export retains the dshgo routing extension', async t => {
+test('valid long Chinese export retains the dshgo routing extension', async t => {
   const f = await fixture(t);
   const original = '文'.repeat(81) + '.dshgo';
   const bytes = Buffer.from('{"dshgo":1,"code":"fixture"}\n');
@@ -451,7 +451,7 @@ test('125 valid long Chinese export retains the dshgo routing extension', async 
   assert(Buffer.byteLength(name) <= 240);
 });
 
-test('125 actual outgoing share wire retains extension after local export', async t => {
+test('actual outgoing share wire retains extension after local export', async t => {
   const f = await fixture(t);
   const source = await f.file('文'.repeat(81) + '.dshgo', 'actual-export-payload');
   const reply = await f.call('dsh/files', 'resolveGuest', { path: source });
@@ -471,7 +471,7 @@ test('125 actual outgoing share wire retains extension after local export', asyn
 });
 
 
-test('125 export preserves literal percent sequences, Chinese spaces and one file URI encoding', async t => {
+test('export preserves literal percent sequences, Chinese spaces and one file URI encoding', async t => {
   const f = await fixture(t), name = '中文 50% %2F 文件.dshgo';
   const source = await f.file(name, 'literal-percent-payload');
   const reply = await f.call('dsh/files', 'resolveGuest', { path: source });
@@ -483,7 +483,7 @@ test('125 export preserves literal percent sequences, Chinese spaces and one fil
   assert(decodeURIComponent(new URL(uri).pathname).endsWith('/' + name));
 });
 
-test('125 real export keeps bounded suffix and full Unicode code points at the 240-byte budget', async t => {
+test('real export keeps bounded suffix and full Unicode code points at the 240-byte budget', async t => {
   const f = await fixture(t);
   for (const name of ['文'.repeat(78) + '.dshgo', '😀'.repeat(60) + '.dshgo']) {
     const source = await f.file(name, name);
