@@ -476,7 +476,8 @@ export class BoundaryCoordinator {
       activeBudgetCount: this.clock.pendingCount, calls,
       host: { revision: this.#nativeHost?.revision ?? 0,
         foreground: this.#nativeHost?.available === 1 && this.#nativeHost?.foreground === 1,
-        computePermission: 'unknown' } };
+        computePermission: this.#nativeHost?.available === 1 && this.#nativeHost?.clockFailed === 0 &&
+          this.#nativeHost?.phase === 7 ? 'granted' : 'unknown' } };
   }
   async result(sessionId, callSeq) {
     const row = this.#rows.get(keyOf({ sessionId, callSeq }));

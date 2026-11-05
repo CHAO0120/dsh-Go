@@ -16,7 +16,7 @@ inline int64_t LifecycleBootTimeMs() noexcept {
 }
 class LifecycleState {
  public:
-  enum Phase : uint32_t { Idle, Requesting, Granted, Draining, Released, Expired, Unavailable };
+  enum Phase : uint32_t { Idle, Requesting, Granted, Draining, Released, Expired, Unavailable, Continuous };
   using Clock = int64_t (*)() noexcept;
   explicit LifecycleState(Clock clock = LifecycleBootTimeMs) : clock_(clock) {}
   void BeginEngine() {
@@ -66,6 +66,12 @@ class LifecycleState {
     std::lock_guard<std::mutex> lock(mutex_);
     if (!Current(owner) || grant_ != grant || grant == 0) return false;
     pending_ = 0; phase_ = Released; deadline_ = drain_ = 0; ++revision_; return true;
+  }
+  bool SetContinuous(uint64_t owner, bool active) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (!Current(owner) || (active && foreground_)) return false;
+    pending_ = 0; deadline_ = drain_ = 0;
+    phase_ = active ? Continuous : Released; ++revision_; return true;
   }
   bool Retire(uint64_t owner) {
     std::lock_guard<std::mutex> lock(mutex_);

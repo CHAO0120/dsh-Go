@@ -23,5 +23,13 @@ int main(){
  dsh::LifecycleState rollback(clock_now);rollback.BeginEngine();auto d=rollback.BeginOwner(false);g=rollback.BeginGrant(d);assert(g);now--;assert(!rollback.Activate(d,g,10000));rollback.Snapshot(&s,sizeof(s));assert(!s.available&&s.clock_failed);
  dsh::LifecycleState broken(clock_now);broken.BeginEngine();broken.BeginOwner(true);now=-1;broken.Snapshot(&s,sizeof(s));assert(!s.available&&s.clock_failed);
  now=9007199254740000LL;dsh::LifecycleState overflow(clock_now);overflow.BeginEngine();auto e=overflow.BeginOwner(false);g=overflow.BeginGrant(e);assert(g);assert(!overflow.Activate(e,g,180000));overflow.Snapshot(&s,sizeof(s));assert(s.clock_failed&&!s.available);
+ now=1000;dsh::LifecycleState continuous(clock_now);continuous.BeginEngine();auto owner=continuous.BeginOwner(true);
+ assert(!continuous.SetContinuous(owner,true));assert(continuous.Foreground(owner,false));assert(continuous.SetContinuous(owner,true));
+ now+=600000;continuous.Snapshot(&s,sizeof(s));assert(s.phase==dsh::LifecycleState::Continuous&&s.available&&!s.foreground&&s.deadline_ms==0&&s.drain_at_ms==0);
+ assert(continuous.BeginGrant(owner)==0);assert(continuous.SetContinuous(owner,false));continuous.Snapshot(&s,sizeof(s));assert(s.phase==dsh::LifecycleState::Released);
+ assert(continuous.SetContinuous(owner,true));assert(continuous.Foreground(owner,true));continuous.Snapshot(&s,sizeof(s));assert(s.phase==dsh::LifecycleState::Released&&s.foreground);
+ assert(continuous.Retire(owner));assert(!continuous.SetContinuous(owner,true));auto replacement=continuous.BeginOwner(false);assert(!continuous.SetContinuous(owner,true));assert(continuous.SetContinuous(replacement,true));
+ continuous.Stop();assert(!continuous.SetContinuous(replacement,true));continuous.Snapshot(&s,sizeof(s));assert(!s.available);
+ puts("PASS continuous native lease: foreground/owner isolation, no short deadline, revoke, retire and stop");
  puts("PASS native state: size, owner, fixed pre-API deadline, duplicate/late activation, drain/expire, retire, old owner, stop, invalid duration, rollback and clock failure");
 }

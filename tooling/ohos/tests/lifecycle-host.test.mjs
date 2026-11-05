@@ -96,10 +96,12 @@ test('stopping while backoff is armed clears it and prevents any extra permissio
 });
 test('public eligibility query distinguishes prerequisite denial from unsupported or failed observation', () => {
   const reset = () => Object.assign(permission, { grants: 0, modes: 0, status: 0, supported: true,
-    accessCapability: true, backgroundCapability: true, error: null, requestedModes: null });
+    accessCapability: true, backgroundCapability: true, error: null, requestedModes: null, systemStatus: null });
   reset(); assert.equal(backgroundComputePermission(42), 'granted');
-  assert.deepEqual(permission.last, { id: 42, name: 'ohos.permission.KEEP_BACKGROUND_RUNNING' });
+  assert.deepEqual(permission.last, { id: 42, name: 'ohos.permission.KEEP_BACKGROUND_RUNNING_SYSTEM' });
+  assert.equal(permission.grants, 2);
   assert.deepEqual(permission.requestedModes, [9]); assert.equal(permission.modes, 1);
+  reset(); permission.systemStatus = -1; assert.equal(backgroundComputePermission(42), 'denied'); assert.equal(permission.modes, 0);
   reset(); permission.status = -1; assert.equal(backgroundComputePermission(42), 'denied'); assert.equal(permission.modes, 0);
   reset(); permission.supported = false; assert.equal(backgroundComputePermission(42), 'denied');
   reset(); permission.backgroundCapability = false; assert.equal(backgroundComputePermission(42), 'unknown');

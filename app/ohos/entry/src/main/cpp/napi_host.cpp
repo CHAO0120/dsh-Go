@@ -160,6 +160,7 @@ napi_value LifecycleUpdate(napi_env env, napi_callback_info info) {
     auto& state=Host().Lifecycle(); uint64_t answer=0;
     if(operation=="owner" && value<=1 && owner==0 && grant==0) answer=state.BeginOwner(value==1);
     else if(operation=="foreground" && value<=1) answer=state.Foreground(owner,value==1);
+    else if(operation=="continuous" && value<=1) answer=state.SetContinuous(owner,value==1);
     else if(operation=="begin") answer=state.BeginGrant(owner);
     else if(operation=="activate") answer=state.Activate(owner,grant,value);
     else if(operation=="drain") answer=state.Drain(owner,grant);

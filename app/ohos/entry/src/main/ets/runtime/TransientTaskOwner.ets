@@ -1,3 +1,5 @@
+import common from '@ohos.app.ability.common';
+import { ContinuousTaskOwner } from './ContinuousTaskOwner';
 import backgroundTaskManager from '@ohos.resourceschedule.backgroundTaskManager';
 import { NativeHostModule } from './NativeHost';
 import { HostLifecycleAck } from './RuntimeLifecycle';
@@ -6,6 +8,7 @@ import { HostLifecycleAck } from './RuntimeLifecycle';
 // MethodChannel, host cookie, environment option or Node binding exposes writes.
 export class TransientTaskOwner {
   private readonly host: NativeHostModule;
+  private readonly continuous: ContinuousTaskOwner | null;
   private readonly wake: () => void;
   private owner: number;
   private foreground: boolean;
@@ -25,9 +28,14 @@ export class TransientTaskOwner {
   private cleanupAttempts: Map<number, number> = new Map<number, number>();
   private failure: string | null = null;
 
-  constructor(host: NativeHostModule, foreground: boolean, wake: () => void) {
+  constructor(host: NativeHostModule, foreground: boolean, wake: () => void, context?: common.UIAbilityContext) {
     this.host = host; this.foreground = foreground; this.wake = wake;
     this.owner = host.lifecycleUpdate('owner', 0, 0, foreground ? 1 : 0);
+    this.continuous = context === undefined ? null : new ContinuousTaskOwner(context, host, this.owner, wake, (): void => {
+      if (this.retired || this.foreground) return;
+      try { this.requestShort(); }
+      catch (_) { this.failure = 'ohos_transient_native_failed'; this.retire(); }
+    });
   }
 
   observe(foreground: boolean): void {
@@ -44,12 +52,17 @@ export class TransientTaskOwner {
     // Synchronous shared native state changes before any OS cancellation.
     this.host.lifecycleUpdate('foreground', this.owner, 0, foreground ? 1 : 0);
     this.release(); this.activityBusy = false;
-    this.awaitingActivity = !foreground && freshBusy && this.owner !== 0;
+    this.awaitingActivity = !foreground && (freshBusy || this.continuous?.eligible() === true) && this.owner !== 0;
     this.requestedAt = before.nowMs;
     this.wake();
   }
 
   private request(): void {
+    if (this.continuous?.request() === true) return;
+    this.requestShort();
+  }
+
+  private requestShort(): void {
     this.grant = this.host.lifecycleUpdate('begin', this.owner, 0, 0);
     if (this.grant === 0) return;
     const grant = this.grant;
@@ -87,6 +100,7 @@ export class TransientTaskOwner {
     const current = this.host.lifecycleSnapshot();
     if (native.engineGeneration !== current.engineGeneration || native.ownerGeneration !== this.owner ||
         native.revision !== current.revision || current.available !== 1 || current.clockFailed !== 0) return;
+    if (this.continuous?.active() === true && (!ack.busy || ack.manualPaused)) this.release();
     if (this.foreground) {
       this.activityAt = native.nowMs; this.activityRevision = native.revision;
       this.activityBusy = ack.busy && !ack.manualPaused;
@@ -135,16 +149,17 @@ export class TransientTaskOwner {
     }
     return new Map<string, Object | null>([['ownerGeneration', this.owner], ['retired', this.retired],
       ['phase', phase], ['deadlineMs', deadline], ['drainAtMs', drain],
-      ['cleanupPending', this.cleanup.length > 0], ['error', this.failure]]);
+      ['cleanupPending', this.cleanupPending()], ['error', this.failure ?? this.continuous?.error() ?? null]]);
   }
 
-  cleanupPending(): boolean { return this.cleanup.length > 0; }
+  cleanupPending(): boolean { return this.cleanup.length > 0 || this.continuous?.cleanupPending() === true; }
 
   private retryableCleanup(): boolean {
     return this.cleanup.some((id: number): boolean => (this.cleanupAttempts.get(id) ?? 0) < 3);
   }
 
   private release(): void {
+    this.continuous?.stop();
     if (this.grant !== 0) {
       try { this.host.lifecycleUpdate('release', this.owner, this.grant, 0); }
       catch (_) { this.failure = 'ohos_transient_native_failed'; }

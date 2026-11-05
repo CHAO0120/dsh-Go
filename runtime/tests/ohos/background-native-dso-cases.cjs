@@ -22,6 +22,12 @@
   assert.equal(reader.getHostLifecycleSnapshot().deadlineMs,deadline,'duplicate cannot extend');
   await coordinator.pause();assert.equal(coordinator.admit('round'),false,'manual pause wins grant');
   await coordinator.resume();assert.equal(coordinator.admit('round'),true);
+  assert.equal(host.lifecycleUpdate('continuous',owner,0,1),1);
+  await coordinator.observeHost({revision:3,foreground:false,computePermission:'denied'});
+  assert.equal(reader.getHostLifecycleSnapshot().phase,7);assert.equal(reader.getHostLifecycleSnapshot().deadlineMs,0);
+  assert.equal(coordinator.admit('round'),true);assert.equal(coordinator.status().host.computePermission,'granted');
+  await coordinator.pause();assert.equal(coordinator.admit('round'),false);await coordinator.resume();assert.equal(coordinator.admit('round'),true);
+  assert.equal(host.lifecycleUpdate('continuous',owner,0,0),1);assert.equal(coordinator.admit('round'),false);
   host.lifecycleUpdate('retire',owner,0,0);assert.equal(coordinator.admit('round'),false);
   assert.equal(host.lifecycleUpdate('activate',owner,grant,30000),0);
   const {Worker}=require('node:worker_threads');
@@ -40,8 +46,7 @@
   const round=await f.create();
   host.lifecycleUpdate('foreground',nextOwner,0,0);
   const running=round.run([{}]);await new Promise(resolve=>setImmediate(resolve));assert.equal(effects,0);
-  const nextGrant=host.lifecycleUpdate('begin',nextOwner,0,0);assert(nextGrant>0);
-  assert.equal(host.lifecycleUpdate('activate',nextOwner,nextGrant,30000),1);
+  assert.equal(host.lifecycleUpdate('continuous',nextOwner,0,1),1);
   await f.coordinator.observeHost({revision:1,foreground:false,computePermission:'denied'});
   await running;assert.equal(effects,1);
   assert.equal(f.coordinator.status(round.session.id).calls[0].phase,'committed');
