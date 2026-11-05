@@ -2,7 +2,7 @@
 
 ## 目的与边界
 
-Android 构建只应用 `targetSets.android` 里的公共补丁，现在是 main-df4c9b2 的 57 个，公共 diff 和各版本 pin 对象保持 main 原字节与数值。OHOS 的 78 项先应用这 57 个公共补丁，再应用 21 个 OHOS 专用补丁；平台判断为 false 并不等于 JavaScript 文件字节没有变化，因此不能把所有 diff 一起打进 Android 再依赖运行时判断。
+Android 构建只应用 `targetSets.android` 里的公共补丁，现在是 main-63e255f 的 57 个，公共 diff 和各版本 pin 对象保持 main 原字节与数值。OHOS 的 81 项先应用这 57 个公共补丁，再应用 24 个 OHOS 专用补丁；平台判断为 false 并不等于 JavaScript 文件字节没有变化，因此不能把所有 diff 一起打进 Android 再依赖运行时判断。
 
 本次恢复的是 **DSH npm 前缀树的文件字节**。构建工具自身、构建报告、时间戳或压缩器可能改变完整 runtime / APK 的字节；本包没有执行 Android APK、arm64 原生 runtime 或 HAP 构建，也不宣称这些整体产物与旧版完全相同。
 

@@ -92,6 +92,14 @@
         }
       }
     },
+    "ohos-market-git-unavailable.diff": {
+      "0.2.2-rc.1": {
+        "node_modules/@deepseek-ai/dsh-plugin-market/lib/index.js": {
+          "after": "b1db85d1fe34de0feb5e48401e798eaf668769afafdd605d5bff6fef5788bb5d",
+          "before": "28ea59098d0d46f2732f80c70dd361177b4dc79f9b5f7ff95b6d9aa80ddc9697"
+        }
+      }
+    },
     "ohos-mcp-stdio-unavailable.diff": {
       "0.2.2-rc.1": {
         "node_modules/@deepseek-ai/dsh-mcp-client/lib/index.js": {
@@ -1442,7 +1450,8 @@
       "zzzzzzzzzzzzz-ohos-plugin-install-refusal.diff",
       "zzzzzzzzzzzzzz-ohos-composition-imports.diff",
       "ohos-forge-github-unavailable.diff",
-      "ohos-liveshare-owner-unavailable.diff"
+      "ohos-liveshare-owner-unavailable.diff",
+      "ohos-market-git-unavailable.diff"
     ]
   }
 }
