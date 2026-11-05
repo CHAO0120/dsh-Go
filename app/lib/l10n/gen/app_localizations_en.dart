@@ -13873,6 +13873,13 @@ class L10nEn extends L10n {
       'Saved only on this phone, encrypted by Android Keystore. Supports Ed25519, RSA and ECDSA.';
 
   @override
+  String get remotePasswordStorageHelpIos => 'Saved only on this phone, encrypted by the system keychain';
+
+  @override
+  String get remoteKeyStorageHelpIos =>
+      'Saved only on this phone, encrypted by the system keychain. Supports Ed25519, RSA and ECDSA.';
+
+  @override
   String get remotePrivateKey => 'Private key';
 
   @override

@@ -24206,6 +24206,18 @@ abstract class L10n {
   /// **'只保存在这台手机上，由 Android Keystore 加密。支持 Ed25519、RSA、ECDSA'**
   String get remoteKeyStorageHelp;
 
+  /// No description provided for @remotePasswordStorageHelpIos.
+  ///
+  /// In zh, this message translates to:
+  /// **'只保存在这台手机上，由系统钥匙串加密'**
+  String get remotePasswordStorageHelpIos;
+
+  /// No description provided for @remoteKeyStorageHelpIos.
+  ///
+  /// In zh, this message translates to:
+  /// **'只保存在这台手机上，由系统钥匙串加密。支持 Ed25519、RSA、ECDSA'**
+  String get remoteKeyStorageHelpIos;
+
   /// No description provided for @remotePrivateKey.
   ///
   /// In zh, this message translates to:

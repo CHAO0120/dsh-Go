@@ -13217,6 +13217,12 @@ class L10nZh extends L10n {
   String get remoteKeyStorageHelp => '只保存在这台手机上，由 Android Keystore 加密。支持 Ed25519、RSA、ECDSA';
 
   @override
+  String get remotePasswordStorageHelpIos => '只保存在这台手机上，由系统钥匙串加密';
+
+  @override
+  String get remoteKeyStorageHelpIos => '只保存在这台手机上，由系统钥匙串加密。支持 Ed25519、RSA、ECDSA';
+
+  @override
   String get remotePrivateKey => '私钥';
 
   @override

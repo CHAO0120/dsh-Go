@@ -12,6 +12,7 @@ import '../theme/glass.dart';
 import '../theme/motion.dart';
 import '../theme/semantic_colors.dart';
 import '../theme/shapes.dart';
+import '../theme/sheet_recede.dart';
 import '../theme/surfaces.dart';
 import 'sheet_title_bar.dart';
 import 'sheet_dismissal.dart';
@@ -117,7 +118,9 @@ Future<T?> showAppSheet<T>(
               child: Material(type: MaterialType.transparency, child: content),
             )
           : content;
-      return holds == null ? surface() : _HeldSheetDrag(holds: holds, builder: surface);
+      return SheetRecedeSheet(
+        child: holds == null ? surface() : _HeldSheetDrag(holds: holds, builder: surface),
+      );
     }),
   );
 }

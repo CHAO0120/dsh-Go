@@ -7,6 +7,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../l10n/l10n.dart';
 import '../../remote/ssh/ssh_link.dart';
+import '../../state/android_features.dart';
 import '../../state/attachments.dart';
 import '../../state/connection_state.dart';
 import '../../state/hosts_state.dart';
@@ -481,9 +482,12 @@ class _SshHostFormPageState extends ConsumerState<SshHostFormPage> {
             ),
             SettingsSection(
               title: l10n.remoteAuthentication,
-              footer: Text(
-                _auth == SshAuthMethod.password ? l10n.remotePasswordStorageHelp : l10n.remoteKeyStorageHelp,
-              ),
+              footer: Text(switch ((_auth == SshAuthMethod.password, ref.watch(operatingSystemProvider) == 'ios')) {
+                (true, true) => l10n.remotePasswordStorageHelpIos,
+                (true, false) => l10n.remotePasswordStorageHelp,
+                (false, true) => l10n.remoteKeyStorageHelpIos,
+                (false, false) => l10n.remoteKeyStorageHelp,
+              }),
               children: [
                 FormFieldGroup(
                   children: [
