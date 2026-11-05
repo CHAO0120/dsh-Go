@@ -786,7 +786,7 @@ def main():
         return {'scope': 'The fixed embedding unpacked for the launch clip fixture; not a build'}
     g.internal('embedding-package', embedding_package, needs=('tools',))
     g.node_tests('launch-clip', [rt + 'launch-clip.test.mjs'], needs=('embedding-package',), extra=lambda: {'OHOS_FLUTTER_EMBEDDING': str(o / 'embedding-package/package')})
-    tooling = ['managed-skill', 'native-host-lazy', 'runtime-archive', 'runtime-channel', 'lifecycle-host', 'web-files', 'transient-task', 'runtime-recovery', 'recovery-storage', 'native-recovery-gate']
+    tooling = ['managed-skill', 'native-host-lazy', 'runtime-archive', 'runtime-channel', 'lifecycle-host', 'web-files', 'transient-task', 'runtime-recovery', 'recovery-storage', 'native-recovery-gate', 'last-known-good']
     g.node_tests('ets-runtime-tooling', [tools + n + '.test.mjs' for n in tooling], needs=('native-zlib-build',), extra=lambda: {'OHOS_TEST_ZLIB_ADDON': str(o / 'zlib.node'), 'OHOS_INSTALL_RECORD_WIRE': str(o / 'install-record-wire.json')}, timeout=240)
     g.internal('install-record-wire', lambda _: verify_install_record_wire(o / 'install-record-wire.json'), needs=('ets-runtime-tooling',))
     for mode in ['plain', 'jitless']:
@@ -847,6 +847,7 @@ def main():
                 'localPackages': verify_flutter_packages(g.flutter_source)}
     g.internal('flutter-input-identity', flutter_identity, needs=('flutter-l10n', 'install-record-wire'))
     flutter_tests = ['test/secrets', 'test/ohos/attachment_files_test.dart', 'test/runtime/phone_callback_bridge_test.dart', 'test/runtime/runtime_recovery_test.dart', 'test/runtime/ohos_install_record_test.dart', 'test/usage/ohos_device_contract_test.dart',
+                     'test/safe_mode/safe_mode_logic_test.dart', 'test/state/engine_control_test.dart', 'test/runtime/runtime_controller_test.dart',
                      'test/chat/attachment_file_budget_test.dart', 'test/remote/private_key_file_budget_test.dart',
                      'test/chat/attachment_owner_test.dart', 'test/remote/ssh_key_callback_lifetime_test.dart', 'test/share_hosted', 'test/share/share_panel_test.dart']
     g.run('flutter-consumers', lambda: g.flutter('test', '--no-pub', '--reporter', 'json', '--concurrency=1', *flutter_tests), cwd=g.flutter_source / 'app', env=g.flutter_env, needs=('flutter-input-identity',), timeout=300, tests=['app/' + x for x in flutter_tests], scope='Actual Linux Flutter engine and Dart consumers; not OHOS AOT/device')

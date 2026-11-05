@@ -147,6 +147,8 @@ export class RuntimePlugin implements FlutterPlugin, MethodCallHandler, StreamHa
       try { this.phone?.retire(); } finally { await controller.reset(keep as string[], reinstall); }
       return;
     }
+    // Preview must not trigger pending recovery writes through initialization.
+    if (call.method === 'lastKnownGood') { result.success(await controller.lastKnownGood()); return; }
     await controller.initialize().catch((error: Error): void => {
       // Recovery failures must remain inspectable while mutating calls stay closed.
       if (!['getStatus', 'getLogs', 'getLogSnapshot', 'failureLog'].includes(call.method)) throw error;
@@ -166,9 +168,8 @@ export class RuntimePlugin implements FlutterPlugin, MethodCallHandler, StreamHa
       case 'getLogSnapshot': result.success(controller.logSnapshot((call.argument('lines') ?? 300) as number)); return;
       case 'clearFailure': await controller.clearFailure(); result.success(null); return;
       case 'failureLog': result.success(controller.failureLog()); return;
-      case 'lastKnownGood':
-        result.success(new Map<string, Object | null>([['available', false], ['at', null], ['disable', []], ['enable', []],
-          ['changed', []], ['patchChanged', false], ['empty', true]])); return;
+
+      case 'restoreLastKnownGood': result.success(await controller.restoreLastKnownGood()); return;
       case 'storageStatus':
         result.success(new Map<string, Object | null>([['granted', false], ['permission', false], ['legacy', false], ['guestPath', '']])); return;
       case 'networkMetered': result.success(await controller.networkMetered()); return;
@@ -180,7 +181,7 @@ export class RuntimePlugin implements FlutterPlugin, MethodCallHandler, StreamHa
           catch (_) { result.success(null); }
         }
         return;
-      case 'restoreLastKnownGood': case 'safePreflight': case 'moveAside': case 'setAutoSafe':
+      case 'safePreflight': case 'moveAside': case 'setAutoSafe':
       case 'setDirectEngine': case 'requestStorage':
       case 'openAllFilesAccess': case 'batteryExempt': case 'requestBatteryExempt': case 'backgroundSettings':
       case 'openBackgroundSettings': case 'openVendorSettings': case 'voiceModelLine':

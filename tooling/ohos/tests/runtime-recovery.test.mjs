@@ -39,6 +39,12 @@ test('explicit reinstall reset removes only runtime trees and preserves app host
  const c=await setup(t);await c.r.requestReset([],ids[0],true);assert.equal(await fs.readFile(join(c.root,'dsh-runtime/tree/old.js'),'utf8'),'old');
  await c.r.initialize(1,c.install,()=>false);await preserved(c);assert.equal(await fs.readFile(join(c.root,'dsh-runtime/tree/new.js'),'utf8'),'new');assert.equal(await c.store.kind(join(c.root,'runtime/rootfs')),'missing');assert.equal(await c.store.read(c.r.directory+'/reset.json'),null);
 });
+test('a reset takes the last good config and a restore cut short with it, and no keys',async t=>{
+ const c=await setup(t);const names=['lkg.json','lkg-restore.json','lkg-restore-backup.json'];
+ for(const name of names)await put(c.root,'dsh-recovery/'+name,'{"snapshot":"the old profile"}');
+ await c.r.requestReset([],ids[0],true);await c.r.initialize(1,c.install,()=>false);await preserved(c);
+ for(const name of names)await assert.rejects(fs.access(join(c.root,'dsh-recovery',name)),{code:'ENOENT'});
+});
 test('both ResetKeep choices restore exact selected bytes, not unselected credentials/workspace',async t=>{
  const c=await setup(t);await c.r.requestReset(['uiAndSkills','pluginsAndSettings'],ids[0],true);await c.r.initialize(1,c.install,()=>false);await preserved(c);
  assert.equal(await fs.readFile(join(c.root,'runtime/rootfs/root/.dsh/profiles/config'),'utf8'),'plugins');assert.equal(await fs.readFile(join(c.root,'runtime/rootfs/root/.dsh/dsh-go/ui.json'),'utf8'),'ui');assert.equal(await c.store.kind(join(c.root,'runtime/rootfs/root/.dsh/credentials')),'missing');assert.equal(await c.store.kind(join(c.root,'runtime/rootfs/root/workspace')),'missing');

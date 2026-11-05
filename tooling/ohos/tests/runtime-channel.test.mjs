@@ -111,6 +111,31 @@ for (const name of ['RuntimeRecovery', 'OhosRecoveryStorage']) {
   await fs.writeFile(path.join(temp, name+'.mts'), text);
 }
 
+// 454 uses actual product modules; baseline keeps its original Controller.
+if (controllerText.includes("from './RuntimeLastKnownGood'")) {
+  const lkgIoUrl=pathToFileURL(path.join(temp,'lkg-io.mjs')).href;
+  await fs.writeFile(path.join(temp,'lkg-io.mjs'), `import {recoveryIo} from '${recoveryFixtureUrl}';
+export const lkgIo={...recoveryIo,async open(...args){try{return await recoveryIo.open(...args);}catch(e){if(e.code==='ENOENT')e.code=13900002;throw e;}},async listFile(...args){try{return await recoveryIo.listFile(...args);}catch(e){if(e.code==='ENOENT')e.code=13900002;throw e;}}};`);
+  let text = (await fs.readFile(path.join(source,'RuntimeLastKnownGood.ets'),'utf8'))
+    .replace("from './RuntimeCore'", "from './RuntimeCore.mts'");
+  await fs.writeFile(path.join(temp,'RuntimeLastKnownGood.mts'),text);
+  text=(await fs.readFile(path.join(source,'OhosLastKnownGoodStorage.ets'),'utf8'))
+    .replace("import fs from '@ohos.file.fs';", `import { lkgIo as fs } from '${lkgIoUrl}';`)
+    .replace("import fileHash from '@ohos.file.hash';", `import { fileHash } from '${fixtureUrl}';`)
+    .replace("import util from '@ohos.util';", `import { util } from '${fixtureUrl}';`)
+    .replace("import common from '@ohos.app.ability.common';", '')
+    .replace("import { BusinessError } from '@ohos.base';", '')
+    .replace("import bundleManager from '@ohos.bundle.bundleManager';", `const bundleManager={BundleFlag:{GET_BUNDLE_INFO_WITH_HAP_MODULE:2},async getBundleInfoForSelf(){return {name:'fixture.dsh',versionCode:1,hapModulesInfo:[{name:'entry',hashValue:'fixture-hap-hash'}]};}};`)
+    .replace("import { LkgStorage, LkgPair, LkgProfile, LkgVersion }", "import type { LkgStorage, LkgPair, LkgProfile, LkgVersion }")
+    .replace("from './RuntimeLastKnownGood'", "from './RuntimeLastKnownGood.mts'")
+    .replace("from './RuntimeCore'", "from './RuntimeCore.mts'")
+    .replace("from './OhosRuntimeStorage'", "from './OhosRuntimeStorage.mts'");
+  await fs.writeFile(path.join(temp,'OhosLastKnownGoodStorage.mts'),text);
+  controllerText=controllerText.replace('RuntimeLastKnownGood, LkgBoot','RuntimeLastKnownGood, type LkgBoot')
+    .replace("from './RuntimeLastKnownGood'", "from './RuntimeLastKnownGood.mts'")
+    .replace("from './OhosLastKnownGoodStorage'", "from './OhosLastKnownGoodStorage.mts'");
+}
+
 controllerText = controllerText.replace("import common from '@ohos.app.ability.common';", '')
   .replace("import UIAbility from '@ohos.app.ability.UIAbility';", '')
   .replace("import util from '@ohos.util';", `import { util } from '${fixtureUrl}';`)
@@ -709,12 +734,13 @@ test('实际RuntimePlugin逐个处理28个Android方法，unknown才notImplement
   assert.equal((await invoke('clearFailure')).kind, 'success');
   assert.equal((await invoke('failureLog')).kind, 'success');
   assert.equal((await invoke('lastKnownGood')).value.get('available'), false);
+  assert.equal((await invoke('restoreLastKnownGood')).code, 'ohos_lkg_invalid');
   assert.equal((await invoke('storageStatus')).value.get('granted'), false);
   assert.equal((await invoke('networkMetered')).value, false);
   const diagnostic = await invoke('publishDiagnostics', {markdown: '# 测试\n'});
   assert.equal(diagnostic.kind, 'success'); assert.equal(diagnostic.value.get('bytes'), Buffer.byteLength('# 测试\n'));
   assert.equal((await invoke('publishDiagnostics', {markdown: ''})).value.get('bytes'), 0);
-  for (const method of ['restoreLastKnownGood', 'safePreflight', 'moveAside', 'setAutoSafe', 'setDirectEngine',
+  for (const method of ['safePreflight', 'moveAside', 'setAutoSafe', 'setDirectEngine',
     'requestStorage', 'openAllFilesAccess', 'batteryExempt',
     'requestBatteryExempt', 'backgroundSettings', 'openBackgroundSettings', 'openVendorSettings', 'voiceModelLine']) {
     assert.deepEqual((await invoke(method)).code, 'ohos_unsupported', method);
@@ -1648,4 +1674,114 @@ test('failed durable mode commit cannot start Node or request a restart', async 
   await c.controller.start(null, false, 'safe', true);
   assert.equal(native.starts.length, 1); assert.equal(native.starts[0].safeMode, true);
   c.controller.stop();
+});
+
+test('public normal healthy boot restores its launch profile through RuntimePlugin',async()=>{
+ const c=await controllerCase('lkg-public');
+ c.context.bundleCodeDir=path.join(c.dir,'hap');
+ const nativeDir=path.join(c.context.bundleCodeDir,'libs/arm64');await fs.mkdir(nativeDir,{recursive:true});
+ await fs.writeFile(path.join(nativeDir,'libnode.so'),'fixture-node');await fs.writeFile(path.join(nativeDir,'libdsh_host.so'),'fixture-host');
+ const home=path.join(c.dir,'runtime/rootfs/root/.dsh/profiles/web');await fs.mkdir(home,{recursive:true});
+ const packagePath=path.join(home,'package.json'),patchPath=path.join(home,'cordis.patch.yml');
+ await fs.writeFile(packagePath,JSON.stringify({name:'web',other:123,dependencies:{},dsh:{profile:{bundles:['good']}}}));await fs.writeFile(patchPath,'started: true\n');
+ const plugin=new RuntimePlugin();plugin.onAttachedToEngine({getApplicationContext:()=>c.context,getBinaryMessenger:()=>({setMessageHandler(){}})});
+ const invoke=(method,args={})=>new Promise(resolve=>plugin.onMethodCall(new MethodCall(method,new Map(Object.entries(args))),{success:value=>resolve({kind:'success',value}),error:(code,message)=>resolve({kind:'error',code,message}),notImplemented:()=>resolve({kind:'unknown'})}));
+ assert.equal((await invoke('install')).kind,'success');assert.equal((await invoke('start',{mode:'normal',env:new Map()})).kind,'success');
+ native.state.phase='running';const realNow=Date.now,now=realNow();
+ try{
+  Date.now=()=>now;c.controller.collect();
+  await fs.writeFile(packagePath,JSON.stringify({name:'web',other:123,dependencies:{},dsh:{profile:{bundles:['not-booted']}}}));await fs.writeFile(patchPath,'notBooted: true\n');
+  Date.now=()=>now+119999;c.controller.collect();assert.equal(await fs.stat(path.join(c.dir,'dsh-recovery/lkg.json')).then(()=>true,()=>false),false);
+  Date.now=()=>now+120000;c.controller.collect();await c.controller.lkgPin;
+ }finally{Date.now=realNow;}
+ await invoke('stop');native.state.phase='exited';native.state.exitCode=0;c.controller.collect();await c.controller.recovery.pending;
+ const preview=await invoke('lastKnownGood');assert.equal(preview.kind,'success',JSON.stringify(preview));assert.equal(preview.value.get('available'),true);
+ const restored=await invoke('restoreLastKnownGood');assert.equal(restored.kind,'success',JSON.stringify(restored));assert.deepEqual(JSON.parse(await fs.readFile(packagePath,'utf8')).dsh.profile.bundles,['good']);assert.equal(await fs.readFile(patchPath,'utf8'),'started: true\n');assert.equal(JSON.parse(await fs.readFile(packagePath,'utf8')).other,123);
+});
+
+
+test('active native cannot restore or import during pending restore',async()=>{
+ const c=await controllerCase('lkg-admission');await c.controller.install(false);await c.controller.start(null,false,'safe',true);
+ native.state.phase='running';await assert.rejects(c.controller.restoreLastKnownGood(),{code:'ohos_lkg_engine_active'});
+ native.state.phase='stopping';await assert.rejects(c.controller.lastKnownGood(),{code:'ohos_lkg_engine_active'});
+ c.controller.pending='restore';await assert.rejects(nativeHostModule.loadNativeHost(),{code:'ohos_lkg_pending'});await assert.rejects(c.controller.start(null,false,'normal',true),{code:'start_busy'});await assert.rejects(c.controller.install(false),{code:'install_busy'});await assert.rejects(c.controller.reset([],false),{code:'ohos_lkg_pending'});c.controller.pending=null;
+ c.controller.stop();native.state.phase='exited';c.controller.collect();await c.controller.recovery.pending;
+});
+for(const mode of ['safe','normal']) test(''+mode+' mode with first missing profile never pins after two minutes',async()=>{
+  const c=await controllerCase('lkg-no-pin-'+mode);await c.controller.install(false);await c.controller.start(null,false,mode,true);native.state.phase='running';const realNow=Date.now,now=realNow();
+  try{Date.now=()=>now;c.controller.collect();Date.now=()=>now+120001;c.controller.collect();await c.controller.lkgPin;}finally{Date.now=realNow;}
+  assert.equal(await fs.stat(path.join(c.dir,'dsh-recovery/lkg.json')).then(()=>true,()=>false),false);c.controller.stop();native.state.phase='exited';c.controller.collect();await c.controller.recovery.pending;
+});
+
+
+test('public safe-running preview is read-only; pending intent blocks and stopped restore replans',async()=>{
+ let c=await controllerCase('lkg-safe-preview');c.context.bundleCodeDir=path.join(c.dir,'hap');
+ const libs=path.join(c.context.bundleCodeDir,'libs/arm64');await fs.mkdir(libs,{recursive:true});
+ await fs.writeFile(path.join(libs,'libnode.so'),'fixture-node');await fs.writeFile(path.join(libs,'libdsh_host.so'),'fixture-host');
+ const home=path.join(c.dir,'runtime/rootfs/root/.dsh/profiles/web');await fs.mkdir(home,{recursive:true});
+ const packagePath=path.join(home,'package.json'),patchPath=path.join(home,'cordis.patch.yml');
+ await fs.writeFile(packagePath,JSON.stringify({name:'web',other:123,dependencies:{},dsh:{profile:{bundles:['good']}}}));await fs.writeFile(patchPath,'started: true\n');
+ await c.controller.install(false);await c.controller.start(null,false,'normal',true);native.state.phase='running';
+ const realNow=Date.now,now=realNow();try{Date.now=()=>now;c.controller.collect();Date.now=()=>now+120000;c.controller.collect();await c.controller.lkgPin;}finally{Date.now=realNow;}
+ c.controller.stop();native.state.phase='exited';native.state.exitCode=0;c.controller.collect();await c.controller.recovery.pending;
+ await fs.writeFile(packagePath,JSON.stringify({name:'web',other:456,dependencies:{},dsh:{profile:{bundles:['broken']}}}));await fs.writeFile(patchPath,'later: true\n');
+ c=await reopenCase(c);await c.controller.start(null,false,'safe',true);native.state.phase='running';
+ const plugin=new RuntimePlugin();plugin.onAttachedToEngine({getApplicationContext:()=>c.context,getBinaryMessenger:()=>({setMessageHandler(){}})});
+ const invoke=method=>new Promise(resolve=>plugin.onMethodCall(new MethodCall(method,new Map()),{success:value=>resolve({kind:'success',value}),error:(code,message)=>resolve({kind:'error',code,message}),notImplemented:()=>resolve({kind:'unknown'})}));
+ const before=[await fs.readFile(packagePath,'utf8'),await fs.readFile(patchPath,'utf8')];
+ let initCalls=0;const initialize=c.controller.initialize.bind(c.controller);c.controller.initialize=()=>{initCalls++;return initialize();};
+ const preview=await invoke('lastKnownGood');assert.equal(preview.kind,'success',JSON.stringify(preview));assert.equal(preview.value.get('available'),true);assert.deepEqual(preview.value.get('disable'),['broken']);assert.equal(initCalls,0);
+ assert.equal((await invoke('restoreLastKnownGood')).code,'ohos_lkg_engine_active');
+ assert.deepEqual([await fs.readFile(packagePath,'utf8'),await fs.readFile(patchPath,'utf8')],before);
+ const intent=path.join(c.dir,'dsh-recovery/lkg-restore.json');await fs.writeFile(intent,'{}');initCalls=0;
+ assert.equal((await invoke('lastKnownGood')).code,'ohos_lkg_pending');assert.equal(initCalls,0);assert.equal(await fs.readFile(intent,'utf8'),'{}');
+ assert.deepEqual([await fs.readFile(packagePath,'utf8'),await fs.readFile(patchPath,'utf8')],before);await fs.unlink(intent);
+ c.controller.lastGood.pending=true;assert.equal((await invoke('lastKnownGood')).code,'ohos_lkg_pending');c.controller.lastGood.pending=false;
+ c.controller.stop();native.state.phase='exited';native.state.exitCode=0;c.controller.collect();await c.controller.recovery.pending;
+ await fs.writeFile(packagePath,JSON.stringify({name:'web',other:789,dependencies:{},dsh:{profile:{bundles:['changed-after-preview']}}}));
+ const restored=await invoke('restoreLastKnownGood');assert.equal(restored.kind,'success',JSON.stringify(restored));assert.deepEqual(restored.value.get('disable'),['changed-after-preview']);
+ const actual=JSON.parse(await fs.readFile(packagePath,'utf8'));assert.deepEqual(actual.dsh.profile.bundles,['good']);assert.equal(actual.other,789);assert.equal(await fs.readFile(patchPath,'utf8'),'started: true\n');
+});
+
+test('cold public preview does not initiate initialization or replay',async()=>{
+ native.reset();const c=await makeCase('lkg-cold-preview');const cacheDir=path.join(c.dir,'cache');await fs.mkdir(cacheDir);
+ const context={filesDir:c.dir,cacheDir,resourceManager:c.resources,bundleCodeDir:'/private/hap',applicationInfo:{nativeLibraryPath:'libs/arm64/'}};
+ const controller=RuntimeController.get(context);controllers.push(controller);let initCalls=0;const initialize=controller.initialize.bind(controller);controller.initialize=()=>{initCalls++;return initialize();};
+ const plugin=new RuntimePlugin();plugin.onAttachedToEngine({getApplicationContext:()=>context,getBinaryMessenger:()=>({setMessageHandler(){}})});
+ const invoke=method=>new Promise(resolve=>plugin.onMethodCall(new MethodCall(method,new Map()),{success:value=>resolve({kind:'success',value}),error:(code,message)=>resolve({kind:'error',code,message}),notImplemented:()=>resolve({kind:'unknown'})}));
+ assert.equal((await invoke('lastKnownGood')).code,'ohos_lkg_pending');assert.equal(initCalls,0);assert.equal(controller.initialized,null);
+ assert.equal((await invoke('getStatus')).kind,'success');assert.ok(initCalls>0);
+ const preview=await invoke('lastKnownGood');assert.equal(preview.kind,'success',JSON.stringify(preview));assert.equal(preview.value.get('available'),false);
+});
+
+test('a restore cut short that cannot finish still lets a reset through, and the reset ends it', async () => {
+  const c = await controllerCase('lkg-stuck-reset');
+  c.context.bundleCodeDir = path.join(c.dir, 'hap');
+  const libs = path.join(c.context.bundleCodeDir, 'libs/arm64');
+  await fs.mkdir(libs, { recursive: true });
+  await fs.writeFile(path.join(libs, 'libnode.so'), 'fixture-node');
+  await fs.writeFile(path.join(libs, 'libdsh_host.so'), 'fixture-host');
+  await c.controller.install(false);
+  const text = JSON.stringify({ dsh: { profile: { bundles: [] } } });
+  const intent = path.join(c.dir, 'dsh-recovery/lkg-restore.json');
+  await fs.mkdir(path.dirname(intent), { recursive: true });
+  await fs.writeFile(intent, JSON.stringify({ schema: 1, identity: 'another install',
+    before: { packageText: text, patchText: null }, target: { packageText: text, patchText: null } }));
+  native.reset(); nativeHostModule.resetNativeFixture(); RuntimeController.shared = null;
+  const stuck = RuntimeController.get(c.context); controllers.push(stuck);
+  await assert.rejects(stuck.initialize(), { code: 'ohos_lkg_invalid' });
+  await assert.rejects(stuck.start(null, false, null, true));
+  assert.equal(native.starts.length, 0);
+  await assert.rejects(stuck.reset([], false), { code: 'ohos_reset_committed' });
+  native.reset(); nativeHostModule.resetNativeFixture(); RuntimeController.shared = null;
+  const next = RuntimeController.get(c.context); controllers.push(next);
+  await next.initialize();
+  await assert.rejects(fs.access(intent), { code: 'ENOENT' });
+});
+
+test('no restore starts once a reset has been committed', async () => {
+  const c = await controllerCase('lkg-after-reset');
+  await c.controller.install(false);
+  await assert.rejects(c.controller.reset([], false), { code: 'ohos_reset_committed' });
+  await assert.rejects(c.controller.restoreLastKnownGood(), { code: 'ohos_restart_required' });
 });

@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../runtime/runtime_bridge.dart';
 import '../runtime/runtime_state.dart';
+import 'android_features.dart' show operatingSystemProvider;
 
 /// Multi-step engine actions built on [localRuntimeProvider].
 ///
@@ -71,8 +72,11 @@ abstract final class EngineControl {
         status.phase == RuntimePhase.running ||
         status.phase == RuntimePhase.starting ||
         status.phase == RuntimePhase.stopping;
-    // A normal-mode DSH must not be running on the profile being rewritten; a safe one may.
-    if (busy && !status.inSafeMode) await _stopAndWait(container);
+    // OH must observe the embedded Node's exit even when its safe profile runs.
+    // Android keeps its existing safe-profile restore-before-stop order.
+    if (busy && (!status.inSafeMode || container.read(operatingSystemProvider) == 'ohos')) {
+      await _stopAndWait(container);
+    }
     final changed = await container.read(runtimeBridgeProvider).restoreLastKnownGood();
     await restart(container, mode: EngineMode.normal);
     return changed;

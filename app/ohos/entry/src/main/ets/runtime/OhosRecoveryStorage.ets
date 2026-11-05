@@ -46,7 +46,8 @@ export class OhosRecoveryStorage implements RecoveryStorage {
   }
 
   private record(path: string): void {
-    if (path !== this.root + '/dsh-recovery/boot.json' && path !== this.root + '/dsh-recovery/reset.json' && path !== this.root + '/dsh-recovery/mode.json') this.invalid();
+    if (!['boot.json', 'reset.json', 'mode.json', 'lkg.json', 'lkg-restore.json', 'lkg-restore-backup.json']
+      .some((name: string): boolean => path === this.root + '/dsh-recovery/' + name)) this.invalid();
   }
 
   async read(path: string): Promise<string | null> {
@@ -104,7 +105,8 @@ export class OhosRecoveryStorage implements RecoveryStorage {
   }
 
   async removeFile(path: string): Promise<void> {
-    if (path !== this.root + '/dsh-recovery/reset.json') this.invalid();
+    if (!['reset.json', 'lkg.json', 'lkg-restore.json', 'lkg-restore-backup.json']
+      .some((name: string): boolean => path === this.root + '/dsh-recovery/' + name)) this.invalid();
     await this.metadata.removeFile(path);
   }
 

@@ -293,6 +293,11 @@ export class RuntimeRecovery {
     if (record.stage === 'deleting') {
       assertUnloaded(); await this.storage.removeTree(this.payloadRoot);
       assertUnloaded(); await this.storage.removeTree(this.guestRoot);
+      // The last good config goes with the profile it describes, as Android's does
+      // with its runtime directory. A restore cut short can't finish on what replaces it.
+      for (const name of ['lkg-restore.json', 'lkg-restore-backup.json', 'lkg.json']) {
+        await this.storage.removeFile(this.directory + '/' + name);
+      }
       record.stage = record.reinstall ? 'installing' : 'waitingInstall'; await this.saveReset(record);
     }
     if (record.stage === 'waitingInstall') { this.waitingInstall = true; return; }

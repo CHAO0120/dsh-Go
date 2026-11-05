@@ -10,6 +10,8 @@ import { RuntimeChannelError, RuntimeManifest, RuntimeFile, RuntimeInstaller, Ru
 import { OhosRuntimeStorage } from './OhosRuntimeStorage';
 import { RuntimeRecovery } from './RuntimeRecovery';
 import { OhosRecoveryStorage } from './OhosRecoveryStorage';
+import { RuntimeLastKnownGood, LkgBoot } from './RuntimeLastKnownGood';
+import { OhosLastKnownGoodStorage } from './OhosLastKnownGoodStorage';
 import { RuntimePaths } from './RuntimePaths';
 import { ManagedSkillService, ManagedSkillScope } from './ManagedSkillService';
 import { PersistedRuntimeLog } from './PersistedRuntimeLog';
@@ -62,6 +64,11 @@ export class RuntimeController {
   private runningSince: number | null = null;
   private markedHealthy: boolean = false;
   private runMode: string = 'normal';
+  private lastGood: RuntimeLastKnownGood;
+  private bootProfile: LkgBoot | null = null;
+  private pinnedProfile: boolean = false;
+  private lkgPin: Promise<void> | null = null;
+  private lkgRecovering: boolean = false;
 
   static get(context: common.Context): RuntimeController {
     if (RuntimeController.shared === null) RuntimeController.shared = new RuntimeController(context);
@@ -90,6 +97,7 @@ export class RuntimeController {
   constructor(context: common.Context) {
     this.context = context;
     this.recovery = new RuntimeRecovery(new OhosRecoveryStorage(context), context.filesDir);
+    this.lastGood = new RuntimeLastKnownGood(new OhosLastKnownGoodStorage(context));
     this.persistedLogs = PersistedRuntimeLog.get(context.filesDir);
     this.lifecycle = new RuntimeLifecycle(new OhosLifecycleTransport(),
       (): string => backgroundComputePermission(context.applicationInfo.accessTokenId),
@@ -120,6 +128,7 @@ export class RuntimeController {
   }
 
   private checkRecovery(): void {
+    if (this.pending === 'restore' || this.lkgRecovering || this.lastGood.blocked()) throw new RuntimeChannelError('ohos_lkg_pending', '配置恢复尚未完成，未允许启动原生引擎。');
     if (this.recovery.status().waitingInstall) throw new RuntimeChannelError('ohos_install_required', '运行时已移除，请明确安装后继续。');
     if (this.resetRequested || this.recovery.status().resetPending) throw new RuntimeChannelError('ohos_restart_required', '重置尚未完成，请重新打开应用。');
   }
@@ -168,6 +177,9 @@ export class RuntimeController {
     const recovering = this.recovery.status().resetPending;
     await this.readInstallation();
     await this.recovery.initialize(Date.now(), (): Promise<void> => this.installPayload(), nativeHostTouched);
+    this.lkgRecovering = true;
+    try { this.assertLkgStopped(); await this.lastGood.recoverPending(); }
+    finally { this.lkgRecovering = false; }
     if (this.manifest !== null) {
       this.installed = await this.installer.installed();
       if (this.current() && !(await this.storage.exists(this.installer.base + '/installing.json'))) {
@@ -317,6 +329,7 @@ export class RuntimeController {
       }
     }
     this.noteHealthy(state);
+    this.noteLastGood(state);
     if (++this.lifecycleTicks >= 10) { this.lifecycleTicks = 0; this.lifecycle.refresh(); }
     this.syncManagedSkills(state);
     if (state.token !== null) this.logs.rememberSecret(state.token);
@@ -359,6 +372,54 @@ export class RuntimeController {
     this.markedHealthy = true;
     // Unconfirmed, the run just stays counted as unclean: the safe side.
     this.recovery.markHealthy(this.attempt).then((): void => this.emitStatus()).catch((): void => {});
+  }
+
+  private noteLastGood(state: HostState): void {
+    if (state.phase !== 'running' || this.requestedStop || this.attempt === null || this.runMode !== 'normal' ||
+      this.pinnedProfile || this.bootProfile === null || this.runningSince === null || Date.now() - this.runningSince < 120000) return;
+    this.pinnedProfile = true;
+    // The running interval qualified this captured launch image. A later stop
+    // does not substitute a newer disk configuration into this write.
+    this.lkgPin = this.lastGood.pinBooted(this.bootProfile, Date.now()).catch((): void => {
+      this.emit(new Map<string, Object | null>([['type', 'notice'], ['text', '上次正常配置尚未确认保存；本次运行仍可继续。']]));
+    });
+  }
+
+  private assertLkgStopped(): void {
+    const state = nativeHostState();
+    if ((nativeHostTouched() && peekNativeHost() === null) ||
+      !((!state.consumed && state.phase === 'idle') || state.phase === 'exited' || state.phase === 'error')) {
+      throw new RuntimeChannelError('ohos_lkg_engine_active', '请先停止本机引擎并等待真实退出，再恢复配置。');
+    }
+  }
+
+  async lastKnownGood(): Promise<Map<string, Object | null>> {
+    if (this.pending !== null) throw new RuntimeChannelError('ohos_lkg_busy', '运行时操作尚未完成。');
+    const initialized = this.initialized;
+    if (initialized === null || this.lkgRecovering || this.lastGood.blocked() || this.resetRequested || this.recovery.status().resetPending) {
+      throw new RuntimeChannelError('ohos_lkg_pending', '启动或配置恢复尚未完成，未预览半套配置。');
+    }
+    this.pending = 'restore';
+    try {
+      // Read-only preview never initiates initialization or intent replay.
+      await initialized;
+      const state = nativeHostState();
+      if (!(this.runMode === 'safe' && state.phase === 'running' && !this.requestedStop)) this.assertLkgStopped();
+      await this.lkgPin;
+      return await this.lastGood.preview();
+    } finally { this.pending = null; }
+  }
+
+  async restoreLastKnownGood(): Promise<Map<string, Object | null>> {
+    if (this.pending !== null) throw new RuntimeChannelError('ohos_lkg_busy', '运行时操作尚未完成。');
+    if (this.resetRequested || this.recovery.status().resetPending) throw new RuntimeChannelError('ohos_restart_required', '重置尚未完成，请重新打开应用。');
+    this.pending = 'restore';
+    try {
+      await this.initialize(); this.assertLkgStopped(); await this.lkgPin;
+      const result = await this.lastGood.restore();
+      this.emit(new Map<string, Object | null>([['type', 'notice'], ['text', '主配置已恢复；已用过的 Node 进程不能再次启动，请正常模式重新打开应用。']]));
+      return result;
+    } finally { this.pending = null; this.emitStatus(); }
   }
 
   async install(dropKept: boolean): Promise<void> {
@@ -427,6 +488,11 @@ export class RuntimeController {
       this.requestedStop = false;
       this.runtimeGeneration++;
       const host = await loadNativeHost();
+      this.bootProfile = null; this.pinnedProfile = false; this.runningSince = null; this.markedHealthy = false;
+      if (selectedMode === 'normal') {
+        try { this.bootProfile = await this.lastGood.captureBoot(); }
+        catch (_) { this.emit(new Map<string, Object | null>([['type', 'notice'], ['text', '本次启动配置无法建立可靠恢复快照；正常启动仍将继续。']])); }
+      }
       const attempt = util.generateRandomUUID();
       this.runMode = selectedMode;
       await this.recovery.arm(attempt, Date.now(), 'engineRun', selectedMode === 'safe');
@@ -452,6 +518,9 @@ export class RuntimeController {
   }
 
   async reset(keep: string[], reinstall: boolean): Promise<void> {
+    // A restore cut short that can't finish must not lock out the one way past it:
+    // the committed reset drops it on reopening. Only a write in progress waits.
+    if (this.pending === 'restore' || this.lkgRecovering) throw new RuntimeChannelError('ohos_lkg_pending', '配置恢复尚未完成，未提交重置。');
     if (this.pending === 'install') throw new RuntimeChannelError('reset_busy', '安装进行中，未提交重置。');
     // Stop admission synchronously, including a loader currently awaiting I/O.
     this.resetRequested = true;
