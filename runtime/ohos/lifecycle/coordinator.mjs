@@ -278,12 +278,25 @@ export class BoundaryCoordinator {
     this.#check();
     const replacements = snapshot(closers);
     const decisions = [];
+    // JSONL supplies a private, stable event slice. Index only this recovery
+    // read, retaining the first event and every result for identity checks.
+    const eventsBySeq = new Map(), calls = [], resultsByCall = new Map();
+    for (const event of persisted) {
+      if (event.seq === event.seq && !eventsBySeq.has(event.seq)) eventsBySeq.set(event.seq, event);
+      if (event.type === 'tool/call') calls.push(event);
+      if (event.type !== 'tool/result' || event.sourceEventSeqs?.length !== 1) continue;
+      const seq = event.sourceEventSeqs[0];
+      if (seq !== seq) continue; // Map equates NaN keys; the prior strict comparisons do not.
+      const matches = resultsByCall.get(seq);
+      if (matches) matches.push(event);
+      else resultsByCall.set(seq, [event]);
+    }
     // A session predating this protocol is not evidence that nothing ran. An
     // unresolved legacy call receives an explicit unknown origin, never a
     // retroactive prepared/dispatch record or automatic replay permission.
-    for (const call of persisted.filter(event => event.type === 'tool/call')) {
+    for (const call of calls) {
       const key = keyOf({ sessionId, callSeq: call.seq });
-      const matches = persisted.filter(event => event.type === 'tool/result' && event.sourceEventSeqs?.length === 1 && event.sourceEventSeqs[0] === call.seq);
+      const matches = resultsByCall.get(call.seq) ?? [];
       if (this.#rows.has(key) || (matches.length === 1 && !unknownResult(matches[0]))) continue;
       await this.#record({ kind: 'untracked', bootId: this.bootId, identity: { sessionId, callSeq: call.seq,
         callId: call.data.callId, name: call.data.name, turn: call.data.turn, step: call.data.step,
@@ -291,8 +304,8 @@ export class BoundaryCoordinator {
     }
     const sessionRows = [...this.#rows.values()].filter(row => row.identity.sessionId === sessionId);
     for (const row of sessionRows) {
-      const identity = row.identity, call = persisted.find(event => event.seq === identity.callSeq);
-      const matches = persisted.filter(event => event.type === 'tool/result' && event.sourceEventSeqs?.length === 1 && event.sourceEventSeqs[0] === identity.callSeq);
+      const identity = row.identity, call = eventsBySeq.get(identity.callSeq);
+      const matches = resultsByCall.get(identity.callSeq) ?? [];
       let basis, blocking = false, expected;
       if (!call || call.type !== 'tool/call' || hash(call) !== identity.callHash || matches.length > 1) {
         basis = 'session-identity-mismatch'; blocking = true;
