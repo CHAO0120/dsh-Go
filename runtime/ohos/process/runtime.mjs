@@ -9,7 +9,7 @@ import { OutputCollector } from '@deepseek-ai/dsh-subprocess-local/output';
 import { scrubbedParentEnv, SubprocessExecutableNotFoundError } from '@deepseek-ai/dsh-subprocess';
 import { MAX_TIMER_DELAY_MS } from '@deepseek-ai/dsh-timeout';
 import { capabilities, subprocessCommands, unavailableMessage } from './commands.mjs';
-import { distinctRoots, isInside } from './filesystem.mjs';
+import { distinctRoots, isInside } from './paths.mjs';
 import { createOwnedGitServer } from './owned-server.mjs';
 import { createNodeScriptWorker, nodeScriptAvailable } from './node-script.mjs';
 

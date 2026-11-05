@@ -20,6 +20,7 @@
       "runtime/tests/ohos/process-readwrite-freshness.test.mjs",
       "runtime/tests/ohos/process-readwrite-read-errors.test.mjs",
       "runtime/tests/ohos/process-scoped-fd.test.mjs",
+      "runtime/tests/ohos/process-startup-import.test.mjs",
       "runtime/tests/ohos/process-stderr-limit.test.mjs",
       "runtime/tests/ohos/process-streaming.test.mjs",
       "runtime/tests/ohos/process-symlink-mount.test.mjs",

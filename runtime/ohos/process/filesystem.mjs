@@ -1,8 +1,7 @@
-import { dirname, resolve, sep } from 'node:path';
+import { dirname, resolve } from 'node:path';
+import { isInside } from './paths.mjs';
+export { isInside, distinctRoots } from './paths.mjs';
 import { MountableFs, ReadWriteFs } from './build/just-bash/index.js';
-
-export const isInside = (root, path) => path === root || path.startsWith(root + sep);
-export const distinctRoots = roots => [...new Set(roots)].filter(root => !roots.some(other => other !== root && isInside(other, root)));
 
 export function createFilesystem(roots, policy) {
   let ready = false;
