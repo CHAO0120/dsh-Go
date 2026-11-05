@@ -54,9 +54,11 @@ String failureOneLiner(RuntimeFailure f) {
     FailureKind.startupFailed => appL10n.stateSafeStartupFailed,
     FailureKind.crashedEarly => appL10n.stateSafeCrashedEarly,
     FailureKind.crashedLate => appL10n.stateSafeCrashedLate,
-    FailureKind.killed => appL10n.stateSafeKilled,
+    FailureKind.killed => f.causeUnknown ? appL10n.harmonyEngineUnclean : appL10n.stateSafeKilled,
     FailureKind.noSpace => appL10n.commonStorageFull,
   };
+  // Its summary only says this again, in the native side's language.
+  if (f.causeUnknown) return what;
   final culprits = f.culprits;
   if (f.kind != FailureKind.launchFailed && culprits.isNotEmpty) {
     return appL10n.stateSafeSuspectPlugins(what, culprits.take(3).join(appL10n.stateListSeparator));

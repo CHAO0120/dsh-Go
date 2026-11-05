@@ -1076,6 +1076,20 @@ test('recovery: two unclean engine generations persist strikes/failure; clearing
  const state=c.controller.snapshot();assert.equal(state.get('strikes'),2);assert.equal(state.get('failure').get('kind'),'killed');assert.equal(state.get('safeState'),'off');assert.equal(state.get('autoSafe'),false);
  await c.controller.clearFailure();assert.equal(c.controller.snapshot().get('failure'),null);assert.equal(c.controller.snapshot().get('strikes'),2);
 });
+test('recovery: the failure says its cause is unknown; thirty seconds running clears the count, sooner does not',async()=>{
+ let c=await controllerCase('rescue-healthy');await c.controller.install(false);
+ await c.controller.start(null,false,null,false);c=await reopenCase(c);
+ const failure=c.controller.snapshot().get('failure');assert.equal(failure.get('kind'),'killed');assert.equal(failure.get('causeUnknown'),true);assert.equal(c.controller.snapshot().get('strikes'),1);
+ await c.controller.start(null,false,null,false);native.state.phase='running';
+ const realNow=Date.now,start=realNow();
+ try{
+  Date.now=()=>start;c.controller.collect();Date.now=()=>start+29999;c.controller.collect();await c.controller.recovery.pending;
+  assert.equal(c.controller.snapshot().get('strikes'),1);
+  Date.now=()=>start+30000;c.controller.collect();await c.controller.recovery.pending;
+  assert.equal(c.controller.snapshot().get('strikes'),0);assert.equal(c.controller.snapshot().get('failure'),null);
+ }finally{Date.now=realNow;}
+ c=await reopenCase(c);assert.equal(c.controller.snapshot().get('strikes'),1,'still unclean, once');
+});
 test('recovery: committed reset does not delete in old process; next process reinstalls and restores chosen bytes before native import',async()=>{
  let c=await controllerCase('rescue-reset-reinstall');await c.controller.install(false);
  const kept=c.dir+'/runtime/rootfs/root/.dsh/dsh-go/ui.json';await fs.mkdir(path.dirname(kept),{recursive:true});await fs.writeFile(kept,'user-ui');

@@ -30,6 +30,7 @@ import 'package:dsh_app/ui/onboarding/runtime_setup_page.dart';
 import 'package:dsh_app/ui/pets/overlay_settings_tile.dart';
 import 'package:dsh_app/ui/pets/pet_settings_page.dart';
 import 'package:dsh_app/ui/phone/phone_control_screen.dart';
+import 'package:dsh_app/ui/phone/system_actions_page.dart';
 import 'package:dsh_app/ui/plugins/native/native_taps.dart' show openNativePage;
 import 'package:dsh_app/ui/safe_mode/engine_failure_card.dart';
 import 'package:dsh_app/ui/settings/appearance/app_icon_picker.dart';
@@ -58,12 +59,7 @@ import '../phone/support.dart' show FixedActiveHost, FixedHosts;
 import '../safe_mode/support.dart' show FakeBridge, failedAt;
 import '../shell/golden_harness.dart';
 
-const _pages = {
-  'page:phone',
-  'page:phoneAppRules',
-  'page:phoneDnd',
-  'page:phoneUnlocks',
-};
+const _pages = {'page:phone', 'page:phoneAppRules', 'page:phoneDnd', 'page:phoneUnlocks'};
 const _rows = {
   'phone-a11y-restore',
   'phone-confirm',
@@ -79,8 +75,6 @@ const _rows = {
   'refresh-rate',
   'auto-safe',
   'safe-mode',
-  'engine-reset',
-  'engine-uninstall',
 };
 
 final _zh = lookupL10n(AppLocale.zhCN);
@@ -150,6 +144,18 @@ void main() {
         expect(SettingsIndex.androidOnlyLink(id), isFalse, reason: id);
       }
     });
+
+    test('HarmonyOS\'s own is 系统操作 alone', () {
+      expect(
+        {
+          for (final spot in SettingsIndex.spots)
+            if (spot.ohosOnly) spot.id,
+        },
+        {'page:systemActions'},
+      );
+      expect(SettingsIndex.ohosOnlyLink('system-actions'), isTrue);
+      expect(SettingsIndex.ohosOnlyLink('phone'), isFalse);
+    });
   });
 
   group('settings hub', () {
@@ -160,11 +166,15 @@ void main() {
       for (final id in ['page:phone', ...both]) {
         expect(find.byKey(SpotKey(id)), findsOneWidget, reason: id);
       }
+      expect(find.byKey(const SpotKey('page:systemActions')), findsNothing);
+      expect(find.text(_zh.systemActionsTitle), findsNothing);
     });
 
-    testWidgets('on HarmonyOS: no phone control, every group still there', (tester) async {
+    testWidgets('on HarmonyOS: 系统操作 instead of phone control, every group still there', (tester) async {
       await _pump(tester, const SettingsScreen(), android: false);
       expect(find.byKey(const SpotKey('page:phone')), findsNothing);
+      expect(find.byKey(const SpotKey('page:systemActions')), findsOneWidget);
+      expect(find.text(_zh.systemActionsTitle), findsOneWidget);
       for (final id in both) {
         expect(find.byKey(SpotKey(id)), findsOneWidget, reason: id);
       }
@@ -197,11 +207,13 @@ void main() {
     testWidgets('on Android: 手机操控 is a card', (tester) async {
       await _pump(tester, const AllFeaturesPage(), android: true);
       expect(find.text('手机操控'), findsOneWidget);
+      expect(find.text(_zh.catalogSystemActions), findsNothing);
     });
 
-    testWidgets('on HarmonyOS: no card, the rest of its group stays', (tester) async {
+    testWidgets('on HarmonyOS: 系统操作 in its place, the rest of its group stays', (tester) async {
       await _pump(tester, const AllFeaturesPage(), android: false);
       expect(find.text('手机操控'), findsNothing);
+      expect(find.text(_zh.catalogSystemActions), findsOneWidget);
       expect(find.text(_zh.catalogModels), findsOneWidget);
       expect(find.byKey(const ValueKey('all-settings')), findsOneWidget);
     });
@@ -227,6 +239,18 @@ void main() {
       expect(ids('电池优化', android: true), contains('page:background'));
       expect(ids('桌面图标', android: true), contains('app-icon'));
       expect(ids('悬浮窗', android: true), contains('pet-outside-app'));
+      expect(ids('系统操作', android: true), isNot(contains('page:systemActions')));
+      expect(ids('日历', android: true), isNot(contains('page:systemActions')));
+    });
+
+    test('on HarmonyOS: 系统操作 by its name and what it does, in both languages', () {
+      for (final q in ['系统操作', 'system actions', '拨号', 'dialer', '发通知', '写剪贴板', 'clipboard']) {
+        expect(ids(q, android: false), contains('page:systemActions'), reason: q);
+      }
+      // Its words don't promise what it can't do.
+      for (final q in ['无障碍', '点按', 'tap', 'accessibility']) {
+        expect(ids(q, android: false), isNot(contains('page:systemActions')), reason: q);
+      }
     });
 
     test('on HarmonyOS: nothing of Android\'s by any of its names, the rest as before', () {
@@ -280,12 +304,14 @@ void main() {
       expect(resolve('phone', android: true), isA<PhoneControlScreen>());
       expect(resolve('background', android: true), isNotNull);
       expect(resolve('system-permissions', android: true), isNotNull);
+      expect(resolve('system-actions', android: true), isNull, reason: 'HarmonyOS\'s own');
     });
 
     test('on HarmonyOS they are unknown; other pages still open', () {
       for (final id in ['phone', 'phone-unlocks', 'phone-confirm', 'phone-files']) {
         expect(resolve(id, android: false), isNull, reason: id);
       }
+      expect(resolve('system-actions', android: false), isA<SystemActionsPage>());
       expect(resolve('engine', android: false), isA<EngineScreen>());
       expect(resolve('background', android: false), isA<BackgroundGuidePage>());
       expect(resolve('system-permissions', android: false), isA<SystemAccessPage>());
@@ -420,10 +446,14 @@ void main() {
       expect(find.text(_zh.engineStartReopensApp), findsNothing);
     });
 
-    testWidgets('on HarmonyOS: none of them, and it says what starting again does', (tester) async {
+    testWidgets('on HarmonyOS: reset and uninstall, no safe mode, and it says what starting again does', (
+      tester,
+    ) async {
       await _pump(tester, const EngineScreen(), android: false, overrides: bridge());
-      expect(find.text(_zh.phoneEngineReset), findsNothing);
+      expect(find.text(_zh.phoneEngineReset), findsOneWidget);
+      expect(find.text(_zh.localEnvUninstall), findsOneWidget);
       expect(find.text(_zh.phoneSafeAutoSettingsHint), findsNothing);
+      expect(find.text(_zh.phoneSafeStartSettings), findsNothing);
       expect(find.text(_zh.engineStartReopensApp), findsOneWidget);
     });
 

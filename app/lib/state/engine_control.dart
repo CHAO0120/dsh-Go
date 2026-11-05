@@ -40,6 +40,18 @@ abstract final class EngineControl {
   static bool shouldAutoStart(RuntimeStatus status) =>
       !(status.safeState == SafeModeState.off && !status.autoSafe && status.strikes >= 2);
 
+  /// What the launch-time start goes by. A run that merely didn't end cleanly
+  /// (HarmonyOS, [RuntimeFailure.causeUnknown]: the system reclaiming the app
+  /// reads the same) doesn't stop the next one until [shouldAutoStart] says so.
+  static bool startsAtLaunch(RuntimeStatus status) {
+    final unclean =
+        status.phase == RuntimePhase.error &&
+        status.error == null &&
+        status.failure?.kind == FailureKind.killed &&
+        status.failure!.causeUnknown;
+    return (status.phase == RuntimePhase.installed || unclean) && shouldAutoStart(status);
+  }
+
   /// Restarts in safe mode, first renaming the given home-level files out of the way.
   static Future<void> enterSafeMode(ProviderContainer container, {List<String> moveAside = const []}) async {
     if (moveAside.isNotEmpty) {

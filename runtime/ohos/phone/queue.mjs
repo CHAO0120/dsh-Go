@@ -78,6 +78,8 @@ export class PhoneQueue {
         !Number.isSafeInteger(state.nowMs) || state.nowMs < 0 ||
         (this.#scope === key(state.engineId, state.bridgeGeneration) && state.nowMs < this.#lastNow)) {
       for (const row of [...this.#pending.values()]) this.#stop(row, 'failed', 'native_unavailable', '本机手机回调或持续计时不可用。');
+      // Off screen the app has no owner attached, and that is the reason worth giving.
+      if (state?.foreground === false) throw fail('not_foreground', 'DSH不在前台，不能执行手机操作。');
       throw fail('native_unavailable', '本机手机回调或持续计时不可用。', 503);
     }
     const scope = key(state.engineId, state.bridgeGeneration);
@@ -134,6 +136,13 @@ export class PhoneQueue {
     this.#calls.set(callKey, request.requestId); this.#pending.set(request.requestId, row);
     this.#arm(); this.#notify();
     return pending.promise;
+  }
+
+  /** Whether a call could start now: when it can't, asking first only wastes the answer. */
+  canRun() {
+    if (this.#closed) return false;
+    try { const state = this.native.snapshot(); return state?.available === true && state.foreground === true; }
+    catch { return false; }
   }
 
   next(auth) {

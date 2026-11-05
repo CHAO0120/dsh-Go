@@ -63,6 +63,7 @@ enum SettingsPageId {
   phoneAppRules,
   phoneDnd,
   phoneUnlocks,
+  systemActions,
   webSearch,
   media,
   plugins,
@@ -114,6 +115,7 @@ class SettingsPageMeta {
     this.condition,
     this.row = true,
     this.androidOnly = false,
+    this.ohosOnly = false,
   });
 
   final SettingsPageId id;
@@ -144,6 +146,9 @@ class SettingsPageMeta {
   /// or under it ([SettingsIndex.androidOnly]).
   final bool androidOnly;
 
+  /// HarmonyOS's own, where Android has a page of its own for the same idea.
+  final bool ohosOnly;
+
   /// The row on [parent] that opens this page.
   late final SettingSpot entry = SettingSpot(
     'page:${id.name}',
@@ -156,6 +161,7 @@ class SettingsPageMeta {
     opens: id,
     condition: condition,
     androidOnly: androidOnly,
+    ohosOnly: ohosOnly,
   );
 }
 
@@ -175,6 +181,7 @@ class SettingSpot {
     this.field,
     this.altTitle,
     this.androidOnly = false,
+    this.ohosOnly = false,
   });
 
   /// Stable, unique: `phone-confirm`, `page:phone`.
@@ -210,6 +217,9 @@ class SettingSpot {
 
   /// Android's own, on a page that isn't ([SettingsIndex.androidOnly]).
   final bool androidOnly;
+
+  /// HarmonyOS's own ([SettingsPageMeta.ohosOnly]).
+  final bool ohosOnly;
 
   bool get isEntry => opens != null;
 }
@@ -261,6 +271,9 @@ abstract final class SettingsIndex {
     final spot = pageForLink(id)?.entry ?? spotForLink(id);
     return spot != null && androidOnly(spot);
   }
+
+  /// Whether the `dshgo://open/<id>` link [id] leads to what only HarmonyOS has.
+  static bool ohosOnlyLink(String id) => pageForLink(id)?.ohosOnly ?? false;
 
   /// Pages from the hub down to [id], both included.
   static List<SettingsPageId> chain(SettingsPageId id) {
@@ -370,6 +383,15 @@ final _pages = <SettingsPageMeta>[
     freq: Freq.medium,
     links: const ['phone'],
     androidOnly: true,
+  ),
+  SettingsPageMeta(
+    SettingsPageId.systemActions,
+    title: (l) => l.systemActionsTitle,
+    group: _abilities,
+    keywords: (l) => l.searchKwSystemActions,
+    freq: Freq.medium,
+    links: const ['system-actions'],
+    ohosOnly: true,
   ),
   SettingsPageMeta(
     SettingsPageId.phoneAppRules,
@@ -990,14 +1012,13 @@ abstract final class Spots {
     page: SettingsPageId.engine,
     title: (l) => l.phoneEngineReset,
     keywords: (l) => l.searchKwEngineReset,
-    androidOnly: true,
   );
   static final engineUninstall = SettingSpot(
     'engine-uninstall',
     page: SettingsPageId.engine,
     title: (l) => l.localEnvUninstall,
     keywords: (l) => l.searchKwEngineUninstall,
-    androidOnly: true,
+    ohosKeywords: (l) => l.harmonyKwEngineUninstall,
   );
 
   // 远程主机.

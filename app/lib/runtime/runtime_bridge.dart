@@ -86,6 +86,7 @@ class RuntimeFailure {
     this.recent = const [],
     this.diagnostics,
     this.upSeconds,
+    this.causeUnknown = false,
   });
 
   static RuntimeFailure? fromMap(Object? raw) {
@@ -109,6 +110,7 @@ class RuntimeFailure {
       recent: strings(raw['recent']),
       diagnostics: raw['diagnostics'] as String?,
       upSeconds: (raw['upSeconds'] as num?)?.toInt(),
+      causeUnknown: raw['causeUnknown'] == true,
     );
   }
 
@@ -134,6 +136,11 @@ class RuntimeFailure {
   /// Guest path of DSH's startup diagnostics file.
   final String? diagnostics;
   final int? upSeconds;
+
+  /// The native side only knows the run didn't end cleanly (HarmonyOS, where
+  /// the engine shares the app's process: the system or the person ending the
+  /// app looks the same as a crash), so nothing may name a cause.
+  final bool causeUnknown;
 
   /// Crash-output suspects first, then recent changes.
   List<String> get culprits => {...suspects, ...recent}.toList();
@@ -171,6 +178,7 @@ class RuntimeStatus {
     this.launchSpawned = false,
     this.launchFailureReason,
     this.tidyingFiles = false,
+    this.resetPending = false,
   });
 
   const RuntimeStatus.unknown() : this(phase: RuntimePhase.notInstalled);
@@ -236,6 +244,10 @@ class RuntimeStatus {
   /// files for more than a moment (once per install, before Direct launch).
   final bool tidyingFiles;
 
+  /// A reset was committed and hasn't finished (HarmonyOS): it finishes as the
+  /// app opens, and nothing starts until it has.
+  final bool resetPending;
+
   Map<String, Object?> get launchDiagnostics => {
     'directEngineEnabled': directEngineEnabled,
     'directEngineAvailable': directEngineAvailable,
@@ -298,6 +310,7 @@ class RuntimeStatus {
     launchSpawned: map['launchSpawned'] == true,
     launchFailureReason: map['launchFailureReason'] as String?,
     tidyingFiles: map['tidyingFiles'] == true,
+    resetPending: map['resetPending'] == true,
   );
 }
 

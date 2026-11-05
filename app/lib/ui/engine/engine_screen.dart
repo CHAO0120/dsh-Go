@@ -27,6 +27,7 @@ import '../web/local_web_screen.dart';
 import 'engine_status.dart';
 import 'engine_capabilities.dart';
 import 'local_uninstall.dart';
+import 'reset_outcome.dart';
 import 'log_view.dart';
 
 /// `rN-dsh…-HASH` → `rN · HASH8`; anything else is shown as is.
@@ -128,6 +129,7 @@ class EngineScreen extends ConsumerWidget {
               ),
             const EngineFailureCard(padding: EdgeInsets.fromLTRB(16, 0, 16, 16)),
             const SafeModeCard(padding: EdgeInsets.fromLTRB(16, 0, 16, 16)),
+            if (status.resetPending) ...[const ResetPendingNote(), const SizedBox(height: 10)],
             SettingsSection(
               title: l10n.hubEngineStartup,
               children: [
@@ -179,7 +181,7 @@ class EngineScreen extends ConsumerWidget {
                 ...engineCapabilityRows(l10n, ref.watch(runtimeCapabilitiesProvider).value),
               ],
             ),
-            if (!missing && guest)
+            if (!missing)
               SettingsSection(
                 children: [
                   _ResetRow(enabled: !status.phase.isBusy),
@@ -361,8 +363,13 @@ class _ResetRow extends ConsumerWidget {
 
   Future<void> _reset(BuildContext context, WidgetRef ref) async {
     final l10n = context.l10n;
-    final keep = await showDialog<ResetKeep>(context: context, builder: (_) => const _ResetDialog());
+    final harmony = ref.read(operatingSystemProvider) == 'ohos';
+    final keep = await showDialog<ResetKeep>(
+      context: context,
+      builder: (_) => _ResetDialog(harmony: harmony),
+    );
     if (keep == null || !context.mounted) return;
+    if (harmony) return resetOnHarmony(context, ref, keep);
     final navigator = Navigator.of(context);
     final messenger = ScaffoldMessenger.maybeOf(context);
     try {
@@ -402,7 +409,10 @@ String resetDeletes(ResetKeep keep) {
 
 /// Pops the chosen [ResetKeep], or null on 取消.
 class _ResetDialog extends StatefulWidget {
-  const _ResetDialog();
+  const _ResetDialog({required this.harmony});
+
+  /// Says what a reset leaves alone, and that the app reopens to do it.
+  final bool harmony;
 
   @override
   State<_ResetDialog> createState() => _ResetDialogState();
@@ -427,6 +437,7 @@ class _ResetDialogState extends State<_ResetDialog> {
             (false, true) => l10n.phoneResetBodyWithUi,
             (false, false) => l10n.phoneResetBodyEverything,
           }),
+          if (widget.harmony) ...[const SizedBox(height: 8), Text(l10n.harmonyResetKept)],
           const SizedBox(height: 12),
           _KeepOption(
             label: l10n.phoneEngineKeepUiSkills,

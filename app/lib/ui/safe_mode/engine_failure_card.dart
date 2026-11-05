@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../l10n/l10n.dart';
 import '../../runtime/runtime_bridge.dart';
 import '../../runtime/runtime_state.dart';
+import '../../state/engine_control.dart';
 import '../../state/safe_mode_state.dart';
 import '../common/status_chip.dart';
 import '../engine/diagnostics_export_card.dart';
@@ -55,14 +56,14 @@ class FailureCardModel {
         return FailureCardModel(
           title: appL10n.phoneFailureLaunch,
           body: appL10n.phoneFailureLaunchHint,
-          detail: f.summary,
+          detail: f.causeUnknown ? null : f.summary,
           primary: FailureAction.retry,
           secondary: const [FailureAction.remote, FailureAction.showLog],
         );
       case FailureKind.killed:
         return FailureCardModel(
-          title: appL10n.phoneFailureKilled,
-          body: appL10n.phoneFailureKilledHint,
+          title: f.causeUnknown ? appL10n.harmonyFailureUnclean : appL10n.phoneFailureKilled,
+          body: f.causeUnknown ? appL10n.harmonyFailureUncleanHint : appL10n.phoneFailureKilledHint,
           primary: FailureAction.retry,
           secondary: const [FailureAction.background, FailureAction.showLog],
           tone: StatusTone.warn,
@@ -188,6 +189,14 @@ class EngineFailureCard extends ConsumerWidget {
             ),
             const SizedBox(height: 8),
             Text(model.body, style: theme.textTheme.bodyMedium?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
+            // Where there is no safe mode to fall back on, this is what two in a row do.
+            if (failure.causeUnknown && !EngineControl.shouldAutoStart(status)) ...[
+              const SizedBox(height: 8),
+              Text(
+                l10n.harmonyFailureHeld,
+                style: theme.textTheme.bodyMedium?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+              ),
+            ],
             for (final h in hazards) ...[
               const SizedBox(height: 10),
               Text(h.path, style: AppType.monoLabel(color: colors.textTertiary)),
@@ -204,8 +213,7 @@ class EngineFailureCard extends ConsumerWidget {
                   : () => run(model.primary),
               secondary: [
                 for (final action in model.secondary)
-                  if (action != FailureAction.showLog)
-                    (label: action.label, onPressed: () => run(action)),
+                  if (action != FailureAction.showLog) (label: action.label, onPressed: () => run(action)),
               ],
               onLog: () => run(FailureAction.showLog),
               onExport: () => unawaited(showDiagnosticsExportSheet(context)),

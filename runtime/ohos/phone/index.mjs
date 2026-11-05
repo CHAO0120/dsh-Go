@@ -4,7 +4,7 @@ import { registerPhoneRoutes } from './routes.mjs';
 import { registerPhoneTools } from './tools.mjs';
 
 export const name = 'dsh-go-ohos-phone';
-export const inject = ['tools', 'ohosLifecycle'];
+export const inject = ['tools', 'ohosLifecycle', 'approval'];
 const simulationSymbol = Symbol.for('dsh.go.ohos.sim');
 const phoneSymbol = Symbol.for('dsh.go.ohos.phone');
 
