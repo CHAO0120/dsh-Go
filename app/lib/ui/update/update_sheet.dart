@@ -185,13 +185,14 @@ class UpdateSheet extends ConsumerWidget {
                       ),
                     ],
                   ),
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(4, 8, 4, 0),
-                    child: Text(
-                      l10n.updateInstallKeepsData,
-                      style: theme.textTheme.bodySmall?.copyWith(color: colors.textTertiary),
+                  if (!update.noticeOnly)
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(4, 8, 4, 0),
+                      child: Text(
+                        l10n.updateInstallKeepsData,
+                        style: theme.textTheme.bodySmall?.copyWith(color: colors.textTertiary),
+                      ),
                     ),
-                  ),
                 ],
               ),
             ),
@@ -210,6 +211,15 @@ class UpdateSheet extends ConsumerWidget {
     final theme = Theme.of(context);
     final colors = DshColors.of(context);
     final scheme = theme.colorScheme;
+    if (update.noticeOnly) {
+      return _Notice(
+        icon: AppIcons.info,
+        background: colors.infoContainer,
+        foreground: colors.onInfoContainer,
+        title: l10n.harmonyUpdateNoticeTitle,
+        text: update.noticePage == null ? l10n.harmonyUpdateNoticeNoPage : l10n.harmonyUpdateNoticeText,
+      );
+    }
     if (update.asset == null) {
       final abi = update.flavor?.name;
       return _Notice(
@@ -331,6 +341,32 @@ class UpdateSheet extends ConsumerWidget {
       child: Text(label),
     );
 
+    // HarmonyOS only offers the release page, and only one the feed really names.
+    if (update.noticeOnly) {
+      final notice = update.noticePage;
+      return Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          if (notice == null)
+            FilledButton(
+              style: FilledButton.styleFrom(minimumSize: _buttonSize),
+              onPressed: close,
+              child: Text(l10n.commonClose),
+            )
+          else
+            pair(l10n.commonLater, close, l10n.updateOpenReleasePage, () => unawaited(_openPage(context, notice))),
+          if (!update.isSkipped)
+            TextButton(
+              onPressed: () {
+                unawaited(controller.skipLatest());
+                close();
+              },
+              child: Text(l10n.updateSkipVersion),
+            ),
+        ],
+      );
+    }
     if (update.asset == null) {
       return pair(l10n.commonLater, close, l10n.updateOpenReleasePage, () => unawaited(_openPage(context, page)));
     }

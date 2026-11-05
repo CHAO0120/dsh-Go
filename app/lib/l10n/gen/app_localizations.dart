@@ -12938,6 +12938,24 @@ abstract class L10n {
   /// **'卸载,删除运行环境,清理本机数据'**
   String get harmonyKwEngineUninstall;
 
+  /// No description provided for @harmonyUpdateNoticeTitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'到发布页下载新版'**
+  String get harmonyUpdateNoticeTitle;
+
+  /// No description provided for @harmonyUpdateNoticeText.
+  ///
+  /// In zh, this message translates to:
+  /// **'鸿蒙版不能在应用内更新。发布页可能还没有鸿蒙安装包，有的话下载后手动安装。'**
+  String get harmonyUpdateNoticeText;
+
+  /// No description provided for @harmonyUpdateNoticeNoPage.
+  ///
+  /// In zh, this message translates to:
+  /// **'这个版本没有给出下载页，过些时候再看看。'**
+  String get harmonyUpdateNoticeNoPage;
+
   /// No description provided for @hostDetailsConnectionType.
   ///
   /// In zh, this message translates to:

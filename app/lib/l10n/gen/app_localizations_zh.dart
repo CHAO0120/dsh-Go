@@ -7050,6 +7050,15 @@ class L10nZh extends L10n {
   String get harmonyKwEngineUninstall => '卸载,删除运行环境,清理本机数据';
 
   @override
+  String get harmonyUpdateNoticeTitle => '到发布页下载新版';
+
+  @override
+  String get harmonyUpdateNoticeText => '鸿蒙版不能在应用内更新。发布页可能还没有鸿蒙安装包，有的话下载后手动安装。';
+
+  @override
+  String get harmonyUpdateNoticeNoPage => '这个版本没有给出下载页，过些时候再看看。';
+
+  @override
   String get hostDetailsConnectionType => '连接方式';
 
   @override

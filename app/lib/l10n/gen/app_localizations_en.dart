@@ -7456,6 +7456,16 @@ class L10nEn extends L10n {
   String get harmonyKwEngineUninstall => 'uninstall,remove runtime,clear local data';
 
   @override
+  String get harmonyUpdateNoticeTitle => 'Download it from the release page';
+
+  @override
+  String get harmonyUpdateNoticeText =>
+      'The HarmonyOS build can\'t update itself. The release page may not have a HarmonyOS package yet; if it does, download and install it by hand.';
+
+  @override
+  String get harmonyUpdateNoticeNoPage => 'This version has no download page yet. Check again later.';
+
+  @override
   String get hostDetailsConnectionType => 'Connection type';
 
   @override
