@@ -170,3 +170,19 @@ test('actual loader import completes without host.start, and the next process ha
  const child=spawn(process.execPath,[...childFlags,actor,c.root,'nativeDone',ids[0]],{env:process.env,stdio:['ignore','pipe','pipe']});let result='';child.stdout.on('data',b=>result+=b);assert.equal((await once(child,'exit'))[0],0);assert.equal(JSON.parse(result).starts,0);
  const inspect=spawn(process.execPath,[...childFlags,actor,c.root,'inspect'],{env:process.env,stdio:['ignore','pipe','pipe']});let state='';inspect.stdout.on('data',b=>state+=b);assert.equal((await once(inspect,'exit'))[0],0);assert.equal(JSON.parse(state).strikes,0);assert.equal(JSON.parse(state).failure,null);
 });
+
+
+test('manual mode survives reopen, rejects corrupt mode and safe failure preserves main strikes',async t=>{
+ const c=await fixture(t);await c.r.initialize(1,async()=>{},()=>false);
+ await c.r.arm(ids[0],2);await c.r.finish(ids[0],false,3,23);
+ assert.equal(await c.r.selectMode('safe'),'safe');
+ const next=new Recovery(new RecoveryFiles(c.root),c.root);await next.initialize(4,async()=>{},()=>false);
+ assert.equal(await next.selectMode(null),'safe');
+ await next.arm(ids[1],5,'engineRun',true);await next.finish(ids[1],false,6,23);
+ assert.equal(next.status().strikes,1);assert.equal(next.status().failure.safeMode,true);
+ assert.equal(await next.selectMode('normal'),'normal');
+ await c.store.write(c.r.directory+'/mode.json','{"schema":1,"mode":"../web"}');
+ const invalid=new Recovery(new RecoveryFiles(c.root),c.root);await assert.rejects(invalid.initialize(7,async()=>{},()=>false));
+ await invalid.requestReset([],ids[2],true);await invalid.initialize(8,async()=>{},()=>false);
+ assert.equal(invalid.status().nextMode,'normal','explicit reset also repairs a corrupt mode record');
+});

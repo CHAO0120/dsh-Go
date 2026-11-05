@@ -42,8 +42,8 @@ int NoEngineToStop() { return 0; }
 }  // namespace
 
 int main(int argc, char** argv) {
-  if (argc != 8) {
-    std::cerr << "Usage: host-profile RUNTIME_ROOT GUEST_ROOT DSH_HOME WORKSPACE CACHE_DIR NATIVE_LIBRARY_DIR ARGV_JSON\n";
+  if (argc != 8 && argc != 9) {
+    std::cerr << "Usage: host-profile RUNTIME_ROOT GUEST_ROOT DSH_HOME WORKSPACE CACHE_DIR NATIVE_LIBRARY_DIR ARGV_JSON [safe]\n";
     return 2;
   }
   output = argv[7];
@@ -53,6 +53,10 @@ int main(int argc, char** argv) {
     options.runtime_root = argv[1]; options.guest_root = argv[2]; options.dsh_home = argv[3];
     options.workspace_roots = {argv[4]}; options.cache_dir = argv[5];
     options.native_library_dir = argv[6];
+    if (argc == 9) {
+      if (std::string(argv[8]) != "safe") return 2;
+      options.safe_mode = true;
+    }
     host.Start(std::move(options), CaptureArguments, NoEngineToStop);
     host.Wait();
     const auto state = host.State();

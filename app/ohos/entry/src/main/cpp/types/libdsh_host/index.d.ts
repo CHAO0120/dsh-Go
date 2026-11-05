@@ -9,6 +9,8 @@ export interface HostOptions {
   // Ark resolves this from its own Context installation paths; never from Dart.
   nativeLibraryDir: string;
   env: Record<string, string>;
+  // Selects only the fixed rescue profile; no caller-supplied argv or paths.
+  safeMode?: boolean;
 }
 
 export interface HostState {

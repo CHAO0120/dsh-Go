@@ -50,6 +50,10 @@ napi_value Property(napi_env env, napi_value object, const char* key) {
 
 dsh::HostOptions Options(napi_env env, napi_value value) {
   dsh::HostOptions options;
+  napi_value safe = Property(env, value, "safeMode");
+  napi_valuetype safe_type;
+  Check(napi_typeof(env, safe, &safe_type));
+  if (safe_type != napi_undefined) Check(napi_get_value_bool(env, safe, &options.safe_mode));
   options.runtime_root = String(env, Property(env, value, "runtimeRoot"));
   options.guest_root = String(env, Property(env, value, "guestRoot"));
   options.dsh_home = String(env, Property(env, value, "dshHome"));

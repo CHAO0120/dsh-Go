@@ -46,7 +46,7 @@ export class OhosRecoveryStorage implements RecoveryStorage {
   }
 
   private record(path: string): void {
-    if (path !== this.root + '/dsh-recovery/boot.json' && path !== this.root + '/dsh-recovery/reset.json') this.invalid();
+    if (path !== this.root + '/dsh-recovery/boot.json' && path !== this.root + '/dsh-recovery/reset.json' && path !== this.root + '/dsh-recovery/mode.json') this.invalid();
   }
 
   async read(path: string): Promise<string | null> {

@@ -414,13 +414,14 @@ test('日志快照/live边界单调去重、2000行有界，敏感值不落日�
   assert.equal(logs.append('x'.repeat(10000), 'stdout').line.length < 8300, true);
 });
 
-test('start参数拒绝暗中改变宿主配置，明确拒绝sdcard和安全模式', () => {
+test('start参数拒绝暗中改变宿主配置，模式仅允许normal或safe且拒绝sdcard', () => {
   for (const key of ['NODE_OPTIONS', 'DSH_HOME', 'DSH_AGENTS_HOME', 'LD_PRELOAD', 'DSH_GO_OHOS_SIM', 'DSH_GO_OHOS_NATIVE_LIBRARY_DIR', 'NODE_PATH', 'HOME']) {
     assert.throws(() => core.validateEnvironment(new Map([[key, 'value']])), { code: 'ohos_invalid_env' });
   }
   assert.deepEqual(core.validateEnvironment(new Map([['DEEPSEEK_API_KEY', 'test-only']])), { DEEPSEEK_API_KEY: 'test-only' });
   assert.throws(() => core.validateStartOptions(true, null), { code: 'ohos_unsupported' });
-  assert.throws(() => core.validateStartOptions(false, 'safe'), { code: 'ohos_unsupported' });
+  core.validateStartOptions(false, 'safe');
+  assert.throws(() => core.validateStartOptions(false, 'arbitrary-profile'), { code: 'ohos_unsupported' });
   core.validateStartOptions(false, 'normal');
 });
 
@@ -1587,4 +1588,63 @@ test('a power cut at any point of an update keeps the old install or a whole new
   assert(seen.points > 20, `saw only ${seen.points} points`);
   assert(seen.unready > 0, 'an interrupted update must read as not the new install');
   assert.equal(seen.readyAt, points.length - 1, 'the finished update reads as installed');
+});
+
+
+test('public start selects the manual safe profile through actual Controller', async () => {
+  const c = await controllerCase('manual-safe-public');
+  const plugin = new RuntimePlugin();
+  plugin.onAttachedToEngine({ getApplicationContext: () => c.context,
+    getBinaryMessenger: () => ({ setMessageHandler() {} }) });
+  const invoke = (method, args = {}) => new Promise(resolve => plugin.onMethodCall(
+    new MethodCall(method, new Map(Object.entries(args))), {
+      success: value => resolve({kind: 'success', value}),
+      error: (code, message) => resolve({kind: 'error', code, message}),
+      notImplemented: () => resolve({kind: 'unknown'}),
+    }));
+  assert.equal((await invoke('install')).kind, 'success');
+  const started = await invoke('start', {mode: 'safe', env: new Map()});
+  assert.equal(started.kind, 'success', JSON.stringify(started));
+  assert.equal(native.starts.length, 1);
+  assert.equal(native.starts[0].safeMode, true);
+  assert.equal((await invoke('getStatus')).value.get('mode'), 'safe');
+  await invoke('stop');
+});
+
+
+test('consumed host saves manual next mode before restart and new Controller reads it', async () => {
+  const c = await controllerCase('manual-safe-reopen');
+  await c.controller.install(false);
+  await c.controller.start(null, false, 'normal', true);
+  c.controller.stop(); native.state.phase = 'exited'; c.controller.collect();
+  await c.controller.recovery.pending;
+  await assert.rejects(c.controller.start(null, false, 'safe', true), {code:'ohos_restart_required'});
+  assert.equal(native.starts.length, 1, 'never starts a second embedded Node');
+  assert.equal(c.controller.snapshot().get('mode'), 'normal', 'running/consumed mode is not relabelled');
+  assert.equal(c.controller.snapshot().get('safeState'), 'on');
+  assert.equal(JSON.parse(await fs.readFile(path.join(c.dir, 'dsh-recovery/mode.json'),'utf8')).mode, 'safe');
+  native.reset(); nativeHostModule.resetNativeFixture(); RuntimeController.shared = null;
+  const next = RuntimeController.get(c.context); controllers.push(next);
+  await next.initialize(); await next.start(null, false, null, true);
+  assert.equal(native.starts.length, 1); assert.equal(native.starts[0].safeMode, true);
+  await assert.rejects(next.start(null, false, 'normal', true), {code:'ohos_restart_required'});
+  assert.equal(native.starts.length, 1); assert.equal(next.snapshot().get('mode'), 'safe');
+  assert.equal(next.snapshot().get('safeState'), 'off');
+  next.stop();
+});
+
+test('failed durable mode commit cannot start Node or request a restart', async () => {
+  const c = await controllerCase('manual-safe-write-failed'); await c.controller.install(false);
+  const write = c.controller.recovery.storage.write.bind(c.controller.recovery.storage);
+  let failed = true;
+  c.controller.recovery.storage.write = async (file, text) => {
+    await write(file, text);
+    if (failed && file.endsWith('/mode.json')) { failed=false; throw Error('directory fsync outcome unknown'); }
+  };
+  await assert.rejects(c.controller.start(null, false, 'safe', true), /outcome unknown/);
+  assert.equal(native.starts.length, 0);
+  assert.equal(c.controller.snapshot().get('safeState'), 'off');
+  await c.controller.start(null, false, 'safe', true);
+  assert.equal(native.starts.length, 1); assert.equal(native.starts[0].safeMode, true);
+  c.controller.stop();
 });

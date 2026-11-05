@@ -19,10 +19,11 @@ export interface RecoveryFailure {
   safeMode: boolean;
   summary: string;
 }
-interface ActiveRun { id: string; at: number; phase: string; }
+interface ActiveRun { id: string; at: number; phase: string; safeMode?: boolean; }
+interface ModeRecord { schema: number; mode: string; }
 interface BootRecord { schema: number; strikes: number; active: ActiveRun | null; failure: RecoveryFailure | null; }
 interface ResetRecord { schema: number; id: string; keep: string[]; reinstall: boolean; stage: string; kept: string[]; restored: string[]; restorePending: string | null; }
-export interface RecoveryStatus { strikes: number; failure: RecoveryFailure | null; resetPending: boolean; waitingInstall: boolean; }
+export interface RecoveryStatus { nextMode: string; strikes: number; failure: RecoveryFailure | null; resetPending: boolean; waitingInstall: boolean; }
 
 const UI_PATHS: string[] = ['root/.dsh/dsh-go', 'root/.dsh/skills', 'root/.agents/skills'];
 const PLUGIN_PATHS: string[] = ['root/.dsh/profiles', 'root/.dsh/cordis.patch.yml', 'root/.dsh/.env'];
@@ -40,9 +41,10 @@ function bootRecord(text: string | null): BootRecord {
   if (text === null) return fresh();
   const record = JSON.parse(text) as BootRecord;
   if (!record || record.schema !== 1 || !Number.isSafeInteger(record.strikes) || record.strikes < 0 || record.strikes > 2147483647 ||
-    (record.active !== null && (!record.active || !validId(record.active.id) || !Number.isSafeInteger(record.active.at) || record.active.at < 0 || !['nativeLoad', 'engineRun'].includes(record.active.phase))) ||
+    (record.active !== null && (!record.active || !validId(record.active.id) || !Number.isSafeInteger(record.active.at) || record.active.at < 0 || !['nativeLoad', 'engineRun'].includes(record.active.phase) ||
+      (record.active.safeMode !== undefined && typeof record.active.safeMode !== 'boolean'))) ||
     (record.failure !== null && (!record.failure || !['killed', 'launchFailed'].includes(record.failure.kind) ||
-      !Number.isSafeInteger(record.failure.at) || record.failure.at < 0 || !Number.isSafeInteger(record.failure.exitCode) || record.failure.safeMode !== false || typeof record.failure.summary !== 'string' || record.failure.summary.length > 500))) {
+      !Number.isSafeInteger(record.failure.at) || record.failure.at < 0 || !Number.isSafeInteger(record.failure.exitCode) || typeof record.failure.safeMode !== 'boolean' || typeof record.failure.summary !== 'string' || record.failure.summary.length > 500))) {
     fail('启动恢复记录损坏，请明确重置运行环境；未自动清空数据。');
   }
   return record;
@@ -70,6 +72,7 @@ export class RuntimeRecovery {
   readonly payloadRoot: string;
   private storage: RecoveryStorage;
   private boot: BootRecord = fresh();
+  private nextMode: string = 'normal';
   private pending: Promise<void> = Promise.resolve();
   private initialized: Promise<void> | null = null;
   private resetPending: boolean = false;
@@ -91,9 +94,9 @@ export class RuntimeRecovery {
 
   status(): RecoveryStatus {
     const failure = this.boot.failure;
-    return { strikes: this.boot.strikes, resetPending: this.resetPending, waitingInstall: this.waitingInstall,
+    return { nextMode: this.nextMode, strikes: this.boot.strikes, resetPending: this.resetPending, waitingInstall: this.waitingInstall,
       failure: failure === null ? null : { kind: failure.kind, at: failure.at, exitCode: failure.exitCode,
-        safeMode: false, summary: failure.summary } };
+        safeMode: failure.safeMode, summary: failure.summary } };
   }
 
   initialize(now: number, install: () => Promise<void>, nativeLoaded: () => boolean): Promise<void> {
@@ -107,10 +110,11 @@ export class RuntimeRecovery {
           await this.recoverReset(resetRecord(text), install, nativeLoaded);
           if (this.waitingInstall) { this.boot = fresh(); return; }
         }
+        this.nextMode = this.readMode(await this.storage.read(this.directory + '/mode.json'));
         const boot = bootRecord(await this.storage.read(this.directory + '/boot.json'));
         if (boot.active !== null) {
-          boot.strikes = Math.min(2147483647, boot.strikes + 1);
-          boot.failure = this.failure(boot.active.phase === 'nativeLoad' ? 'launchFailed' : 'killed', now, 0);
+          if (boot.active.safeMode !== true) boot.strikes = Math.min(2147483647, boot.strikes + 1);
+          boot.failure = this.failure(boot.active.phase === 'nativeLoad' ? 'launchFailed' : 'killed', now, 0, boot.active.safeMode === true);
           boot.active = null;
           await this.storage.write(this.directory + '/boot.json', JSON.stringify(boot));
         }
@@ -120,13 +124,36 @@ export class RuntimeRecovery {
     return this.initialized;
   }
 
-  arm(id: string, at: number, phase: string = 'engineRun'): Promise<void> {
+  private readMode(text: string | null): string {
+    if (text === null) return 'normal';
+    const record = JSON.parse(text) as ModeRecord;
+    if (!record || record.schema !== 1 || !['normal', 'safe'].includes(record.mode)) fail('启动模式记录损坏，未猜测启动配置。');
+    return record.mode;
+  }
+
+  async selectMode(mode: string | null): Promise<string> {
+    await this.serial(async (): Promise<void> => {
+      if (this.initialized === null || this.resetPending) fail('启动恢复尚未完成。');
+      if (mode !== null && mode !== 'normal' && mode !== 'safe') fail('启动模式无效。');
+      const selected = mode ?? this.readMode(await this.storage.read(this.directory + '/mode.json'));
+      if (mode !== null) {
+        const record: ModeRecord = { schema: 1, mode: selected };
+        // Do not acknowledge/reopen after an uncertain durable write. Repeating
+        // an explicit request writes again, even if rename had already happened.
+        await this.storage.write(this.directory + '/mode.json', JSON.stringify(record));
+      }
+      this.nextMode = selected;
+    });
+    return this.nextMode;
+  }
+
+  arm(id: string, at: number, phase: string = 'engineRun', safeMode: boolean = false): Promise<void> {
     return this.serial(async (): Promise<void> => {
       if (!validId(id) || !Number.isSafeInteger(at) || at < 0 || !['nativeLoad', 'engineRun'].includes(phase)) fail('启动标识无效。');
       if (this.initialized === null || this.resetPending) fail('启动恢复尚未完成。');
       const boot = bootRecord(await this.storage.read(this.directory + '/boot.json'));
       if (boot.active !== null) fail('已有启动标记，不能重用执行代际。');
-      boot.active = { id, at, phase };
+      boot.active = { id, at, phase, safeMode };
       await this.storage.write(this.directory + '/boot.json', JSON.stringify(boot));
       this.boot = boot;
     });
@@ -138,10 +165,11 @@ export class RuntimeRecovery {
       if (boot.active === null || boot.active.id !== id) return;
       if (!Number.isSafeInteger(at) || at < 0 || !Number.isSafeInteger(exitCode)) fail('退出记录无效。');
       const nativeLoad = boot.active.phase === 'nativeLoad';
+      const safeMode = boot.active.safeMode === true;
       boot.active = null;
       if (!clean || !nativeLoad) {
-        boot.strikes = clean ? 0 : Math.min(2147483647, boot.strikes + 1);
-        boot.failure = clean ? null : this.failure(launchFailed || nativeLoad ? 'launchFailed' : 'killed', at, exitCode);
+        if (!safeMode) boot.strikes = clean ? 0 : Math.min(2147483647, boot.strikes + 1);
+        boot.failure = clean ? null : this.failure(launchFailed || nativeLoad ? 'launchFailed' : 'killed', at, exitCode, safeMode);
       }
       await this.storage.write(this.directory + '/boot.json', JSON.stringify(boot));
       this.boot = boot;
@@ -219,8 +247,8 @@ export class RuntimeRecovery {
     }).catch((error: Error): void => { if (this.resetPending) this.initialized = null; throw error; });
   }
 
-  private failure(kind: string, at: number, exitCode: number): RecoveryFailure {
-    return { kind, at, exitCode, safeMode: false,
+  private failure(kind: string, at: number, exitCode: number, safeMode: boolean = false): RecoveryFailure {
+    return { kind, at, exitCode, safeMode: safeMode,
       summary: kind === 'launchFailed' ? '本机引擎启动未完成。' : '上次引擎没有确认干净退出，具体原因未知。' };
   }
 
@@ -309,6 +337,9 @@ export class RuntimeRecovery {
     }
     assertUnloaded();
     await this.storage.write(this.directory + '/boot.json', JSON.stringify(fresh()));
+    const normal: ModeRecord = { schema: 1, mode: 'normal' };
+    await this.storage.write(this.directory + '/mode.json', JSON.stringify(normal));
+    this.nextMode = 'normal';
     await this.storage.removeTree(keepRoot);
     await this.storage.removeFile(this.directory + '/reset.json');
     this.resetPending = false;

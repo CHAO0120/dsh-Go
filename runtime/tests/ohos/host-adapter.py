@@ -26,7 +26,24 @@ extern "C" int OH_LOG_Print(LogType, LogLevel, unsigned int, const char*, const 
   return 0;
 }
 extern "C" int dsh_node_start(int argc, char** argv) {
-  assert(argc == 13 && argv[13] == nullptr);
+  const bool safe = argc == 16;
+  assert((argc == 13 || argc == 16) && argv[argc] == nullptr);
+  assert(std::strcmp(argv[2], "--import") == 0);
+  if (safe) {
+    assert(std::strcmp(argv[5], "--profile") == 0);
+    assert(std::strcmp(argv[6], "dsh-app-safe") == 0);
+    assert(std::strcmp(argv[7], "--from-default-profile") == 0);
+    assert(std::strcmp(argv[8], "web") == 0);
+  } else assert(std::strcmp(argv[5], "web") == 0);
+  const int patch = safe ? 9 : 6;
+  assert(std::strcmp(argv[patch], "--patch") == 0);
+  assert(std::strcmp(argv[patch + 2], "--host") == 0);
+  assert(std::strcmp(argv[patch + 3], "127.0.0.1") == 0);
+  assert(std::strcmp(argv[patch + 4], "--port") == 0);
+  assert(std::strcmp(argv[patch + 5], "0") == 0);
+  assert(std::strcmp(argv[patch + 6], "--no-open") == 0);
+  const char* mode = safe ? "fixture-mode:safe\n" : "fixture-mode:normal\n";
+  assert(write(1, mode, std::strlen(mode)) == static_cast<ssize_t>(std::strlen(mode)));
   assert(std::strcmp(argv[1], "--jitless") == 0);
   active = true;
   const char* ready = "dsh web: http://127.0.0.1:3080/?token=fixture_LAUNCH\nfixture_SECRET\n";
@@ -45,10 +62,13 @@ const fs = require('node:fs');
 const path = require('node:path');
 const host = require(process.argv[2]);
 const base = process.argv[3];
+const mode = process.argv[4];
+assert.ok(mode === 'normal' || mode === 'safe');
 const guestRoot=path.join(base,'中文 root/runtime/rootfs');
 const options = {runtimeRoot:path.join(base,'runtime'),guestRoot,dshHome:path.join(guestRoot,'root/.dsh'),
   cacheDir:path.join(base,'cache'),nativeLibraryDir:path.join(base,'libs'),workspaceRoots:[path.join(guestRoot,'root/workspace')],
   env:{DEEPSEEK_API_KEY:'fixture_SECRET'}};
+if (mode === 'safe') options.safeMode = true;
 for (const dir of [options.runtimeRoot,options.dshHome,options.cacheDir,options.nativeLibraryDir,path.join(guestRoot,'root/.agents'),...options.workspaceRoots])
   fs.mkdirSync(dir,{recursive:true});
 for (const name of ['libdsh_flock.so','libdsh_require_builtin.so'])
@@ -63,6 +83,8 @@ for (const relative of ['runtime/ohos/preload.mjs','node_modules/@deepseek-ai/ds
 for (const key of ['start','stop','getState','drainEvents','openUserFile']) assert.equal(typeof host[key],'function');
 assert.equal(host.getState().phase,'idle');assert.equal(host.getState().consumed,false);
 assert.throws(()=>host.start(),{code:'ERR_OHOS_HOST_ARGUMENT'});
+for (const safeMode of [null, 'true', 1, {}])
+  assert.throws(()=>host.start({...options,safeMode}),{code:'ERR_OHOS_HOST_ARGUMENT'});
 assert.throws(()=>host.start({...options,guestRoot:undefined}),{code:'ERR_OHOS_HOST_ARGUMENT'});
 assert.throws(()=>host.start({...options,guestRoot:'/missing-guest-root'}),{code:'ERR_OHOS_HOST_LAYOUT'});
 assert.throws(()=>host.start({...options,nativeLibraryDir:undefined}),{code:'ERR_OHOS_HOST_ARGUMENT'});
@@ -102,6 +124,10 @@ async function until(phase) {
   assert.equal(process.env.DSH_HOME,options.dshHome);
   assert.equal(process.env.HOME,path.join(guestRoot,'root'));
   assert.equal(process.env.DSH_AGENTS_HOME,path.join(guestRoot,'root/.agents'));
+  const patch=JSON.parse(fs.readFileSync(path.join(options.dshHome,'ohos-host.patch.json'),'utf8'));
+  assert.equal(patch.some(row=>row.id==='hmr' && row.disabled===true),mode==='safe');
+  for (const id of ['plugin-manager','tool-plugin-manager'])
+    assert.equal(patch.some(row=>row.id===id && row.disabled===true),false);
   const events=host.drainEvents();host.stop();const exit=await until('exited');
   events.push(...host.drainEvents());
   assert.equal(exit.exitCode,23);assert.equal(exit.token,null);assert.equal(exit.baseUrl,null);
@@ -111,11 +137,12 @@ async function until(phase) {
   assert.equal(process.env.DSH_GO_OHOS_NATIVE_LIBRARY_DIR,previousNative);
   assert.equal(events.at(-1).kind,'exit');assert.equal(events.at(-1).exitCode,23);
   assert.ok(events.some(e=>e.kind==='ready'&&e.token==='fixture_LAUNCH'));
+  assert.ok(events.some(e=>e.kind==='log'&&e.line==='fixture-mode:'+mode));
   assert.ok(events.some(e=>e.kind==='log'&&e.line==='中文适配层尾部'));
   assert.ok(events.filter(e=>e.kind==='log').every(e=>!e.line.includes('fixture_SECRET')&&!e.line.includes('fixture_LAUNCH')));
   assert.throws(()=>host.start(options),{code:'ERR_OHOS_HOST_ALREADY_STARTED'});
   host.stop();
-  console.log(JSON.stringify({status:'PASS',eventCount:events.length,exitCode:exit.exitCode,
+  console.log(JSON.stringify({status:'PASS',mode,eventCount:events.length,exitCode:exit.exitCode,
     scope:'desktop Node N-API adapter, explicit fake runner and hilog; not Ark/SDK/device'}));
 })().catch(error=>{console.error(error);process.exitCode=1;host.stop();});
 '''
@@ -139,15 +166,21 @@ def main():
     build = subprocess.run(command,text=True,capture_output=True)
     rows = [{'kind':'build','command':command,'code':build.returncode,'stdout':build.stdout,'stderr':build.stderr}]
     build.check_returncode()
-    command = [str(node_root/'bin/node'),'--jitless',str(out/'probe.cjs'),str(out/'host.node'),str(out/'fixture')]
-    result = subprocess.run(command,text=True,capture_output=True,timeout=15)
-    rows.append({'kind':'run','command':command,'code':result.returncode,'stdout':result.stdout,'stderr':result.stderr})
+    results = []
+    for mode in ['normal', 'safe']:
+        command = [str(node_root/'bin/node'),'--jitless',str(out/'probe.cjs'),str(out/'host.node'),str(out/('fixture-'+mode)),mode]
+        result = subprocess.run(command,text=True,capture_output=True,timeout=15)
+        results.append(result)
+        rows.append({'kind':'run','mode':mode,'command':command,'code':result.returncode,'stdout':result.stdout,'stderr':result.stderr})
+        # Preserve a failed first mode before stopping; each mode is a fresh process.
+        (out/'progress.json').write_text(json.dumps(rows,indent=2)+'\n')
+        result.check_returncode()
     inputs = [core/name for name in ['host_core.cpp','host_core.h','napi_host.cpp','file_access.h']]
     (out/'report.json').write_text(json.dumps({'scope':'desktop Node N-API plus public OH headers, not OH SDK',
         'inputs':{str(p):hashlib.sha256(p.read_bytes()).hexdigest() for p in inputs},'rows':rows},indent=2)+'\n')
-    print(result.stdout,end='');print(result.stderr,end='')
-    result.check_returncode()
-    assert '"status":"PASS"' in result.stdout
+    for result in results:
+        print(result.stdout,end='');print(result.stderr,end='')
+        assert '"status":"PASS"' in result.stdout
 
 
 if __name__ == '__main__':

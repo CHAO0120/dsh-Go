@@ -269,7 +269,9 @@ void Host::Run(HostOptions options, StartNode start_node) {
     for (const auto& root : options.workspace_roots) { if (!roots.empty()) roots += ','; roots += Json(root); }
     const std::string mode = options.env.count("DSH_PERMISSION_MODE") ? options.env.at("DSH_PERMISSION_MODE") : "workspace-write";
     const std::string profile = options.dsh_home + "/ohos-host.patch.json";
-    WriteProfile(profile, "[{\"id\":\"subprocess\",\"disabled\":true},{\"id\":\"sandbox\",\"disabled\":true},"
+    const std::string safe_patch = options.safe_mode
+        ? "{\"id\":\"hmr\",\"disabled\":true}," : "";
+    WriteProfile(profile, "[" + safe_patch + "{\"id\":\"subprocess\",\"disabled\":true},{\"id\":\"sandbox\",\"disabled\":true},"
         "{\"id\":\"working-directory\",\"config\":{\"defaultDirectory\":" + Json(options.workspace_roots[0]) + "}},"
         "{\"id\":\"sandbox-policy\",\"config\":{\"mode\":" + Json(mode) + ",\"workspaceRoot\":" + Json(options.workspace_roots[0]) + "}},"
         "{\"insert\":[{\"id\":\"ohos-subprocess\",\"name\":" + Json(File(options.runtime_root, "runtime/ohos/process/index.mjs")) +
@@ -293,8 +295,13 @@ void Host::Run(HostOptions options, StartNode start_node) {
       environment.Set("DSH_PERMISSION_MODE", mode);
       std::vector<std::string> argv{"dsh-node", "--jitless", "--import",
         File(options.runtime_root, "runtime/ohos/preload.mjs"),
-        File(options.runtime_root, "node_modules/@deepseek-ai/dsh/lib/bin.js"), "web", "--patch", profile,
-        "--host", "127.0.0.1", "--port", "0", "--no-open"};
+        File(options.runtime_root, "node_modules/@deepseek-ai/dsh/lib/bin.js")};
+      if (options.safe_mode) {
+        argv.insert(argv.end(), {"--profile", "dsh-app-safe", "--from-default-profile", "web"});
+      } else {
+        argv.push_back("web");
+      }
+      argv.insert(argv.end(), {"--patch", profile, "--host", "127.0.0.1", "--port", "0", "--no-open"});
       std::vector<char*> pointers;
       for (auto& value : argv) pointers.push_back(value.data());
       pointers.push_back(nullptr);

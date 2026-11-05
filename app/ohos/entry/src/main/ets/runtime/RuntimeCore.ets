@@ -75,8 +75,8 @@ export function validateEnvironment(env: Map<string, Object> | null): Record<str
 
 export function validateStartOptions(phoneStorage: boolean, mode: string | null): void {
   if (phoneStorage) throw new RuntimeChannelError('ohos_unsupported', '鸿蒙不提供 /sdcard 全盘挂载，请用系统文件选择器导入或导出。');
-  if (mode !== null && mode !== 'normal') {
-    throw new RuntimeChannelError('ohos_unsupported', '本版本鸿蒙宿主不支持安全模式，请关闭并重新打开 App，或使用已连接的电脑。');
+  if (mode !== null && mode !== 'normal' && mode !== 'safe') {
+    throw new RuntimeChannelError('ohos_unsupported', '启动模式无效；仅支持正常模式或安全模式。');
   }
 }
 

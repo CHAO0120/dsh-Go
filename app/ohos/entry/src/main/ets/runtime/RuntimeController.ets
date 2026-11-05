@@ -61,6 +61,7 @@ export class RuntimeController {
   private longTaskAllowed: boolean | null = null;
   private runningSince: number | null = null;
   private markedHealthy: boolean = false;
+  private runMode: string = 'normal';
 
   static get(context: common.Context): RuntimeController {
     if (RuntimeController.shared === null) RuntimeController.shared = new RuntimeController(context);
@@ -223,7 +224,7 @@ export class RuntimeController {
     if (recovery.failure !== null && phase === 'installed') phase = 'error';
     const recoveryFailure = recovery.failure === null ? null : new Map<string, Object | null>([
       ['kind', recovery.failure.kind], ['at', recovery.failure.at], ['exitCode', recovery.failure.exitCode],
-      ['safeMode', false], ['summary', recovery.failure.summary], ['causeUnknown', true]
+      ['safeMode', recovery.failure.safeMode], ['summary', recovery.failure.summary], ['causeUnknown', true]
     ]);
     const active = native.phase === 'running';
     const failure = native.errorCode ?? (native.phase === 'exited' && !this.requestedStop ? 'ohos_node_exited' : null);
@@ -236,7 +237,9 @@ export class RuntimeController {
       ['error', this.lastError ?? this.setupError ?? native.errorMessage ??
         (native.phase === 'exited' && !this.requestedStop ? '本机引擎已退出；请关闭并重新打开 App 后再启动。' :
           this.lifecycle.failureCode() !== null ? LIFECYCLE_NOTICE : null)],
-      ['mode', 'normal'], ['safeState', 'off'], ['safeReason', null], ['strikes', recovery.strikes], ['autoSafe', false],
+      ['mode', native.consumed ? this.runMode : recovery.nextMode],
+      ['safeState', recovery.nextMode === 'safe' ? 'on' : 'off'],
+      ['safeReason', recovery.nextMode === 'safe' ? 'manual' : null], ['strikes', recovery.strikes], ['autoSafe', false],
       ['failure', recoveryFailure], ['mainFailure', null], ['healthyAt', null], ['networkBlocked', false], ['networkBlockedAt', null],
       ['directEngineEnabled', false], ['directEngineAvailable', false], ['directEngineActive', false],
       ['directEngineFallbackReason', null], ['currentExecutionMode', active ? 'ohos-embedded' : null],
@@ -349,7 +352,7 @@ export class RuntimeController {
   }
 
   private noteHealthy(state: HostState): void {
-    if (state.phase !== 'running' || this.attempt === null || this.markedHealthy) return;
+    if (state.phase !== 'running' || this.attempt === null || this.markedHealthy || this.runMode === 'safe') return;
     const now = Date.now();
     if (this.runningSince === null) this.runningSince = now;
     if (now - this.runningSince < HEALTHY_MS) return;
@@ -393,13 +396,15 @@ export class RuntimeController {
     validateStartOptions(phoneStorage, mode);
     const environment = validateEnvironment(env);
     const native = nativeHostState();
-    if (native.phase === 'starting' || native.phase === 'running' || this.pending === 'start') return;
-    if (native.consumed) throw new RuntimeChannelError('ohos_restart_required', '一个 App 进程只启动一次 Node，请关闭并重新打开 App。');
+    if (this.pending === 'start') return;
     if (this.pending !== null) throw new RuntimeChannelError('start_busy', '运行时正在安装。');
     this.pending = 'start'; this.startCancelled = false; this.lastError = null;
     this.emitStatus();
     try {
       await this.initialize();
+      const selectedMode = await this.recovery.selectMode(mode);
+      if ((native.phase === 'starting' || native.phase === 'running') && selectedMode === this.runMode) return;
+      if (native.consumed) throw new RuntimeChannelError('ohos_restart_required', '启动模式已保存；一个 App 进程只启动一次 Node，请重新打开 App。');
       this.installed = await this.installer.installed();
       if (!this.current()) throw new RuntimeChannelError('ohos_install_required', '运行时尚未完整安装到当前版本，请先安装。');
       const nativeLibraryDir = resolveNativeLibraryDir(this.context.bundleCodeDir, this.context.applicationInfo.nativeLibraryPath);
@@ -412,14 +417,19 @@ export class RuntimeController {
       await new OhosRuntimeStorage(this.context.resourceManager, this.context.cacheDir).ensureDirectory(cache);
       await this.writeInstructions(dshHome, workspace, visualReplies);
       if (this.startCancelled) throw new RuntimeChannelError('ohos_start_cancelled', '启动已取消。');
+      if (selectedMode === 'safe') {
+        this.emit(new Map<string, Object | null>([['type', 'notice'], ['text',
+          '安全模式使用独立的随包配置，不会改写原 web 配置；全局补丁和 .env 仍可能影响启动。']]));
+      }
       Object.keys(environment).forEach((key: string) => this.logs.rememberSecret(environment[key]));
       const options: HostOptions = { runtimeRoot: this.installer.root, guestRoot: this.paths.guestRoot, dshHome: dshHome,
-        workspaceRoots: [workspace], cacheDir: cache, nativeLibraryDir: nativeLibraryDir, env: environment };
+        workspaceRoots: [workspace], cacheDir: cache, nativeLibraryDir: nativeLibraryDir, env: environment, safeMode: selectedMode === 'safe' };
       this.requestedStop = false;
       this.runtimeGeneration++;
       const host = await loadNativeHost();
       const attempt = util.generateRandomUUID();
-      await this.recovery.arm(attempt, Date.now(), 'engineRun');
+      this.runMode = selectedMode;
+      await this.recovery.arm(attempt, Date.now(), 'engineRun', selectedMode === 'safe');
       this.attempt = attempt;
       this.checkRecovery();
       if (this.startCancelled) throw new RuntimeChannelError('ohos_start_cancelled', '启动已取消。');
