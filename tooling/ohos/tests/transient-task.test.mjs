@@ -36,7 +36,41 @@ function setup(t,context){
 test('idle, unknown and manual pause consume no transient quota',t=>{for(const mode of ['unknown','idle','paused']){const f=setup(t);if(mode!=='unknown')f.owner.acknowledge(f.ack(mode==='paused',mode==='paused'));f.owner.observe(false);f.owner.acknowledge(f.ack());assert.equal(osTask.requests.length,0);}});
 test('fresh actual work requires second current background ACK before requesting once',t=>{const f=setup(t);f.owner.acknowledge(f.ack());f.owner.observe(false);assert.equal(osTask.requests.length,0);f.owner.acknowledge(f.ack());assert.equal(osTask.requests.length,1);assert.equal(f.s.phase,2);const deadline=f.s.deadlineMs;f.owner.observe(false);f.owner.acknowledge(f.ack());assert.equal(osTask.requests.length,1);assert.equal(f.s.deadlineMs,deadline);});
 test('busy to idle between observations does not spend quota',t=>{const f=setup(t);f.owner.acknowledge(f.ack());f.owner.observe(false);f.owner.acknowledge(f.ack(false));assert.equal(osTask.requests.length,0);});
-test('stale foreground evidence and delayed background ACK fail closed',t=>{const f=setup(t);f.owner.acknowledge(f.ack());f.s.nowMs+=1001;f.owner.observe(false);f.owner.acknowledge(f.ack());assert.equal(osTask.requests.length,0);const g=setup(t);g.owner.acknowledge(g.ack());g.owner.observe(false);g.s.nowMs+=1001;g.owner.acknowledge(g.ack());assert.equal(osTask.requests.length,0);});
+test('foreground polling and background ACK tolerate bounded scheduling delay',t=>{
+ for(const [foregroundAge,ackDelay] of [[1001,0],[0,1001],[2500,2500],[3000,3000]]){
+  const f=setup(t);f.owner.acknowledge(f.ack());f.s.nowMs+=foregroundAge;f.owner.observe(false);
+  assert.equal(osTask.requests.length,0,'foreground evidence cannot authorize alone');
+  f.s.nowMs+=ackDelay;f.owner.acknowledge(f.ack());assert.equal(osTask.requests.length,1);
+  assert.equal(f.s.deadlineMs,f.s.nowMs+30000,'grant starts at OS request, with its unchanged duration');
+  const deadline=f.s.deadlineMs;f.owner.acknowledge(f.ack());f.owner.observe(false);
+  assert.equal(osTask.requests.length,1);assert.equal(f.s.deadlineMs,deadline,'ACK cannot renew the grant');
+ }
+});
+test('expired foreground evidence and delayed background ACK fail closed',t=>{
+ for(const [foregroundAge,ackDelay] of [[3001,0],[0,3001]]){
+  const f=setup(t);f.owner.acknowledge(f.ack());f.s.nowMs+=foregroundAge;f.owner.observe(false);
+  f.s.nowMs+=ackDelay;f.owner.acknowledge(f.ack());assert.equal(osTask.requests.length,0);
+  f.owner.acknowledge(f.ack());assert.equal(osTask.requests.length,0,'later ACK cannot reopen a spent transition');
+ }
+});
+test('delayed evidence still rejects idle, manual pause, wrong identity and failed native clock',t=>{
+ for(const invalid of ['idle','paused','engine','owner','revision','unavailable','clockFailed']){
+  const f=setup(t);f.owner.acknowledge(f.ack());f.s.nowMs+=1500;f.owner.observe(false);f.s.nowMs+=1500;
+  const ack=f.ack(invalid!=='idle',invalid==='paused');
+  if(invalid==='engine')ack.nativeHost.engineGeneration++;
+  if(invalid==='owner')ack.nativeHost.ownerGeneration++;
+  if(invalid==='revision')ack.nativeHost.revision--;
+  if(invalid==='unavailable')f.s.available=0;
+  if(invalid==='clockFailed')f.s.clockFailed=1;
+  f.owner.acknowledge(ack);assert.equal(osTask.requests.length,0,invalid);
+ }
+});
+test('native clock rollback and future foreground timestamp cannot create fresh work',t=>{
+ const f=setup(t),future=f.ack();future.nativeHost.nowMs++;f.owner.acknowledge(future);
+ f.owner.observe(false);f.owner.acknowledge(f.ack());assert.equal(osTask.requests.length,0);
+ const g=setup(t);g.owner.acknowledge(g.ack());g.owner.observe(false);g.s.nowMs--;
+ g.owner.acknowledge(g.ack());assert.equal(osTask.requests.length,0);
+});
 test('old owner/revision ACK cannot activate a new background transition',t=>{const f=setup(t);const old=f.ack();f.owner.acknowledge(old);f.owner.observe(false);f.owner.acknowledge(old);assert.equal(osTask.requests.length,0);});
 test('round completion closes native admission before OS cancellation',t=>{const f=setup(t);f.background();f.owner.acknowledge(f.ack(false));assert.equal(f.s.phase,4);assert.equal(osTask.cancels.length,1);assert.equal(f.writes.at(-1),'release');});
 test('retirement never requests and late ACK does not reactivate',t=>{const f=setup(t);f.owner.acknowledge(f.ack());f.owner.retire();f.owner.observe(false);f.owner.acknowledge(f.ack());assert.equal(osTask.requests.length,0);assert.equal(f.s.available,0);});

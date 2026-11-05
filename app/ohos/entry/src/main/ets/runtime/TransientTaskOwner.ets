@@ -4,6 +4,9 @@ import backgroundTaskManager from '@ohos.resourceschedule.backgroundTaskManager'
 import { NativeHostModule } from './NativeHost';
 import { HostLifecycleAck } from './RuntimeLifecycle';
 
+// Allow the one-second refresh cycle plus bounded ACK/scheduling delay.
+const ACTIVITY_WINDOW_MS: number = 3000;
+
 // Only RuntimeController's real Ability callbacks can reach this owner. No
 // MethodChannel, host cookie, environment option or Node binding exposes writes.
 export class TransientTaskOwner {
@@ -47,7 +50,7 @@ export class TransientTaskOwner {
     if (this.retired || foreground === this.foreground) return;
     const before = this.host.lifecycleSnapshot();
     const freshBusy = this.activityBusy && this.activityRevision === before.revision &&
-      before.available === 1 && before.nowMs >= this.activityAt && before.nowMs - this.activityAt <= 1000;
+      before.available === 1 && before.nowMs >= this.activityAt && before.nowMs - this.activityAt <= ACTIVITY_WINDOW_MS;
     this.foreground = foreground;
     // Synchronous shared native state changes before any OS cancellation.
     this.host.lifecycleUpdate('foreground', this.owner, 0, foreground ? 1 : 0);
@@ -111,7 +114,7 @@ export class TransientTaskOwner {
       // A fresh foreground fact alone can race round completion. Require a
       // second current background fact before spending any OS quota.
       if (ack.busy && !ack.manualPaused && current.nowMs >= this.requestedAt &&
-          current.nowMs - this.requestedAt <= 1000) this.request();
+          current.nowMs - this.requestedAt <= ACTIVITY_WINDOW_MS) this.request();
       return;
     }
     if (this.grant === 0 || native.grantGeneration !== this.grant) return;
