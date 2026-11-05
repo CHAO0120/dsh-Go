@@ -10,6 +10,7 @@ import {
 import { VoiceFailure, VoiceNotice, VoiceResource, retiredVoice } from './VoiceTypes';
 import { OhosVoiceRecorder } from './OhosVoiceRecorder';
 import { HmsVoiceRecognizer } from './HmsVoiceRecognizer';
+import { VoiceMicLease, VoiceMicToken } from './VoiceMicLease';
 
 const MICROPHONE = 'ohos.permission.MICROPHONE';
 
@@ -22,6 +23,7 @@ class VoiceLease {
   valid: boolean = true;
   resource?: VoiceResource;
   preparing?: Promise<void>;
+  mic?: VoiceMicToken;
   constructor(owner: VoicePlugin, engine: FlutterPluginBinding, ability: AbilityPluginBinding,
     sessionId: number, recorder: boolean) {
     this.owner = owner; this.engine = engine; this.ability = ability; this.sessionId = sessionId; this.recorder = recorder;
@@ -30,8 +32,6 @@ class VoiceLease {
 
 export default class VoicePlugin implements FlutterPlugin, AbilityAware {
   private static owner?: VoicePlugin;
-  private static physical?: VoiceLease;
-  private static permissionOpen: boolean = false;
   private static foregroundAbilities: WeakSet<UIAbility> = new WeakSet<UIAbility>();
   private binding?: FlutterPluginBinding;
   private ability?: AbilityPluginBinding;
@@ -39,6 +39,8 @@ export default class VoicePlugin implements FlutterPlugin, AbilityAware {
   private events?: EventChannel;
   private sink?: EventSink;
   private session?: VoiceLease;
+  // Resource retry handle only; VoiceMicLease is the sole admission authority.
+  private physicalLease?: VoiceLease;
 
   getUniqueClassName(): string { return 'DshVoicePlugin'; }
 
@@ -119,7 +121,8 @@ export default class VoicePlugin implements FlutterPlugin, AbilityAware {
   }
 
   private released(lease: VoiceLease): void {
-    if (VoicePlugin.physical === lease) VoicePlugin.physical = undefined;
+    if (lease.mic) VoiceMicLease.release(lease.mic);
+    if (this.physicalLease === lease) this.physicalLease = undefined;
   }
 
   private async cancelLease(lease: VoiceLease): Promise<void> {
@@ -130,9 +133,10 @@ export default class VoicePlugin implements FlutterPlugin, AbilityAware {
   }
 
   private async cancel(): Promise<void> {
-    const lease = this.session ?? (VoicePlugin.physical?.owner === this || VoicePlugin.physical?.valid === false ? VoicePlugin.physical : undefined);
+    const lease = this.session ?? this.physicalLease;
     this.session = undefined;
     if (lease) await this.cancelLease(lease);
+    else await VoiceMicLease.retryRetiredDictation();
   }
 
   private async permitted(context: common.UIAbilityContext): Promise<boolean> {
@@ -151,8 +155,8 @@ export default class VoicePlugin implements FlutterPlugin, AbilityAware {
     if (!ability || !VoicePlugin.foregroundAbilities.has(ability.getAbility())) throw new VoiceFailure('no_ability', '请回到应用前台后重试。', 9);
     const binding = this.binding;
     const ui = ability.getAbility();
-    if (VoicePlugin.permissionOpen) throw new VoiceFailure('busy', '麦克风权限窗口尚未关闭。', 8);
-    VoicePlugin.permissionOpen = true;
+    if (VoiceMicLease.permissionOpen) throw new VoiceFailure('busy', '麦克风权限窗口尚未关闭。', 8);
+    VoiceMicLease.permissionOpen = true;
     try {
       const context = ui.context;
       const granted = await this.permitted(context);
@@ -176,7 +180,7 @@ export default class VoicePlugin implements FlutterPlugin, AbilityAware {
     } catch (error) {
       if (error instanceof VoiceFailure) throw error as Error;
       throw new VoiceFailure('permission', '无法打开麦克风权限设置，请在系统设置中检查授权。', 9);
-    } finally { VoicePlugin.permissionOpen = false; }
+    } finally { VoiceMicLease.permissionOpen = false; }
   }
 
   private async begin(call: MethodCall, recorder: boolean): Promise<void> {
@@ -199,11 +203,15 @@ export default class VoicePlugin implements FlutterPlugin, AbilityAware {
         throw new VoiceFailure('language', '系统语音识别仅支持中文普通话（zh-CN）。', 12);
       }
     }
-    if (VoicePlugin.physical) throw new VoiceFailure('busy', '上一语音会话尚未释放麦克风。', 8);
+    VoiceMicLease.assertDictationAvailable();
     const previous = this.session;
     const lease = new VoiceLease(this, binding, ability, id, recorder);
-    VoicePlugin.physical = lease; this.session = lease;
+    const mic = new VoiceMicToken('dictation', (): Promise<void> => this.cancelLease(lease), (): boolean => !lease.valid);
+    lease.mic = mic;
+    this.session = lease;
     lease.preparing = (async (): Promise<void> => {
+      await VoiceMicLease.dictation(mic);
+      this.physicalLease = lease;
       if (previous) await this.cancelLease(previous);
       if (!this.live(lease)) throw retiredVoice();
       if (!await this.permitted(ability.getAbility().context)) throw new VoiceFailure('permission', '请先允许使用麦克风。', 9);
