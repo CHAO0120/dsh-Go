@@ -6,7 +6,7 @@ import os from 'node:os';
 import {fileURLToPath} from 'node:url';
 import {randomBytes} from 'node:crypto';
 import {prepareArchiveModules, makeArchive, observation, resetObservation, activeInflaters,
-  fileIo, ArchiveResources} from './runtime-archive-fixture.mjs';
+  fileIo, nativeZlib, ArchiveResources} from './runtime-archive-fixture.mjs';
 
 const root = process.env.OHOS_ARCHIVE_ROOT ?? path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
 const temporary = await fs.mkdtemp(path.join(process.env.OHOS_ARCHIVE_TEST_DIR ?? os.tmpdir(), 'archive-tests-'));
@@ -337,3 +337,60 @@ for (const kind of ['metadata', 'payload']) {
     assert.equal(await fs.readFile(c.victim, 'utf8'), 'outside data');
   });
 }
+
+// This is the failure contract of the new native CRC boundary, not evidence
+// that the former synchronous CRC accepted corrupt bytes.
+test('447 native CRC failure refuses completion and an explicit retry preserves all payload bytes', async () => {
+  const c = await scenario('native-crc-failure');
+  observation.failCrc = 1;
+  await assert.rejects(install(c), /injected native CRC failure/);
+  assert.equal(await c.installer.installed(), null);
+  await fs.access(c.directory + '/runtime/installing.json');
+  assert.equal(observation.fd.size, 0); assert.equal(activeInflaters(), 0);
+  await install(c);
+  assert.equal((await c.installer.installed()).runtimeVersion, 'v1');
+  for (const [name, bytes] of Object.entries(baseFiles))
+    assert.deepEqual(await fs.readFile(c.installer.root + '/' + name), Buffer.from(bytes));
+});
+
+test('447 native CRC uses unsigned incremental standard vectors and empty input', async () => {
+  const checksum = await nativeZlib.createChecksum();
+  const buffer = text => Uint8Array.from(Buffer.from(text)).buffer;
+  assert.equal(await checksum.crc32(0, buffer('123456789')), 0xcbf43926);
+  let crc = 0;
+  for (const text of ['123', '456', '789']) crc = await checksum.crc32(crc, buffer(text));
+  assert.equal(crc, 0xcbf43926);
+  assert.equal(await checksum.crc32(0, new ArrayBuffer(0)), 0);
+});
+
+test('447 asynchronous native CRC checks only valid output bytes and retains them until write', async () => {
+  const data = randomBytes(256 * 1024 + 29);
+  const files = {...baseFiles, 'chunked.bin': data, 'full-output.bin': Buffer.alloc(2 * 256 * 1024, 0x61),
+    'short.txt': '123456789'};
+  const c = await scenario('native-crc-valid-count', files);
+  observation.beforeCrc = async (_previous, buffer) => {
+    const before = Buffer.from(buffer).toString('base64');
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(Buffer.from(buffer).toString('base64'), before);
+  };
+  await install(c);
+  assert.equal(observation.checksumCreates, 1);
+  assert.equal(observation.crcBytes, Object.values(files).reduce((n, bytes) => n + Buffer.byteLength(bytes), 0));
+  assert.ok(observation.crcCalls > Object.keys(files).length - 1);
+  assert.equal(observation.maxCrcBuffer, 256 * 1024);
+  for (const [name, bytes] of Object.entries(files))
+    assert.deepEqual(await fs.readFile(c.installer.root + '/' + name), Buffer.from(bytes));
+});
+
+test('447 incorrect payload CRC still refuses completion when manifest SHA and length match', async () => {
+  const c = await scenario('native-crc-corrupt');
+  await mutate(c, (bytes, rows) => {
+    const member = rows.find(row => row.name.endsWith('/bin.js'));
+    const wrong = (bytes.readUInt32LE(member.localOffset + 14) ^ 1) >>> 0;
+    bytes.writeUInt32LE(wrong, member.localOffset + 14);
+    bytes.writeUInt32LE(wrong, member.centralOffset + 16);
+  });
+  await assert.rejects(install(c), {code: 'ohos_checksum_failed'});
+  assert.equal(await c.installer.installed(), null);
+  await fs.access(c.directory + '/runtime/installing.json');
+});

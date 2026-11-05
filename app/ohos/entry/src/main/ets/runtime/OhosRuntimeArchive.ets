@@ -2,7 +2,7 @@ import fs from '@ohos.file.fs';
 import resourceManager from '@ohos.resourceManager';
 import zlib from '@ohos.zlib';
 import { RuntimeChannelError, RuntimeFile, RuntimeManifest } from './RuntimeCore';
-import { RuntimeArchiveSource, RuntimeZip, RuntimeZipEntry, runtimeCrc32 } from './RuntimeZip';
+import { RuntimeArchiveSource, RuntimeZip, RuntimeZipEntry } from './RuntimeZip';
 
 export const RUNTIME_ARCHIVE_ASSET: string = 'dsh-runtime/runtime.zip';
 const CHUNK: number = 256 * 1024;
@@ -69,6 +69,7 @@ export class OhosRuntimeArchive {
   private source: RawArchiveSource | null = null;
   private index: RuntimeZip | null = null;
   private extracting: boolean = false;
+  private checksum: zlib.Checksum | null = null;
 
   constructor(resources: resourceManager.ResourceManager) {
     // guestRoot and remote-only queries must remain free of resource/file I/O.
@@ -138,6 +139,8 @@ export class OhosRuntimeArchive {
 
   private async inflate(source: RawArchiveSource, entry: RuntimeZipEntry,
     write: (buffer: ArrayBuffer, length: number) => Promise<void>): Promise<void> {
+    if (this.checksum === null) this.checksum = await zlib.createChecksum();
+    const checksum: zlib.Checksum = this.checksum;
     const zip = await zlib.createZip();
     let input: ArrayBuffer = new ArrayBuffer(0);
     // Keep one extra byte to detect an oversized first block before writing it.
@@ -186,8 +189,13 @@ export class OhosRuntimeArchive {
             throw new RuntimeChannelError('ohos_native_payload', '原生 ELF 必须随 HAP 的 libs 交付，不能落地到可写目录。');
           }
         }
-        crc = runtimeCrc32(new Uint8Array(output, 0, count), crc);
-        if (count > 0) await write(output, count);
+        if (count > 0) {
+          // The native checksum consumes the complete buffer. Retain exactly
+          // the valid bytes across its await and write those same bytes next.
+          const chunk: ArrayBuffer = count === outputCapacity ? output : output.slice(0, count);
+          crc = (await checksum.crc32(crc, chunk)) >>> 0;
+          await write(chunk, count);
+        }
         consumed += used;
         produced += count;
         available = state.availableIn;
