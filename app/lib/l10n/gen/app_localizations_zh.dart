@@ -7071,6 +7071,9 @@ class L10nZh extends L10n {
   String get harmonyLiveFooter => '这是普通通知，应用被系统挂起后不再更新。实况窗还没有接入。';
 
   @override
+  String get harmonyLockScreenPrivacy => '锁屏是否显示对话内容由系统决定：设置 › 通知和状态栏 › 锁屏通知';
+
+  @override
   String get hostDetailsConnectionType => '连接方式';
 
   @override

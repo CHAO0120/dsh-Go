@@ -12980,6 +12980,12 @@ abstract class L10n {
   /// **'这是普通通知，应用被系统挂起后不再更新。实况窗还没有接入。'**
   String get harmonyLiveFooter;
 
+  /// No description provided for @harmonyLockScreenPrivacy.
+  ///
+  /// In zh, this message translates to:
+  /// **'锁屏是否显示对话内容由系统决定：设置 › 通知和状态栏 › 锁屏通知'**
+  String get harmonyLockScreenPrivacy;
+
   /// No description provided for @hostDetailsConnectionType.
   ///
   /// In zh, this message translates to:

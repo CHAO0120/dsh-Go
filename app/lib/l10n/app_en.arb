@@ -2148,6 +2148,7 @@
   "harmonyLiveSwitch": "Show a progress notification",
   "harmonyLiveSubtitle": "Keeps one status notification while a conversation runs",
   "harmonyLiveFooter": "This is a plain notification and stops updating once the system suspends the app. Live View isn't connected yet.",
+  "harmonyLockScreenPrivacy": "Whether the lock screen shows chat content is up to the system: check its lock screen notification setting",
   "hostDetailsConnectionType": "Connection type",
   "hostDetailsSshNetworkHint": "Uses an SSH tunnel. LAN / P2P route inspection and latency measurements are not available for this connection.",
   "hubSessionDetails": "Chat details",

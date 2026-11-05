@@ -246,7 +246,8 @@ class _NotificationSettingsPageState extends ConsumerState<NotificationSettingsP
         ),
         SettingsSection(
           title: l10n.pluginsSystemSettings,
-          footer: Text(l10n.pluginsLockScreenPrivacy),
+          // Android posts a public version for the lock screen; here the real text goes to the system.
+          footer: Text(ohos ? l10n.harmonyLockScreenPrivacy : l10n.pluginsLockScreenPrivacy),
           children: [
             SettingsTile(
               spot: Spots.notifySystem,

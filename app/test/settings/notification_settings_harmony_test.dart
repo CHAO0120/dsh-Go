@@ -110,6 +110,18 @@ void main() {
     expect(find.text(zh.harmonyAlertsRequirement), findsNothing);
   });
 
+  testWidgets('on HarmonyOS: it doesn\'t claim the lock screen hides anything; the system decides', (tester) async {
+    await pump(tester, 'ohos');
+    expect(find.text(zh.harmonyLockScreenPrivacy), findsOneWidget);
+    expect(find.text(zh.pluginsLockScreenPrivacy), findsNothing);
+  });
+
+  testWidgets('on Android: the lock screen line stays, it is true there', (tester) async {
+    await pump(tester, 'android');
+    expect(find.text(zh.pluginsLockScreenPrivacy), findsOneWidget);
+    expect(find.text(zh.harmonyLockScreenPrivacy), findsNothing);
+  });
+
   testWidgets('on HarmonyOS: the status is read again when the panel closes', (tester) async {
     await pump(tester, 'ohos', channel: _Blocked(opens: true));
     await tester.tap(find.text(zh.pluginsTurnOn));

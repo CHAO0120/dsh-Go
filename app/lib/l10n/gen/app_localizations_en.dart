@@ -7479,6 +7479,10 @@ class L10nEn extends L10n {
       'This is a plain notification and stops updating once the system suspends the app. Live View isn\'t connected yet.';
 
   @override
+  String get harmonyLockScreenPrivacy =>
+      'Whether the lock screen shows chat content is up to the system: check its lock screen notification setting';
+
+  @override
   String get hostDetailsConnectionType => 'Connection type';
 
   @override
