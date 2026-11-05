@@ -279,6 +279,17 @@ abstract final class SettingsIndex {
   /// Whether the `dshgo://open/<id>` link [id] leads to what only HarmonyOS has.
   static bool ohosOnlyLink(String id) => pageForLink(id)?.ohosOnly ?? false;
 
+  /// The link to follow on HarmonyOS for [id]: 系统操作 stands in for 手机操控
+  /// and its 解除限制, whose hard rules it hasn't got, and the permission page
+  /// for 确认方式, which follows it there. Anything else is itself.
+  static String ohosLink(String id) => _ohosLinks[id] ?? id;
+
+  static const _ohosLinks = {
+    'phone': 'system-actions',
+    'phone-unlocks': 'system-actions',
+    'phone-confirm': 'permission',
+  };
+
   /// Pages from the hub down to [id], both included.
   static List<SettingsPageId> chain(SettingsPageId id) {
     final out = <SettingsPageId>[];

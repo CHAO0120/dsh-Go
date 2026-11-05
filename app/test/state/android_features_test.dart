@@ -242,7 +242,19 @@ void main() {
     });
 
     test('on HarmonyOS: 系统操作 by its name and what it does, in both languages', () {
-      for (final q in ['系统操作', 'system actions', '拨号', 'dialer', '发通知', '写剪贴板', 'clipboard']) {
+      for (final q in [
+        '系统操作',
+        'system actions',
+        '拨号',
+        'dialer',
+        '发通知',
+        '写剪贴板',
+        'clipboard',
+        '手机操控',
+        '操作手机',
+        '代操作',
+        'phone control',
+      ]) {
         expect(ids(q, android: false), contains('page:systemActions'), reason: q);
       }
       // Its words don't promise what it can't do.
@@ -280,11 +292,15 @@ void main() {
       expect(find.text(_zh.searchNoResults), findsNothing);
     });
 
-    testWidgets('on HarmonyOS: 后台运行 is there, and 手机操控 says it isn\'t', (tester) async {
+    testWidgets('on HarmonyOS: 后台运行 is there, 手机操控 finds 系统操作, and 无障碍 says it isn\'t', (tester) async {
       await _pump(tester, const SettingsSearchPage(), android: false);
       expect(find.text(_zh.searchSuggestBackground), findsOneWidget);
       expect(find.text(_zh.searchSuggestDark), findsOneWidget);
       await tester.enterText(find.byType(TextField), '手机操控');
+      await tester.pumpAndSettle();
+      expect(find.textContaining(_zh.systemActionsTitle, findRichText: true), findsWidgets);
+      expect(find.text(_zh.harmonySearchUnavailable), findsNothing);
+      await tester.enterText(find.byType(TextField), '无障碍');
       await tester.pumpAndSettle();
       expect(find.text(_zh.harmonySearchUnavailable), findsOneWidget);
       expect(find.text(_zh.searchNoResults), findsNothing);
@@ -305,10 +321,12 @@ void main() {
       expect(resolve('system-actions', android: true), isNull, reason: 'HarmonyOS\'s own');
     });
 
-    test('on HarmonyOS they are unknown; other pages still open', () {
-      for (final id in ['phone', 'phone-unlocks', 'phone-confirm', 'phone-files']) {
-        expect(resolve(id, android: false), isNull, reason: id);
+    test('on HarmonyOS 系统操作 stands in for 手机操控, and the rest say they aren\'t there', () {
+      for (final id in ['phone', 'phone-unlocks']) {
+        expect(resolve(id, android: false), isA<SystemActionsPage>(), reason: id);
       }
+      expect(resolve('phone-confirm', android: false), isA<PermissionPage>());
+      expect(resolve('phone-files', android: false), isNull);
       expect(resolve('system-actions', android: false), isA<SystemActionsPage>());
       expect(resolve('engine', android: false), isA<EngineScreen>());
       expect(resolve('background', android: false), isA<BackgroundGuidePage>());
@@ -316,14 +334,14 @@ void main() {
     });
 
     for (final android in [true, false]) {
-      testWidgets('a plugin\'s `open phone` with android=$android', (tester) async {
+      Future<void> open(WidgetTester tester, String page) async {
         usePhoneSurface(tester);
         await tester.pumpWidget(
           goldenApp(
             home: Scaffold(
               body: Consumer(
                 builder: (context, ref, _) =>
-                    TextButton(onPressed: () => openNativePage(context, ref, 'phone'), child: const Text('open')),
+                    TextButton(onPressed: () => openNativePage(context, ref, page), child: const Text('open')),
               ),
             ),
             brightness: Brightness.light,
@@ -333,8 +351,23 @@ void main() {
         await tester.tap(find.text('open'));
         await tester.pump();
         await tester.pump(const Duration(milliseconds: 500));
+      }
+
+      testWidgets('a plugin\'s `open phone` with android=$android', (tester) async {
+        await open(tester, 'phone');
         expect(find.byType(PhoneControlScreen), android ? findsOneWidget : findsNothing);
+        expect(find.byType(SystemActionsPage), android ? findsNothing : findsOneWidget);
+        expect(find.text(_zh.harmonyPageUnavailable), findsNothing);
+      });
+
+      testWidgets('a plugin\'s `open phone-files` with android=$android', (tester) async {
+        await open(tester, 'phone-files');
         expect(find.text(_zh.harmonyPageUnavailable), android ? findsNothing : findsOneWidget);
+      });
+
+      testWidgets('a plugin\'s `open system-actions` with android=$android', (tester) async {
+        await open(tester, 'system-actions');
+        expect(find.byType(SystemActionsPage), android ? findsNothing : findsOneWidget);
       });
     }
   });

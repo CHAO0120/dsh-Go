@@ -16678,7 +16678,7 @@ class L10nZh extends L10n {
   String get catalogSystemActionsSummary => '打开应用和系统页面';
 
   @override
-  String get searchKwSystemActions => '打开应用,打开链接,日历,拨号,分享,导航,发通知,写剪贴板,交还';
+  String get searchKwSystemActions => '手机操控,操作手机,代操作,打开应用,打开链接,日历,拨号,分享,导航,发通知,写剪贴板,交还';
 
   @override
   String get updateCheck => '检查更新';

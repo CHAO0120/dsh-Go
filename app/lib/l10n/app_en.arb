@@ -5080,7 +5080,7 @@
   "systemActionsResultNotRun": "Nothing ran.",
   "catalogSystemActions": "System actions",
   "catalogSystemActionsSummary": "Open apps and system pages",
-  "searchKwSystemActions": "open app,open link,calendar,dialer,share,navigation,notification,clipboard,hand back",
+  "searchKwSystemActions": "phone control,control phone,open app,open link,calendar,dialer,share,navigation,notification,clipboard,hand back",
   "updateCheck": "Check for updates",
   "updateAutoCheck": "Check automatically",
   "updateAutoCheckDaily": "Once a day",

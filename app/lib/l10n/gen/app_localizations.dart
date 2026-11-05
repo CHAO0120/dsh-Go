@@ -30575,7 +30575,7 @@ abstract class L10n {
   /// No description provided for @searchKwSystemActions.
   ///
   /// In zh, this message translates to:
-  /// **'打开应用,打开链接,日历,拨号,分享,导航,发通知,写剪贴板,交还'**
+  /// **'手机操控,操作手机,代操作,打开应用,打开链接,日历,拨号,分享,导航,发通知,写剪贴板,交还'**
   String get searchKwSystemActions;
 
   /// No description provided for @updateCheck.

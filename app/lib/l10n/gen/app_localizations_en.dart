@@ -17605,7 +17605,7 @@ class L10nEn extends L10n {
 
   @override
   String get searchKwSystemActions =>
-      'open app,open link,calendar,dialer,share,navigation,notification,clipboard,hand back';
+      'phone control,control phone,open app,open link,calendar,dialer,share,navigation,notification,clipboard,hand back';
 
   @override
   String get updateCheck => 'Check for updates';
