@@ -29,9 +29,7 @@ void main() {
       for (final element in find.byType(Scrollable).evaluate())
         ((element as StatefulElement).state as ScrollableState).position,
     ].where((position) => position.axis == Axis.vertical).toList();
-    positions.sort(
-      (a, b) => (b.maxScrollExtent - b.minScrollExtent).compareTo(a.maxScrollExtent - a.minScrollExtent),
-    );
+    positions.sort((a, b) => (b.maxScrollExtent - b.minScrollExtent).compareTo(a.maxScrollExtent - a.minScrollExtent));
     return positions.first;
   }
 
@@ -42,13 +40,13 @@ void main() {
     expect(before.minScrollExtent, lessThan(0), reason: 'with earlier messages above');
 
     tester.simulateStatusBarTap();
-    await pumpFrames(tester, 12);
+    await pumpFrames(tester, 24);
 
     final after = list(tester);
     expect(after.pixels, closeTo(after.minScrollExtent, 1));
   }, variant: TargetPlatformVariant.only(TargetPlatform.iOS));
 
-  testWidgets('Android keeps the route's own controller', (tester) async {
+  testWidgets('Android keeps its own controller', (tester) async {
     await open(tester);
     final scaffold = find.byType(Scaffold).evaluate().first;
     expect(PrimaryScrollController.maybeOf(scaffold), isNot(isA<StatusBarTop>()));

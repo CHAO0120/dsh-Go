@@ -225,17 +225,33 @@ class _ChatListState extends ConsumerState<ChatList> with SingleTickerProviderSt
     _glide.start();
   }
 
-  void _goToTop() {
+  void _goToTop() => unawaited(_runToTop());
+
+  /// The rows above are measured as they come into view, so the top can turn out nearer or further
+  /// than it first looked: stop on arriving, and go on if it's further. A finger takes over.
+  Future<void> _runToTop() async {
     if (!_scroll.hasClients) return;
     _stopGlide();
     _pinned = false;
     final position = _scroll.position;
     final duration = AppMotion.of(context, const Duration(milliseconds: 600));
-    if (duration == Duration.zero) {
-      position.jumpTo(position.minScrollExtent);
-    } else {
-      unawaited(position.animateTo(position.minScrollExtent, duration: duration, curve: AppMotion.glide));
+    void stopAtTop() {
+      if (position.pixels < position.minScrollExtent) position.jumpTo(position.minScrollExtent);
     }
+
+    _scroll.addListener(stopAtTop);
+    for (
+      var tries = 0;
+      tries < 3 && mounted && _fingers == 0 && position.pixels > position.minScrollExtent + 1;
+      tries++
+    ) {
+      if (duration == Duration.zero) {
+        position.jumpTo(position.minScrollExtent);
+      } else {
+        await position.animateTo(position.minScrollExtent, duration: duration, curve: AppMotion.glide);
+      }
+    }
+    if (mounted) _scroll.removeListener(stopAtTop);
   }
 
   void _stopGlide() {
