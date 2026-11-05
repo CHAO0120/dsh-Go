@@ -151,6 +151,27 @@ def verify_proc_mapping():
         raise Blocked('cannot verify parent procfs identity: ' + str(error)) from error
 
 
+def verify_install_record_wire(path):
+    if not path.is_file():
+        raise Blocked('missing actual install-record wire; apply 300 and run ets-runtime-tooling')
+    records = json.loads(path.read_text())
+    if not isinstance(records, list) or len(records) != 2:
+        raise ValueError('install-record wire must contain both actual producer cases')
+    if {row.get('name') for row in records if isinstance(row, dict)} != {'json', 'schema'}:
+        raise ValueError('install-record wire producer cases differ')
+    for row in records:
+        status, install = row.get('status', {}), row.get('install', {})
+        value = status.get('value', {})
+        if ('code' in status or value.get('phase') != 'error' or
+                'installedVersion' not in value or value['installedVersion'] is not None or
+                not isinstance(value.get('error'), str) or
+                install.get('code') != 'ohos_install_record_invalid' or
+                not isinstance(install.get('message'), str)):
+            raise ValueError('install-record wire status/error contract differs')
+    return {'sha256': sha(path), 'cases': [row['name'] for row in records],
+            'producer': 'ets-runtime-tooling/runtime-channel.test.mjs; actual ETS with explicit OS fixtures'}
+
+
 def verify_dart_consumers(output):
     diagnostics = output / 'diagnostics-dart'
     commands = json.loads((diagnostics / 'commands.json').read_text())
@@ -738,7 +759,8 @@ def main():
     channels = ['app-links-channel', 'frame-rate-channel', 'keyboard-log', 'connectivity-channel', 'notify-channel', 'files-media-channel', 'usage-channel', 'launch-channel', 'launcher-icon-channel', 'shortcuts-channel']
     g.node_tests('ets-channels', [rt + n + '.test.mjs' for n in channels], needs=('native-opener-build',), extra=lambda: {'OHOS_USER_FILE_ADDON': str(o / 'user-file-access.node')}, timeout=240)
     tooling = ['managed-skill', 'native-host-lazy', 'runtime-archive', 'runtime-channel', 'lifecycle-host', 'web-files', 'transient-task', 'runtime-recovery', 'recovery-storage', 'native-recovery-gate']
-    g.node_tests('ets-runtime-tooling', [tools + n + '.test.mjs' for n in tooling], needs=('native-zlib-build',), extra=lambda: {'OHOS_TEST_ZLIB_ADDON': str(o / 'zlib.node')}, timeout=240)
+    g.node_tests('ets-runtime-tooling', [tools + n + '.test.mjs' for n in tooling], needs=('native-zlib-build',), extra=lambda: {'OHOS_TEST_ZLIB_ADDON': str(o / 'zlib.node'), 'OHOS_INSTALL_RECORD_WIRE': str(o / 'install-record-wire.json')}, timeout=240)
+    g.internal('install-record-wire', lambda _: verify_install_record_wire(o / 'install-record-wire.json'), needs=('ets-runtime-tooling',))
     for mode in ['plain', 'jitless']:
         g.node_tests('secrets-picker-' + mode, [rt + 'secrets.test.mjs', tools + 'attachment-files-channel.test.mjs'], mode=mode, needs=('tools',))
     for filename in ['runtime-archive-audit.test.py', 'audit-dart-bridges.test.py', 'patch-framework.test.py']:
@@ -791,10 +813,11 @@ def main():
     g.run('flutter-pub-vendored', lambda: g.flutter('pub', 'get', '--offline'), cwd=g.flutter_source / 'app', env=g.flutter_env, needs=('flutter-vendor',), timeout=180)
     g.run('flutter-l10n', lambda: g.flutter('gen-l10n'), cwd=g.flutter_source / 'app', env=g.flutter_env, needs=('flutter-pub-vendored',), timeout=180)
     def flutter_identity(_):
+        g.flutter_env['OHOS_INSTALL_RECORD_WIRE'] = str(o / 'install-record-wire.json')
         return {'source': verify_flutter_inputs(g.flutter_source, g.flutter_original_inputs),
                 'localPackages': verify_flutter_packages(g.flutter_source)}
-    g.internal('flutter-input-identity', flutter_identity, needs=('flutter-l10n',))
-    flutter_tests = ['test/secrets', 'test/ohos/attachment_files_test.dart', 'test/runtime/phone_callback_bridge_test.dart', 'test/runtime/runtime_recovery_test.dart', 'test/usage/ohos_device_contract_test.dart',
+    g.internal('flutter-input-identity', flutter_identity, needs=('flutter-l10n', 'install-record-wire'))
+    flutter_tests = ['test/secrets', 'test/ohos/attachment_files_test.dart', 'test/runtime/phone_callback_bridge_test.dart', 'test/runtime/runtime_recovery_test.dart', 'test/runtime/ohos_install_record_test.dart', 'test/usage/ohos_device_contract_test.dart',
                      'test/chat/attachment_file_budget_test.dart', 'test/remote/private_key_file_budget_test.dart',
                      'test/chat/attachment_owner_test.dart', 'test/remote/ssh_key_callback_lifetime_test.dart', 'test/share_hosted', 'test/share/share_panel_test.dart']
     g.run('flutter-consumers', lambda: g.flutter('test', '--no-pub', '--reporter', 'json', '--concurrency=1', *flutter_tests), cwd=g.flutter_source / 'app', env=g.flutter_env, needs=('flutter-input-identity',), timeout=300, tests=['app/' + x for x in flutter_tests], scope='Actual Linux Flutter engine and Dart consumers; not OHOS AOT/device')

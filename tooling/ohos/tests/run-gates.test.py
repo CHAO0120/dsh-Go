@@ -40,6 +40,13 @@ class RunnerContract(unittest.TestCase):
             'node_root': str(node.parent.parent), 'cxx': shutil.which('c++')}}))
         self.g = gates.Gates(argparse.Namespace(out=root / 'out', config=config))
 
+    def test_install_record_wire_rejects_absent_or_partial_producer(self):
+        path = self.g.out / 'install-record-wire.json'
+        with self.assertRaises(gates.Blocked): gates.verify_install_record_wire(path)
+        for records in ([], [{'name': 'json'}], [{'name': 'json'}, {'name': 'schema'}]):
+            path.write_text(json.dumps(records))
+            with self.assertRaises(ValueError): gates.verify_install_record_wire(path)
+
     def test_flutter_generated_android_files_cannot_pollute_native_identity_tree(self):
         code = "from pathlib import Path; Path('android/local.properties').write_text('sdk.dir=fixture'); p=Path('android/app/src/main/java/GeneratedPluginRegistrant.java'); p.parent.mkdir(parents=True); p.write_text('generated fixture')"
         self.assertTrue(self.g.run('flutter-generator-probe', [sys.executable, '-c', code], cwd=self.g.flutter_source / 'app'))
