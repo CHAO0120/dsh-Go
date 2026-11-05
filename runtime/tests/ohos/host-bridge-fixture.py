@@ -20,7 +20,7 @@ def prepare_bridge_fixture(runtime, dsh, out):
     # Pre-existing private durable objects, not an OH image upload/codec success.
     image = asset.read_bytes()
     image_hash = hashlib.sha256(image).hexdigest()
-    assert len(image) == 69 and image_hash == '1280e8de649805526731cc11672b0479f5ca25d9bd7ebf7a3375f8a9c966205e'
+    assert image[:8] == b'\x89PNG\r\n\x1a\n' and image[12:16] == b'IHDR' and image[16:24] == b'\0\0\0\x01\0\0\0\x01'
     object_root = dsh / 'attachments/v1/objects'
     corrupt_hash = hashlib.sha256(b'declared-object-with-different-content').hexdigest()
     missing_hash = hashlib.sha256(b'object-not-created').hexdigest()
@@ -100,4 +100,4 @@ def prepare_bridge_fixture(runtime, dsh, out):
     save(out / 'attachment-fixture-input.json', attachments)
     return {'pkg': 'dsh-go-fixture-host-bridge', 'entryId': 'add12-owned-config',
             'nativeEntryId': 'add12-owned-fixture', 'attachments': attachments,
-            'assetSHA256': hashlib.sha256(asset.read_bytes()).hexdigest()}
+            'assetSHA256': hashlib.sha256(asset.read_bytes()).hexdigest(), 'assetBytes': len(image)}

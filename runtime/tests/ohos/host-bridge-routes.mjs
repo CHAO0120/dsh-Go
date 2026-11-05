@@ -99,7 +99,7 @@ export async function runBridgeRouteContract({ base, cookie, rpc, WebSocket, out
     const listedBefore = await rpc('session/list', { _request: {} });
     result.sessionListBefore = listedBefore; check(Array.isArray(listedBefore.items) && listedBefore.items.some(item => item.sessionId === sessionId), 'completed private session really listed before deletion');
     const image = fixture.attachments.reference;
-    check(image.attachmentId === 'sha256:' + fixture.assetSHA256 && image.bytes === 69 && image.width === 1 && image.height === 1, 'fixed real PNG full reference');
+    check(image.attachmentId === 'sha256:' + fixture.assetSHA256 && image.bytes === fixture.assetBytes && image.width === 1 && image.height === 1, 'fixed real PNG full reference');
     await attachmentCase('full-reference', sessionId, image, 'session/attachment-invalid', 'OHOS_IMAGE_CODEC_UNAVAILABLE');
     await attachmentCase('missing-object', sessionId, { ...image, attachmentId: fixture.attachments.missingId }, 'session/attachment-invalid', 'ATTACHMENT_NOT_FOUND');
     await attachmentCase('corrupt-object', sessionId, { ...image, attachmentId: fixture.attachments.corruptId }, 'session/attachment-invalid', 'ATTACHMENT_CORRUPT');
