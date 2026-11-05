@@ -19,6 +19,10 @@
     {
       "name": "shortcut_voice_input",
       "value": "语音输入"
+    },
+    {
+      "name": "dsh_pasteboard_reason",
+      "value": "用于您主动点击粘贴时读取剪贴板内容。"
     }
   ]
 }

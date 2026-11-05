@@ -19,6 +19,10 @@
     {
       "name": "shortcut_voice_input",
       "value": "Voice input"
+    },
+    {
+      "name": "dsh_pasteboard_reason",
+      "value": "Read the clipboard when you choose Paste."
     }
   ]
 }
