@@ -1229,3 +1229,58 @@ test('recovery: rejected validation reports no submitted request and writes no r
  try{const reply=await plugin.call({keep:['../']});assert.equal(reply.code,'ohos_recovery_invalid');await assert.rejects(fs.access(c.dir+'/dsh-recovery/reset.json'));assert.equal(c.controller.snapshot().get('resetPending'),false);await recordRecoveryReply('notCommitted',reply);}
  finally{plugin.close();}
 });
+
+const installRecordReplies = [];
+for (const [name, content] of [
+  ['json', '{broken'],
+  ['schema', '{"schema":0}'],
+]) {
+  test(`损坏安装记录 ${name}：状态和日志可读，安装保持拒绝，明确重置后恢复`, async () => {
+    let c = await controllerCase('damaged-installed-' + name);
+    await c.controller.install(false);
+    const record = c.dir + '/dsh-runtime/installed.json';
+    const unknown = c.dir + '/dsh-runtime/tree/unowned-user-file.txt';
+    await fs.writeFile(record, content);
+    await fs.writeFile(unknown, 'keep-until-explicit-reset');
+    await c.controller.recovery.pending;
+    nativeHostModule.resetNativeFixture(); native.reset(); RuntimeController.shared = null;
+    const controller = RuntimeController.get(c.context); controllers.push(controller);
+    c = { ...c, controller };
+    const plugin = new RuntimePlugin();
+    const binding = { getApplicationContext: () => c.context,
+      getBinaryMessenger: () => ({ setMessageHandler() {} }) };
+    plugin.onAttachedToEngine(binding);
+    const invoke = (method, args = {}) => new Promise(resolve => plugin.onMethodCall(
+      new MethodCall(method, new Map(Object.entries(args))), {
+        success: value => resolve({ value }), error: (code, message) => resolve({ code, message }),
+        notImplemented: () => resolve({ missing: true })
+      }));
+    try {
+      const status = await invoke('getStatus');
+      const install = await invoke('install');
+      installRecordReplies.push({ name, status, install });
+      if (process.env.OHOS_INSTALL_RECORD_WIRE) await fs.writeFile(process.env.OHOS_INSTALL_RECORD_WIRE,
+        JSON.stringify(installRecordReplies, (_key, value) => value instanceof Map ? Object.fromEntries(value) : value));
+      assert.equal(status.code, undefined, '损坏安装记录时 getStatus 仍须返回状态');
+      assert.equal(status.value.get('phase'), 'error');
+      assert.match(status.value.get('error'), /安装记录.*损坏.*重置运行环境/);
+      assert.equal(status.value.get('installedVersion'), null);
+      assert.equal(install.code, 'ohos_install_record_invalid');
+      assert.match(install.message, /重置运行环境/);
+      assert.equal((await invoke('start')).code, 'ohos_install_record_invalid');
+      for (const method of ['getLogs', 'getLogSnapshot', 'failureLog']) {
+        assert.equal((await invoke(method)).code, undefined, method);
+      }
+      assert.equal(await fs.readFile(record, 'utf8'), content);
+      assert.equal(await fs.readFile(unknown, 'utf8'), 'keep-until-explicit-reset');
+      assert.equal(nativeHostModule.nativeHostTouched(), false);
+      assert.equal(native.starts.length, 0);
+      assert.equal((await invoke('reset', { keep: [], reinstall: true })).code, 'ohos_reset_committed');
+      assert.equal(await fs.readFile(unknown, 'utf8'), 'keep-until-explicit-reset');
+    } finally { plugin.onDetachedFromEngine(binding); }
+    c = await reopenCase(c);
+    assert.equal(c.controller.snapshot().get('phase'), 'installed');
+    assert.equal(c.controller.snapshot().get('error'), null);
+    assert.equal(nativeHostModule.nativeHostTouched(), false);
+  });
+}

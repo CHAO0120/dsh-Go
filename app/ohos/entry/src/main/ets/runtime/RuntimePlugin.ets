@@ -147,7 +147,10 @@ export class RuntimePlugin implements FlutterPlugin, MethodCallHandler, StreamHa
       try { this.phone?.retire(); } finally { await controller.reset(keep as string[], reinstall); }
       return;
     }
-    await controller.initialize();
+    await controller.initialize().catch((error: Error): void => {
+      // Recovery failures must remain inspectable while mutating calls stay closed.
+      if (!['getStatus', 'getLogs', 'getLogSnapshot', 'failureLog'].includes(call.method)) throw error;
+    });
     switch (call.method) {
       case 'getStatus': controller.collect(); result.success(controller.snapshot()); return;
       case 'install': await controller.install(call.argument('dropKept') === true); result.success(null); return;

@@ -190,7 +190,17 @@ export class RuntimeInstaller {
   async installed(): Promise<RuntimeManifest | null> {
     if (await this.storage.exists(this.base + '/installing.json')) return null;
     if (!await this.storage.exists(this.base + '/installed.json')) return null;
-    return validateManifest(JSON.parse(await this.storage.readText(this.base + '/installed.json')) as RuntimeManifest);
+    return this.readInstalled();
+  }
+
+  private async readInstalled(): Promise<RuntimeManifest> {
+    const text = await this.storage.readText(this.base + '/installed.json');
+    try {
+      return validateManifest(JSON.parse(text) as RuntimeManifest);
+    } catch (_) {
+      throw new RuntimeChannelError('ohos_install_record_invalid',
+        '运行时安装记录已损坏，无法安全重试安装。请先备份需要保留的数据，再选择“重置运行环境”并重新打开应用。');
+    }
   }
 
   async install(manifest: RuntimeManifest, progress: (event: InstallProgress) => void): Promise<void> {
@@ -203,7 +213,7 @@ export class RuntimeInstaller {
       await this.storage.ensureDirectory(this.base + '/staging');
       let previous: RuntimeManifest | null = null;
       if (await this.storage.exists(this.base + '/installed.json')) {
-        previous = validateManifest(JSON.parse(await this.storage.readText(this.base + '/installed.json')) as RuntimeManifest);
+        previous = await this.readInstalled();
       }
       const owned = new Set<string>(previous === null ? [] : previous.files.map((file: RuntimeFile) => file.path));
       const staged = new Set<string>();
