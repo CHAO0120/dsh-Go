@@ -73,6 +73,9 @@ void main() {
     await _pump(tester, const UpdateSheet(), _Notice(_release(page: page)));
     expect(find.text(l10n.harmonyUpdateNoticeTitle), findsOneWidget);
     expect(find.text(l10n.harmonyUpdateNoticeText), findsOneWidget);
+    // Whether a phone can install a HAP by hand isn't for this to promise.
+    expect(l10n.harmonyUpdateNoticeText, isNot(contains('手动安装')));
+    expect(l10n.harmonyUpdateNoticeTitle, contains('获取方式'));
     expect(find.text(l10n.updateOpenReleasePage), findsOneWidget);
     expect(find.text(l10n.commonLater), findsOneWidget);
     expect(find.text(l10n.updateSkipVersion), findsOneWidget);

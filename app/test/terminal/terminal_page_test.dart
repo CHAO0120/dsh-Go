@@ -4,12 +4,17 @@
 
 import 'dart:ui' show Tristate;
 
+import 'package:dsh_app/l10n/l10n.dart';
+import 'package:dsh_app/state/android_features.dart';
+import 'package:dsh_app/state/runtime_capabilities_state.dart';
 import 'package:dsh_app/state/terminal_state.dart';
 import 'package:dsh_app/ui/terminal/terminal_keys.dart';
 import 'package:dsh_app/ui/terminal/terminal_page.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:dsh_client/dsh_client.dart' show RuntimeCapabilities, RuntimeShellCapabilities, RuntimeSupport;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_riverpod/misc.dart' show Override;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:xterm/xterm.dart' show TerminalView;
@@ -49,6 +54,48 @@ void main() {
       modifiers.tap(TerminalExtraKey.alt);
       expect(modifiers.any, isFalse);
     });
+  });
+
+  group('what the engine says about a terminal', () {
+    final zh = lookupL10n(AppLocale.zhCN);
+    List<Override> on(String os, RuntimeSupport pty) => [
+      operatingSystemProvider.overrideWithValue(os),
+      runtimeCapabilitiesProvider.overrideWith(
+        (ref) async => RuntimeCapabilities(shell: RuntimeShellCapabilities(pty: pty)),
+      ),
+    ];
+
+    testWidgets('on HarmonyOS, no PTY: said up front, with no terminal card to fail', (tester) async {
+      await pumpTerminalPage(tester, FakeTerminalBackend(), overrides: on('ohos', RuntimeSupport.unsupported));
+      expect(find.text(zh.harmonyTerminalNoPty), findsOneWidget);
+      expect(find.byType(TerminalView), findsNothing);
+      expect(find.text(zh.commonRetry), findsNothing);
+    });
+
+    testWidgets('on HarmonyOS, a host that has one: it opens', (tester) async {
+      final backend = FakeTerminalBackend();
+      await pumpTerminalPage(tester, backend, overrides: on('ohos', RuntimeSupport.supported));
+      expect(find.text(zh.harmonyTerminalNoPty), findsNothing);
+      expect(backend.created, hasLength(1));
+    });
+
+    testWidgets('on Android the engine is not asked: it opens as ever', (tester) async {
+      final backend = FakeTerminalBackend();
+      await pumpTerminalPage(tester, backend, overrides: on('android', RuntimeSupport.unsupported));
+      expect(find.text(zh.harmonyTerminalNoPty), findsNothing);
+      expect(backend.created, hasLength(1));
+    });
+
+    for (final (os, hint) in [('ohos', zh.harmonyTerminalSupportedHosts), ('android', zh.botsTerminalSupportedHosts)]) {
+      testWidgets('on $os a connection without terminals says where they are', (tester) async {
+        await pumpTerminalPage(
+          tester,
+          FakeTerminalBackend(supported: false),
+          overrides: [operatingSystemProvider.overrideWithValue(os)],
+        );
+        expect(find.text(hint), findsOneWidget);
+      });
+    }
   });
 
   testWidgets('the selected terminal tab exposes its selected semantics', (tester) async {

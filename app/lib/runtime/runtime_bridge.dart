@@ -203,6 +203,7 @@ class RuntimeStatus {
     this.tidyingFiles = false,
     this.resetPending = false,
     this.backgroundTask,
+    this.longTaskEligible = false,
   });
 
   const RuntimeStatus.unknown() : this(phase: RuntimePhase.notInstalled);
@@ -211,6 +212,11 @@ class RuntimeStatus {
 
   /// Null where there's no such grant.
   final RuntimeBackgroundTask? backgroundTask;
+
+  /// This build may ask HarmonyOS for a long-running task for a turn (debug and
+  /// device builds have the permission, store builds don't). The system can still
+  /// say no, or take it back.
+  final bool longTaskEligible;
   final String? abi;
   final String? bundledVersion;
   final String? installedVersion;
@@ -301,6 +307,7 @@ class RuntimeStatus {
   factory RuntimeStatus.fromMap(Map<Object?, Object?> map) => RuntimeStatus(
     phase: RuntimePhase.parse(map['phase']),
     backgroundTask: RuntimeBackgroundTask.fromMap(map['transientTask']),
+    longTaskEligible: map['longTaskEligible'] == true,
     abi: map['abi'] as String?,
     bundledVersion: map['bundledVersion'] as String?,
     installedVersion: map['installedVersion'] as String?,

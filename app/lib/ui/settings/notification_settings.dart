@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../l10n/l10n.dart';
+import '../../runtime/runtime_state.dart';
 import '../../state/android_features.dart';
 import '../../state/live_activity_state.dart';
 import '../../state/notify_state.dart';
@@ -99,9 +100,15 @@ class _NotificationSettingsPageState extends ConsumerState<NotificationSettingsP
   Future<void> _openSystem({String? channel}) async {
     final opened = await ref.read(notifyChannelProvider).openSettings(channel: channel);
     if (!mounted) return;
-    // On HarmonyOS a half-sheet over the app, closed by now: there may be no resume to read again on.
-    if (_ohos) ref.invalidate(notifySystemStatusProvider);
+    _readAgainOnHarmony();
     if (!opened) _settingsFailed();
+  }
+
+  /// On HarmonyOS a half-sheet over the app, closed by now: there may be no resume to read again on.
+  void _readAgainOnHarmony() {
+    if (!_ohos) return;
+    ref.invalidate(notifySystemStatusProvider);
+    ref.invalidate(liveSystemStatusProvider);
   }
 
   Widget? _systemNote(NotifySystemStatus system) {
@@ -112,6 +119,10 @@ class _NotificationSettingsPageState extends ConsumerState<NotificationSettingsP
     if (!system.enabled) {
       title = appL10n.pluginsSystemNotificationsOff;
       text = appL10n.pluginsBackgroundNoAlerts;
+    } else if (_ohos) {
+      // One system slot carries both kinds of alert: there is one switch to name.
+      title = appL10n.harmonyAlertsOffTitle;
+      text = appL10n.harmonyAlertsOffText;
     } else if (!system.attention) {
       title = appL10n.pluginsApprovalNotificationsOff;
       text = appL10n.pluginsBackgroundNoApprovalAlerts;
@@ -145,8 +156,8 @@ class _NotificationSettingsPageState extends ConsumerState<NotificationSettingsP
   Widget _liveNote() => PhoneNote(
     tone: NoteTone.warn,
     icon: AppIcons.notificationsOff,
-    title: appL10n.liveBlockedTitle,
-    text: appL10n.liveBlockedText,
+    title: _ohos ? appL10n.harmonyLiveBlockedTitle : appL10n.liveBlockedTitle,
+    text: _ohos ? appL10n.harmonyLiveBlockedText : appL10n.liveBlockedText,
     margin: const EdgeInsets.fromLTRB(16, 0, 16, 24),
     action: TextButton.icon(
       style: TextButton.styleFrom(
@@ -163,7 +174,9 @@ class _NotificationSettingsPageState extends ConsumerState<NotificationSettingsP
 
   Future<void> _openLive() async {
     final opened = await ref.read(notifyChannelProvider).openLiveSettings();
-    if (!opened && mounted) _settingsFailed();
+    if (!mounted) return;
+    _readAgainOnHarmony();
+    if (!opened) _settingsFailed();
   }
 
   @override
@@ -175,10 +188,16 @@ class _NotificationSettingsPageState extends ConsumerState<NotificationSettingsP
     // Unknown until the phone answers: no 「不支持」 flashing up meanwhile.
     final live = ref.watch(liveSystemStatusProvider).value;
     final ohos = ref.watch(operatingSystemProvider) == 'ohos';
-    final liveSupported = !ohos && (live?.supported ?? true);
+    // HarmonyOS has no live card in this build, only a plain progress notification.
+    // A read that failed says nothing about whether it has one: the switch stays as it is.
+    final liveSupported = ohos ? (live == null || live.readFailed || live.ordinaryFallback) : (live?.supported ?? true);
     final on = prefs.enabled;
     final note = on ? _systemNote(system) : null;
-    final liveBlocked = on && prefs.live && live != null && live.supported && !live.allowed;
+    final liveBlocked =
+        on &&
+        prefs.live &&
+        live != null &&
+        (ohos ? live.ordinaryFallback && !live.ordinaryAllowed : live.supported && !live.allowed);
 
     return AppPage.list(
       title: l10n.pluginsNotifications,
@@ -197,7 +216,11 @@ class _NotificationSettingsPageState extends ConsumerState<NotificationSettingsP
         ),
         SettingsSection(
           title: l10n.pluginsAlerts,
-          footer: Text(ohos ? l10n.harmonyAlertsRequirement : l10n.pluginsRemoteAlertsRequirement),
+          footer: Text(switch ((ohos, ref.watch(localRuntimeProvider.select((s) => s.status.longTaskEligible)))) {
+            (true, true) => l10n.harmonyAlertsRequirementLong,
+            (true, false) => l10n.harmonyAlertsRequirement,
+            (false, _) => l10n.pluginsRemoteAlertsRequirement,
+          }),
           children: [
             SettingsSwitchTile(
               spot: Spots.notifyDone,
@@ -227,13 +250,14 @@ class _NotificationSettingsPageState extends ConsumerState<NotificationSettingsP
         ),
         if (liveBlocked) _liveNote(),
         SettingsSection(
-          title: l10n.liveSettingsTitle,
-          footer: ohos ? null : Text(l10n.liveSettingsFooter),
+          title: ohos ? l10n.harmonyLiveTitle : l10n.liveSettingsTitle,
+          footer: Text(ohos ? l10n.harmonyLiveFooter : l10n.liveSettingsFooter),
           children: [
             SettingsSwitchTile(
               spot: Spots.notifyLive,
+              title: ohos ? l10n.harmonyLiveSwitch : null,
               subtitle: ohos
-                  ? l10n.harmonyLiveUnavailable
+                  ? (liveSupported ? l10n.harmonyLiveSubtitle : l10n.harmonyLiveUnavailable)
                   : liveSupported
                   ? l10n.liveSettingsSubtitle
                   : l10n.liveUnsupported,
@@ -244,11 +268,12 @@ class _NotificationSettingsPageState extends ConsumerState<NotificationSettingsP
         ),
         SettingsSection(
           title: l10n.pluginsSystemSettings,
-          footer: Text(l10n.pluginsLockScreenPrivacy),
+          // Android posts a public version for the lock screen; here the real text goes to the system.
+          footer: Text(ohos ? l10n.harmonyLockScreenPrivacy : l10n.pluginsLockScreenPrivacy),
           children: [
             SettingsTile(
               spot: Spots.notifySystem,
-              subtitle: l10n.pluginsEnableFloatingNotifications,
+              subtitle: ohos ? l10n.harmonyEnableBanner : l10n.pluginsEnableFloatingNotifications,
               onTap: () => unawaited(_openSystem()),
             ),
           ],

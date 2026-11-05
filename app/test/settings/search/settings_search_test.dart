@@ -220,7 +220,9 @@ void main() {
       expect(find.textContaining('问 AI'), findsNothing);
     });
 
-    testWidgets('on HarmonyOS: the launcher icon and launch screen are there, the picture shortcut isn\'t', (tester) async {
+    testWidgets('on HarmonyOS: the launcher icon and launch screen are there, the picture shortcut isn\'t', (
+      tester,
+    ) async {
       await _pumpSearch(tester, overrides: [..._overrides(), operatingSystemProvider.overrideWithValue('ohos')]);
       for (final q in [_zh.pluginsAppIcon, _zh.launchScreenTitle]) {
         await _type(tester, q);
@@ -233,10 +235,16 @@ void main() {
 
     testWidgets('on HarmonyOS: what only Android has says so, a typo stays a typo', (tester) async {
       await _pumpSearch(tester, overrides: [..._overrides(), operatingSystemProvider.overrideWithValue('ohos')]);
-      for (final q in ['悬浮窗', '手机操控', '无障碍', 'phone control', '电池优化']) {
+      for (final q in ['悬浮窗', '无障碍', '电池优化']) {
         await _type(tester, q);
         expect(find.text(_zh.harmonySearchUnavailable), findsOneWidget, reason: q);
         expect(find.text('没有找到相关设置'), findsNothing, reason: q);
+      }
+      // 手机操控 by its old name finds what stands in for it there.
+      for (final q in ['手机操控', 'phone control']) {
+        await _type(tester, q);
+        expect(find.text(_zh.harmonySearchUnavailable), findsNothing, reason: q);
+        expect(find.textContaining(_zh.systemActionsTitle, findRichText: true), findsWidgets, reason: q);
       }
       await _type(tester, '怎么把对话导出成 PDF');
       expect(find.text('没有找到相关设置'), findsOneWidget);
@@ -244,6 +252,13 @@ void main() {
       await _type(tester, '后台运行');
       expect(find.text('没有找到相关设置'), findsNothing);
       expect(find.text(_zh.harmonySearchUnavailable), findsNothing);
+    });
+
+    testWidgets('on HarmonyOS: the progress notification is listed by its own name', (tester) async {
+      await _pumpSearch(tester, overrides: [..._overrides(), operatingSystemProvider.overrideWithValue('ohos')]);
+      await _type(tester, '进度通知');
+      expect(find.text(_zh.harmonyLiveSwitch), findsOneWidget);
+      expect(find.text(_zh.liveSettingsSwitch), findsNothing);
     });
 
     testWidgets('on Android: those words find their pages, and it never says so', (tester) async {
@@ -279,7 +294,12 @@ void main() {
           home: Scaffold(
             body: Align(
               alignment: Alignment.bottomCenter,
-              child: IdentityBar(onHost: () {}, onFeatures: () {}, onSettings: () => tapped++, onSettingsHold: () => held++),
+              child: IdentityBar(
+                onHost: () {},
+                onFeatures: () {},
+                onSettings: () => tapped++,
+                onSettingsHold: () => held++,
+              ),
             ),
           ),
           brightness: Brightness.light,

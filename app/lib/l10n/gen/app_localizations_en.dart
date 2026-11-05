@@ -7332,21 +7332,21 @@ class L10nEn extends L10n {
       'Alerts need the app running: the system suspends it soon after it leaves the screen, and none go out then';
 
   @override
-  String get harmonyLiveUnavailable => 'Live activities aren\'t available in this version yet';
+  String get harmonyLiveUnavailable => 'This version has no progress notification';
 
   @override
   String get harmonySchedulesLocal =>
       'Tasks on this phone only fire while the app is running: they won\'t run on time while the system has it suspended';
 
   @override
-  String get harmonyPageUnavailable => 'This page isn\'t available on HarmonyOS yet';
+  String get harmonyPageUnavailable => 'HarmonyOS doesn\'t support this';
 
   @override
   String get harmonyNotificationSettingsFailed =>
       'Couldn’t open system settings. Turn on notifications in Settings → Notifications & status bar → DSH Go.';
 
   @override
-  String get harmonySearchUnavailable => 'This isn\'t available on HarmonyOS yet';
+  String get harmonySearchUnavailable => 'This isn\'t available on HarmonyOS';
 
   @override
   String get harmonyCredentialsSection => 'Keys';
@@ -7459,14 +7459,122 @@ class L10nEn extends L10n {
   String get harmonyKwEngineUninstall => 'uninstall,remove runtime,clear local data';
 
   @override
-  String get harmonyUpdateNoticeTitle => 'Download it from the release page';
+  String get harmonyUpdateNoticeTitle => 'See the release page for how to get it';
 
   @override
   String get harmonyUpdateNoticeText =>
-      'The HarmonyOS build can\'t update itself. The release page may not have a HarmonyOS package yet; if it does, download and install it by hand.';
+      'HarmonyOS can\'t update inside the app, and the release page may not have a HarmonyOS package yet.';
 
   @override
   String get harmonyUpdateNoticeNoPage => 'This version has no download page yet. Check again later.';
+
+  @override
+  String get harmonyLiveTitle => 'Progress notification';
+
+  @override
+  String get harmonyLiveSwitch => 'Show a progress notification';
+
+  @override
+  String get harmonyLiveSubtitle => 'Keeps one status notification while a conversation runs';
+
+  @override
+  String get harmonyLiveFooter => 'This is a plain notification. It stops updating once the system suspends the app.';
+
+  @override
+  String get harmonyLockScreenPrivacy =>
+      'Whether the lock screen shows chat content is up to the system: check its lock screen notification setting';
+
+  @override
+  String get harmonyLiveBlockedTitle => 'The system isn\'t allowing progress notifications';
+
+  @override
+  String get harmonyLiveBlockedText => 'Turn on notifications for DSH Go in system settings';
+
+  @override
+  String get harmonyAlertsOffTitle => 'Alert notifications are off';
+
+  @override
+  String get harmonyAlertsOffText => 'You won\'t be alerted when a reply finishes or needs your approval';
+
+  @override
+  String get harmonyEnableBanner => 'Banners are off by default. To see them, turn on banner notifications';
+
+  @override
+  String get harmonyKwNotifyLive => 'progress notification,notification progress,status bar progress';
+
+  @override
+  String get harmonyTerminalNoPty => 'This engine has no interactive terminal. Connect to an SSH host for one';
+
+  @override
+  String get harmonyTerminalSupportedHosts => 'Available on SSH hosts';
+
+  @override
+  String get harmonyPluginRemoveRefused => 'This engine can\'t remove plugins';
+
+  @override
+  String get harmonyPluginRefusedHint =>
+      'You can turn bundled plugins on or off, or connect a computer to manage plugins';
+
+  @override
+  String get harmonyVoiceLocalLine => 'On-device HarmonyOS uses the system\'s recognition. There\'s no voice model';
+
+  @override
+  String get harmonyPasswordStorageHelp => 'Saved only on this phone, encrypted by the system keystore';
+
+  @override
+  String get harmonyKeyStorageHelp =>
+      'Saved only on this phone, encrypted by the system keystore. Supports Ed25519, RSA and ECDSA.';
+
+  @override
+  String get harmonyUsageNotSent => 'Usage statistics aren\'t sent on HarmonyOS for now';
+
+  @override
+  String get harmonyVoiceSystemHint => 'Uses the system\'s speech recognition';
+
+  @override
+  String get harmonyVoiceSystemHintChinese => 'Uses the system\'s speech recognition, Chinese only';
+
+  @override
+  String get harmonyVoiceAutoHint => 'Uses the system\'s speech recognition';
+
+  @override
+  String get harmonyVoiceSystemUnavailable => 'The system\'s speech recognition isn\'t available';
+
+  @override
+  String get harmonyNetworkRelayOnly => 'This version goes through the relay, end-to-end encrypted the whole way.';
+
+  @override
+  String get harmonyNetworkFallbackRelayOnly => 'This version only uses the relay';
+
+  @override
+  String get harmonySetupStay => 'Stay on this page while it installs';
+
+  @override
+  String get harmonyLaunchEmbedded => 'Inside the app';
+
+  @override
+  String get harmonyLaunchNodeExited => 'The engine exited';
+
+  @override
+  String get harmonyKwAccent => 'color,colour,accent,palette';
+
+  @override
+  String get harmonyKwPets => 'pet,pets,companion,whale';
+
+  @override
+  String get harmonyBackgroundSubtitleLong =>
+      'A running conversation tries to keep going after the app leaves the screen';
+
+  @override
+  String get harmonyBackgroundLocalLong =>
+      'This version can ask for a long-running task: the conversation goes on in the background, with a notice in the notification bar. If the system says no or takes it back, it pauses with the app, and tries to pick up when you come back';
+
+  @override
+  String get harmonyEngineBackgroundHintLong => 'A running conversation tries to keep going after you leave the screen';
+
+  @override
+  String get harmonyAlertsRequirementLong =>
+      'Alerts need the app running: they go out while a conversation carries on in the background, and stop once the system suspends the app';
 
   @override
   String get hostDetailsConnectionType => 'Connection type';
@@ -17600,7 +17708,7 @@ class L10nEn extends L10n {
 
   @override
   String get searchKwSystemActions =>
-      'open app,open link,calendar,dialer,share,navigation,notification,clipboard,hand back';
+      'phone control,control phone,open app,open link,calendar,dialer,share,navigation,notification,clipboard,hand back';
 
   @override
   String get updateCheck => 'Check for updates';

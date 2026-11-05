@@ -184,6 +184,7 @@ class SettingSpot {
     this.opens,
     this.field,
     this.altTitle,
+    this.ohosTitle,
     this.androidOnly = false,
     this.ohosOnly = false,
   });
@@ -218,6 +219,12 @@ class SettingSpot {
   /// The title the row shows in its other state (安全模式: 以安全模式启动 /
   /// 恢复正常模式).
   final Label? altTitle;
+
+  /// In place of [title] where the row has another name on HarmonyOS.
+  final Label? ohosTitle;
+
+  /// The title on this OS, for what lists the spot away from its row.
+  Label titleOn({required bool androidFeatures}) => androidFeatures ? title : ohosTitle ?? title;
 
   /// Android's own, on a page that isn't ([SettingsIndex.androidOnly]).
   final bool androidOnly;
@@ -278,6 +285,17 @@ abstract final class SettingsIndex {
 
   /// Whether the `dshgo://open/<id>` link [id] leads to what only HarmonyOS has.
   static bool ohosOnlyLink(String id) => pageForLink(id)?.ohosOnly ?? false;
+
+  /// The link to follow on HarmonyOS for [id]: 系统操作 stands in for 手机操控
+  /// and its 解除限制, whose hard rules it hasn't got, and the permission page
+  /// for 确认方式, which follows it there. Anything else is itself.
+  static String ohosLink(String id) => _ohosLinks[id] ?? id;
+
+  static const _ohosLinks = {
+    'phone': 'system-actions',
+    'phone-unlocks': 'system-actions',
+    'phone-confirm': 'permission',
+  };
 
   /// Pages from the hub down to [id], both included.
   static List<SettingsPageId> chain(SettingsPageId id) {
@@ -456,6 +474,7 @@ final _pages = <SettingsPageMeta>[
     title: (l) => l.botsPets,
     group: _look,
     keywords: (l) => l.searchKwPets,
+    ohosKeywords: (l) => l.harmonyKwPets,
     freq: Freq.medium,
     links: const ['pets'],
   ),
@@ -769,6 +788,7 @@ abstract final class Spots {
     page: SettingsPageId.appearance,
     title: (l) => l.pluginsColors,
     keywords: (l) => l.searchKwAccent,
+    ohosKeywords: (l) => l.harmonyKwAccent,
   );
   static final tileStyle = SettingSpot(
     'tile-style',
@@ -962,7 +982,9 @@ abstract final class Spots {
     'notify-live',
     page: SettingsPageId.notifications,
     title: (l) => l.liveSettingsSwitch,
+    ohosTitle: (l) => l.harmonyLiveSwitch,
     keywords: (l) => l.searchKwNotifyLive,
+    ohosKeywords: (l) => l.harmonyKwNotifyLive,
   );
   static final notifySystem = SettingSpot(
     'notify-system',

@@ -46,7 +46,10 @@ void main() {
 
   test('old Android status retains its fields and has no ordinary fallback', () {
     final status = LiveSystemStatus.fromMap({
-      'supported': true, 'allowed': true, 'settings': true, 'xiaomiFocus': true,
+      'supported': true,
+      'allowed': true,
+      'settings': true,
+      'xiaomiFocus': true,
     });
     expect(status, const LiveSystemStatus(supported: true, allowed: true, settings: true, xiaomiFocus: true));
     expect(status.native, isTrue);
@@ -57,8 +60,12 @@ void main() {
 
   test('ordinary capability and permission do not imply system live activity or display', () {
     final status = LiveSystemStatus.fromMap({
-      'supported': false, 'allowed': false, 'settings': true,
-      'ordinaryFallback': true, 'ordinaryAllowed': true, 'backend': 'ordinary',
+      'supported': false,
+      'allowed': false,
+      'settings': true,
+      'ordinaryFallback': true,
+      'ordinaryAllowed': true,
+      'backend': 'ordinary',
     });
     expect(status.supported, isFalse);
     expect(status.allowed, isFalse);
@@ -67,7 +74,9 @@ void main() {
     expect(status.ordinaryAllowed, isTrue);
     expect(status.backend, 'ordinary');
     final denied = LiveSystemStatus.fromMap({
-      'ordinaryFallback': true, 'ordinaryAllowed': false, 'backend': 'ordinary',
+      'ordinaryFallback': true,
+      'ordinaryAllowed': false,
+      'backend': 'ordinary',
     });
     expect(denied.ordinaryFallback, isTrue);
     expect(denied.ordinaryAllowed, isFalse);
@@ -75,9 +84,10 @@ void main() {
   });
 
   test('unknown ordinary values default safely and new fields participate in equality', () {
-    expect(LiveSystemStatus.fromMap({
-      'ordinaryFallback': 'true', 'ordinaryAllowed': 1, 'backend': 'unknown',
-    }), const LiveSystemStatus());
+    expect(
+      LiveSystemStatus.fromMap({'ordinaryFallback': 'true', 'ordinaryAllowed': 1, 'backend': 'unknown'}),
+      const LiveSystemStatus(),
+    );
     expect(LiveSystemStatus.fromMap({'backend': 1}).backend, 'none');
     const values = [
       LiveSystemStatus(),
@@ -98,8 +108,13 @@ void main() {
     messenger.setMockMethodCallHandler(methods, (call) async {
       calls.add(call);
       if (call.method == 'liveStatus') {
-        return {'supported': false, 'allowed': false, 'ordinaryFallback': true,
-          'ordinaryAllowed': true, 'backend': 'ordinary'};
+        return {
+          'supported': false,
+          'allowed': false,
+          'ordinaryFallback': true,
+          'ordinaryAllowed': true,
+          'backend': 'ordinary',
+        };
       }
       return null;
     });
@@ -109,19 +124,50 @@ void main() {
     await channel.live(const LivePush(enabled: false));
     expect(calls.map((c) => c.method), ['live', 'live']);
     expect(calls[0].arguments, {
-      'enabled': true, 'packId': 'pet', 'activity': {
-        'kind': 'waiting', 'title': 'Private conversation', 'text': 'Private request',
-        'chip': '待确认', 'publicText': 'DSH 等你确认', 'mood': 'notification',
-        'host': '{"kind":"ssh","id":"lab"}', 'sessionId': 'root', 'eventId': 'e1',
+      'enabled': true,
+      'packId': 'pet',
+      'activity': {
+        'kind': 'waiting',
+        'title': 'Private conversation',
+        'text': 'Private request',
+        'chip': '待确认',
+        'publicText': 'DSH 等你确认',
+        'mood': 'notification',
+        'host': '{"kind":"ssh","id":"lab"}',
+        'sessionId': 'root',
+        'eventId': 'e1',
       },
     });
     expect((calls[0].arguments as Map).keys.toList(), ['enabled', 'packId', 'activity']);
-    expect(((calls[0].arguments as Map)['activity'] as Map).keys.toList(),
-      ['kind', 'title', 'text', 'chip', 'publicText', 'mood', 'host', 'sessionId', 'eventId']);
+    expect(((calls[0].arguments as Map)['activity'] as Map).keys.toList(), [
+      'kind',
+      'title',
+      'text',
+      'chip',
+      'publicText',
+      'mood',
+      'host',
+      'sessionId',
+      'eventId',
+    ]);
     expect(calls[1].arguments, {'enabled': false});
     final status = await channel.liveStatus();
     expect(status, const LiveSystemStatus(ordinaryFallback: true, ordinaryAllowed: true, backend: 'ordinary'));
     expect(calls.last.arguments, isNull);
+  });
+
+  test('a native liveStatus that throws is a failed read, not a phone without the feature', () async {
+    const methods = MethodChannel('test/live-read-failed');
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockMethodCallHandler(methods, (call) async {
+      throw PlatformException(code: 'ohos_notify_failed');
+    });
+    addTearDown(
+      () => TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockMethodCallHandler(methods, null),
+    );
+    final status = await NotifyChannel(methods: methods).liveStatus();
+    expect(status.readFailed, isTrue);
+    expect(status.native, isTrue);
+    expect(status, isNot(const LiveSystemStatus()));
   });
 
   test('missing native liveStatus remains unavailable with no ordinary backend', () async {
@@ -148,9 +194,7 @@ void main() {
       } finally {
         container.dispose();
       }
-      expect(channel.pushes, [
-        _push, const LivePush(enabled: true), if (os == 'ohos') const LivePush(enabled: false),
-      ]);
+      expect(channel.pushes, [_push, const LivePush(enabled: true), if (os == 'ohos') const LivePush(enabled: false)]);
     });
   }
 

@@ -70,15 +70,19 @@ class VoiceInputController extends ChangeNotifier with WidgetsBindingObserver {
     required this.client,
     Future<VoiceMode> Function()? mode,
     bool Function()? modelReady,
+    bool Function()? harmony,
     this.onRecognized,
     this.requiredProviderId,
     bool observeLifecycle = true,
   }) : _mode = mode ?? _automatic,
        _modelReady = modelReady ?? _noModel,
+       _harmony = harmony ?? _noModel,
        _observing = observeLifecycle {
     if (_observing) WidgetsBinding.instance.addObserver(this);
     unawaited(refresh());
   }
+
+  String get _noRecognizer => _harmony() ? appL10n.harmonyVoiceSystemUnavailable : appL10n.voiceConfigureEither;
 
   static Future<VoiceMode> _automatic() async => VoiceMode.auto;
   static bool _noModel() => false;
@@ -93,6 +97,10 @@ class VoiceInputController extends ChangeNotifier with WidgetsBindingObserver {
   /// The on-device voice model is ready for this host (voice settings):
   /// automatic mode then records for it instead of trying the phone service.
   final bool Function() _modelReady;
+
+  /// HarmonyOS: the recogniser is the system's own, so there is none to choose,
+  /// and its engine has no model to download.
+  final bool Function() _harmony;
   final bool _observing;
   void Function(VoiceMessage message)? onMessage;
 
@@ -273,7 +281,7 @@ class VoiceInputController extends ChangeNotifier with WidgetsBindingObserver {
         _runMode == VoiceMode.system || (_runMode == VoiceMode.auto && _caps.recognizer && !_caps.systemUnreliable);
     if (system && !_caps.recognizer) {
       _finish();
-      _say(VoiceMessage(appL10n.voiceChooseSystem, change: true));
+      _say(VoiceMessage(_harmony() ? appL10n.harmonyVoiceSystemUnavailable : appL10n.voiceChooseSystem, change: true));
       return;
     }
     final value = input.value;
@@ -297,12 +305,7 @@ class VoiceInputController extends ChangeNotifier with WidgetsBindingObserver {
       if (!_current(operation)) return;
       if (target == null) {
         _finish();
-        _say(
-          VoiceMessage(
-            _runMode == VoiceMode.engine ? appL10n.voiceConfigureEngine : appL10n.voiceConfigureEither,
-            change: true,
-          ),
-        );
+        _say(VoiceMessage(_runMode == VoiceMode.engine ? appL10n.voiceConfigureEngine : _noRecognizer, change: true));
         return;
       }
       await _startRecorder(operation, target);
@@ -385,7 +388,7 @@ class VoiceInputController extends ChangeNotifier with WidgetsBindingObserver {
     if (!_current(operation)) return;
     if (target == null) {
       _finish();
-      _say(VoiceMessage(appL10n.voiceConfigureEither, change: true));
+      _say(VoiceMessage(_noRecognizer, change: true));
       return;
     }
     await _startRecorder(operation, target, fallback: true);

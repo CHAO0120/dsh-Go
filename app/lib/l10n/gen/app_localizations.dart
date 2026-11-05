@@ -12719,7 +12719,7 @@ abstract class L10n {
   /// No description provided for @harmonyLiveUnavailable.
   ///
   /// In zh, this message translates to:
-  /// **'这个版本暂时没有实时活动'**
+  /// **'这个版本没有进度通知'**
   String get harmonyLiveUnavailable;
 
   /// No description provided for @harmonySchedulesLocal.
@@ -12731,7 +12731,7 @@ abstract class L10n {
   /// No description provided for @harmonyPageUnavailable.
   ///
   /// In zh, this message translates to:
-  /// **'鸿蒙版暂时没有这个页面'**
+  /// **'鸿蒙不支持这项功能'**
   String get harmonyPageUnavailable;
 
   /// No description provided for @harmonyNotificationSettingsFailed.
@@ -12743,7 +12743,7 @@ abstract class L10n {
   /// No description provided for @harmonySearchUnavailable.
   ///
   /// In zh, this message translates to:
-  /// **'鸿蒙版暂时没有这项功能'**
+  /// **'鸿蒙版没有这项功能'**
   String get harmonySearchUnavailable;
 
   /// No description provided for @harmonyCredentialsSection.
@@ -12947,13 +12947,13 @@ abstract class L10n {
   /// No description provided for @harmonyUpdateNoticeTitle.
   ///
   /// In zh, this message translates to:
-  /// **'到发布页下载新版'**
+  /// **'到发布页看获取方式'**
   String get harmonyUpdateNoticeTitle;
 
   /// No description provided for @harmonyUpdateNoticeText.
   ///
   /// In zh, this message translates to:
-  /// **'鸿蒙版不能在应用内更新。发布页可能还没有鸿蒙安装包，有的话下载后手动安装。'**
+  /// **'鸿蒙版不能在应用内更新。发布页可能还没有鸿蒙安装包。'**
   String get harmonyUpdateNoticeText;
 
   /// No description provided for @harmonyUpdateNoticeNoPage.
@@ -12961,6 +12961,210 @@ abstract class L10n {
   /// In zh, this message translates to:
   /// **'这个版本没有给出下载页，过些时候再看看。'**
   String get harmonyUpdateNoticeNoPage;
+
+  /// No description provided for @harmonyLiveTitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'进度通知'**
+  String get harmonyLiveTitle;
+
+  /// No description provided for @harmonyLiveSwitch.
+  ///
+  /// In zh, this message translates to:
+  /// **'显示进度通知'**
+  String get harmonyLiveSwitch;
+
+  /// No description provided for @harmonyLiveSubtitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'对话进行中，在通知栏显示一条状态'**
+  String get harmonyLiveSubtitle;
+
+  /// No description provided for @harmonyLiveFooter.
+  ///
+  /// In zh, this message translates to:
+  /// **'这是普通通知，应用被系统挂起后不再更新。'**
+  String get harmonyLiveFooter;
+
+  /// No description provided for @harmonyLockScreenPrivacy.
+  ///
+  /// In zh, this message translates to:
+  /// **'锁屏是否显示对话内容由系统决定：设置 › 通知和状态栏 › 锁屏通知'**
+  String get harmonyLockScreenPrivacy;
+
+  /// No description provided for @harmonyLiveBlockedTitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'系统没有允许进度通知'**
+  String get harmonyLiveBlockedTitle;
+
+  /// No description provided for @harmonyLiveBlockedText.
+  ///
+  /// In zh, this message translates to:
+  /// **'在系统设置里为 DSH Go 打开通知'**
+  String get harmonyLiveBlockedText;
+
+  /// No description provided for @harmonyAlertsOffTitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'提醒通知已关闭'**
+  String get harmonyAlertsOffTitle;
+
+  /// No description provided for @harmonyAlertsOffText.
+  ///
+  /// In zh, this message translates to:
+  /// **'回复跑完和等你确认都不会提醒'**
+  String get harmonyAlertsOffText;
+
+  /// No description provided for @harmonyEnableBanner.
+  ///
+  /// In zh, this message translates to:
+  /// **'横幅默认关闭，要弹出来请开启「横幅通知」'**
+  String get harmonyEnableBanner;
+
+  /// No description provided for @harmonyKwNotifyLive.
+  ///
+  /// In zh, this message translates to:
+  /// **'进度通知,通知栏进度,状态栏进度'**
+  String get harmonyKwNotifyLive;
+
+  /// No description provided for @harmonyTerminalNoPty.
+  ///
+  /// In zh, this message translates to:
+  /// **'这个引擎没有交互终端，可连 SSH 主机'**
+  String get harmonyTerminalNoPty;
+
+  /// No description provided for @harmonyTerminalSupportedHosts.
+  ///
+  /// In zh, this message translates to:
+  /// **'在 SSH 主机上可用'**
+  String get harmonyTerminalSupportedHosts;
+
+  /// No description provided for @harmonyPluginRemoveRefused.
+  ///
+  /// In zh, this message translates to:
+  /// **'这个引擎不能卸载插件'**
+  String get harmonyPluginRemoveRefused;
+
+  /// No description provided for @harmonyPluginRefusedHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'可以开关随包插件，或连接电脑管理插件'**
+  String get harmonyPluginRefusedHint;
+
+  /// No description provided for @harmonyVoiceLocalLine.
+  ///
+  /// In zh, this message translates to:
+  /// **'鸿蒙本机用系统识别，没有语音模型'**
+  String get harmonyVoiceLocalLine;
+
+  /// No description provided for @harmonyPasswordStorageHelp.
+  ///
+  /// In zh, this message translates to:
+  /// **'只保存在这台手机上，由系统密钥库加密'**
+  String get harmonyPasswordStorageHelp;
+
+  /// No description provided for @harmonyKeyStorageHelp.
+  ///
+  /// In zh, this message translates to:
+  /// **'只保存在这台手机上，由系统密钥库加密。支持 Ed25519、RSA、ECDSA'**
+  String get harmonyKeyStorageHelp;
+
+  /// No description provided for @harmonyUsageNotSent.
+  ///
+  /// In zh, this message translates to:
+  /// **'鸿蒙版暂不发送使用统计'**
+  String get harmonyUsageNotSent;
+
+  /// No description provided for @harmonyVoiceSystemHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'使用系统的语音识别'**
+  String get harmonyVoiceSystemHint;
+
+  /// No description provided for @harmonyVoiceSystemHintChinese.
+  ///
+  /// In zh, this message translates to:
+  /// **'使用系统的语音识别，只认中文'**
+  String get harmonyVoiceSystemHintChinese;
+
+  /// No description provided for @harmonyVoiceAutoHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'用系统的语音识别'**
+  String get harmonyVoiceAutoHint;
+
+  /// No description provided for @harmonyVoiceSystemUnavailable.
+  ///
+  /// In zh, this message translates to:
+  /// **'系统语音识别不可用'**
+  String get harmonyVoiceSystemUnavailable;
+
+  /// No description provided for @harmonyNetworkRelayOnly.
+  ///
+  /// In zh, this message translates to:
+  /// **'当前版本走 Relay 中继，全程端到端加密。'**
+  String get harmonyNetworkRelayOnly;
+
+  /// No description provided for @harmonyNetworkFallbackRelayOnly.
+  ///
+  /// In zh, this message translates to:
+  /// **'当前版本只走 Relay 中继'**
+  String get harmonyNetworkFallbackRelayOnly;
+
+  /// No description provided for @harmonySetupStay.
+  ///
+  /// In zh, this message translates to:
+  /// **'安装时请留在这个页面'**
+  String get harmonySetupStay;
+
+  /// No description provided for @harmonyLaunchEmbedded.
+  ///
+  /// In zh, this message translates to:
+  /// **'应用内启动'**
+  String get harmonyLaunchEmbedded;
+
+  /// No description provided for @harmonyLaunchNodeExited.
+  ///
+  /// In zh, this message translates to:
+  /// **'引擎已退出'**
+  String get harmonyLaunchNodeExited;
+
+  /// No description provided for @harmonyKwAccent.
+  ///
+  /// In zh, this message translates to:
+  /// **'颜色,主题色,强调色'**
+  String get harmonyKwAccent;
+
+  /// No description provided for @harmonyKwPets.
+  ///
+  /// In zh, this message translates to:
+  /// **'宠物,小鲸,桌宠,鲸鱼'**
+  String get harmonyKwPets;
+
+  /// No description provided for @harmonyBackgroundSubtitleLong.
+  ///
+  /// In zh, this message translates to:
+  /// **'应用离开屏幕后，正在跑的对话会尽量继续'**
+  String get harmonyBackgroundSubtitleLong;
+
+  /// No description provided for @harmonyBackgroundLocalLong.
+  ///
+  /// In zh, this message translates to:
+  /// **'这个版本可以申请长时任务：对话留在后台继续跑，通知栏会有一条提示。系统不批准或中途收回时，对话跟着应用暂停，回到应用后会尽量接着跑'**
+  String get harmonyBackgroundLocalLong;
+
+  /// No description provided for @harmonyEngineBackgroundHintLong.
+  ///
+  /// In zh, this message translates to:
+  /// **'离开屏幕后，正在跑的对话会尽量继续'**
+  String get harmonyEngineBackgroundHintLong;
+
+  /// No description provided for @harmonyAlertsRequirementLong.
+  ///
+  /// In zh, this message translates to:
+  /// **'提醒要应用在运行才发得出：对话在后台继续时会提醒，应用被系统挂起后就没有了'**
+  String get harmonyAlertsRequirementLong;
 
   /// No description provided for @hostDetailsConnectionType.
   ///
@@ -30569,7 +30773,7 @@ abstract class L10n {
   /// No description provided for @searchKwSystemActions.
   ///
   /// In zh, this message translates to:
-  /// **'打开应用,打开链接,日历,拨号,分享,导航,发通知,写剪贴板,交还'**
+  /// **'手机操控,操作手机,代操作,打开应用,打开链接,日历,拨号,分享,导航,发通知,写剪贴板,交还'**
   String get searchKwSystemActions;
 
   /// No description provided for @updateCheck.

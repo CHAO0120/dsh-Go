@@ -754,8 +754,9 @@ Future<void> runComposerCommand(BuildContext context, WidgetRef ref, String line
 }
 
 /// An app page by its ui.json / 全部功能 id, `new-chat` or `settings`.
-Future<void> openNativePage(BuildContext context, WidgetRef ref, String page, {String? sessionId}) async {
-  // On HarmonyOS, Android's own pages aren't there: say so.
+Future<void> openNativePage(BuildContext context, WidgetRef ref, String id, {String? sessionId}) async {
+  // On HarmonyOS, Android's own pages lead to its form of them; with none, say so.
+  final page = ref.read(androidSystemFeaturesProvider) ? id : SettingsIndex.ohosLink(id);
   if (!ref.read(androidSystemFeaturesProvider) && SettingsIndex.androidOnlyLink(page)) {
     _toast(context, context.l10n.harmonyPageUnavailable);
     return;

@@ -6938,19 +6938,19 @@ class L10nZh extends L10n {
   String get harmonyAlertsRequirement => '提醒要应用在运行才发得出：离开屏幕后系统很快会挂起应用，挂起期间没有提醒';
 
   @override
-  String get harmonyLiveUnavailable => '这个版本暂时没有实时活动';
+  String get harmonyLiveUnavailable => '这个版本没有进度通知';
 
   @override
   String get harmonySchedulesLocal => '本机的任务只在应用运行时触发：应用被系统挂起时，到点不会运行';
 
   @override
-  String get harmonyPageUnavailable => '鸿蒙版暂时没有这个页面';
+  String get harmonyPageUnavailable => '鸿蒙不支持这项功能';
 
   @override
   String get harmonyNotificationSettingsFailed => '没能打开系统设置。到「设置 → 通知和状态栏 → DSH Go」里开启';
 
   @override
-  String get harmonySearchUnavailable => '鸿蒙版暂时没有这项功能';
+  String get harmonySearchUnavailable => '鸿蒙版没有这项功能';
 
   @override
   String get harmonyCredentialsSection => '密钥';
@@ -7053,13 +7053,115 @@ class L10nZh extends L10n {
   String get harmonyKwEngineUninstall => '卸载,删除运行环境,清理本机数据';
 
   @override
-  String get harmonyUpdateNoticeTitle => '到发布页下载新版';
+  String get harmonyUpdateNoticeTitle => '到发布页看获取方式';
 
   @override
-  String get harmonyUpdateNoticeText => '鸿蒙版不能在应用内更新。发布页可能还没有鸿蒙安装包，有的话下载后手动安装。';
+  String get harmonyUpdateNoticeText => '鸿蒙版不能在应用内更新。发布页可能还没有鸿蒙安装包。';
 
   @override
   String get harmonyUpdateNoticeNoPage => '这个版本没有给出下载页，过些时候再看看。';
+
+  @override
+  String get harmonyLiveTitle => '进度通知';
+
+  @override
+  String get harmonyLiveSwitch => '显示进度通知';
+
+  @override
+  String get harmonyLiveSubtitle => '对话进行中，在通知栏显示一条状态';
+
+  @override
+  String get harmonyLiveFooter => '这是普通通知，应用被系统挂起后不再更新。';
+
+  @override
+  String get harmonyLockScreenPrivacy => '锁屏是否显示对话内容由系统决定：设置 › 通知和状态栏 › 锁屏通知';
+
+  @override
+  String get harmonyLiveBlockedTitle => '系统没有允许进度通知';
+
+  @override
+  String get harmonyLiveBlockedText => '在系统设置里为 DSH Go 打开通知';
+
+  @override
+  String get harmonyAlertsOffTitle => '提醒通知已关闭';
+
+  @override
+  String get harmonyAlertsOffText => '回复跑完和等你确认都不会提醒';
+
+  @override
+  String get harmonyEnableBanner => '横幅默认关闭，要弹出来请开启「横幅通知」';
+
+  @override
+  String get harmonyKwNotifyLive => '进度通知,通知栏进度,状态栏进度';
+
+  @override
+  String get harmonyTerminalNoPty => '这个引擎没有交互终端，可连 SSH 主机';
+
+  @override
+  String get harmonyTerminalSupportedHosts => '在 SSH 主机上可用';
+
+  @override
+  String get harmonyPluginRemoveRefused => '这个引擎不能卸载插件';
+
+  @override
+  String get harmonyPluginRefusedHint => '可以开关随包插件，或连接电脑管理插件';
+
+  @override
+  String get harmonyVoiceLocalLine => '鸿蒙本机用系统识别，没有语音模型';
+
+  @override
+  String get harmonyPasswordStorageHelp => '只保存在这台手机上，由系统密钥库加密';
+
+  @override
+  String get harmonyKeyStorageHelp => '只保存在这台手机上，由系统密钥库加密。支持 Ed25519、RSA、ECDSA';
+
+  @override
+  String get harmonyUsageNotSent => '鸿蒙版暂不发送使用统计';
+
+  @override
+  String get harmonyVoiceSystemHint => '使用系统的语音识别';
+
+  @override
+  String get harmonyVoiceSystemHintChinese => '使用系统的语音识别，只认中文';
+
+  @override
+  String get harmonyVoiceAutoHint => '用系统的语音识别';
+
+  @override
+  String get harmonyVoiceSystemUnavailable => '系统语音识别不可用';
+
+  @override
+  String get harmonyNetworkRelayOnly => '当前版本走 Relay 中继，全程端到端加密。';
+
+  @override
+  String get harmonyNetworkFallbackRelayOnly => '当前版本只走 Relay 中继';
+
+  @override
+  String get harmonySetupStay => '安装时请留在这个页面';
+
+  @override
+  String get harmonyLaunchEmbedded => '应用内启动';
+
+  @override
+  String get harmonyLaunchNodeExited => '引擎已退出';
+
+  @override
+  String get harmonyKwAccent => '颜色,主题色,强调色';
+
+  @override
+  String get harmonyKwPets => '宠物,小鲸,桌宠,鲸鱼';
+
+  @override
+  String get harmonyBackgroundSubtitleLong => '应用离开屏幕后，正在跑的对话会尽量继续';
+
+  @override
+  String get harmonyBackgroundLocalLong => '这个版本可以申请长时任务：对话留在后台继续跑，通知栏会有一条提示。系统不批准或中途收回时，对话跟着应用暂停，回到应用后会尽量接着跑';
+
+  @override
+  String get harmonyEngineBackgroundHintLong => '离开屏幕后，正在跑的对话会尽量继续';
+
+  @override
+  String get harmonyAlertsRequirementLong => '提醒要应用在运行才发得出：对话在后台继续时会提醒，应用被系统挂起后就没有了';
 
   @override
   String get hostDetailsConnectionType => '连接方式';
@@ -16675,7 +16777,7 @@ class L10nZh extends L10n {
   String get catalogSystemActionsSummary => '打开应用和系统页面';
 
   @override
-  String get searchKwSystemActions => '打开应用,打开链接,日历,拨号,分享,导航,发通知,写剪贴板,交还';
+  String get searchKwSystemActions => '手机操控,操作手机,代操作,打开应用,打开链接,日历,拨号,分享,导航,发通知,写剪贴板,交还';
 
   @override
   String get updateCheck => '检查更新';

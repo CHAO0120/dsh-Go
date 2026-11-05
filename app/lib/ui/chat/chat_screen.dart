@@ -24,6 +24,7 @@ import '../../state/commands_state.dart';
 import '../../state/compose_inbox.dart';
 import '../../state/composer_insert.dart';
 import '../../state/composer_quote.dart';
+import '../../state/android_features.dart';
 import '../../state/connection_state.dart';
 import '../../state/draft_store.dart';
 import '../../state/drawer_view_state.dart';
@@ -252,7 +253,11 @@ class _ChatScreenState extends ConsumerState<ChatScreen> with WidgetsBindingObse
     _voice = VoiceInputController(
       input: _input,
       bridge: ref.read(voiceBridgeProvider),
-      mode: () => ref.read(voiceSettingsProvider.notifier).ready(),
+      mode: () async {
+        final mode = await ref.read(voiceSettingsProvider.notifier).ready();
+        return mounted && ref.read(harmonyLocalVoiceProvider) ? voiceModeOnHarmonyLocal(mode) : mode;
+      },
+      harmony: () => ref.read(operatingSystemProvider) == 'ohos',
       // The voice model lives in the on-device engine: it counts for that host only.
       modelReady: () =>
           mounted &&

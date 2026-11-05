@@ -71,7 +71,7 @@ export class OhosLifecycleTransport {
   }
   cancel() { lifecycleControl.cancels++; }
 }
-export function backgroundComputePermission() { lifecycleControl.queries++; return 'denied'; }
+export function backgroundComputePermission() { lifecycleControl.queries++; return lifecycleControl.permission ?? 'denied'; }
 export class FlutterAbility {
   superCalls = [];
   onForeground() { this.superCalls.push('foreground'); }

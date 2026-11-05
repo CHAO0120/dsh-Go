@@ -241,8 +241,53 @@ void main() {
       expect(ids('日历', android: true), isNot(contains('page:systemActions')));
     });
 
+    test('on HarmonyOS: the words for what isn\'t there don\'t lead to pages without it', () {
+      for (final q in ['取色', 'wallpaper']) {
+        expect(ids(q, android: false), isNot(contains('accent')), reason: q);
+        expect(ids(q, android: true), contains('accent'), reason: q);
+      }
+      for (final q in ['悬浮', 'overlay']) {
+        expect(ids(q, android: false), isNot(contains('page:pets')), reason: q);
+        expect(ids(q, android: true), contains('page:pets'), reason: q);
+      }
+      expect(ids('主题色', android: false), contains('accent'));
+      expect(ids('桌宠', android: false), contains('page:pets'));
+    });
+
+    test('what isn\'t there isn\'t promised for later', () {
+      for (final l in [_zh, _en]) {
+        for (final text in [l.harmonyPageUnavailable, l.harmonySearchUnavailable]) {
+          expect(text, isNot(contains('暂时')), reason: text);
+          expect(text, isNot(contains('yet')), reason: text);
+        }
+      }
+    });
+
+    test('the progress notification goes by its own name on HarmonyOS, the live activity on Android', () {
+      for (final q in ['进度通知', '通知栏进度', '显示进度通知', 'progress notification']) {
+        expect(ids(q, android: false), contains('notify-live'), reason: q);
+        expect(ids(q, android: true), isNot(contains('notify-live')), reason: q);
+      }
+      for (final q in ['实时活动', '灵动岛', 'live activity']) {
+        expect(ids(q, android: true), contains('notify-live'), reason: q);
+        expect(ids(q, android: false), isNot(contains('notify-live')), reason: q);
+      }
+    });
+
     test('on HarmonyOS: 系统操作 by its name and what it does, in both languages', () {
-      for (final q in ['系统操作', 'system actions', '拨号', 'dialer', '发通知', '写剪贴板', 'clipboard']) {
+      for (final q in [
+        '系统操作',
+        'system actions',
+        '拨号',
+        'dialer',
+        '发通知',
+        '写剪贴板',
+        'clipboard',
+        '手机操控',
+        '操作手机',
+        '代操作',
+        'phone control',
+      ]) {
         expect(ids(q, android: false), contains('page:systemActions'), reason: q);
       }
       // Its words don't promise what it can't do.
@@ -280,11 +325,15 @@ void main() {
       expect(find.text(_zh.searchNoResults), findsNothing);
     });
 
-    testWidgets('on HarmonyOS: 后台运行 is there, and 手机操控 says it isn\'t', (tester) async {
+    testWidgets('on HarmonyOS: 后台运行 is there, 手机操控 finds 系统操作, and 无障碍 says it isn\'t', (tester) async {
       await _pump(tester, const SettingsSearchPage(), android: false);
       expect(find.text(_zh.searchSuggestBackground), findsOneWidget);
       expect(find.text(_zh.searchSuggestDark), findsOneWidget);
       await tester.enterText(find.byType(TextField), '手机操控');
+      await tester.pumpAndSettle();
+      expect(find.textContaining(_zh.systemActionsTitle, findRichText: true), findsWidgets);
+      expect(find.text(_zh.harmonySearchUnavailable), findsNothing);
+      await tester.enterText(find.byType(TextField), '无障碍');
       await tester.pumpAndSettle();
       expect(find.text(_zh.harmonySearchUnavailable), findsOneWidget);
       expect(find.text(_zh.searchNoResults), findsNothing);
@@ -305,10 +354,12 @@ void main() {
       expect(resolve('system-actions', android: true), isNull, reason: 'HarmonyOS\'s own');
     });
 
-    test('on HarmonyOS they are unknown; other pages still open', () {
-      for (final id in ['phone', 'phone-unlocks', 'phone-confirm', 'phone-files']) {
-        expect(resolve(id, android: false), isNull, reason: id);
+    test('on HarmonyOS 系统操作 stands in for 手机操控, and the rest say they aren\'t there', () {
+      for (final id in ['phone', 'phone-unlocks']) {
+        expect(resolve(id, android: false), isA<SystemActionsPage>(), reason: id);
       }
+      expect(resolve('phone-confirm', android: false), isA<PermissionPage>());
+      expect(resolve('phone-files', android: false), isNull);
       expect(resolve('system-actions', android: false), isA<SystemActionsPage>());
       expect(resolve('engine', android: false), isA<EngineScreen>());
       expect(resolve('background', android: false), isA<BackgroundGuidePage>());
@@ -316,14 +367,14 @@ void main() {
     });
 
     for (final android in [true, false]) {
-      testWidgets('a plugin\'s `open phone` with android=$android', (tester) async {
+      Future<void> open(WidgetTester tester, String page) async {
         usePhoneSurface(tester);
         await tester.pumpWidget(
           goldenApp(
             home: Scaffold(
               body: Consumer(
                 builder: (context, ref, _) =>
-                    TextButton(onPressed: () => openNativePage(context, ref, 'phone'), child: const Text('open')),
+                    TextButton(onPressed: () => openNativePage(context, ref, page), child: const Text('open')),
               ),
             ),
             brightness: Brightness.light,
@@ -333,8 +384,23 @@ void main() {
         await tester.tap(find.text('open'));
         await tester.pump();
         await tester.pump(const Duration(milliseconds: 500));
+      }
+
+      testWidgets('a plugin\'s `open phone` with android=$android', (tester) async {
+        await open(tester, 'phone');
         expect(find.byType(PhoneControlScreen), android ? findsOneWidget : findsNothing);
+        expect(find.byType(SystemActionsPage), android ? findsNothing : findsOneWidget);
+        expect(find.text(_zh.harmonyPageUnavailable), findsNothing);
+      });
+
+      testWidgets('a plugin\'s `open phone-files` with android=$android', (tester) async {
+        await open(tester, 'phone-files');
         expect(find.text(_zh.harmonyPageUnavailable), android ? findsNothing : findsOneWidget);
+      });
+
+      testWidgets('a plugin\'s `open system-actions` with android=$android', (tester) async {
+        await open(tester, 'system-actions');
+        expect(find.byType(SystemActionsPage), android ? findsNothing : findsOneWidget);
       });
     }
   });
@@ -472,6 +538,25 @@ void main() {
     testWidgets('on Android: 后台保活 under 更多', (tester) async {
       await _pump(tester, const EngineScreen(), android: true, overrides: bridge());
       expect(find.byKey(const SpotKey('page:background')), findsOneWidget);
+    });
+
+    testWidgets('on HarmonyOS, a build that may ask for a long task: its hint says so', (tester) async {
+      tester.view.devicePixelRatio = 2;
+      tester.view.physicalSize = const Size(390 * 2, 3600 * 2);
+      addTearDown(tester.view.reset);
+      await tester.pumpWidget(
+        goldenApp(
+          home: const EngineScreen(),
+          brightness: Brightness.light,
+          overrides: [
+            ..._on(android: false, status: const RuntimeStatus(phase: RuntimePhase.running, longTaskEligible: true)),
+            ...bridge(),
+          ],
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text(_zh.harmonyEngineBackgroundHintLong), findsOneWidget);
+      expect(find.text(_zh.harmonyEngineBackgroundHint), findsNothing);
     });
 
     testWidgets('on HarmonyOS: 后台运行 under 更多, and what it says is true there', (tester) async {
