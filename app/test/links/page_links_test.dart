@@ -176,7 +176,10 @@ void main() {
               operatingSystemProvider.overrideWithValue('ohos'),
               activeHostProvider.overrideWith(() => FixedActiveHost(HostRef.local)),
             ],
-            child: MaterialApp(theme: buildLightTheme(), home: const Scaffold(body: LinkHost())),
+            child: MaterialApp(
+              theme: buildLightTheme(),
+              home: const Scaffold(body: LinkHost()),
+            ),
           ),
         );
         await tester.pump();
