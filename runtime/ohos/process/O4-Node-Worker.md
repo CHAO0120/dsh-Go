@@ -91,6 +91,6 @@ v2 在 OH 私有 ESM 增加 `stderrKind: "bytes"`，用 Latin-1 字符串保存�
 
 ## 内联与 stdin 入口
 
-内联代码和 stdin 程序走同一个专用 Worker、继承产品 preload 和 jitless，保留256MiB Worker堆、64MiB输入限制及路径/只读保护。固定Node24的CommonJS `Worker({eval:true})`不会先执行这条ESM preload路径，因此使用固定短data模块入口，源码经workerData传入，分类编译也全部在Worker中完成；CommonJS源在已初始化Worker中作为独立vm.Script运行，保留严格模式指令，require基于授权cwd。ESM静态/动态相对导入通过仅此专用Worker的resolver绑定cwd；内联ESM的import.meta.url为私有dsh-ohos-inline:source标识，不伪称实际脚本文件，import.meta.main为false。脚本文件原生入口及其require.main/import.meta.main保持原样。
+内联代码和 stdin 程序走同一个专用 Worker、继承产品 preload 和 jitless，保留256MiB Worker堆、64MiB输入限制及路径/只读保护。固定Node24的CommonJS `Worker({eval:true})`不会先执行这条ESM preload路径，因此使用固定短data模块入口，源码经workerData传入，分类编译也全部在Worker中完成；CommonJS源在已初始化Worker中作为独立vm.Script运行，保留严格模式指令，require基于授权cwd。ESM静态/动态相对导入通过仅此专用Worker的resolver绑定cwd；内联ESM的import.meta.url为授权cwd下带随机私有query的合成file URL，支持new URL相邻资源与Node原生filename/dirname；它不是写入磁盘的脚本文件，不能把该URL当成源码文件存在的证明。仅完整私有query身份由loader提供内联源码，真实无query的[eval].mjs/[stdin].mjs仍正常加载；import.meta.main为false。脚本文件原生入口及其require.main/import.meta.main保持原样。
 
 `-p`在beforeExit/exit输出表达式结果；stdin模式将批量输入作为程序源码，仅消费一次，程序的process.stdin为空。`-e`/`-p`则将批量输入留给用户代码读取。直接Node仍实时输出；bash中的node仍先完成语句内部路由和缓冲，取消、背压、输出预算不变。错误仍经真实Worker异常/exit汇报，缺表达式或不支持的选项明确报ERR_OHOS_NODE_SCRIPT_ARGUMENTS。

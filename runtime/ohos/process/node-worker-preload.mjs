@@ -15,15 +15,19 @@ if (workerData?.dshOhosNodeScript?.protocol === 1) {
     configurable: true, enumerable: true });
   installNodeWorkerPaths(config);
   if (config.inline !== undefined) {
-    const base = pathToFileURL(config.inline.base + '.mjs').href;
+    // A file base gives inline ESM normal neighboring-resource URLs. The private
+    // query identity must not shadow a real [eval].mjs or [stdin].mjs file.
+    const { randomUUID } = await import('node:crypto');
+    const inlineURL = pathToFileURL(config.inline.base + '.mjs');
+    inlineURL.searchParams.set('dsh-ohos-inline', randomUUID());
+    const identity = inlineURL.href;
     registerHooks({
       resolve(specifier, context, nextResolve) {
-        if (specifier === 'dsh-ohos-inline:source') return { url: specifier, shortCircuit: true };
-        return nextResolve(specifier, context.parentURL === 'dsh-ohos-inline:source'
-          ? { ...context, parentURL: base } : context);
+        if (specifier === 'dsh-ohos-inline:source') return { url: identity, shortCircuit: true };
+        return nextResolve(specifier, context);
       },
       load(url, context, nextLoad) {
-        if (url === 'dsh-ohos-inline:source') return { format: 'module', source: config.inline.source, shortCircuit: true };
+        if (url === identity) return { format: 'module', source: config.inline.source, shortCircuit: true };
         return nextLoad(url, context);
       },
     });

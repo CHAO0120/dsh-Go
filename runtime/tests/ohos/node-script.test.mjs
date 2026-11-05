@@ -268,3 +268,37 @@ test('inline Node expressions, print, version and stdin use the inherited guarde
   assert.equal((await run(['-e','"use strict";console.log((function(){return this})()===undefined)'])).stdout,'true\n');
   assert.equal((await run(['-e','import path from "node:path";console.log(await Promise.resolve(path.basename(process.cwd())))'])).stdout,'工作区\n');
 });
+
+test('inline ESM resource URLs preserve special cwd, real same-name modules and path guards', { timeout: 30000 }, async t => {
+  const f = await fixture(t), cwd = join(f.workspace, '目录 #%');
+  await promises.mkdir(cwd);
+  await promises.writeFile(join(cwd, '资料 #%.txt'), '资源355');
+  await promises.writeFile(join(cwd, '[eval].mjs'), 'export default "real-eval";');
+  await promises.writeFile(join(cwd, '[stdin].mjs'), 'export default "real-stdin";');
+  await promises.writeFile(join(f.root, 'outside.txt'), 'outside');
+  for (const mode of ['eval', 'stdin']) for (const readOnly of [false, true]) {
+    const source = `#!/usr/bin/env node
+import assert from 'node:assert/strict';import fs from 'node:fs';import {pathToFileURL} from 'node:url';
+import a from './[eval].mjs';import b from './[stdin].mjs';
+const resource=new URL('./资料%20%23%25.txt',import.meta.url);
+assert.equal(fs.readFileSync(resource,'utf8'),'资源355');assert.equal(a,'real-eval');assert.equal(b,'real-stdin');
+assert.equal(import.meta.main,false);assert.equal(import.meta.dirname,${JSON.stringify(cwd)});
+assert.equal(Object.getPrototypeOf(import.meta),null);assert.equal(Object.getOwnPropertyDescriptor(import.meta,'url').writable,true);
+assert.equal(fs.readFileSync(new URL(import.meta.url),'utf8'),${JSON.stringify(`export default "real-${mode}";`)});
+assert.throws(()=>fs.readFileSync(${JSON.stringify(join(f.root, 'outside.txt'))},'utf8'),{code:'EACCES'});
+assert.throws(()=>fs.readFileSync(new URL('./missing355',import.meta.url),'utf8'),{code:'ENOENT'});
+const output=new URL('./output%20%23%25.txt',import.meta.url);
+${readOnly ? "assert.throws(()=>fs.writeFileSync(output,'x'),{code:'EACCES'});" : "fs.writeFileSync(output,'ok');assert.equal(fs.readFileSync(output,'utf8'),'ok');"}
+const resolved=import.meta.resolve('./资料%20%23%25.txt');import.meta.url='file:///changed/no.mjs';
+assert.equal(import.meta.resolve('./资料%20%23%25.txt'),resolved);
+console.log(JSON.stringify({mode:${JSON.stringify(mode)},readOnly:${readOnly},value:fs.readFileSync(resource,'utf8'),sameName:[a,b]}));`;
+    const worker = createNodeScriptWorker({ args: mode === 'eval' ? ['-e', source] : ['-'],
+      cwd, roots: [f.workspace, f.temporary], workspaceRoots: [f.workspace], readOnly, env: {}, stdin: mode === 'stdin' ? source : '' });
+    const output = [], errors = [];
+    worker.stdout.on('data', bytes => output.push(bytes));worker.on('error', error => errors.push({code:error.code,message:error.message}));
+    worker.stderr.resume();const timer=setTimeout(()=>worker.terminate(),10000);
+    const exit = await new Promise(resolve => worker.once('exit', resolve));clearTimeout(timer);
+    assert.equal(exit,0,JSON.stringify(errors));assert.deepEqual(errors,[]);
+    assert.deepEqual(JSON.parse(Buffer.concat(output).toString()),{mode,readOnly,value:'资源355',sameName:['real-eval','real-stdin']});
+  }
+});
