@@ -13,6 +13,7 @@ import 'package:dsh_app/state/onboarding_state.dart';
 import 'package:dsh_app/state/sessions_state.dart';
 import 'package:dsh_app/state/settings_state.dart';
 import 'package:dsh_app/ui/chat/chat_screen.dart';
+import 'package:dsh_app/ui/common/app_dialog.dart';
 import 'package:dsh_app/ui/common/app_sheet.dart';
 import 'package:dsh_app/ui/common/side_insets.dart';
 import 'package:dsh_app/ui/engine/engine_screen.dart';
@@ -40,12 +41,17 @@ var _shots = 0;
 
 void _say(String line) => _log.writeAsStringSync('$line\n', mode: FileMode.append, flush: true);
 
-/// Asks the driver for a screenshot and waits until it has it.
+/// The second pass, for the video: real time, no stops for screenshots.
+final _recording = Platform.environment['DSH_TOUR_MODE'] == 'video';
+
+/// Asks the driver for a screenshot and waits until it has it. One can take a good while on a CI
+/// machine, and going on without it would put the next screen under this name.
 Future<void> _shot(String name) async {
+  if (_recording) return;
   final number = ++_shots;
   _say('SHOT $number $name');
   final done = File('${Directory.systemTemp.path}/dsh-ui-tour-ack-$number');
-  for (var i = 0; i < 300 && !done.existsSync(); i++) {
+  for (var i = 0; i < 3600 && !done.existsSync(); i++) {
     await Future<void>.delayed(const Duration(milliseconds: 50));
   }
 }
@@ -73,10 +79,7 @@ List<Override> _shell() => [
   currentSessionProvider.overrideWith(() => FakeCurrentSession('s2')),
 ];
 
-List<Override> _emptyChat() => [
-  accountWalletBalanceProvider.overrideWithValue(null),
-  ...ChatHarness().overrides,
-];
+List<Override> _emptyChat() => [accountWalletBalanceProvider.overrideWithValue(null), ...ChatHarness().overrides];
 
 List<Override> _conversation() => [
   accountWalletBalanceProvider.overrideWithValue(null),
@@ -118,6 +121,11 @@ Future<void> _push(BuildContext context, String suffix) async {
 
 /// Takes a screenshot of a transition partway through, with time slowed enough to catch it.
 Future<void> _slowly(VoidCallback start, String name) async {
+  if (_recording) {
+    start();
+    await Future<void>.delayed(const Duration(milliseconds: 900));
+    return;
+  }
   timeDilation = 10;
   start();
   await Future<void>.delayed(const Duration(milliseconds: 1200));
@@ -125,11 +133,30 @@ Future<void> _slowly(VoidCallback start, String name) async {
   timeDilation = 1;
 }
 
+Future<void> _dialog(BuildContext context, String suffix) async {
+  unawaited(
+    showAppDialog<void>(
+      context: context,
+      builder: (dialog) => AlertDialog(
+        title: const Text('删除这个对话?'),
+        content: const Text('删除后不能恢复。'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(dialog), child: const Text('取消')),
+          FilledButton(onPressed: () => Navigator.pop(dialog), child: const Text('删除')),
+        ],
+      ),
+    ),
+  );
+  await Future<void>.delayed(_settle);
+  await _shot('dialog$suffix');
+}
+
 final _stops = <_Stop>[
   _Stop('welcome', () => WelcomePage(onStart: () {})),
   _Stop('chat_empty', () => const ChatScreen(), overrides: _emptyChat),
   _Stop('conversation', () => const ChatScreen(), overrides: _conversation),
   _Stop('sheet', () => const ChatScreen(), overrides: _conversation, act: _sheet),
+  _Stop('dialog', () => const ChatScreen(), overrides: _conversation, act: _dialog),
   _Stop('drawer', () => HomeShell(chatBuilder: (_) => const _Backdrop(), initiallyOpen: true)),
   _Stop('settings', () => const SettingsScreen()),
   _Stop('push', () => const SettingsScreen(), act: _push),
@@ -178,7 +205,7 @@ class _TourState extends State<_Tour> {
   }
 
   Future<void> _run() async {
-    for (final brightness in Brightness.values.reversed) {
+    for (final brightness in _recording ? const [Brightness.light] : Brightness.values.reversed) {
       for (var i = 0; i < _stops.length; i++) {
         setState(() {
           _at = i;
@@ -218,10 +245,7 @@ class _TourState extends State<_Tour> {
         locale: const Locale('zh', 'CN'),
         supportedLocales: const [Locale('zh', 'CN'), Locale('en')],
         localizationsDelegates: GlobalMaterialLocalizations.delegates,
-        builder: (context, child) => AppMotionScope(
-          fluid: true,
-          child: MirroredSideInsets(child: child!),
-        ),
+        builder: (context, child) => AppMotionScope(fluid: true, child: MirroredSideInsets(child: child!)),
         home: stop.home(),
       ),
     );
@@ -229,8 +253,10 @@ class _TourState extends State<_Tour> {
 }
 
 void main() {
-  WidgetsFlutterBinding.ensureInitialized();
-  if (_log.existsSync()) _log.deleteSync();
-  FlutterError.onError = (details) => _say('ERROR ${details.exceptionAsString().split('\n').first}');
-  runZonedGuarded(() => runApp(const _Tour()), (error, stack) => _say('ERROR $error'));
+  runZonedGuarded(() {
+    WidgetsFlutterBinding.ensureInitialized();
+    if (_log.existsSync()) _log.deleteSync();
+    FlutterError.onError = (details) => _say('ERROR ${details.exceptionAsString().split('\n').first}');
+    runApp(const _Tour());
+  }, (error, stack) => _say('ERROR $error'));
 }

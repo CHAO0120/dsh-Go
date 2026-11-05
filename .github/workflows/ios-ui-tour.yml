@@ -58,7 +58,7 @@ jobs:
           udid="$(python3 tooling/ios/engine-smoke/pick-simulator.py)"
           xcrun simctl boot "$udid"
           xcrun simctl bootstatus "$udid"
-          node tooling/ios/ui-tour.mjs --simulator "$udid" --app app/build/ios/iphonesimulator/Runner.app --out "$RUNNER_TEMP/ui-tour"
+          node tooling/ios/ui-tour.mjs --simulator "$udid" --app app/build/ios/iphonesimulator/Runner.app --out "$RUNNER_TEMP/ui-tour" --video "$RUNNER_TEMP/ui-tour-video"
 
       - name: Keep what it saw
         if: always()
@@ -66,4 +66,12 @@ jobs:
         with:
           name: ios-ui-tour
           path: ${{ runner.temp }}/ui-tour
+          if-no-files-found: ignore
+
+      - name: Keep the video
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: ios-ui-tour-video
+          path: ${{ runner.temp }}/ui-tour-video
           if-no-files-found: ignore
