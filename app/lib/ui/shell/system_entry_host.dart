@@ -96,7 +96,10 @@ class _SystemEntryHostState extends ConsumerState<SystemEntryHost> {
   /// Bytes the draft this arrival lands in already holds; share loading checks
   /// the message's whole budget before buffering anything.
   int get _heldDraftBytes {
-    final draft = ref.read(draftStoreProvider).drafts[ref.read(currentSessionProvider) ?? 'new'];
+    // iOS shares always merge into the new-chat draft, even when another
+    // conversation is selected. Its attachments own the pre-read budget.
+    final key = ref.read(operatingSystemProvider) == 'ios' ? 'new' : ref.read(currentSessionProvider) ?? 'new';
+    final draft = ref.read(draftStoreProvider).drafts[key];
     return totalAttachmentBytes(draft?.attachments ?? const []);
   }
 
