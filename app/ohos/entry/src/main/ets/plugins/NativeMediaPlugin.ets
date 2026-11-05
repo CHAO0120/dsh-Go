@@ -7,10 +7,9 @@ import {
   AbilityAware, AbilityPluginBinding, Any, EventChannel, EventSink, FlutterPlugin,
   FlutterPluginBinding, MethodCall, MethodChannel, MethodResult
 } from '@ohos/flutter_ohos';
-import { NativeMediaError, NativeMediaKey, nativeClipRelative } from './NativeMediaPolicy';
+import { NativeMediaError, NativeMediaKey, NativeVoiceIndicator, nativeClipRelative } from './NativeMediaPolicy';
 import { NativeClipOpener, OhosClipPlayer } from './OhosClipPlayer';
 import { VoiceMicLease, VoiceMicToken } from './VoiceMicLease';
-import { NativeVoiceIndicator } from './NativeVoiceIndicator';
 import { OhosSpeechActivity } from './OhosSpeechActivity';
 
 class MediaOwner {
