@@ -6,6 +6,7 @@ import 'package:dsh_app/ui/theme/app_theme.dart';
 import 'package:dsh_app/ui/theme/motion.dart';
 import 'package:dsh_app/ui/theme/sheet_recede.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show SystemUiOverlayStyle;
 import 'package:flutter_test/flutter_test.dart';
 
 const _page = Key('page');
@@ -17,14 +18,18 @@ const _statusBar = 59.0;
 Widget _app({required bool fluid}) => MaterialApp(
   theme: buildLightTheme(),
   builder: (context, child) => AppMotionScope(fluid: fluid, child: child!),
-  home: Scaffold(
-    key: _page,
-    body: Builder(
-      builder: (context) => Center(
-        child: TextButton(
-          key: _open,
-          onPressed: () => showAppSheet<void>(context, builder: (_) => const SizedBox(height: 300)),
-          child: const Text('open'),
+  // Every page says what the status bar should be.
+  home: AnnotatedRegion<SystemUiOverlayStyle>(
+    value: SystemUiOverlayStyle.dark,
+    child: Scaffold(
+      key: _page,
+      body: Builder(
+        builder: (context) => Center(
+          child: TextButton(
+            key: _open,
+            onPressed: () => showAppSheet<void>(context, builder: (_) => const SizedBox(height: 300)),
+            child: const Text('open'),
+          ),
         ),
       ),
     ),
@@ -123,6 +128,27 @@ void main() {
     expect(SheetRecede.amount.value, 0);
     expect(tester.getRect(find.byKey(_page)).width, _screen);
     expect(tester.state(find.byKey(_page)), same(page));
+  }, variant: TargetPlatformVariant.only(TargetPlatform.iOS));
+
+  testWidgets('the status bar turns light over the dark edge, and back', (tester) async {
+    useScreen(tester);
+    await tester.pumpWidget(_app(fluid: true));
+    await tester.pump();
+
+    Brightness? statusBar() => tester.binding.renderViews.first.debugLayer!
+        .find<SystemUiOverlayStyle>(const Offset(_screen / 2, _statusBar))
+        ?.statusBarBrightness;
+
+    expect(statusBar(), SystemUiOverlayStyle.dark.statusBarBrightness);
+
+    await tester.tap(find.byKey(_open));
+    await tester.pumpAndSettle();
+    expect(statusBar(), SystemUiOverlayStyle.light.statusBarBrightness);
+
+    await tester.tapAt(const Offset(_screen / 2, 100));
+    await tester.pumpAndSettle();
+    await tester.pump();
+    expect(statusBar(), SystemUiOverlayStyle.dark.statusBarBrightness);
   }, variant: TargetPlatformVariant.only(TargetPlatform.iOS));
 
   testWidgets('off the fluid tier the page stays where it is', (tester) async {

@@ -95,6 +95,13 @@ class SheetRecedeSheet extends StatefulWidget {
 
 class _SheetRecedeSheetState extends State<SheetRecedeSheet> {
   Animation<double>? _route;
+  final _statusBar = OverlayPortalController();
+
+  @override
+  void initState() {
+    super.initState();
+    if (_available) _statusBar.show();
+  }
 
   @override
   void didChangeDependencies() {
@@ -115,9 +122,24 @@ class _SheetRecedeSheetState extends State<SheetRecedeSheet> {
 
   @override
   Widget build(BuildContext context) {
-    if (!_available || !_sitsBack(context)) return widget.child;
-    // Above the page in the layer tree and not limited to the sheet's own box, so this is the one
-    // the status bar reads.
-    return AnnotatedRegion<SystemUiOverlayStyle>(value: SystemUiOverlayStyle.light, sized: false, child: widget.child);
+    if (!_available) return widget.child;
+    // The status bar reads the topmost region at its own height, which is outside the sheet's
+    // clip, so this one goes on the overlay, above the sheet. It turns once the page has sat back
+    // far enough to show the dark edge.
+    final sits = _sitsBack(context);
+    return OverlayPortal(
+      controller: _statusBar,
+      overlayChildBuilder: (context) => ValueListenableBuilder<double>(
+        valueListenable: SheetRecede._amount,
+        builder: (context, amount, _) => sits && amount > 0.5
+            ? const AnnotatedRegion<SystemUiOverlayStyle>(
+                value: SystemUiOverlayStyle.light,
+                sized: false,
+                child: SizedBox.shrink(),
+              )
+            : const SizedBox.shrink(),
+      ),
+      child: widget.child,
+    );
   }
 }
