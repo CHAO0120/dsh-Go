@@ -1,5 +1,17 @@
 {
   "patches": {
+    "ohos-provider-stream-body-timeout.diff": {
+      "0.2.1-rc.4": {
+        "node_modules/@earendil-works/pi-ai/dist/api/openai-responses.js": {
+          "before": "002f15414b7c7b62a32610a8a915bdf1a01eed930b8b45d7691e8a5c475fa9b5",
+          "after": "97da0d0cab0f691d339e1c9499d1906ef71936a0ae0864f2018c5eb11f351763"
+        },
+        "node_modules/@earendil-works/pi-ai/dist/api/anthropic-messages.js": {
+          "before": "360298eff89e8c517c213880088db33c93b56ba737c91e885b22e7e125ca5d55",
+          "after": "81cc0b75ed4a9f2726325e404ef1015fb42b7da1906d89e4f708c3cc51362512"
+        }
+      }
+    },
     "fs-create-exclusive.diff": {
       "0.2.1-rc.2": {
         "node_modules/@deepseek-ai/dsh-fs-local/lib/index.js": {
@@ -515,6 +527,7 @@
       "zzzzzzzz-schedule-authorization.diff"
     ],
     "ohos": [
+      "ohos-provider-stream-body-timeout.diff",
       "zzzzzzz-input-recovery.diff",
       "zzzzzzzz-model-defaults.diff",
       "fs-create-exclusive.diff",

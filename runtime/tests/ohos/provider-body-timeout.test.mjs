@@ -10,6 +10,10 @@ const api = join(resolve(process.env.DSH_TEST_PREFIX), 'node_modules/@earendil-w
 const cases = [
   { file: 'openai-completions.js', api: 'openai-completions',
     chunk: 'data: {"id":"x","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"content":"first"}}]}\n\n' },
+  { file: 'openai-responses.js', api: 'openai-responses',
+    chunk: 'event: response.created\ndata: {"type":"response.created","response":{"id":"x"}}\n\n' },
+  { file: 'anthropic-messages.js', api: 'anthropic-messages',
+    chunk: 'event: message_start\ndata: {"type":"message_start","message":{"id":"x","usage":{"input_tokens":1,"output_tokens":1}}}\n\n' },
 ];
 const model = row => ({ id: 'fixture', name: 'fixture', api: row.api, provider: 'fixture', baseUrl: 'http://127.0.0.1:9/v1',
   reasoning: false, input: ['text'], cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, contextWindow: 1000, maxTokens: 100 });
