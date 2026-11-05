@@ -275,8 +275,8 @@ export default class NotifyPlugin implements FlutterPlugin, AbilityAware, NewWan
 
   private acceptAction(data: commonEventManager.CommonEventData, generation: number, epoch: number): void {
     if (data.event !== APPROVAL_ACTION || data.bundleName !== this.bundleName || !data.parameters) return;
-    const payload = data.parameters['dshNotifyActionPayload'];
-    const signature = data.parameters['dshNotifyActionMac'];
+    const payload: Any = data.parameters['dshNotifyActionPayload'];
+    const signature: Any = data.parameters['dshNotifyActionMac'];
     const signer = this.signer;
     if (!signer || typeof payload !== 'string' || payload.length > 8192 || typeof signature !== 'string') return;
     this.serial(async (): Promise<Any> => {
@@ -314,7 +314,7 @@ export default class NotifyPlugin implements FlutterPlugin, AbilityAware, NewWan
     const label = await this.label(call.argument('group') as string, call.argument('key') as string);
     const entry = this.approvals.get(label);
     if (!entry || !entry.submitted || entry.action.actionId !== call.argument('actionId')) return;
-    const result = call.argument('result');
+    const result: Any = call.argument('result');
     if (!['handled', 'gone', 'failed'].includes(result as string)) throw new NotifyError('bad_args', '未知通知操作结果。');
     this.ensureCurrent(generation);
     this.approvals.delete(label);
@@ -405,7 +405,7 @@ export default class NotifyPlugin implements FlutterPlugin, AbilityAware, NewWan
     if (call.argument('canApprove') === true) {
       const openButton: notificationManager.NotificationActionButton = { title: '打开应用处理', wantAgent: agent };
       request.actionButtons = [openButton];
-      const token = call.argument('requestToken');
+      const token: Any = call.argument('requestToken');
       if (typeof token === 'number' && Number.isSafeInteger(token) && token > 0 && route.eventId !== '' && await this.enableActions(generation)) {
         try {
           const action: NotifyApproval = { actionId: util.generateRandomUUID(), requestToken: token,

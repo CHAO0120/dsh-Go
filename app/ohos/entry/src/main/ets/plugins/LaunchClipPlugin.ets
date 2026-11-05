@@ -116,15 +116,15 @@ export default class LaunchClipPlugin implements FlutterPlugin, MethodCallHandle
   }
   private async handle(call: MethodCall): Promise<Any> {
     if (call.method === 'probe' || call.method === 'open') {
-      const path = call.argument<Any>('path');
+      const path: Any = call.argument('path');
       if (typeof path !== 'string') throw new ClipError('invalid', 'A launch file is required.');
       if (call.method === 'open') return this.open(path);
-      const poster = call.argument<Any>('poster');
+      const poster: Any = call.argument('poster');
       if (typeof poster !== 'string') throw new ClipError('invalid', 'A launch poster is required.');
       return this.probe(path, poster);
     }
     if (call.method === 'play' || call.method === 'close') {
-      const id = call.argument<Any>('texture');
+      const id: Any = call.argument('texture');
       if (typeof id !== 'number' || !Number.isSafeInteger(id)) throw new ClipError('invalid', 'Invalid texture.');
       let found: ClipResources | null = null;
       this.resources.forEach((resource: ClipResources): void => {
@@ -262,13 +262,13 @@ export default class LaunchClipPlugin implements FlutterPlugin, MethodCallHandle
       resource.notify = notify;
       await new Promise<void>((resolve: () => void, reject: (error: Error) => void): void => {
         let settled = false, preparing = false;
-        const timer = setTimeout((): void => finish(new ClipError('media', 'Launch preparation timed out.')), 10000);
+        const timer = setTimeout((): void => finish(new ClipError('media', 'Launch preparation timed out.') as Error), 10000);
         const finish = (error: Error | null): void => {
           if (settled) return; settled = true; clearTimeout(timer); resource.cancel = null;
           if (error === null) resolve(); else reject(error);
         };
-        resource.cancel = (): void => finish(new ClipError('cancelled', 'Launch clip closed.'));
-        player.on('error', (_error: BusinessError): void => { finish(new ClipError('media', 'Launch player failed.')); notify('done'); });
+        resource.cancel = (): void => finish(new ClipError('cancelled', 'Launch clip closed.') as Error);
+        player.on('error', (_error: BusinessError): void => { finish(new ClipError('media', 'Launch player failed.') as Error); notify('done'); });
         player.on('startRenderFrame', (): void => {
           // MediaKit has handed the frame to the display module, not proof of presentation.
           notify('showing');
@@ -288,7 +288,7 @@ export default class LaunchClipPlugin implements FlutterPlugin, MethodCallHandle
             }
             catch (error) { finish(error as Error); }
           } else if (state === 'completed') notify('done');
-          else if (state === 'error') { finish(new ClipError('media', 'Launch player failed.')); notify('done'); }
+          else if (state === 'error') { finish(new ClipError('media', 'Launch player failed.') as Error); notify('done'); }
         });
         player.fdSrc = { fd: resource.fd, offset: 0, length: size };
       });

@@ -185,8 +185,9 @@ class NotifyAction {
           token > 9007199254740991 ||
           session is! String ||
           session.isEmpty ||
-          session.length > 200)
+          session.length > 200) {
         return null;
+      }
       return NotifyAction(
         host: HostRef.decode(host),
         group: group,

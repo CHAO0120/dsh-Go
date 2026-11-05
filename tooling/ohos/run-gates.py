@@ -18,6 +18,7 @@ import shutil
 import signal
 import socket
 import subprocess
+import tarfile
 import sys
 import time
 from urllib.parse import unquote, urljoin, urlparse
@@ -763,6 +764,13 @@ def main():
     g.internal('dart-consumer-evidence', lambda _: verify_dart_consumers(o), needs=('diagnostics-dart', 'performance-dart'))
     channels = ['app-links-channel', 'frame-rate-channel', 'keyboard-log', 'connectivity-channel', 'notify-channel', 'files-media-channel', 'usage-channel', 'launch-channel', 'launcher-icon-channel', 'shortcuts-channel']
     g.node_tests('ets-channels', [rt + n + '.test.mjs' for n in channels], needs=('native-opener-build',), extra=lambda: {'OHOS_USER_FILE_ADDON': str(o / 'user-file-access.node')}, timeout=240)
+    def embedding_package(_):
+        target = o / 'embedding-package'; target.mkdir()
+        with tarfile.open(p('embedding_har')) as har:
+            har.extractall(target, filter='data')
+        return {'scope': 'The fixed embedding unpacked for the launch clip fixture; not a build'}
+    g.internal('embedding-package', embedding_package, needs=('tools',))
+    g.node_tests('launch-clip', [rt + 'launch-clip.test.mjs'], needs=('embedding-package',), extra=lambda: {'OHOS_FLUTTER_EMBEDDING': str(o / 'embedding-package/package')})
     tooling = ['managed-skill', 'native-host-lazy', 'runtime-archive', 'runtime-channel', 'lifecycle-host', 'web-files', 'transient-task', 'runtime-recovery', 'recovery-storage', 'native-recovery-gate']
     g.node_tests('ets-runtime-tooling', [tools + n + '.test.mjs' for n in tooling], needs=('native-zlib-build',), extra=lambda: {'OHOS_TEST_ZLIB_ADDON': str(o / 'zlib.node'), 'OHOS_INSTALL_RECORD_WIRE': str(o / 'install-record-wire.json')}, timeout=240)
     g.internal('install-record-wire', lambda _: verify_install_record_wire(o / 'install-record-wire.json'), needs=('ets-runtime-tooling',))
