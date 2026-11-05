@@ -1,13 +1,14 @@
-// 通知 on HarmonyOS: what the page says must be true there. Live activities
-// aren't available in this version, an alert needs the app running, and the
-// way to the switch is that system's. Its half-sheet may bring no resume, so
-// the status is read again when it closes.
+// 通知 on HarmonyOS: what the page says must be true there. A running turn gets
+// a plain progress notification rather than a live card, an alert needs the app
+// running, and the way to the switch is that system's. Its half-sheet may bring
+// no resume, so the status is read again when it closes.
 
 import 'package:dsh_app/l10n/l10n.dart';
 import 'package:dsh_app/notify/notify_channel.dart';
 import 'package:dsh_app/state/android_features.dart';
 import 'package:dsh_app/state/notify_state.dart' show notifyChannelProvider;
 import 'package:dsh_app/ui/settings/notification_settings.dart';
+import 'package:dsh_app/ui/settings/settings_widgets.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -20,6 +21,13 @@ class _Unsupported extends FakeNotifyChannel {
 
   @override
   Future<LiveSystemStatus> liveStatus() async => const LiveSystemStatus();
+}
+
+/// What NotifyPlugin.ets reports: no live card, a plain notification instead.
+class _Ordinary extends FakeNotifyChannel {
+  @override
+  Future<LiveSystemStatus> liveStatus() async =>
+      const LiveSystemStatus(settings: true, ordinaryFallback: true, ordinaryAllowed: true, backend: 'ordinary');
 }
 
 /// Notifications off; the system's panel either turns them on or won't open.
@@ -59,7 +67,27 @@ void main() {
     await tester.pumpAndSettle();
   }
 
-  testWidgets('on HarmonyOS: not available in this version, with no Android to talk about', (tester) async {
+  testWidgets('on HarmonyOS: the progress notification is on and says what it is', (tester) async {
+    await pump(tester, 'ohos', channel: _Ordinary());
+    expect(find.text(zh.harmonyLiveTitle), findsOneWidget);
+    expect(find.text(zh.harmonyLiveSwitch), findsOneWidget);
+    expect(find.text(zh.harmonyLiveSubtitle), findsOneWidget);
+    expect(find.text(zh.harmonyLiveFooter), findsOneWidget);
+    expect(find.text(zh.harmonyLiveUnavailable), findsNothing);
+    expect(find.text(zh.liveUnsupported), findsNothing);
+    expect(find.text(zh.liveSettingsFooter), findsNothing);
+    expect(find.text(zh.liveSettingsSubtitle), findsNothing);
+    final toggle = tester.widget<Switch>(
+      find.descendant(
+        of: find.ancestor(of: find.text(zh.harmonyLiveSwitch), matching: find.byType(SettingsSwitchTile)),
+        matching: find.byType(Switch),
+      ),
+    );
+    expect(toggle.value, isTrue);
+    expect(toggle.onChanged, isNotNull);
+  });
+
+  testWidgets('on HarmonyOS: a build without it says not available, with no Android to talk about', (tester) async {
     await pump(tester, 'ohos');
     expect(find.text(zh.harmonyLiveUnavailable), findsOneWidget);
     expect(find.text(zh.liveUnsupported), findsNothing);

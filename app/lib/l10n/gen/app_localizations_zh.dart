@@ -7059,6 +7059,18 @@ class L10nZh extends L10n {
   String get harmonyUpdateNoticeNoPage => '这个版本没有给出下载页，过些时候再看看。';
 
   @override
+  String get harmonyLiveTitle => '进度通知';
+
+  @override
+  String get harmonyLiveSwitch => '显示进度通知';
+
+  @override
+  String get harmonyLiveSubtitle => '对话进行中，在通知栏显示一条状态';
+
+  @override
+  String get harmonyLiveFooter => '这是普通通知，应用被系统挂起后不再更新。实况窗还没有接入。';
+
+  @override
   String get hostDetailsConnectionType => '连接方式';
 
   @override

@@ -12956,6 +12956,30 @@ abstract class L10n {
   /// **'这个版本没有给出下载页，过些时候再看看。'**
   String get harmonyUpdateNoticeNoPage;
 
+  /// No description provided for @harmonyLiveTitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'进度通知'**
+  String get harmonyLiveTitle;
+
+  /// No description provided for @harmonyLiveSwitch.
+  ///
+  /// In zh, this message translates to:
+  /// **'显示进度通知'**
+  String get harmonyLiveSwitch;
+
+  /// No description provided for @harmonyLiveSubtitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'对话进行中，在通知栏显示一条状态'**
+  String get harmonyLiveSubtitle;
+
+  /// No description provided for @harmonyLiveFooter.
+  ///
+  /// In zh, this message translates to:
+  /// **'这是普通通知，应用被系统挂起后不再更新。实况窗还没有接入。'**
+  String get harmonyLiveFooter;
+
   /// No description provided for @hostDetailsConnectionType.
   ///
   /// In zh, this message translates to:

@@ -7466,6 +7466,19 @@ class L10nEn extends L10n {
   String get harmonyUpdateNoticeNoPage => 'This version has no download page yet. Check again later.';
 
   @override
+  String get harmonyLiveTitle => 'Progress notification';
+
+  @override
+  String get harmonyLiveSwitch => 'Show a progress notification';
+
+  @override
+  String get harmonyLiveSubtitle => 'Keeps one status notification while a conversation runs';
+
+  @override
+  String get harmonyLiveFooter =>
+      'This is a plain notification and stops updating once the system suspends the app. Live View isn\'t connected yet.';
+
+  @override
   String get hostDetailsConnectionType => 'Connection type';
 
   @override

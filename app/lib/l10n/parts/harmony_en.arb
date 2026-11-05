@@ -55,5 +55,9 @@
   "harmonyKwEngineUninstall": "uninstall,remove runtime,clear local data",
   "harmonyUpdateNoticeTitle": "Download it from the release page",
   "harmonyUpdateNoticeText": "The HarmonyOS build can't update itself. The release page may not have a HarmonyOS package yet; if it does, download and install it by hand.",
-  "harmonyUpdateNoticeNoPage": "This version has no download page yet. Check again later."
+  "harmonyUpdateNoticeNoPage": "This version has no download page yet. Check again later.",
+  "harmonyLiveTitle": "Progress notification",
+  "harmonyLiveSwitch": "Show a progress notification",
+  "harmonyLiveSubtitle": "Keeps one status notification while a conversation runs",
+  "harmonyLiveFooter": "This is a plain notification and stops updating once the system suspends the app. Live View isn't connected yet."
 }

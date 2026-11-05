@@ -175,7 +175,8 @@ class _NotificationSettingsPageState extends ConsumerState<NotificationSettingsP
     // Unknown until the phone answers: no 「不支持」 flashing up meanwhile.
     final live = ref.watch(liveSystemStatusProvider).value;
     final ohos = ref.watch(operatingSystemProvider) == 'ohos';
-    final liveSupported = !ohos && (live?.supported ?? true);
+    // HarmonyOS has no live card in this build, only a plain progress notification.
+    final liveSupported = ohos ? (live?.ordinaryFallback ?? true) : (live?.supported ?? true);
     final on = prefs.enabled;
     final note = on ? _systemNote(system) : null;
     final liveBlocked = on && prefs.live && live != null && live.supported && !live.allowed;
@@ -227,13 +228,14 @@ class _NotificationSettingsPageState extends ConsumerState<NotificationSettingsP
         ),
         if (liveBlocked) _liveNote(),
         SettingsSection(
-          title: l10n.liveSettingsTitle,
-          footer: ohos ? null : Text(l10n.liveSettingsFooter),
+          title: ohos ? l10n.harmonyLiveTitle : l10n.liveSettingsTitle,
+          footer: Text(ohos ? l10n.harmonyLiveFooter : l10n.liveSettingsFooter),
           children: [
             SettingsSwitchTile(
               spot: Spots.notifyLive,
+              title: ohos ? l10n.harmonyLiveSwitch : null,
               subtitle: ohos
-                  ? l10n.harmonyLiveUnavailable
+                  ? (liveSupported ? l10n.harmonyLiveSubtitle : l10n.harmonyLiveUnavailable)
                   : liveSupported
                   ? l10n.liveSettingsSubtitle
                   : l10n.liveUnsupported,
