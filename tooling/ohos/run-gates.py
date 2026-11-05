@@ -797,6 +797,9 @@ def main():
                      'test/chat/attachment_file_budget_test.dart', 'test/remote/private_key_file_budget_test.dart',
                      'test/chat/attachment_owner_test.dart', 'test/remote/ssh_key_callback_lifetime_test.dart', 'test/share_hosted', 'test/share/share_panel_test.dart']
     g.run('flutter-consumers', lambda: g.flutter('test', '--no-pub', '--reporter', 'json', '--concurrency=1', *flutter_tests), cwd=g.flutter_source / 'app', env=g.flutter_env, needs=('flutter-input-identity',), timeout=300, tests=['app/' + x for x in flutter_tests], scope='Actual Linux Flutter engine and Dart consumers; not OHOS AOT/device')
+    g.run('flutter-clipboard-consumer', lambda: g.flutter('test', '--no-pub', '--reporter', 'json', 'test/runtime/ohos_clipboard_consumer_test.dart'), cwd=g.flutter_source / 'app',
+          env={**g.flutter_env, 'OHOS_CLIPBOARD_WIRE': str(o / 'clipboard-settlement/after-observations.json')}, needs=('flutter-input-identity', 'clipboard-settlement'), timeout=120,
+          tests=['app/test/runtime/ohos_clipboard_consumer_test.dart'], scope='Actual HAR replies consumed by Flutter Clipboard, ApiKeyPage and EditableText; not device clipboard permission')
     g.run('flutter-consumer-analyze', lambda: g.flutter('analyze', '--no-pub', 'lib/secrets', 'lib/state/attachment_files_ohos.dart', 'lib/share_hosted/hosted_links_state.dart', 'lib/ui/share_hosted', 'lib/ui/share/share_panel.dart', 'test/secrets', 'test/ohos/attachment_files_test.dart', 'test/share_hosted', 'test/share/share_panel_test.dart'), cwd=g.flutter_source / 'app', env=g.flutter_env, needs=('flutter-input-identity',), timeout=300)
     def retain_resolver(_):
         app = g.flutter_source / 'app'
