@@ -93,5 +93,6 @@
   "harmonySaveToFile": "Save to file",
   "harmonySaveChooseLocation": "Choose where to save",
   "harmonySaving": "Saving…",
-  "harmonySaved": "Saved"
+  "harmonySaved": "Saved",
+  "harmonyCommandExportDescription": "Export this chat’s full history as a ZIP to share or save to a file"
 }

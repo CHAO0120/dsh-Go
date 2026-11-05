@@ -7176,6 +7176,9 @@ class L10nZh extends L10n {
   String get harmonySaved => '已保存';
 
   @override
+  String get harmonyCommandExportDescription => '把这个对话的完整记录打包成 ZIP，分享或保存到文件';
+
+  @override
   String get hostDetailsConnectionType => '连接方式';
 
   @override

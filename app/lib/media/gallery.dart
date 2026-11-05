@@ -38,7 +38,8 @@ class GallerySaveException implements Exception {
   const GallerySaveException(this.code);
 
   /// `permission` (storage refused), `unsupported` (not a picture Flutter
-  /// can read), `download` (a web image did not come), `failed`.
+  /// can read), `download` (a web image did not come), `failed`, `cancelled`
+  /// (the person backed out of HarmonyOS's album window: nothing to say).
   final String code;
 
   @override
@@ -186,6 +187,7 @@ Future<String> saveToGallery(MediaChannel channel, Uint8List raw, {String? name}
     throw GallerySaveException(switch (e.code) {
       'permission' => 'permission',
       'invalid' => 'unsupported',
+      'cancelled' => 'cancelled',
       _ => 'failed',
     });
   } on MissingPluginException {

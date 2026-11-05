@@ -783,18 +783,23 @@ Future<void> saveMediaItems(BuildContext context, WidgetRef ref, String sessionI
   final media = ref.read(mediaChannelProvider);
   var saved = 0;
   var chosen = false;
+  var backedOut = false;
   String? failure;
   for (final item in pictures) {
     try {
       await saveToGallery(media, await mediaItemBytes(ref, sessionId, item), name: item.name);
       saved++;
     } on GallerySaveException catch (e) {
+      // Backed out of the system's window: stop asking, and nothing to report for it.
+      backedOut = e.code == 'cancelled';
+      if (backedOut) break;
       failure ??= e.code;
     } catch (_) {
       failure ??= 'failed';
     }
   }
   for (final item in videos) {
+    if (backedOut) break;
     try {
       final where = await ref
           .read(artifactFilesProvider)
@@ -802,7 +807,6 @@ Future<void> saveMediaItems(BuildContext context, WidgetRef ref, String sessionI
       chosen = chosen || savedInChosenPlace(where);
       saved++;
     } catch (e) {
-      // Backed out of the save window: stop asking, and nothing to report for it.
       if (saveWindowDismissed(e)) break;
       failure ??= 'failed';
     }

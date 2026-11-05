@@ -7589,6 +7589,9 @@ class L10nEn extends L10n {
   String get harmonySaved => 'Saved';
 
   @override
+  String get harmonyCommandExportDescription => 'Export this chat’s full history as a ZIP to share or save to a file';
+
+  @override
   String get hostDetailsConnectionType => 'Connection type';
 
   @override

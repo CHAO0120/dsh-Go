@@ -13190,6 +13190,12 @@ abstract class L10n {
   /// **'已保存'**
   String get harmonySaved;
 
+  /// No description provided for @harmonyCommandExportDescription.
+  ///
+  /// In zh, this message translates to:
+  /// **'把这个对话的完整记录打包成 ZIP，分享或保存到文件'**
+  String get harmonyCommandExportDescription;
+
   /// No description provided for @hostDetailsConnectionType.
   ///
   /// In zh, this message translates to:

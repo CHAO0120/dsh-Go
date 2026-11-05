@@ -4559,6 +4559,7 @@
   "harmonySaveChooseLocation": "选择保存位置",
   "harmonySaving": "正在保存…",
   "harmonySaved": "已保存",
+  "harmonyCommandExportDescription": "把这个对话的完整记录打包成 ZIP，分享或保存到文件",
   "hostDetailsConnectionType": "连接方式",
   "hostDetailsSshNetworkHint": "通过 SSH 隧道连接。此连接不提供 LAN / P2P 路径检测或延迟测量。",
   "hubSessionDetails": "对话详情",
