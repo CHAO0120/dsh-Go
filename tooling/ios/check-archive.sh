@@ -72,9 +72,14 @@ for binary in "$app/Runner" "$frameworks"/*.framework/*; do
 done | sort -u >"$log"
 if [ -s "$log" ]; then fail "missing at launch: $(cat "$log")"; else note 'archive links' 'everything linked is in the app'; fi
 
-# Files the App Store refuses, loose outside a framework.
+# Code outside a framework: the App Store refuses it, and a tool that signs the app afterwards
+# leaves it unsigned, which a phone then won't load.
 loose="$(find "$app" \( -name '*.dylib' -o -name '*.so' -o -name '*.node' \) -not -path '*/Frameworks/*.framework/*' | sed "s|$app/||" | head -10 | tr '\n' ' ')"
-[ -n "$loose" ] && note 'archive loose binaries' "$loose"
+[ -n "$loose" ] && fail "code outside a framework: $loose"
+for framework in "$frameworks"/*.framework; do
+  name="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$framework/Info.plist" 2>/dev/null)"
+  [ -n "$name" ] && [ -f "$framework/$name" ] || fail "$(basename "$framework") has no Info.plist naming its executable"
+done
 
 # The same app as an unsigned .ipa, for a phone: a signing tool (Xcode, or one that signs with
 # an Apple ID) still has to sign it before it installs.
