@@ -611,7 +611,7 @@ def main():
         selected = all_pins['targetSets']['ohos']
         commands = []
         for name in reversed(selected[selected.index(patch):]):
-            pin = all_pins['patches'][name].get('0.2.1-rc.4', {}).get(relative)
+            pin = all_pins['patches'][name].get('0.2.2-rc.1', {}).get(relative)
             if pin is None: continue
             if sha(target) != pin['after']: raise ValueError('Unexpected reverse-patch input: ' + name)
             for flag in ('--check', None):
@@ -621,7 +621,7 @@ def main():
                 commands.append({'argv': argv, 'exitCode': proc.returncode, 'stdout': proc.stdout, 'stderr': proc.stderr})
                 proc.check_returncode()
             if sha(target) != pin['before']: raise ValueError('Unexpected reverse-patch output: ' + name)
-        pin = pins['0.2.1-rc.4'][relative]
+        pin = pins['0.2.2-rc.1'][relative]
         (o / 'grep-description-before/node_modules/@deepseek-ai/dsh-tool-fs-search/package.json').write_text('{"type":"module"}\n')
         # Both source images resolve the real provider's sibling dependencies.
         (o / 'grep-description-before/node_modules/@deepseek-ai/dsh-tool-fs-search/node_modules').symlink_to(prefix() / 'node_modules', target_is_directory=True)
@@ -740,10 +740,10 @@ def main():
     for label in ('crash', 'freeze'):
         def lifecycle_command(label=label):
             values = g.py(rt + 'lifecycle-' + label + '-controller.py', '--node', node(), '--prefix', prefix(), '--linked', native() / 'libpublication-test-linked.so', '--native-library-dir', p('native_library_dir'), '--out', o / ('lifecycle-' + label))
-            if label == 'crash': values += ['--baseline-source', p('android_pristine') / 'node_modules/@deepseek-ai/dsh-agent-loop/lib/index.js']
+            if label == 'crash': values += ['--baseline-source', p('android_pristine') / 'node_modules/@deepseek-ai/dsh-tools/lib/pipeline.js']
             return values
         g.run('lifecycle-' + label, lifecycle_command, needs=('prepared-inputs', 'native-publication-build', 'build-bash', 'build-regex') + (('proc-mapping-tools',) if label == 'freeze' else ()), env=g.common, timeout=360, tests=[rt + 'lifecycle-' + label + '-controller.py'])
-    g.node_tests('lifecycle-platform', [rt + 'lifecycle-platform.test.mjs'], needs=('prepared-inputs',), extra=lambda: {'DSH_LIFECYCLE_BASE_AGENT_LOOP': str(p('android_pristine') / 'node_modules/@deepseek-ai/dsh-agent-loop/lib/index.js')})
+    g.node_tests('lifecycle-platform', [rt + 'lifecycle-platform.test.mjs'], needs=('prepared-inputs',), extra=lambda: {'DSH_LIFECYCLE_BASE_PIPELINE': str(p('android_pristine') / 'node_modules/@deepseek-ai/dsh-tools/lib/pipeline.js')})
     g.node_tests('lifecycle-host-http', [rt + 'lifecycle-host-http.test.mjs'], needs=('prepared-inputs', 'native-publication-build'), extra=lambda: {**linked_env(), 'DSH_LIFECYCLE_BEFORE_ROUTE': str(p('lifecycle_before_route'))})
     g.node_tests('publication-platform', [rt + 'publication-platform.test.mjs', rt + 'fs-exclusive.test.mjs'], needs=('android-targets',), extra=lambda: {'DSH_TEST_PREFIX': str(o / 'targets/ohos-prefix')})
     g.node_tests('publication-capabilities-route', [rt + 'publication-capabilities-route.test.mjs'], needs=('prepared-inputs',), extra=lambda: {'M6_TEST_PREFIX': str(prefix()), 'M6_TEST_CAPABILITIES_MODULE': str(s / 'runtime/ohos/capabilities/index.mjs')})

@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "target": "ohos",
-  "dshVersion": "0.2.1-rc.4",
+  "dshVersion": "0.2.2-rc.1",
   "nodeVersion": "24.22.1",
   "installation": {
     "npmVersion": "11.9.0",
@@ -18,7 +18,7 @@
     "dshClone": "none: fresh locked npm install in a new directory",
     "hardlinks": "reject shared regular files in both prepared prefixes"
   },
-  "dshLockSha256": "9b61c5b60c82a3b64fb252af5c142d40d0c86aff30a17cdd5e1ca9d73df9a25c",
+  "dshLockSha256": "9809a7a64fd5d40df441a30fb4407c037802162d75e8a8e39dc0ef2569bec2ab",
   "processLockSha256": "5a815fc00cafc62fca834fe3e2abf6792bd3263c1a386cb2948d6a4063ed8f30",
   "regexSha256": "80eaea2a9e50a2851e332fa4fccffeb01550584ad3c448a2eadd88b43373d5f1",
   "dshRemovePackages": {
@@ -78,6 +78,7 @@
     "node_modules/@deepseek-ai/dsh-api-terminal-controller/lib/types/client/*": "types输出中的浏览器源码副本；公开/client入口使用已捆绑lib/client.js",
     "node_modules/@deepseek-ai/dsh-api-workspace-controller/lib/types/client/*": "types输出中的浏览器源码副本；公开/client入口使用已捆绑lib/client.js",
     "node_modules/@deepseek-ai/dsh-office-to-pdf/lib/types/index.js": "types目录中的未打补丁重复入口；公开根入口是已明确拒绝OH转换的lib/index.js",
-    "node_modules/json-schema-to-ts/lib/types/*": "类型输出中的原始JavaScript副本含无扩展名导入；固定Node main使用lib/cjs，正式ESM消费由Node解析CJS"
+    "node_modules/json-schema-to-ts/lib/types/*": "类型输出中的原始JavaScript副本含无扩展名导入；固定Node main使用lib/cjs，正式ESM消费由Node解析CJS",
+    "node_modules/rrule/dist/esm/*": "rrule 2.8.1 的 module/类型分支供 bundler 使用，含无扩展名导入；固定 Node main 与唯一 DSH 消费者实际解析到 dist/es5/rrule.js，保留主入口和许可"
   }
 }

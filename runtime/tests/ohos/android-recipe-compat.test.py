@@ -2,7 +2,7 @@
 """Replay the actual old/new shell recipe blocks and mutate their real inputs.
 
 External archives are identical small fixtures, not Android image downloads.
-The baseline must be the verified main-df4c9b2 runtime directory.
+The baseline must be the verified main-63e255f runtime directory.
 """
 import argparse
 from contextlib import contextmanager
@@ -46,7 +46,7 @@ def run_recipe(runtime, fixtures, abi, stream=False, revision='r14'):
     shell = '\n'.join([
         'set -euo pipefail', 'function recipe() {',
         'HERE="$1"; work="$2"; abi="$3"',
-        'RUNTIME_REVISION="$4"; DSH_VERSION=0.2.1-rc.4; NODE_VERSION=24.22.1; PNPM_VERSION=11.28.5',
+        'RUNTIME_REVISION="$4"; DSH_VERSION=0.2.2-rc.1; NODE_VERSION=24.22.1; PNPM_VERSION=11.28.5',
         'UBUNTU_VERSION=24.04.5; COMPRESS=xz; XZ_PRESET=6; PRUNE_DEV_METADATA=1; SOURCE_DATE_EPOCH=1767225600',
         'base="$work/base"; node="$work/node"; python="$work/python"',
         'proot_deb="$work/proot"; talloc_deb="$work/talloc"; shmem_deb="$work/shmem"',
@@ -68,11 +68,11 @@ def main():
     args = parser.parse_args()
     baseline = args.baseline.resolve()
     for name, expected in {
-        'build-runtime.sh': 'a3a4d9e73ec60b24b502ac094cb44dbb528ec492daea18331291d7bce95ae326',
+        'build-runtime.sh': '1ddfc945b7a59fe9243178303d982b04caf6f4178787a5b09a4a5dc1bbfb88ab',
         'lib/rtbuild.py': '235370e7cfd7173a34cd71a348a909b083cc49d118e5ac8ed27a298d6aa821aa',
-        'patches/pins.json': '97d8df4cf8438d96295a6c8554d35ad4809a47ba6f25597526ecd85093dae05e',
+        'patches/pins.json': 'b1b2466fe71a6a343b09ccfdb37ff32e126590000bebea04f564c1cab8784a7c',
     }.items():
-        assert sha((baseline / name).read_bytes()) == expected, 'not the main-df4c9b2 baseline: ' + name
+        assert sha((baseline / name).read_bytes()) == expected, 'not the main-63e255f baseline: ' + name
     cases = []
     with tempfile.TemporaryDirectory(prefix='android-recipe-contract-') as temporary:
         root = Path(temporary)
@@ -128,7 +128,7 @@ def main():
         with changed_pins(pins):
             check('pins-order-and-format-irrelevant')
         changed = json.loads(pins_path.read_text())
-        original = next(iter(changed['patches']['ohos-network-transport.diff']['0.2.1-rc.4'].values()))
+        original = next(iter(changed['patches']['ohos-network-transport.diff']['0.2.2-rc.1'].values()))
         original['after'] = '0' * 64
         with changed_pins(changed):
             check('excluded-ohos-pins')
@@ -140,11 +140,11 @@ def main():
         changed = json.loads(pins_path.read_text())
         name = 'ohos-recipe-fixture.diff'
         changed['targetSets']['ohos'].append(name)
-        changed['patches'][name] = {'0.2.1-rc.4': {}}
+        changed['patches'][name] = {'0.2.2-rc.1': {}}
         with edited(runtime / 'patches' / name, b'# no-op OHOS fixture\n'), changed_pins(changed):
             check('new-registered-ohos-patch')
         changed = json.loads(pins_path.read_text())
-        original = next(iter(changed['patches']['fs-create-exclusive.diff']['0.2.1-rc.4'].values()))
+        original = next(iter(changed['patches']['fs-create-exclusive.diff']['0.2.2-rc.1'].values()))
         original['after'] = '0' * 64
         with changed_pins(changed):
             check('active-android-pin-changes', same=False)
@@ -155,7 +155,7 @@ def main():
         for name in ('patches/fs-create-exclusive.diff', 'build-runtime.sh', 'lib/rtbuild.py',
                      'lib/android_recipe.py', 'session-deletion/core.mjs',
                      'bridge/dsh-go-bridge/package.json', 'boot/boot-cache.mjs', 'direct/paths.mjs',
-                     'locks/dsh-0.2.1-rc.4/package-lock.json', 'locks/pnpm-11.28.5/package-lock.json'):
+                     'locks/dsh-0.2.2-rc.1/package-lock.json', 'locks/pnpm-11.28.5/package-lock.json'):
             path = runtime / name
             suffix = b'\n# digest sensitivity fixture\n' if name.endswith(('.py', '.sh')) else b'\n'
             with edited(path, path.read_bytes() + suffix):

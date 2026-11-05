@@ -82,12 +82,12 @@ def main():
         module = load('rtbuild_' + name, runtime / 'lib/rtbuild.py')
         pins = json.loads((runtime / 'patches/pins.json').read_text())
         names, _ = module.select_dsh_patches(pins, str(runtime / 'patches'), 'android')
-        selected[name], identity = module.dsh_patch_inputs(pins, str(runtime / 'patches'), names, 'android', '0.2.1-rc.4')
+        selected[name], identity = module.dsh_patch_inputs(pins, str(runtime / 'patches'), names, 'android', '0.2.2-rc.1')
         for patch in pins['patches'].values():
-            paths.update(patch['0.2.1-rc.4'])
+            paths.update(patch['0.2.2-rc.1'])
         targets[name] = {'tree': tree, 'identity': identity}
     assert selected['before'] == selected['after'], 'Android target inputs changed'
-    assert sha((prefix / 'package-lock.json').read_bytes()) == sha((ROOT / 'runtime/locks/dsh-0.2.1-rc.4/package-lock.json').read_bytes())
+    assert sha((prefix / 'package-lock.json').read_bytes()) == sha((ROOT / 'runtime/locks/dsh-0.2.2-rc.1/package-lock.json').read_bytes())
     original = inventory(prefix)
     save(out / 'original-full-tree.json', original)
     logical_trees = {}
@@ -99,7 +99,7 @@ def main():
             file.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(prefix / relative, file)
         argv = ['python3', '-I', '-B', str(target['tree'] / 'runtime/lib/rtbuild.py'), 'patch-dsh',
-                '--prefix', str(sparse), '--dsh-version', '0.2.1-rc.4', '--target', 'android',
+                '--prefix', str(sparse), '--dsh-version', '0.2.2-rc.1', '--target', 'android',
                 '--target-report', str(out / (name + '-target.json'))]
         result = subprocess.run(argv, capture_output=True, text=True)
         (out / (name + '.stdout.log')).write_text(result.stdout)

@@ -6244,6 +6244,9 @@ class L10nZh extends L10n {
   String get featuresRepeatAdvanced => '高级';
 
   @override
+  String get featuresRepeatCustom => '自定义';
+
+  @override
   String get featuresIntervalSeconds => '秒';
 
   @override
@@ -11826,6 +11829,15 @@ class L10nZh extends L10n {
 
   @override
   String get pluginsLoadRemoteLogs => '请在这台主机上查看引擎日志。';
+
+  @override
+  String get plugslotsSurfaceComposerTools => '加号面板';
+
+  @override
+  String get plugslotsSurfaceSessionActions => '对话操作';
+
+  @override
+  String get plugslotsSurfaceTurnNote => '回合尾注';
 
   @override
   String get plugslotsSurfaceComposerActions => '输入框按钮';

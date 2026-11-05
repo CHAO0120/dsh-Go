@@ -1,6 +1,3 @@
-# dsh-go OHOS: native HTTP transport with existing DNS pins and proxy policy.
-# Only openharmony or the explicit test preload marker uses the adapter; Android stays on its original path.
-# Pinned to @deepseek-ai/dsh 0.2.1-rc.4. 未在鸿蒙真机核实。
 --- a/node_modules/@deepseek-ai/dsh-http-proxy/lib/index.js
 +++ b/node_modules/@deepseek-ai/dsh-http-proxy/lib/index.js
 @@ -385,7 +385,39 @@
@@ -77,31 +74,25 @@
  		if (previousPolicy === void 0) {
 --- a/node_modules/@deepseek-ai/dsh-web-fetch-http/lib/index.js
 +++ b/node_modules/@deepseek-ai/dsh-web-fetch-http/lib/index.js
-@@ -150,9 +150,16 @@
- * @param signal - request and body-read cancellation signal.
- * @returns a response plus the disposer its consumer must call.
- */
+@@ -172,6 +172,12 @@
+ 	var e = new Error(message);
+ 	return e.name = "SuppressedError", e.error = error, e.suppressed = suppressed, e;
+ });
 +function ohosNetwork() {
 +	if (process.platform !== "openharmony" && globalThis[Symbol.for("dsh.go.ohos.sim")] !== true) return void 0;
 +	const network = globalThis[Symbol.for("dsh.go.ohos.net")];
 +	if (!network) throw Object.assign(new Error("OHOS network preload is required"), { code: "ERR_OHOS_NET_PRELOAD_MISSING" });
 +	return network;
 +}
- async function requestPinned(url, addresses, headers, signal) {
--	const { Agent, fetch } = await import("undici");
--	const dispatcher = new Agent({
-+	const network = ohosNetwork();
-+	const { Agent, fetch } = network ? { fetch: network.fetch } : await import("undici");
-+	const dispatcher = network ? network.createDispatcher({ lookup: createPinnedLookup(addresses), proxyEnv: {}, autoSelectFamily: true }) : new Agent({
- 		autoSelectFamily: true,
- 		connect: { lookup: createPinnedLookup(addresses) }
- 	});
-@@ -190,7 +197,7 @@
- * @returns a response plus a disposer that releases nothing, so both paths close alike.
- */
- async function requestVia(dispatcher, url, headers, signal) {
--	const { fetch } = await import("undici");
-+	const { fetch } = ohosNetwork() ?? await import("undici");
- 	return {
- 		response: await fetch(url, {
- 			method: "GET",
+ /** Stable id this provider registers under. */
+ const LOCAL_FETCH_PROVIDER_ID = "http";
+ /** The anonymous HTTP(S) fetch provider. */
+@@ -243,7 +249,7 @@
+ 			"accept": "text/html,application/xhtml+xml,text/*;q=0.9,application/json;q=0.8"
+ 		};
+ 		try {
+-			const { fetch } = await import("undici");
++			const { fetch } = ohosNetwork() ?? await import("undici");
+ 			return await fetch(url, {
+ 				method: "GET",
+ 				redirect: "manual",

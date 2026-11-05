@@ -49,7 +49,7 @@ def main():
     def run(label, root, prefix, target, expected=0):
         argv = [sys.executable, '-I', '-B', str(root / 'runtime/lib/rtbuild.py'),
                 'patch-dsh', '--prefix', str(prefix), '--patches', str(root / 'runtime/patches'),
-                '--dsh-version', '0.2.1-rc.4', '--target', target,
+                '--dsh-version', '0.2.2-rc.1', '--target', target,
                 '--out', str(out / (label + '-patches.json')),
                 '--target-report', str(out / (label + '-target.json'))]
         row = {'label': label, 'argv': argv, 'cwd': str(root), 'startedUTC': utc(), 'expected': expected}
@@ -62,8 +62,8 @@ def main():
 
     try:
         for name in ('package.json', 'package-lock.json'):
-            assert (pristine / name).read_bytes() == (candidate / 'runtime/locks/dsh-0.2.1-rc.4' / name).read_bytes()
-            assert (pristine / name).read_bytes() == (base / 'runtime/locks/dsh-0.2.1-rc.4' / name).read_bytes()
+            assert (pristine / name).read_bytes() == (candidate / 'runtime/locks/dsh-0.2.2-rc.1' / name).read_bytes()
+            assert (pristine / name).read_bytes() == (base / 'runtime/locks/dsh-0.2.2-rc.1' / name).read_bytes()
         pins = [json.loads((root / 'runtime/patches/pins.json').read_text()) for root in (base, candidate)]
         selected = pins[0]['targetSets']['android']
         assert pins[1]['targetSets']['android'] == selected
@@ -72,7 +72,7 @@ def main():
         # Actual recipe output includes shared companion inputs, not only pin labels.
         for label, root in [('base', base), ('candidate', candidate)]:
             argv = [sys.executable, '-I', '-B', str(root / 'runtime/lib/android_recipe.py'),
-                    '--dsh-version', '0.2.1-rc.4']
+                    '--dsh-version', '0.2.2-rc.1']
             proc = subprocess.run(argv, capture_output=True, cwd=root, timeout=60)
             (out / (label + '-recipe.stdout')).write_bytes(proc.stdout)
             (out / (label + '-recipe.stderr')).write_bytes(proc.stderr)
