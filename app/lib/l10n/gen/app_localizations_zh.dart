@@ -7092,6 +7092,21 @@ class L10nZh extends L10n {
   String get harmonyKwNotifyLive => '进度通知,通知栏进度,状态栏进度';
 
   @override
+  String get harmonyTerminalNoPty => '这个引擎没有交互终端，可连 SSH 主机';
+
+  @override
+  String get harmonyTerminalSupportedHosts => '在 SSH 主机上可用';
+
+  @override
+  String get harmonyPluginRemoveRefused => '这个引擎不能卸载插件';
+
+  @override
+  String get harmonyPluginRefusedHint => '可以开关随包插件，或连接电脑管理插件';
+
+  @override
+  String get harmonyVoiceLocalLine => '鸿蒙本机用系统识别，没有语音模型';
+
+  @override
   String get hostDetailsConnectionType => '连接方式';
 
   @override

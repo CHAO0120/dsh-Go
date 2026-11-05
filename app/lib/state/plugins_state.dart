@@ -14,6 +14,7 @@ import '../runtime/runtime_state.dart';
 import '../share_code/share_net.dart';
 import '../update/version.dart';
 import '../usage/usage_stats.dart';
+import 'android_features.dart';
 import 'app_info.dart';
 import 'connection_state.dart';
 import 'market_sidecar.dart';
@@ -21,6 +22,7 @@ import 'market_sidecar.dart';
 export 'market_sidecar.dart';
 import 'read_list_cache.dart';
 import 'read_list_identity.dart';
+import 'runtime_capabilities_state.dart';
 import 'engine_error_text.dart';
 import 'hosts_state.dart';
 
@@ -243,7 +245,8 @@ typedef _OfficialCopy = ({String index, String? indexTag, String sidecar, String
 
 Future<_OfficialCopy?> _readOfficialCopy() async {
   try {
-    final json = jsonDecode((await SharedPreferences.getInstance()).getString(_officialCopyKey)!) as Map<String, Object?>;
+    final json =
+        jsonDecode((await SharedPreferences.getInstance()).getString(_officialCopyKey)!) as Map<String, Object?>;
     return (
       index: json['index']! as String,
       indexTag: json['indexTag'] as String?,
@@ -517,10 +520,21 @@ final marketResultsProvider = Provider<AsyncValue<List<MarketEntry>>>((ref) {
 /// What plugins can be managed on: the active host's client and what its
 /// carrier allows.
 class PluginHost {
-  const PluginHost({required this.client, required this.label, required this.kind, this.safeMode = false});
+  const PluginHost({
+    required this.client,
+    required this.label,
+    required this.kind,
+    this.safeMode = false,
+    this.installRefused = false,
+  });
 
-  factory PluginHost.of(HostConnection connection, {bool safeMode = false}) =>
-      PluginHost(client: connection.client, label: connection.label, kind: connection.kind, safeMode: safeMode);
+  factory PluginHost.of(HostConnection connection, {bool safeMode = false, bool installRefused = false}) => PluginHost(
+    client: connection.client,
+    label: connection.label,
+    kind: connection.kind,
+    safeMode: safeMode,
+    installRefused: installRefused,
+  );
 
   final DshClient client;
   final String label;
@@ -532,9 +546,13 @@ class PluginHost {
   /// no installs or removals until it's back to normal.
   final bool safeMode;
 
+  /// The engine says it takes no market installs, updates or removals
+  /// (HarmonyOS's own), so there is nothing to offer and no command to show.
+  final bool installRefused;
+
   /// The relay's allow-list has no install/remove; there the app shows the
   /// command to run on that computer instead.
-  bool get canInstall => !safeMode && client.canInstallPlugins;
+  bool get canInstall => !safeMode && !installRefused && client.canInstallPlugins;
 }
 
 /// The on-device engine runs in safe mode. A seam of its own so plugin state
@@ -547,7 +565,8 @@ final pluginHostProvider = Provider<PluginHost?>((ref) {
   final connection = ref.watch(readListLiveConnectionProvider);
   if (connection == null) return null;
   final safeMode = connection.isLocal && ref.watch(localSafeModeProvider);
-  return PluginHost.of(connection, safeMode: safeMode);
+  final installRefused = ref.watch(operatingSystemProvider) == 'ohos' && ref.watch(marketInstallRefusedProvider);
+  return PluginHost.of(connection, safeMode: safeMode, installRefused: installRefused);
 });
 
 // ── Installed bundles ────────────────────────────────────────────────────────
@@ -1077,6 +1096,9 @@ String _requirementText(List<PluginIncompatibility> incompatible) {
   return appL10n.statePluginRequiredVersion(wanted, first.runtimeVersion);
 }
 
+PluginFailure _installRefusedFailure() =>
+    PluginFailure(PluginFailureKind.unsupported, appL10n.marketInstallRefused, appL10n.harmonyPluginRefusedHint);
+
 /// Maps a failed (or cancelled) [result] to user copy. [published] is the
 /// version's index publish time, used to explain pnpm's 24-hour cooldown.
 PluginFailure describeOperationFailure(
@@ -1088,6 +1110,8 @@ PluginFailure describeOperationFailure(
   final run = result.packageResult;
   final detail = [?result.error?.diagnostic, if (run != null && run.output.trim().isNotEmpty) run.output].join('\n\n');
   final d = detail.isEmpty ? null : detail;
+  // The engine refused before doing anything: its diagnostic isn't a message.
+  if (d != null && d.contains('OHOS_PLUGIN_INSTALL_UNAVAILABLE')) return _installRefusedFailure();
   if (result.application == PluginApplication.cancelled) {
     return PluginFailure(
       PluginFailureKind.cancelled,
@@ -1493,6 +1517,8 @@ class PluginInstallsController extends Notifier<Map<String, PluginInstallJob>> {
                 appL10n.commonEngineUnreachable,
                 appL10n.statePluginConnectFirst,
               )
+            : host.installRefused
+            ? _installRefusedFailure()
             : describePluginError(const DshRemoteException('METHOD_NOT_ALLOWED', 'install not allowed')),
       );
       _put(failed);

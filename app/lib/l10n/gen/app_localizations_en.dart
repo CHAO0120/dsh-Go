@@ -7500,6 +7500,22 @@ class L10nEn extends L10n {
   String get harmonyKwNotifyLive => 'progress notification,notification progress,status bar progress';
 
   @override
+  String get harmonyTerminalNoPty => 'This engine has no interactive terminal. Connect to an SSH host for one';
+
+  @override
+  String get harmonyTerminalSupportedHosts => 'Available on SSH hosts';
+
+  @override
+  String get harmonyPluginRemoveRefused => 'This engine can\'t remove plugins';
+
+  @override
+  String get harmonyPluginRefusedHint =>
+      'You can turn bundled plugins on or off, or connect a computer to manage plugins';
+
+  @override
+  String get harmonyVoiceLocalLine => 'On-device HarmonyOS uses the system\'s recognition. There\'s no voice model';
+
+  @override
   String get hostDetailsConnectionType => 'Connection type';
 
   @override

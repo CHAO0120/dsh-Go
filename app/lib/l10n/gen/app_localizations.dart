@@ -13022,6 +13022,36 @@ abstract class L10n {
   /// **'进度通知,通知栏进度,状态栏进度'**
   String get harmonyKwNotifyLive;
 
+  /// No description provided for @harmonyTerminalNoPty.
+  ///
+  /// In zh, this message translates to:
+  /// **'这个引擎没有交互终端，可连 SSH 主机'**
+  String get harmonyTerminalNoPty;
+
+  /// No description provided for @harmonyTerminalSupportedHosts.
+  ///
+  /// In zh, this message translates to:
+  /// **'在 SSH 主机上可用'**
+  String get harmonyTerminalSupportedHosts;
+
+  /// No description provided for @harmonyPluginRemoveRefused.
+  ///
+  /// In zh, this message translates to:
+  /// **'这个引擎不能卸载插件'**
+  String get harmonyPluginRemoveRefused;
+
+  /// No description provided for @harmonyPluginRefusedHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'可以开关随包插件，或连接电脑管理插件'**
+  String get harmonyPluginRefusedHint;
+
+  /// No description provided for @harmonyVoiceLocalLine.
+  ///
+  /// In zh, this message translates to:
+  /// **'鸿蒙本机用系统识别，没有语音模型'**
+  String get harmonyVoiceLocalLine;
+
   /// No description provided for @hostDetailsConnectionType.
   ///
   /// In zh, this message translates to:

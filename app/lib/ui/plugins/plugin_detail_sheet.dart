@@ -288,7 +288,8 @@ class MarketPluginSheet extends ConsumerWidget {
       child: Text(l10n.hubPluginManage),
     );
     // Nothing to install or update from here: manage what is there.
-    if (manageable && (status == MarketInstallStatus.installed || host.safeMode || !host.canInstall)) {
+    if (manageable &&
+        (status == MarketInstallStatus.installed || host.safeMode || (!host.canInstall && !installRefused))) {
       return manage();
     }
     // Listed, but this app is too old for it or the engine takes no market
@@ -604,6 +605,13 @@ class BundleSheet extends ConsumerWidget {
           child: Text(l10n.hubPluginSafeModeInstall),
         );
       }
+      if (host.installRefused) {
+        return FilledButton(
+          style: FilledButton.styleFrom(minimumSize: size),
+          onPressed: null,
+          child: Text(l10n.marketInstallRefused, maxLines: 1, overflow: TextOverflow.ellipsis),
+        );
+      }
       if (!host.canInstall) {
         return FilledButton.icon(
           style: FilledButton.styleFrom(minimumSize: size),
@@ -635,6 +643,13 @@ class BundleSheet extends ConsumerWidget {
         style: FilledButton.styleFrom(minimumSize: size),
         onPressed: null,
         child: Text(l10n.hubPluginSafeModeRemove),
+      );
+    }
+    if (host.installRefused) {
+      return FilledButton(
+        style: FilledButton.styleFrom(minimumSize: size),
+        onPressed: null,
+        child: Text(l10n.harmonyPluginRemoveRefused, maxLines: 1, overflow: TextOverflow.ellipsis),
       );
     }
     if (!host.canInstall) {

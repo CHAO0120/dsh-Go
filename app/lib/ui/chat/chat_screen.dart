@@ -252,7 +252,10 @@ class _ChatScreenState extends ConsumerState<ChatScreen> with WidgetsBindingObse
     _voice = VoiceInputController(
       input: _input,
       bridge: ref.read(voiceBridgeProvider),
-      mode: () => ref.read(voiceSettingsProvider.notifier).ready(),
+      mode: () async {
+        final mode = await ref.read(voiceSettingsProvider.notifier).ready();
+        return mounted && ref.read(harmonyLocalVoiceProvider) ? voiceModeOnHarmonyLocal(mode) : mode;
+      },
       // The voice model lives in the on-device engine: it counts for that host only.
       modelReady: () =>
           mounted &&

@@ -100,39 +100,44 @@ class _VoiceSettingsPageState extends ConsumerState<VoiceSettingsPage> {
   @override
   Widget build(BuildContext context) {
     final l10n = context.l10n;
-    final selected = ref.watch(voiceSettingsProvider);
+    final harmonyLocal = ref.watch(harmonyLocalVoiceProvider);
+    final stored = ref.watch(voiceSettingsProvider);
+    final selected = harmonyLocal ? voiceModeOnHarmonyLocal(stored) : stored;
     return AppPage.list(
       title: l10n.voiceSettingsTitle,
       children: [
         SettingsSection(
           title: l10n.voiceModeSection,
+          footer: harmonyLocal ? Text(l10n.harmonyVoiceLocalLine, key: const ValueKey('voice-local-line')) : null,
           children: [
             for (final mode in VoiceMode.values)
-              Semantics(
-                checked: selected == mode,
-                inMutuallyExclusiveGroup: true,
-                child: SettingsTile(
-                  key: ValueKey('voice-mode-${mode.name}'),
-                  title: voiceModeLabel(l10n, mode),
-                  subtitle: switch (mode) {
-                    VoiceMode.auto => l10n.voiceModeAutoHint,
-                    VoiceMode.system => l10n.voiceModeSystemHint,
-                    VoiceMode.engine => l10n.voiceModeEngineHint,
-                  },
-                  trailing: SizedBox.square(
-                    dimension: 32,
-                    child: Icon(selected == mode ? AppIcons.radioOn : AppIcons.radioOff, size: 24),
+              if (!harmonyLocal || mode != VoiceMode.engine)
+                Semantics(
+                  checked: selected == mode,
+                  inMutuallyExclusiveGroup: true,
+                  child: SettingsTile(
+                    key: ValueKey('voice-mode-${mode.name}'),
+                    title: voiceModeLabel(l10n, mode),
+                    subtitle: switch (mode) {
+                      VoiceMode.auto => l10n.voiceModeAutoHint,
+                      VoiceMode.system => l10n.voiceModeSystemHint,
+                      VoiceMode.engine => l10n.voiceModeEngineHint,
+                    },
+                    trailing: SizedBox.square(
+                      dimension: 32,
+                      child: Icon(selected == mode ? AppIcons.radioOn : AppIcons.radioOff, size: 24),
+                    ),
+                    onTap: () => unawaited(ref.read(voiceSettingsProvider.notifier).setMode(mode)),
                   ),
-                  onTap: () => unawaited(ref.read(voiceSettingsProvider.notifier).setMode(mode)),
                 ),
-              ),
           ],
         ),
-        SettingsSection(
-          title: l10n.voiceModelSection,
-          footer: Text(l10n.voiceModelFooter),
-          children: const [VoiceModelCard()],
-        ),
+        if (!harmonyLocal)
+          SettingsSection(
+            title: l10n.voiceModelSection,
+            footer: Text(l10n.voiceModelFooter),
+            children: const [VoiceModelCard()],
+          ),
       ],
     );
   }
@@ -162,10 +167,7 @@ class VoiceModelCard extends ConsumerWidget {
       VoiceModelStatus.waiting => (l10n.voiceModelWaiting, colors.textTertiary),
       VoiceModelStatus.unsupported => (l10n.voiceModelUnsupported, colors.textTertiary),
       VoiceModelStatus.absent => (l10n.voiceModelAbsent, theme.colorScheme.onSurfaceVariant),
-      VoiceModelStatus.downloading => (
-        '${((model.fraction ?? 0) * 100).floor()}%',
-        theme.colorScheme.onSurfaceVariant,
-      ),
+      VoiceModelStatus.downloading => ('${((model.fraction ?? 0) * 100).floor()}%', theme.colorScheme.onSurfaceVariant),
       VoiceModelStatus.preparing => (l10n.voiceModelPreparing, theme.colorScheme.onSurfaceVariant),
       VoiceModelStatus.ready => (l10n.voiceModelReady, colors.success),
       VoiceModelStatus.failed => (l10n.voiceModelFailed, colors.danger),
@@ -176,16 +178,20 @@ class VoiceModelCard extends ConsumerWidget {
       VoiceModelStatus.ready => l10n.voiceModelReadyNote(total),
       VoiceModelStatus.failed => voiceModelFailureText(l10n, model.failure, neededBytes: model.neededBytes),
       VoiceModelStatus.waiting when model.wanted => l10n.voiceModelWaitingNote,
-      VoiceModelStatus.absent || VoiceModelStatus.waiting when partial => l10n.voiceModelBytes(
-        voiceModelMegabytes(model.doneBytes),
-        total,
-      ),
+      VoiceModelStatus.absent ||
+      VoiceModelStatus.waiting when partial => l10n.voiceModelBytes(voiceModelMegabytes(model.doneBytes), total),
       VoiceModelStatus.absent || VoiceModelStatus.waiting => l10n.voiceModelAbsentNote(total),
       VoiceModelStatus.unsupported => null,
     };
 
-    (String, Widget) primary(String label, VoidCallback onPressed, {Key? key}) =>
-        (label, FilledButton(key: key, onPressed: onPressed, child: Text(label, maxLines: 1, overflow: TextOverflow.ellipsis)));
+    (String, Widget) primary(String label, VoidCallback onPressed, {Key? key}) => (
+      label,
+      FilledButton(
+        key: key,
+        onPressed: onPressed,
+        child: Text(label, maxLines: 1, overflow: TextOverflow.ellipsis),
+      ),
+    );
     (String, Widget) secondary(String label, VoidCallback onPressed, {Key? key, bool danger = false}) => (
       label,
       OutlinedButton(
@@ -225,7 +231,11 @@ class VoiceModelCard extends ConsumerWidget {
         ),
       ],
       VoiceModelStatus.failed => [
-        primary(l10n.commonRetry, () => unawaited(downloadVoiceModel(context, ref)), key: const ValueKey('voice-model-retry')),
+        primary(
+          l10n.commonRetry,
+          () => unawaited(downloadVoiceModel(context, ref)),
+          key: const ValueKey('voice-model-retry'),
+        ),
       ],
     };
     final buttons = [for (final (_, b) in actions) b];
@@ -356,11 +366,7 @@ class _Actions extends StatelessWidget {
           ],
         );
       }
-      return Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        spacing: 8,
-        children: children,
-      );
+      return Column(crossAxisAlignment: CrossAxisAlignment.stretch, spacing: 8, children: children);
     },
   );
 }
