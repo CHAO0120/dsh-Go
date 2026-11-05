@@ -55,6 +55,13 @@ def load_audit():
     return module.audit
 
 
+def load_contract():
+    spec = importlib.util.spec_from_file_location('native_contract', ROOT / 'tooling/ohos/native_contract.py')
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--hap', required=True, type=Path)
@@ -114,6 +121,12 @@ def main():
         expected = [f'{name} imports plain N-API, which only libdsh_host.so may do' for name in OUTSIDE_NODE]
         problems += [f'whole directory: {item}' for item in found if item not in expected]
         report['wholeDirectoryAudit'] = {'problems': found, 'expected': sorted(set(found) & set(expected)), **detail}
+        # A stale input matches itself, so also hold the libraries to the sources' current names.
+        if {'libnode.so', 'libdsh_host.so'} <= libs:
+            found = load_contract().check_files(out / 'libnode.so', out / 'libdsh_host.so',
+                                                args.sdk / 'native/llvm/bin/llvm-nm', ROOT)
+            problems += [f'native contract: {item}' for item in found]
+            report['nativeContract'] = {'problems': found}
         # The bytes hvigor built, stripped and packaged; the audit above stops short of this gate.
         isolation = Path(temp) / 'napi-isolation.json'
         gate = subprocess.run([sys.executable, '-I', '-B', str(ROOT / 'runtime/ohos/host/napi_isolation.py'),

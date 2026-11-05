@@ -767,6 +767,7 @@ def main():
     for filename in ['runtime-archive-audit.test.py', 'audit-dart-bridges.test.py', 'patch-framework.test.py']:
         g.run(filename[:-3], lambda f=filename: g.py(tools + f), needs=('tools',), tests=[tools + filename])
     g.run('hap-distribution', lambda: g.py(tools + 'hap-distribution.test.py'), needs=('tools',), tests=[tools + 'hap-distribution.test.py'])
+    g.run('native-contract', lambda: g.py(tools + 'native-contract.test.py'), needs=('tools',), tests=[tools + 'native-contract.test.py'])
     g.run('fork-installed-resolution', lambda: g.py(tools + 'prepare-forks-installed.test.py'), needs=('tools',), tests=[tools + 'prepare-forks-installed.test.py'])
     g.run('archive-manifest', lambda: g.py(tools + 'runtime-archive-manifest-contract.py', '--node', node(), '--report', o / 'archive-manifest.json'), needs=('tools',))
     g.run('hms-declarations', lambda: g.py(tools + 'prepare-hms-sdk.test.py', '--helper', s / 'tooling/ohos/hms-stubs/prepare-sdk.py', '--output', o / 'hms-declarations'), needs=('tools',), tests=[tools + 'prepare-hms-sdk.test.py'])
