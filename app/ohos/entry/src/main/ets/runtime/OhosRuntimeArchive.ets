@@ -140,10 +140,12 @@ export class OhosRuntimeArchive {
     write: (buffer: ArrayBuffer, length: number) => Promise<void>): Promise<void> {
     const zip = await zlib.createZip();
     let input: ArrayBuffer = new ArrayBuffer(0);
-    const output = new ArrayBuffer(CHUNK);
+    // Keep one extra byte to detect an oversized first block before writing it.
+    const outputCapacity: number = Math.min(CHUNK, entry.size + 1);
+    const output = new ArrayBuffer(outputCapacity);
     let initialized = false;
     try {
-      const init = await zip.inflateInit2({ nextIn: input, availableIn: 0, nextOut: output, availableOut: CHUNK }, -15);
+      const init = await zip.inflateInit2({ nextIn: input, availableIn: 0, nextOut: output, availableOut: outputCapacity }, -15);
       if (init !== zlib.ReturnStatus.OK) throw new RuntimeChannelError('ohos_archive_inflate', '运行时解压初始化失败。');
       initialized = true;
       let loaded = 0;
@@ -153,7 +155,7 @@ export class OhosRuntimeArchive {
       let crc = 0;
       const magic = new Uint8Array(4);
       while (true) {
-        const request: zlib.ZStream = { nextOut: output, availableOut: CHUNK };
+        const request: zlib.ZStream = { nextOut: output, availableOut: outputCapacity };
         if (available === 0 && loaded < entry.packedSize) {
           input = await source.read(entry.dataOffset + loaded, Math.min(CHUNK, entry.packedSize - loaded));
           loaded += input.byteLength;
@@ -169,11 +171,11 @@ export class OhosRuntimeArchive {
             state.totalIn === undefined || state.totalOut === undefined ||
             !Number.isSafeInteger(state.availableIn) || !Number.isSafeInteger(state.availableOut) ||
             state.availableIn < 0 || state.availableIn > available ||
-            state.availableOut < 0 || state.availableOut > CHUNK) {
+            state.availableOut < 0 || state.availableOut > outputCapacity) {
           throw new RuntimeChannelError('ohos_archive_inflate', '运行时解压状态无效。');
         }
         const used = available - state.availableIn;
-        const count = CHUNK - state.availableOut;
+        const count = outputCapacity - state.availableOut;
         if (state.totalIn !== consumed + used || state.totalOut !== produced + count ||
             produced + count > entry.size) {
           throw new RuntimeChannelError('ohos_size_mismatch', '运行时解压长度超过清单或内部计数不一致。');
@@ -197,7 +199,7 @@ export class OhosRuntimeArchive {
           return;
         }
         if (status !== zlib.ReturnStatus.OK || (used === 0 && count === 0) ||
-            (available === 0 && loaded === entry.packedSize && count < CHUNK)) {
+            (available === 0 && loaded === entry.packedSize && count < outputCapacity)) {
           throw new RuntimeChannelError('ohos_archive_inflate', '运行时压缩流未正常结束。');
         }
       }

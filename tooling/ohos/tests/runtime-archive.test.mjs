@@ -76,6 +76,16 @@ test('real random input crossing compressed and output chunk boundaries is byte-
   assert.equal(observation.maxOutput,256*1024);
 });
 
+test('small members and the output-cap boundary finish with exact bytes and CRC',async()=>{
+  const sizes=[1,3,4,256*1024-2,256*1024-1,256*1024,256*1024+1];
+  const files={...baseFiles};
+  for(const size of sizes) files['boundary-'+size+'.txt']=Buffer.alloc(size,0x61);
+  const c=await scenario('output-boundary',files); await install(c);
+  for(const [name,bytes] of Object.entries(files)) assert.deepEqual(await fs.readFile(c.installer.root+'/'+name),Buffer.from(bytes));
+  assert.equal((await c.installer.installed()).runtimeVersion,'v1');
+  assert.equal(observation.maxOutput,256*1024);
+});
+
 test('reinstall skips every inflate and every payload rewrite; changed-only upgrade retains old inode',async()=>{
   const c=await scenario('upgrade'); await install(c);
   const before=await fs.stat(c.installer.root+'/runtime/ohos/preload.mjs');
@@ -202,9 +212,9 @@ test('corrupt actual Deflate bytes fail without installed marker; decompressor i
   await assert.rejects(install(c));assert.equal(await c.installer.installed(),null);
 });
 
-test('decompression beyond manifest size is stopped before oversized output is written',async()=>{
-  const c=await scenario('expanded-bomb',{...baseFiles,'000-bomb.txt':'x'.repeat(1024*1024)},'v1',m=>{m.files[0].size=1;});
-  await mutate(c,(b,r)=>{const row=r.find(x=>x.name==='files/000-bomb.txt');b.writeUInt32LE(1,row.centralOffset+24);b.writeUInt32LE(1,row.localOffset+22);});
+for(const declaredSize of [0,1]) test('decompression beyond declared size '+declaredSize+' is stopped before any output is written',async()=>{
+  const c=await scenario('expanded-bomb-'+declaredSize,{...baseFiles,'000-bomb.txt':'x'.repeat(1024*1024)},'v1',m=>{m.files[0].size=declaredSize;});
+  await mutate(c,(b,r)=>{const row=r.find(x=>x.name==='files/000-bomb.txt');b.writeUInt32LE(declaredSize,row.centralOffset+24);b.writeUInt32LE(declaredSize,row.localOffset+22);});
   await assert.rejects(install(c),{code:'ohos_size_mismatch'});assert.equal(await c.installer.installed(),null);
   const temps=await fs.readdir(c.directory+'/runtime/staging');assert.equal(temps.length,1);
   assert.equal((await fs.stat(c.directory+'/runtime/staging/'+temps[0])).size,0);
