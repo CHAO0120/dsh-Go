@@ -101,12 +101,11 @@ class AppearancePage extends ConsumerWidget {
             if (androidFeatures) const IconShortcutTile(),
           ],
         ),
-        if (androidFeatures)
-          SettingsSection(
-            title: l10n.launchScreenTitle,
-            footer: Text(l10n.launchFooter),
-            children: [SpotAnchor(spot: Spots.launchScreen, child: const LaunchScreenSection())],
-          ),
+        SettingsSection(
+          title: l10n.launchScreenTitle,
+          footer: Text(l10n.launchFooter),
+          children: [SpotAnchor(spot: Spots.launchScreen, child: const LaunchScreenSection())],
+        ),
         SettingsSection(
           title: l10n.wallpaperTitle,
           footer: Text(l10n.wallpaperFooter),

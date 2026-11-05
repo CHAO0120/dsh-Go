@@ -220,15 +220,15 @@ void main() {
       expect(find.textContaining('问 AI'), findsNothing);
     });
 
-    testWidgets('on HarmonyOS: the launcher icon is there, the picture shortcut and launch screen aren\'t', (tester) async {
+    testWidgets('on HarmonyOS: the launcher icon and launch screen are there, the picture shortcut isn\'t', (tester) async {
       await _pumpSearch(tester, overrides: [..._overrides(), operatingSystemProvider.overrideWithValue('ohos')]);
-      await _type(tester, _zh.pluginsAppIcon);
-      expect(find.text(_zh.pluginsAppIcon), findsWidgets);
-      expect(find.text(_zh.harmonySearchUnavailable), findsNothing);
-      for (final q in [_zh.iconShortcutRow, _zh.launchScreenTitle]) {
+      for (final q in [_zh.pluginsAppIcon, _zh.launchScreenTitle]) {
         await _type(tester, q);
-        expect(find.text(_zh.harmonySearchUnavailable), findsOneWidget, reason: q);
+        expect(find.text(q), findsWidgets, reason: q);
+        expect(find.text(_zh.harmonySearchUnavailable), findsNothing, reason: q);
       }
+      await _type(tester, _zh.iconShortcutRow);
+      expect(find.text(_zh.harmonySearchUnavailable), findsOneWidget);
     });
 
     testWidgets('on HarmonyOS: what only Android has says so, a typo stays a typo', (tester) async {

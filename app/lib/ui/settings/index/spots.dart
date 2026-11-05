@@ -794,7 +794,6 @@ abstract final class Spots {
     page: SettingsPageId.appearance,
     title: (l) => l.launchScreenTitle,
     keywords: (l) => l.searchKwLaunchScreen,
-    androidOnly: true,
   );
   static final wallpaper = SettingSpot(
     'wallpaper',
