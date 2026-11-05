@@ -485,6 +485,14 @@
           "after": "73689d6f918f621dd18a74cd01a45f0b33e552193662ebd7703bd657a1d7b449"
         }
       }
+    },
+    "ohos-provider-body-timeout.diff": {
+      "0.2.1-rc.4": {
+        "node_modules/@earendil-works/pi-ai/dist/api/openai-completions.js": {
+          "before": "106eb312121137abbe9ad8050e2c9baa1ea27315233c7b8bee8c7820c8b3a6cf",
+          "after": "80b4e0d44f74add446f81e7e4e1895209c64f8732230cc628ce9d3e503df4433"
+        }
+      }
     }
   },
   "schema": 2,
@@ -539,7 +547,8 @@
       "ohos-output-utf8.diff",
       "file-upload-resolver-dispose.diff",
       "zzzzzzzz-schedule-authorization.diff",
-      "ohos-mcp-stdio-unavailable.diff"
+      "ohos-mcp-stdio-unavailable.diff",
+      "ohos-provider-body-timeout.diff"
     ]
   }
 }
