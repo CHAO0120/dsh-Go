@@ -273,7 +273,7 @@
       if (!piece) return;
       const before = result.text;
       result.text += (before ? '\n' : '') + piece;
-      if (bytes(result) > maxBytes || encoder.encode(result.text).byteLength > maxBytes / 2) { result.text = before; result.truncated = true; }
+      if (result.text.length > maxBytes / 2 || bytes(result) > maxBytes || encoder.encode(result.text).byteLength > maxBytes / 2) { result.text = before; result.truncated = true; }
     }
     function walk(node, context) {
       if (++visits > LIMIT_VISITS) { result.truncated = true; return; }
