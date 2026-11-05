@@ -1057,7 +1057,7 @@ class _WebViewPageState extends State<WebViewPage> {
         opacity: hidden ? 0 : 1,
         duration: AppMotion.of(context, AppMotion.standard),
         curve: AppMotion.std,
-        child: BackdropGroup(
+        child: GlassOverNativeView(
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
@@ -1100,7 +1100,7 @@ class _WebViewPageState extends State<WebViewPage> {
       right: 0,
       top: padding.top,
       height: WebChromeMetrics.barHeight,
-      child: BackdropGroup(
+      child: GlassOverNativeView(
         child: Padding(
           padding: EdgeInsets.fromLTRB(
             padding.left + WebChromeMetrics.edge,

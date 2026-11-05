@@ -6241,6 +6241,9 @@ class L10nZh extends L10n {
   String get featuresRepeatAdvanced => '高级';
 
   @override
+  String get featuresRepeatCustom => '自定义';
+
+  @override
   String get featuresIntervalSeconds => '秒';
 
   @override
@@ -6999,6 +7002,12 @@ class L10nZh extends L10n {
 
   @override
   String get harmonyIconChangeFailed => '没能更换。使用自定义主题或应用分身时不能换桌面图标';
+
+  @override
+  String get hostDetailsConnectionType => '连接方式';
+
+  @override
+  String get hostDetailsSshNetworkHint => '通过 SSH 隧道连接。此连接不提供 LAN / P2P 路径检测或延迟测量。';
 
   @override
   String get hubSessionDetails => '对话详情';
@@ -8559,6 +8568,12 @@ class L10nZh extends L10n {
 
   @override
   String get performanceSystemMotion => '同时遵循系统的移除动画设置';
+
+  @override
+  String get performanceFluid => '灵动动效';
+
+  @override
+  String get performanceFluidHint => '弹性回弹、按压光晕、卡片展开成页面。几乎不增加耗电';
 
   @override
   String get performanceFollowMode => '效果跟随性能模式';
@@ -11749,6 +11764,15 @@ class L10nZh extends L10n {
   String get pluginsLoadRemoteLogs => '请在这台主机上查看引擎日志。';
 
   @override
+  String get plugslotsSurfaceComposerTools => '加号面板';
+
+  @override
+  String get plugslotsSurfaceSessionActions => '对话操作';
+
+  @override
+  String get plugslotsSurfaceTurnNote => '回合尾注';
+
+  @override
   String get plugslotsSurfaceComposerActions => '输入框按钮';
 
   @override
@@ -13643,6 +13667,27 @@ class L10nZh extends L10n {
   String get remoteNetworkObservedAt => '最近观测';
 
   @override
+  String get stateWorkspaceFilesHint => '已上传到当前工作区的文件：';
+
+  @override
+  String get stateRemoteUploadNameInvalid => '文件名不受主机支持，请去掉特殊字符或缩短后再试';
+
+  @override
+  String get stateRemoteUploadWorkspaceUnavailable => '当前对话没有可写的工作目录';
+
+  @override
+  String get stateRemoteUploadWorkspaceChanged => '工作目录已变化，请确认后重新上传';
+
+  @override
+  String get stateRemoteUploadLimit => '主机拒绝了上传，请检查文件大小或稍后重试';
+
+  @override
+  String get stateRemoteUploadUnsupported => '这台主机不支持文件上传，请更新主机上的 Remote 插件后重连';
+
+  @override
+  String get stateRemoteUploadTooLarge => '文件超过远程上传协议的大小上限';
+
+  @override
   String get riskDontShowAgain => '不再提示';
 
   @override
@@ -13757,6 +13802,9 @@ class L10nZh extends L10n {
 
   @override
   String get searchNeedsEngineField => '当前主机提供时可用';
+
+  @override
+  String get searchNeedsAnimations => '开启动画时可用';
 
   @override
   String get searchNeedsChat => '打开对话时可用';
@@ -13931,6 +13979,9 @@ class L10nZh extends L10n {
 
   @override
   String get searchKwAnimations => '动画,动效,减少动画';
+
+  @override
+  String get searchKwFluidMotion => '灵动,弹性,回弹,光晕,丝滑';
 
   @override
   String get searchKwNotifyEnabled => '通知开关,关闭通知';
@@ -15049,6 +15100,24 @@ class L10nZh extends L10n {
   String shellChatsArchivedPartial(int count, int failed) {
     return '已归档 $count 个对话，$failed 个没能归档';
   }
+
+  @override
+  String get shellPanelOverview => '信息';
+
+  @override
+  String get shellPanelWorkspace => '工作区';
+
+  @override
+  String get shellPanelModel => '模型';
+
+  @override
+  String get shellPanelHost => '主机';
+
+  @override
+  String get shellPanelOpenFull => '打开完整页面';
+
+  @override
+  String get shellPanelNoPlugins => '这段对话还没有插件面板';
 
   @override
   String get shellQuickPanel => '快捷入口';

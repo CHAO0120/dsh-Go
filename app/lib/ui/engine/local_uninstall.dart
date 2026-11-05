@@ -14,6 +14,7 @@ import '../../state/android_features.dart';
 import '../../state/hosts_state.dart';
 import '../../state/onboarding_state.dart';
 import '../../state/sessions_state.dart';
+import '../common/app_dialog.dart';
 import '../settings/settings_widgets.dart';
 import '../theme/app_icons.dart';
 import '../theme/theme.dart';
@@ -46,7 +47,7 @@ class LocalUninstallRow extends ConsumerWidget {
 
   Future<void> _confirm(BuildContext context) async {
     final l10n = context.l10n;
-    final ok = await showDialog<bool>(
+    final ok = await showAppDialog<bool>(
       context: context,
       builder: (dialog) => AlertDialog(
         title: Text(l10n.localEnvUninstallTitle),

@@ -791,6 +791,11 @@ class FakeRemoteHost {
   final List<String> rpcMethods = [];
   final List<Map<String, Object?>> openedStreamParams = [];
   Future<Map<String, Object?>> Function(Map<String, Object?>)? transferRead;
+  /// Holds an open reply after the Host has registered its incoming transfer.
+  Future<void> Function(String transferId)? beforeTransferOpenResponse;
+
+  /// Independent top-level workspace upload RPCs (plugin 0.6.2).
+  Future<Object?> Function(String method, Map<String, Object?> params)? workspaceUpload;
 
   /// Responses above this many bytes answer RESPONSE_TOO_LARGE on the
   /// direct path (forces the transfer path).
@@ -1059,6 +1064,10 @@ class FakeRemoteHost {
         if (stallDescribe) return;
         if (describeUnsupported) return reject('METHOD_NOT_FOUND', 'Unknown method.');
         respond({'capabilities': capabilities});
+      case 'workspace.upload.open' || 'workspace.upload.chunk' || 'workspace.upload.commit' || 'workspace.upload.abort':
+        final upload = workspaceUpload;
+        if (upload == null) return reject('FEATURE_NOT_SUPPORTED', 'No workspace upload handler.');
+        respond(await upload(method, params));
       case 'harness.remote.call':
         final endpoint = params['endpoint']! as String;
         if (!harnessRemoteAllowlist.contains(endpoint)) {
@@ -1109,6 +1118,8 @@ class FakeRemoteHost {
           'totalChunks': params['totalChunks'],
           'chunks': <List<int>>[],
         };
+        final beforeOpenResponse = beforeTransferOpenResponse;
+        if (beforeOpenResponse != null) await beforeOpenResponse(params['transferId']! as String);
         respond({'opened': true, 'transferId': params['transferId']});
       case 'harness.remote.transfer.chunk':
         final transfer = connection.transfers[params['transferId']]!;

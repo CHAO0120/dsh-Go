@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:dsh_client/dsh_client.dart' show ImageAttachment;
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
@@ -369,8 +370,8 @@ final attachmentPickerProvider = Provider<AttachmentPicker>((ref) => createAttac
 
 /// Bytes of an image a session's log refers to (`session/attachment`), for
 /// thumbnails of sent messages. Dropped once no bubble shows it.
-final sessionImageProvider = FutureProvider.autoDispose.family<Uint8List, (String, String)>((ref, key) async {
-  final (sessionId, attachmentId) = key;
+final sessionImageProvider = FutureProvider.autoDispose.family<Uint8List, (String, ImageAttachment)>((ref, key) async {
+  final (sessionId, attachment) = key;
   final client = ref.watch(activeConnectionProvider.select((c) => c.value?.client));
   if (client == null) throw StateError(appL10n.commonNotConnected);
   // Scrolling a bubble out and back shouldn't refetch; let it go a bit later.
@@ -379,5 +380,5 @@ final sessionImageProvider = FutureProvider.autoDispose.family<Uint8List, (Strin
   ref.onCancel(() => release = Timer(const Duration(seconds: 30), link.close));
   ref.onResume(() => release?.cancel());
   ref.onDispose(() => release?.cancel());
-  return (await client.attachment(sessionId, attachmentId)).bytes;
+  return (await client.attachment(sessionId, attachment)).bytes;
 });
