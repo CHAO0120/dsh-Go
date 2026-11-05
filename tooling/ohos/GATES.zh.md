@@ -37,7 +37,7 @@ CI现有 Python tooling 之后运行入口合同自测；runtime路径过滤含 
 | `fetch_node` | 单独的、已按项目固定Undici方案构建的Node24.22.1，用于原`net/test.sh`的builtin fetch契约。其它组仍使用`node_root`；stock Node不能冒充此工具。 |
 | `cxx` / `cc` | 本机C++20/C编译器；还需Python3、Git、openssl、zlib开发库、pdfinfo、pdftoppm。 |
 | `prepared` | 用下列原准备器执行两锁全新npm-ci及显式OH目标补丁，含`dsh/process/prepared-inputs.json/target-report.json/patch-results.json`。 |
-| `android_pristine` | `runtime/locks/dsh-0.2.1-rc.4`完整未补丁npm-ci前缀，保留Linux optional loader与固定rg15；不能用OH omit-optional组成输入代替。 |
+| `android_pristine` | `runtime/locks/dsh-0.2.2-rc.1`完整未补丁npm-ci前缀，保留Linux optional loader与固定rg15；不能用OH omit-optional组成输入代替。 |
 | `android_baseline` | 本轮权威基底源码。实际Android补丁选择、完整安装树、真实版本配方和两ABI输入流均与其对照，不写死历史文件数或hash。 |
 | `typescript_prefix` | 安装可执行原ETS夹具的TypeScript；这只是Linux转译适配器，非严格ArkTS编译证明。 |
 | `esbuild_prefix` | `runtime/ohos/node/build-tools`既有锁的独立npm-ci安装，固定esbuild0.27.3。不修改node目录。 |
