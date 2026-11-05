@@ -17702,6 +17702,10 @@ class L10nEn extends L10n {
   String get systemActionsResultNotified => 'The notification was sent. Whether you saw it isn\'t known.';
 
   @override
+  String get systemActionsResultReminder =>
+      'Handed to the system\'s reminders, which go off on their own. The engine doesn\'t run for it.';
+
+  @override
   String get systemActionsResultClipboard => 'The text is on the clipboard.';
 
   @override

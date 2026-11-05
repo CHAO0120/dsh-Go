@@ -16,7 +16,8 @@ function fixture(hooks = {}) {
   const calls = [], payloads = [];
   const effect = async (name, value) => { calls.push(name); payloads.push(clone(value)); return await hooks.effect?.(name,value); };
   const context = {
-    abilityInfo:{bundleName:'com.example.dsh'},
+    abilityInfo:{bundleName:'com.example.dsh'},applicationInfo:{accessTokenId:123},
+    resourceManager:{async getStringByName(name){assert.equal(name,'phone_reminder_close');return 'Localized close';}},
     openLink: link => { if (hooks.syncLinkError) throw new Error('sync SDK error'); return effect('link',link); }, startAbility: want => effect('app',want),
     startAbilityByType: (kind,params,cb) => effect('navigation',{kind,params}),
   };
@@ -28,6 +29,13 @@ function fixture(hooks = {}) {
       publish: request => effect('publish',request),
       openNotificationSettings: actual => {assert.equal(actual,context);return effect('notificationSettings',{});},
     }},
+    '@ohos.abilityAccessCtrl': {default:{GrantStatus:{PERMISSION_GRANTED:0},createAtManager:()=>({
+      async checkAccessToken(token,permission){assert.equal(token,123);assert.equal(permission,'ohos.permission.PUBLISH_AGENT_REMINDER');calls.push('reminderPermission');await hooks.reminderPermission?.();return hooks.grant === false ? -1 : 0;}
+    })}},
+    '@ohos.reminderAgentManager': {default:{ReminderType:{REMINDER_TYPE_ALARM:2,REMINDER_TYPE_TIMER:0},ActionButtonType:{ACTION_BUTTON_TYPE_CLOSE:0},
+      async getAllValidReminders(){calls.push('listReminders');await hooks.list?.();return hooks.existing ?? [];},
+      async publishReminder(request){await effect('reminder',request);return hooks.reminderId ?? 0;}
+    }},
     '@ohos.settings':{default:Object.fromEntries(['MobileNetwork','Display','Sound','Nfc'].map(name=>['open'+name+'SettingsPage',actual=>{assert.equal(actual,context);if(hooks.settingsError)throw new Error('settings error');calls.push('settings:'+name);}] ))},
     '@ohos.pasteboard':{default:{createPlainTextData:text=>({text}),getSystemPasteboard:()=>({setData:data=>effect('clipboard',data)})}},
     '@ohos.telephony.call':{default:{makeCall:(actual,number)=>{assert.equal(actual,context);return effect('dial',number);}}},
@@ -38,8 +46,20 @@ function fixture(hooks = {}) {
       createData:record=>record,createController:data=>({show:(actual,options)=>{assert.equal(actual,context);return effect('share',{data,options});}}),single:1,preview:0,
     };}},
   };
+  let reminderModule;
+  const requireApi = name => {
+    if(name === './PhoneReminders') {
+      if(!reminderModule) {
+        reminderModule={exports:{}};
+        const js=ts.transpileModule(readFileSync(new URL('PhoneReminders.ets',source),'utf8'),{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS}}).outputText;
+        vm.runInNewContext(js,{module:reminderModule,exports:reminderModule.exports,require:requireApi,canIUse:cap=>{assert.equal(cap,'SystemCapability.Notification.ReminderAgent');return hooks.supported !== false;}});
+      }
+      return reminderModule.exports;
+    }
+    assert(name in api,name);return api[name];
+  };
   const module = {exports:{}};
-  vm.runInNewContext(compiled,{module,exports:module.exports,require:name=>{assert(name in api, name);return api[name];}});
+  vm.runInNewContext(compiled,{module,exports:module.exports,require:requireApi});
   const executor = new module.exports.PhoneEffects(context);
   let guards=0;
   const guard = () => {guards++;calls.push('guard');hooks.guard?.(module.exports.PhoneEffectDenied);};
@@ -94,7 +114,7 @@ test('SDK rejection after guard is uncertain and not claimed un-dispatched',asyn
   }
 });
 test('unsupported transactions and targets do not silently substitute another action',async()=>{
-  for(const args of [{kind:'alarm',hour:8},{kind:'timer',seconds:10},{kind:'sms_draft',text:'x'},{kind:'settings',page:'wifi'},{kind:'share',text:'x',app:'com.example'},{kind:'navigate',destination:'北京'},{kind:'navigate',lat:1,lng:2,map:'amap'}]){
+  for(const args of [{kind:'sms_draft',text:'x'},{kind:'settings',page:'wifi'},{kind:'share',text:'x',app:'com.example'},{kind:'navigate',destination:'北京'},{kind:'navigate',lat:1,lng:2,map:'amap'}]){
     const f=fixture();const r=await f.run('intent',args);assert.equal(r.code,'unsupported');assert.equal(r.dispatched,false);assert.equal(f.guards,0);
   }
   const f=fixture();assert.equal((await f.run('handoff',{reason:'登录'})).dispatched,false);assert.equal(f.guards,0);

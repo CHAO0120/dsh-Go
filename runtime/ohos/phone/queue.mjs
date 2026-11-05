@@ -181,10 +181,12 @@ export class PhoneQueue {
     }
     const row = this.#pending.get(requestId);
     if (!row || !row.nonce || row.nonce !== executionNonce) throw fail('stale', '手机回执身份已失效。', 410);
+    const expected = result.effect === 'reminder_scheduled' && row.request.tool === 'mcp__phone__intent' &&
+      ['alarm', 'timer'].includes(row.request.args.kind) ? ['reminder_scheduled', 'unknown'] : success[row.request.tool];
     if (validateJsonSchemaValue(phoneResultSchema, result).length || !/^[a-z][a-z0-9_]{0,63}$/.test(result.code) ||
         Buffer.byteLength(result.message) > 8192 ||
         (result.status === 'succeeded' && (!result.dispatched ||
-          result.effect !== success[row.request.tool]?.[0] || result.evidence !== success[row.request.tool]?.[1])) ||
+          result.effect !== expected?.[0] || result.evidence !== expected?.[1])) ||
         (result.status !== 'succeeded' && (result.effect !== 'none' || result.evidence !== 'unknown'))) {
       throw fail('bad_result', '手机回执格式或结果证据无效。', 400);
     }

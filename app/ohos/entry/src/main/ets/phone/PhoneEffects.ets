@@ -7,6 +7,7 @@ import pasteboard from '@ohos.pasteboard';
 import call from '@ohos.telephony.call';
 import calendarManager from '@ohos.calendarManager';
 import { loadShareKit } from '../plugins/HmsKits';
+import { PhoneReminders, PhoneReminderDenied, PhoneReminderRefused } from './PhoneReminders';
 
 export class PhoneEffectDenied extends Error {
   code: string;
@@ -157,7 +158,10 @@ export class PhoneEffects {
       if (tool === 'mcp__phone__handoff') unsupported('交还等待与继续必须由当前原生 owner 处理。');
       if (tool !== 'mcp__phone__intent') unsupported('未实现的手机工具。');
       const kind = required(args, 'kind').trim();
-      if (kind === 'dial') {
+      if (kind === 'alarm' || kind === 'timer') {
+        await PhoneReminders.schedule(this.context, args, dispatch);
+        return outcome('succeeded', true, 'reminder_scheduled', '系统已接受提醒；到点将由系统提醒，不代表引擎任务会自动运行。', 'reminder_scheduled');
+      } else if (kind === 'dial') {
         const number = required(args, 'number').trim();
         if (!/^\+?[0-9][0-9 ()-]{1,30}$/.test(number)) throw new PhoneEffectDenied('invalid_arguments', '电话号码格式无效，不支持服务码。');
         const phoneNumber = number.replace(/ /g, '');
@@ -242,8 +246,9 @@ export class PhoneEffects {
       }
       return outcome('succeeded', true, 'opened_ui', '已打开系统界面，未确认目标事务完成。', 'opened_ui', 'opened_ui');
     } catch (error) {
+      if (error instanceof PhoneReminderRefused) return outcome('failed', true, 'reminder_refused', error.message);
       if (dispatched) return outcome('unknown', true, 'sdk_failed', '系统调用未返回可靠结果；请确认实际状态，不要自动重试。');
-      if (error instanceof PhoneEffectDenied) {
+      if (error instanceof PhoneEffectDenied || error instanceof PhoneReminderDenied) {
         const status = error.code === 'cancelled' ? 'cancelled' : error.code === 'deadline_expired' ? 'timed_out' : 'failed';
         return outcome(status, false, error.code, error.message);
       }

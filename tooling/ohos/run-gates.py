@@ -742,7 +742,7 @@ def main():
                              'DSH_LIFECYCLE_TEST_PREFIX': str(prefix()), 'DSH_BACKGROUND_OLD_PREFIX': str(o / 'targets/candidate-prefix'),
                              'NODE_PATH': str(p('android_pristine') / 'node_modules'), 'OHOS_ETS_FIXTURE_ARTIFACTS': str(o / 'ets-fixture-artifacts')}, timeout=240)
     for mode in ['marker', 'strict']:
-        for name in ['phone-bridge', 'phone-callback', 'phone-effects', 'phone-http', 'phone-plugin-owner']:
+        for name in ['phone-bridge', 'phone-callback', 'phone-effects', 'phone-reminders', 'phone-http', 'phone-plugin-owner']:
             g.node_tests(name + '-' + mode, [rt + name + '.test.mjs'], mode=mode, imports=['tooling/ohos/tests/ets-fixture-loader.mjs'] if mode == 'strict' else [],
                          needs=('native-publication-build', 'prepared-inputs'), extra=lambda: {**linked_env(), 'DSH_HOME': str(o / 'phone-home'),
                              'NODE_PATH': str(p('android_pristine') / 'node_modules'), 'OHOS_ETS_FIXTURE_ARTIFACTS': str(o / 'ets-fixture-artifacts')}, timeout=240)

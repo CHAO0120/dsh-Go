@@ -1,6 +1,10 @@
 {
   "string": [
     {
+      "name": "phone_reminder_close",
+      "value": "Close"
+    },
+    {
       "name": "module_desc",
       "value": "module description"
     },

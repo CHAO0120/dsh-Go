@@ -310,3 +310,19 @@ test('real ToolRuntime records uncertain cancellation as an error with its effec
   assert.equal(result.isError, true); assert.equal(result.error.info.code, 'OHOS_PHONE_CANCELLED');
   assert.equal(JSON.parse(result.error.message).status, 'unknown'); f.native.finish();
 });
+
+// System reminder acceptance is distinct from presenting an Activity/UI.
+test('public queue accepts reminder_scheduled only for dispatched alarm and timer',async t=>{
+ for(const kind of ['alarm','timer']){
+  const f=fixture(t),p=f.enqueue('mcp__phone__intent',{kind}),lease=f.claim();assert(f.native.consume(lease));f.native.finish();
+  const receipt=ok('reminder_scheduled','unknown');assert.equal(f.queue.result(f.auth,lease.request.requestId,lease.executionNonce,receipt).accepted,true);
+  assert.deepEqual(await p.promise,receipt);assert.equal(f.counts().claims,1);
+ }
+});
+test('public queue rejects reminder evidence on other requests or before dispatch',async t=>{
+ for(const [tool,args,override] of [['mcp__phone__open',{url:'https://example.test'},{}],['mcp__phone__intent',{kind:'calendar'},{}],['mcp__phone__intent',{kind:'alarm'},{evidence:'opened_ui'}],['mcp__phone__intent',{kind:'timer'},{dispatched:false}]]){
+  const f=fixture(t),p=f.enqueue(tool,args),lease=f.claim();assert(f.native.consume(lease));f.native.finish();
+  assert.throws(()=>f.queue.result(f.auth,lease.request.requestId,lease.executionNonce,{...ok('reminder_scheduled','unknown'),...override}),{code:'bad_result'});
+  p.abort.abort();await p.promise;
+ }
+});

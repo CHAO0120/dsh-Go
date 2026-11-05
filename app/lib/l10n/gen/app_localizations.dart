@@ -30764,6 +30764,12 @@ abstract class L10n {
   /// **'通知已发出，不确定你有没有看到。'**
   String get systemActionsResultNotified;
 
+  /// No description provided for @systemActionsResultReminder.
+  ///
+  /// In zh, this message translates to:
+  /// **'已交给系统提醒，到点由系统响。引擎不会因此运行。'**
+  String get systemActionsResultReminder;
+
   /// No description provided for @systemActionsResultClipboard.
   ///
   /// In zh, this message translates to:

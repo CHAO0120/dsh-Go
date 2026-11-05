@@ -16774,6 +16774,9 @@ class L10nZh extends L10n {
   String get systemActionsResultNotified => '通知已发出，不确定你有没有看到。';
 
   @override
+  String get systemActionsResultReminder => '已交给系统提醒，到点由系统响。引擎不会因此运行。';
+
+  @override
   String get systemActionsResultClipboard => '文字已写入剪贴板。';
 
   @override

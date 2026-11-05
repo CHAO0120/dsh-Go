@@ -11,10 +11,10 @@ const schema = (properties, required = []) => ({ type: 'object', properties,
 export const phoneCatalog = Object.freeze([
   { name: 'mcp__phone__open', description: '打开应用或链接（app 或 url 二选一）。鸿蒙仅支持前台公开系统能力，不支持后台屏或屏幕快照；无法解析的应用明确报错。',
     parameters: schema({ app: str('包名或应用名'), url: str('网址或深链'), background: boolean('在后台屏打开') }) },
-  { name: 'mcp__phone__intent', description: '用系统意图办事（最后一步用户在对方界面确认），能办就别点界面。字段按 kind：' +
+  { name: 'mcp__phone__intent', description: '用系统公开能力办事（打开界面的事务仍需用户在对方界面确认），能办就别点界面。字段按 kind：' +
       'alarm(hour,minute,days?,message?)、timer(seconds,message?)、calendar(title,begin,end?,all_day?,location?,description?)、' +
       'dial(number)、sms_draft(number?,text)、share(text,app?)、navigate(destination|lat+lng,mode?,map?)、settings(page,app?)。' +
-      '鸿蒙只用已实现的公开系统映射；不支持的事务明确报错，打开界面不代表事务已完成。',
+      '鸿蒙只用已实现的公开系统映射；闹钟和计时器由系统代理提醒，不承诺唤醒或运行引擎；不支持的事务明确报错，打开界面不代表事务已完成。',
     parameters: schema({
       kind: enumeration(['alarm', 'timer', 'calendar', 'dial', 'sms_draft', 'share', 'navigate', 'settings'], '事务类型'),
       hour: integer('时 0–23'), minute: integer('分 0–59'),
@@ -42,7 +42,7 @@ export const phoneResultSchema = {
   type: 'object', additionalProperties: false,
   properties: {
     status: { type: 'string', enum: ['succeeded', 'failed', 'cancelled', 'timed_out', 'unknown'] },
-    effect: { type: 'string', enum: ['none', 'opened_ui', 'notification_published', 'clipboard_written'] },
+    effect: { type: 'string', enum: ['none', 'opened_ui', 'notification_published', 'clipboard_written', 'reminder_scheduled'] },
     evidence: { type: 'string', enum: ['opened_ui', 'user_confirmed', 'unknown'] },
     dispatched: { type: 'boolean' }, code: { type: 'string' }, message: { type: 'string' },
   },

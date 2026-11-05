@@ -28,7 +28,7 @@ function fixture(hooks={}){
   throw new Error(op);
  }};
  const crypto={default:{createRandom:()=>({async generateRandom(){await hooks.random?.();return {data:randomBytes(32)};}}),createMd:()=>{const hash=createHash('sha256');return {async update(value){hash.update(value.data);},async digest(){return {data:hash.digest()};}};}}};
- const effects=load('phone/PhoneEffects',{'@ohos.notificationManager':{default:{SlotType:{SERVICE_INFORMATION:2},ContentType:{NOTIFICATION_CONTENT_BASIC_TEXT:0},async isNotificationEnabled(){await hooks.permission?.();return true;},async getSlot(){return null;},async publish(value){assert.equal(value.content.normal.title,'original');published++;await hooks.effect?.();}}}});
+ const effects=load('phone/PhoneEffects',{'./PhoneReminders':load('phone/PhoneReminders',{}),'@ohos.notificationManager':{default:{SlotType:{SERVICE_INFORMATION:2},ContentType:{NOTIFICATION_CONTENT_BASIC_TEXT:0},async isNotificationEnabled(){await hooks.permission?.();return true;},async getSlot(){return null;},async publish(value){assert.equal(value.content.normal.title,'original');published++;await hooks.effect?.();}}}});
  const bridgeModule=load('phone/PhoneBridge',{'./PhoneEffects':effects,'../runtime/NativeHost':{loadNativeHost:async()=>host},'../runtime/RuntimeCore':{RuntimeChannelError:ChannelError},'@ohos.security.cryptoFramework':crypto,'@ohos.util':{default:{TextEncoder:class{encodeInto(value){return new TextEncoder().encode(value);}}}}});
  const pluginModule=load('runtime/RuntimePlugin',{'../phone/PhoneBridge':bridgeModule});const plugin=new pluginModule.RuntimePlugin();plugin.ability={};
  const bridge=new bridgeModule.PhoneBridge(()=>plugin.ability===null?null:context);plugin.phone=bridge;

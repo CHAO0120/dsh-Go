@@ -61,6 +61,14 @@ void main() {
       false,
     ),
     (
+      'a reminder handed to the system',
+      ToolStatus.succeeded,
+      _json('succeeded', 'reminder_scheduled', 'unknown', true, 'reminder_scheduled'),
+      _zh.phoneDecisionDone,
+      _zh.systemActionsResultReminder,
+      false,
+    ),
+    (
       'a continue press',
       ToolStatus.succeeded,
       _json('succeeded', 'none', 'user_confirmed', true, 'user_confirmed'),

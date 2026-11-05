@@ -467,6 +467,7 @@ extension PhoneResultText on DshPhoneResult {
       DshPhoneEffect.openedUi => appL10n.systemActionsResultOpened,
       DshPhoneEffect.notificationPublished => appL10n.systemActionsResultNotified,
       DshPhoneEffect.clipboardWritten => appL10n.systemActionsResultClipboard,
+      DshPhoneEffect.reminderScheduled => appL10n.systemActionsResultReminder,
       DshPhoneEffect.none => appL10n.systemActionsResultContinued,
     },
     DshPhoneStatus.unknown => appL10n.systemActionsResultUnknownDetail,

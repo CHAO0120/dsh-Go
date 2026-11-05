@@ -208,7 +208,8 @@ enum DshPhoneEffect {
   none('none'),
   openedUi('opened_ui'),
   notificationPublished('notification_published'),
-  clipboardWritten('clipboard_written');
+  clipboardWritten('clipboard_written'),
+  reminderScheduled('reminder_scheduled');
 
   const DshPhoneEffect(this.wire);
   final String wire;
@@ -273,6 +274,15 @@ final class DshPhoneResult {
     DshPhoneResult.fromJson(toJson());
     if (status != DshPhoneStatus.succeeded) {
       if (effect != DshPhoneEffect.none || evidence != DshPhoneEvidence.unknown) _invalid();
+      return;
+    }
+    if (effect == DshPhoneEffect.reminderScheduled) {
+      if (!dispatched ||
+          evidence != DshPhoneEvidence.unknown ||
+          request.tool != 'mcp__phone__intent' ||
+          !const {'alarm', 'timer'}.contains(request.args['kind'])) {
+        _invalid();
+      }
       return;
     }
     final expected = switch (request.tool) {
