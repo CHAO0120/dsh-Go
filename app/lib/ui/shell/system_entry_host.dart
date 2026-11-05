@@ -26,6 +26,7 @@ import '../../l10n/l10n.dart';
 import '../../links/app_links.dart';
 import '../../links/launcher_entries.dart';
 import '../../links/share_intake.dart';
+import '../../state/android_features.dart';
 import '../../state/attachments.dart';
 import '../../state/compose_inbox.dart';
 import '../../state/draft_store.dart';
@@ -84,8 +85,16 @@ class _SystemEntryHostState extends ConsumerState<SystemEntryHost> {
       ref.read(appLinksProvider).add(link.appLink);
       return;
     }
-    // Read after the answer: shares arriving behind an unanswered 「放弃修改？」
-    // wait in the cache, not in memory.
+    // Android's native side keeps only a few unread shares, dropping the oldest
+    // as the next arrives, with no way to say one is still wanted: read it now.
+    if (ref.read(operatingSystemProvider) != 'ohos') {
+      final request = await ComposeRequest.fromShare(share, heldBytes: _heldDraftBytes);
+      if (mounted) await _compose(request);
+      return;
+    }
+    // HarmonyOS's inbox holds a batch until it is used (ShareConsumption). Read
+    // after the answer: shares arriving behind an unanswered 「放弃修改？」 wait
+    // in the cache, not in memory.
     await _showChat();
     if (!mounted) return ComposeRequest.discardShare(share);
     final request = await ComposeRequest.fromShare(share, heldBytes: _heldDraftBytes);

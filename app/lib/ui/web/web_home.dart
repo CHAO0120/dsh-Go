@@ -31,6 +31,7 @@ import '../../links/launcher_entries.dart';
 import '../../links/share_intake.dart';
 import '../../pets/overlay_channel.dart' show petOverlayChannelProvider;
 import '../../pets/pet_overlay_bridge.dart';
+import '../../state/android_features.dart';
 import '../../state/compose_inbox.dart';
 import '../../state/hosts_state.dart';
 import '../../state/sessions_state.dart';
@@ -291,7 +292,13 @@ class _WebEntryHostState extends ConsumerState<WebEntryHost> {
       ref.read(appLinksProvider).add(link.appLink);
       return;
     }
-    // Read after the answer, as on the native home.
+    // Read now on Android, where the native cache can drop what waits unread; read
+    // after the answer on HarmonyOS, whose inbox holds it. As on the native home.
+    if (ref.read(operatingSystemProvider) != 'ohos') {
+      final request = await ComposeRequest.fromShare(share, maxBytes: maxWebComposeBytes);
+      if (mounted) await _compose(request);
+      return;
+    }
     if (!mounted || !await DiscardGuard.confirmLeave(context) || !mounted) {
       return ComposeRequest.discardShare(share);
     }
