@@ -6,6 +6,7 @@
 #   tooling/ohos/device.sh keygen           a key and the CSR to upload to AGC
 #   tooling/ohos/device.sh install FILE.hap sign FILE.hap and install it
 #   tooling/ohos/device.sh log [SECONDS]    the app's log, for a crash report
+#   tooling/ohos/device.sh motion [SECONDS] only frame rate and keyboard lines, no app text
 #
 # docs/design/harmonyos/first-device.md walks through them in order.
 #
@@ -19,6 +20,8 @@
 set -euo pipefail
 
 BUNDLE=io.github.ccch1mneyyy.dsh_app
+# What the engine and the app log about motion, by tag, so app text can't match by accident.
+MOTION='XComFlutterEngine: .*(SetExpectedFrameRateRange|LTPO|VoteTouchValue)|/Dsh(FrameRate|Keyboard): |/LOGLIMIT: '
 MIN_API=26
 ALIAS=dshDebug
 SDK="${OHOS_SDK:-$HOME/dev/ohos-sdk-7/linux}"
@@ -106,7 +109,15 @@ cmd_install() {
 cmd_log() {
   device
   echo "Logging for ${1:-60}s, reproduce it now. Check it before sharing: it can hold conversation text." >&2
-  timeout "${1:-60}" "$HDC" hilog | grep -E "$BUNDLE|Flutter|flutter|DSH|dsh|NativeHost|libnode|ArkCompiler|JsError|FATAL|CppCrash" || true
+  # Without the 12 lines a second the frame rate keep-alive costs while it runs; motion has them.
+  timeout "${1:-60}" "$HDC" hilog | grep -E "$BUNDLE|Flutter|flutter|DSH|Dsh|dsh|NativeHost|libnode|ArkCompiler|JsError|FATAL|CppCrash" |
+    grep -v nativeLTPODispatchHighFrameRate || true
+}
+
+cmd_motion() {
+  device
+  echo "Logging for ${1:-60}s: frame rate and keyboard only." >&2
+  timeout "${1:-60}" "$HDC" hilog | grep --line-buffered -E "$MOTION" || true
 }
 
 case "${1:-}" in
@@ -114,5 +125,6 @@ case "${1:-}" in
   keygen) cmd_keygen ;;
   install) shift; cmd_install "$@" ;;
   log) shift; cmd_log "$@" ;;
-  *) sed -n '2,8p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
+  motion) shift; cmd_motion "$@" ;;
+  *) sed -n '2,9p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
 esac
