@@ -38,7 +38,7 @@ note 'archive size' "$(du -sh "$app" | cut -f1), top level: $(ls "$app" | grep -
 binary="$frameworks/App.framework/App"
 if [ -f "$binary" ]; then
   note 'archive App' "$(du -h "$binary" | cut -f1) $(lipo -archs "$binary"), exports: $(nm -gU "$binary" | awk '{print $NF}' | head -8 | tr '\n' ' ')"
-  nm -gU "$binary" | grep -q kDartIsolateSnapshotInstructions || fail "App.framework/App exports no Dart snapshot"
+  nm -gU "$binary" | grep -qE "kDartSnapshotText|kDartIsolateSnapshotInstructions" || fail "App.framework/App exports no Dart snapshot"
 else
   fail "App.framework/App is missing"
 fi
