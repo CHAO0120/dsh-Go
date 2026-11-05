@@ -102,6 +102,10 @@ jobs:
             grep -E 'error:|Undefined|ld:' "$log" | awk '!seen[$0]++' | head -10 | cut -c1-600               | sed -e 's/%/%25/g' -e 's/^/::error title=native::/'
             exit 1
           fi
+          for name in DshFlock DshRequireBuiltin; do
+            test -f "$RUNNER_TEMP/sim/$name.framework/$name"
+            test -f "$RUNNER_TEMP/sim/$name.framework/Info.plist"
+          done
           cp -R app/ios/Engine/NodeMobile.xcframework/ios-arm64-simulator/NodeMobile.framework "$RUNNER_TEMP/sim/"
           xcrun --sdk iphonesimulator clang -target arm64-apple-ios15.0-simulator             tooling/ios/engine-smoke/smoke.c -o "$RUNNER_TEMP/smoke"
 
@@ -112,6 +116,11 @@ jobs:
             grep -E 'error:|Undefined|ld:' "$log" | awk '!seen[$0]++' | head -10 | cut -c1-600               | sed -e 's/%/%25/g' -e 's/^/::error title=native-device::/'
             exit 1
           fi
+
+          for name in DshFlock DshRequireBuiltin; do
+            test -f "$RUNNER_TEMP/device/$name.framework/$name"
+            test -f "$RUNNER_TEMP/device/$name.framework/Info.plist"
+          done
 
       - name: Run a round on the simulator
         run: |

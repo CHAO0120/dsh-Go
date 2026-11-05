@@ -37,9 +37,15 @@ flutter build ios --release --no-codesign
 
 分支上的推送也会跑 `iOS compile`。它失败时不用登录也能看原因：Xcode 的报错会列在运行页的 Annotations 里（`tooling/ios/build.sh`）。其中 `engine` 任务在模拟器上真跑引擎：一轮写、改、读、搜、bash 加审批，对着假模型，然后原地停止再启动（`tooling/ios/engine-smoke/`）。
 
+## 引擎 addon 的 framework 布局
+
+两份 addon 由 `build-engine-native.sh` 输出为 `DshFlock.framework/DshFlock` 和 `DshRequireBuiltin.framework/DshRequireBuiltin`，与 `DshNodeHost.framework` 一起嵌入 App 的 `Frameworks/`。iOS 宿主校验与生成 runtime 的 loader 必须使用同一布局；addon 源码、N-API 版本和注册名不因包装改名。升级必须重新准备 runtime，不能把旧 loader 与新 framework 混用。 嵌入脚本会在编译和复制前检查已准备 ZIP 的唯一 loader 成员及两项新路径；旧布局、缺失或损坏时明确失败并要求重跑 `tooling/ios/prepare-engine.sh`，不会自动下载。
+
+`embed-engine.sh` 清除增量构建遗留的两个裸 `.so`，启用签名时逐个签 framework；`CODE_SIGNING_ALLOWED=NO` 仍产出未签名代码，安装前必须由 Xcode 或重签工具签妥全部嵌套 framework。包装改变不是签名验证成功的替代，第三方重签与真机启动须实际复核。模拟器 engine-smoke 会要求新 executable 路径存在，再进入原真实工具回合。
+
 ## 现状
 
-- CI 会在 iOS 模拟器上真跑：真 NodeMobile 的工具回合、取消、停止和恢复会话；停止时不误关别人的 fd；真 App 里的安装、启动、登录、停止、重启和重置；真 App 启动后 30 秒还活着；在 App 进程里真调用提醒、联系人、定位、OCR 和网页操作，只有点确认框是测试代点的（`RunnerTests`，选图除外）。这些都是 Debug 构建。真机和 Release 一次都没跑过，下面的验收项都没做。
+- CI 会在 iOS 模拟器上真跑：真 NodeMobile 的工具回合、取消、停止和恢复会话；停止时不误关别人的 fd；真 App 里的安装、启动、登录、停止、重启和重置；真 App 启动后 30 秒还活着；在 App 进程里真调用提醒、联系人、定位、OCR 和网页操作，只有点确认框是测试代点的（`RunnerTests`，选图除外）。上述 CI 运行门是 Debug 构建。2026-11-06 一台 iPad Air 5（iPadOS 18.7.7）装了自签的 Release 包：App 三次冷启动都正常，本机引擎在加载没签名的 addon 时失败，addon 因此改成了 framework，改后还没在真机上跑过。这不说明 iPhone 上 TestFlight 包的白屏已经解决，下面的验收项也还没做。
 - 本机引擎和鸿蒙是同一层（`runtime/ohos/`）：同进程的 Node（NodeMobile 24.22.1，`--jitless`），命令是 just-bash 模拟的。没有真正的 Linux，不能起子进程，没有 Python。首次安装解压约 160 MB。引擎第一次启动时才加载，只连远程的人不占这份内存。
 - 和鸿蒙不同：停止后能原地再启动，不用重开应用（`runtime/ios/host/node_runner.cc`）。
 - 和鸿蒙不同：本机引擎能处理图片。sharp 在这里装不了，所以 `runtime/ios/image/ios-sharp.cjs` 替代它，像素走系统的 ImageIO（`runtime/ios/host/image_binding.cc`），附件库自己的规则不变。ImageIO 写不了 WebP，所以带透明的图存 PNG，比目标大时压不下去（只影响透明图）。校验和缩放都走缩略图路径，大图的像素不用全部放进内存，但实际峰值还没在设备上量过。

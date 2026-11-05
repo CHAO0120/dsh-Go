@@ -85,6 +85,15 @@ static void begin(char** argv) {
 int main(int argc, char** argv) {
   out = fdopen(dup(STDOUT_FILENO), "w");
   if (argc != 5) die("usage", "smoke <frameworks> <runtime root> <guest root> <cache>");
+  // The simulator smoke must consume the same addon layout as the app bundle.
+  for (size_t i = 0; i < 2; ++i) {
+    const char* addons[] = {"DshFlock.framework/DshFlock", "DshRequireBuiltin.framework/DshRequireBuiltin"};
+    char addon[4096];
+    int length = snprintf(addon, sizeof addon, "%s/%s", argv[1], addons[i]);
+    if (length < 0 || (size_t)length >= sizeof addon || access(addon, R_OK) != 0) {
+      die("addon-layout", "Required addon framework executable is missing");
+    }
+  }
   char library[4096];
   snprintf(library, sizeof library, "%s/DshNodeHost.framework/DshNodeHost", argv[1]);
   void* host = dlopen(library, RTLD_NOW | RTLD_GLOBAL);

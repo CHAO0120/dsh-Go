@@ -3,9 +3,8 @@
 #
 #   tooling/ios/build-engine-native.sh iphoneos|iphonesimulator OUTPUT_DIR [extra compiler flags]
 #
-# Writes DshNodeHost.framework, libdsh_flock.so and libdsh_require_builtin.so to
-# OUTPUT_DIR, unsigned. Node resolves the addons by these fixed names
-# (runtime/ohos/native/hap-loader), which is why they keep the .so suffix.
+# Writes DshNodeHost.framework, DshFlock.framework and DshRequireBuiltin.framework
+# to OUTPUT_DIR, unsigned. The iOS-specialized loader opens each framework executable.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -32,6 +31,11 @@ LINK=(-dynamiclib "-F$FRAMEWORKS" -framework NodeMobile -Wl,-rpath,@loader_path 
   -Wl,-rpath,@executable_path/Frameworks)
 
 mkdir -p "$OUT"
+rm -f "$OUT/libdsh_flock.so" "$OUT/libdsh_require_builtin.so"
+for name in DshFlock DshRequireBuiltin; do
+  rm -rf "$OUT/$name.framework"
+  mkdir -p "$OUT/$name.framework"
+done
 HOST_CORE="$ROOT/app/ohos/entry/src/main/cpp"
 HOST_RUNTIME="$ROOT/runtime/ohos/host"
 FRAMEWORK="$OUT/DshNodeHost.framework"
@@ -61,7 +65,7 @@ cat >"$FRAMEWORK/Info.plist" <<PLIST
 PLIST
 
 "$CLANG" "${COMMON[@]}" -std=c11 -DNAPI_VERSION=8 "$ENGINE/addons/flock/flock.c" \
-  "${LINK[@]}" -install_name @rpath/libdsh_flock.so -o "$OUT/libdsh_flock.so"
+  "${LINK[@]}" -install_name @rpath/DshFlock.framework/DshFlock -o "$OUT/DshFlock.framework/DshFlock"
 
 # The same units and defines as upstream's binding.gyp for its napi backend
 # (runtime/ohos/native/loader/build-loader.py), against the same pinned commit.
@@ -77,4 +81,24 @@ for name in target["sources"] + target["conditions"][0][2]["sources"]:
 "$CLANGXX" "${COMMON[@]}" -std=c++17 -stdlib=libc++ -fno-exceptions -pthread \
   -DNAPI_VERSION=9 -DNARB_BACKEND=1 -DNARB_PRODUCT=1 -DNODE_ADDON_API_DISABLE_CPP_EXCEPTIONS \
   -DNODE_GYP_MODULE_NAME=require_builtin "-I$ENGINE/addons/node-addon-api" \
-  "${SOURCES[@]}" "${LINK[@]}" -install_name @rpath/libdsh_require_builtin.so -o "$OUT/libdsh_require_builtin.so"
+  "${SOURCES[@]}" "${LINK[@]}" -install_name @rpath/DshRequireBuiltin.framework/DshRequireBuiltin -o "$OUT/DshRequireBuiltin.framework/DshRequireBuiltin"
+
+for name in DshFlock DshRequireBuiltin; do
+  case "$name" in
+    DshFlock) bundle_id=io.github.ccch1mneyyy.dshgo.flock ;;
+    DshRequireBuiltin) bundle_id=io.github.ccch1mneyyy.dshgo.requirebuiltin ;;
+  esac
+  cat >"$OUT/$name.framework/Info.plist" <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>CFBundleExecutable</key><string>$name</string>
+  <key>CFBundleIdentifier</key><string>$bundle_id</string>
+  <key>CFBundleName</key><string>$name</string>
+  <key>CFBundlePackageType</key><string>FMWK</string>
+  <key>CFBundleShortVersionString</key><string>1.0</string>
+  <key>CFBundleVersion</key><string>1</string>
+  <key>MinimumOSVersion</key><string>$MIN_IOS</string>
+</dict></plist>
+PLIST
+done

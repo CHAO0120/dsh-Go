@@ -70,6 +70,10 @@ DIAGNOSTIC_EDITS = {
         ('OpenHarmony packages only the pinned N-API backend', 'iOS packages only the pinned N-API backend'),
     ),
     'node_modules/@dsh-go/ohos-native/index.cjs': (
+        ("flock: 'libdsh_flock.so',", "flock: 'DshFlock.framework/DshFlock',"),
+        ("'require-builtin': 'libdsh_require_builtin.so',", "'require-builtin': 'DshRequireBuiltin.framework/DshRequireBuiltin',"),
+        ('// .so is the HAP library filename; require(.so) would parse it as JavaScript.',
+         '// Framework executables are fixed native addons, loaded explicitly with process.dlopen.'),
         ('This native product is not packaged for OpenHarmony', 'This native product is not packaged for iOS'),
     ),
     'node_modules/proxy-agent-negotiate/dist/index.js': (
