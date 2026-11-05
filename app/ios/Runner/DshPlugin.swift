@@ -160,6 +160,13 @@ private final class LinksChannel {
       self.held.removeAll()
       result(true)
     }
+    // New opened files queue after old cached copies are removed.
+    copies.async {
+      let manager = FileManager.default
+      if let caches = manager.urls(for: .cachesDirectory, in: .userDomainMask).first {
+        try? manager.removeItem(at: caches.appendingPathComponent("links", isDirectory: true))
+      }
+    }
   }
 
   func open(_ url: URL) {
