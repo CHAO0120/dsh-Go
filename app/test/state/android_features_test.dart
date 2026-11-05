@@ -72,7 +72,6 @@ const _rows = {
   'pet-outside-app',
   'pet-display-when',
   'auto-safe',
-  'safe-mode',
 };
 
 final _zh = lookupL10n(AppLocale.zhCN);
@@ -524,14 +523,14 @@ void main() {
       expect(find.text(_zh.engineStartReopensApp), findsNothing);
     });
 
-    testWidgets('on HarmonyOS: reset and uninstall, no safe mode, and it says what starting again does', (
+    testWidgets('on HarmonyOS: reset, uninstall and safe mode by hand, and it says what starting again does', (
       tester,
     ) async {
       await _pump(tester, const EngineScreen(), android: false, overrides: bridge());
       expect(find.text(_zh.phoneEngineReset), findsOneWidget);
       expect(find.text(_zh.localEnvUninstall), findsOneWidget);
-      expect(find.text(_zh.phoneSafeAutoSettingsHint), findsNothing);
-      expect(find.text(_zh.phoneSafeStartSettings), findsNothing);
+      expect(find.text(_zh.phoneSafeStartSettings), findsOneWidget);
+      expect(find.text(_zh.phoneSafeAutoSettingsHint), findsNothing, reason: 'nothing there switches it on by itself');
       expect(find.text(_zh.engineStartReopensApp), findsOneWidget);
     });
 

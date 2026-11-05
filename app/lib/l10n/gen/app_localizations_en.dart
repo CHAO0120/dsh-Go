@@ -7390,7 +7390,7 @@ class L10nEn extends L10n {
 
   @override
   String get harmonyFailureHeld =>
-      'This has happened several times in a row, so the engine won\'t start by itself. Tap Retry to start it.';
+      'This has happened several times in a row, so the engine won\'t start by itself. Try again, or start another way.';
 
   @override
   String get harmonyResetKept =>
@@ -7590,6 +7590,24 @@ class L10nEn extends L10n {
 
   @override
   String get harmonyCommandExportDescription => 'Export this chat’s full history as a ZIP to share or save to a file';
+
+  @override
+  String get harmonySafeEnterTitle => 'Start in Safe mode?';
+
+  @override
+  String get harmonySafeEnterBody =>
+      'Starts with the default configuration that comes with the app, without the plugins you installed. Your chats stay, and your own configuration isn\'t changed.';
+
+  @override
+  String get harmonySafeReopenNote => 'Replies in progress stop, and the app reopens.';
+
+  @override
+  String get harmonyRestoredReopening => 'Restored the last good configuration. The app is reopening';
+
+  @override
+  String harmonySafeRepairPrompt(String what) {
+    return 'My DSH has a problem in normal mode ($what). It\'s in Safe mode now, on the default configuration that comes with the app, and my own configuration is untouched. Find the cause, and tell me what you\'d change before changing it.';
+  }
 
   @override
   String get hostDetailsConnectionType => 'Connection type';

@@ -6990,7 +6990,7 @@ class L10nZh extends L10n {
   String get harmonyFailureUncleanHint => '原因不明：可能是系统回收了应用或应用被关掉，也可能是引擎出了错。';
 
   @override
-  String get harmonyFailureHeld => '连续几次都这样，引擎不会自己启动了，点重试再启动。';
+  String get harmonyFailureHeld => '连续几次都这样，引擎不会自己启动了。可以再试一次，或换一种方式启动。';
 
   @override
   String get harmonyResetKept => '主机列表、App 设置和已保存的密钥不受影响。确认后 App 会重新打开，在打开时完成重置。';
@@ -7177,6 +7177,23 @@ class L10nZh extends L10n {
 
   @override
   String get harmonyCommandExportDescription => '把这个对话的完整记录打包成 ZIP，分享或保存到文件';
+
+  @override
+  String get harmonySafeEnterTitle => '以安全模式启动？';
+
+  @override
+  String get harmonySafeEnterBody => '用随包的默认配置启动，不加载你装的插件。对话都在，原来的配置不会改动。';
+
+  @override
+  String get harmonySafeReopenNote => '进行中的回复会中断，App 会重新打开。';
+
+  @override
+  String get harmonyRestoredReopening => '已恢复上次正常的配置，App 正在重新打开';
+
+  @override
+  String harmonySafeRepairPrompt(String what) {
+    return '我的 DSH 正常模式出了问题（$what）。现在是安全模式，用的是随包的默认配置，我原来的配置没有动。请帮我找原因，动手改之前先告诉我要改什么。';
+  }
 
   @override
   String get hostDetailsConnectionType => '连接方式';

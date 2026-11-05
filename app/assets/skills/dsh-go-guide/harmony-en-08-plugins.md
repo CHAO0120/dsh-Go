@@ -2,7 +2,7 @@
 
 Add abilities to DSH from the plugin market, and turn installed plugins on or off, change their settings or uninstall them. Plugins with a native UI appear above the composer, in the message menu and in panels.
 
-Plugins install on the current host. The top of the page says **Install to: This phone** or the host's name; check it before you go ahead. Over DSH Remote, when not connected, or when this engine can't install from the market, it says why instead; you can then turn bundled plugins on or off, or connect a computer to manage plugins.
+Plugins install on the current host. The top of the page says **Install to: This phone** or the host's name; check it before you go ahead. In Safe mode, over DSH Remote, when not connected, or when this engine can't install from the market, it says why instead; you can then turn bundled plugins on or off, or connect a computer to manage plugins.
 
 ## Plugins page
 
@@ -32,7 +32,7 @@ Web-only plugins are hidden by default; use the button in the market to show the
 - **Uninstall**: in the details, tap **Uninstall** and confirm; you can tap **Undo** on the notice within 4 seconds, and leaving the app uninstalls it at once. The plugin is removed from the host; its data and settings are kept. Sometimes an engine restart is needed to remove it fully.
 - **DSH official** components can be turned on or off but not uninstalled, and the switch applies to every chat on that host.
 
-Over DSH Remote, plugins can only be turned on or off. To install or uninstall, tap **Get install command** or **Get uninstall command** and run it on that computer.
+Over DSH Remote, plugins can only be turned on or off. To install or uninstall, tap **Get install command** or **Get uninstall command** and run it on that computer. Plugins can't be installed or uninstalled in Safe mode.
 
 ## Edit plugin settings in the app
 
@@ -73,4 +73,4 @@ The Official section now includes Images and video, with no npm package name to 
 <!-- nav: commonSettings,mediaSettingsTitle -->
 `Settings › Images and video`
 
-When the plugin is missing, this page also offers installation on the current Host. Configure the provider and key on that page afterwards. Over DSH Remote or when this engine can't install, the page explains why direct installation is unavailable.
+When the plugin is missing, this page also offers installation on the current Host. Configure the provider and key on that page afterwards. Over DSH Remote, in Safe mode or when this engine can't install, the page explains why direct installation is unavailable.

@@ -1036,7 +1036,6 @@ abstract final class Spots {
     title: (l) => l.phoneSafeStartSettings,
     altTitle: (l) => l.phoneSafeLeave,
     keywords: (l) => l.searchKwSafeMode,
-    androidOnly: true,
   );
   static final engineReset = SettingSpot(
     'engine-reset',

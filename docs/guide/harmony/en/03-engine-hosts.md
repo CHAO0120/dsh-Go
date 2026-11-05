@@ -17,9 +17,10 @@ You can add DSH to this phone anytime: tap **Install runtime** on the engine pag
 `Settings › Local engine` · [Open](dshgo://open/engine)
 
 - **Start**, **Stop**, **Restart**: stopping asks first; both stopping and restarting interrupt active chats.
-- If the engine fails to start, the page shows the cause and ways to fix it, such as retrying or viewing logs.
+- If the engine fails to start, the page shows the cause and ways to fix it, such as retrying, **Enter Safe mode**, **Restore configuration** or viewing logs.
 - **Start when DSH Go opens**: on by default. As long as DSH is installed on this phone, opening the app starts it, even while you use a remote host. Turn it off if you don't need that.
-- There's no Safe mode. After several unclean exits in a row the engine won't start by itself; tap **Retry** to start it.
+- **Start in Safe mode**: enter Safe mode by hand. It starts with the default configuration that comes with the app, without the plugins you installed. Your chats stay and your own configuration isn't changed, though a global patch or `.env` can still affect the start. Once fixed, tap **Return to normal mode**. If the engine has already started since the app opened, entering and leaving both reopen the app; the dialog says so.
+- Safe mode never starts by itself. After several unclean exits in a row the engine won't start on its own, and the failure card offers **Restore configuration**, **Enter Safe mode** and **Retry**.
 - **Logs**: the engine's live output.
 - **Background running** and **Diagnostics**: see [FAQ](11-faq.md).
 

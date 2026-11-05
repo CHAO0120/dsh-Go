@@ -12821,7 +12821,7 @@ abstract class L10n {
   /// No description provided for @harmonyFailureHeld.
   ///
   /// In zh, this message translates to:
-  /// **'连续几次都这样，引擎不会自己启动了，点重试再启动。'**
+  /// **'连续几次都这样，引擎不会自己启动了。可以再试一次，或换一种方式启动。'**
   String get harmonyFailureHeld;
 
   /// No description provided for @harmonyResetKept.
@@ -13195,6 +13195,36 @@ abstract class L10n {
   /// In zh, this message translates to:
   /// **'把这个对话的完整记录打包成 ZIP，分享或保存到文件'**
   String get harmonyCommandExportDescription;
+
+  /// No description provided for @harmonySafeEnterTitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'以安全模式启动？'**
+  String get harmonySafeEnterTitle;
+
+  /// No description provided for @harmonySafeEnterBody.
+  ///
+  /// In zh, this message translates to:
+  /// **'用随包的默认配置启动，不加载你装的插件。对话都在，原来的配置不会改动。'**
+  String get harmonySafeEnterBody;
+
+  /// No description provided for @harmonySafeReopenNote.
+  ///
+  /// In zh, this message translates to:
+  /// **'进行中的回复会中断，App 会重新打开。'**
+  String get harmonySafeReopenNote;
+
+  /// No description provided for @harmonyRestoredReopening.
+  ///
+  /// In zh, this message translates to:
+  /// **'已恢复上次正常的配置，App 正在重新打开'**
+  String get harmonyRestoredReopening;
+
+  /// No description provided for @harmonySafeRepairPrompt.
+  ///
+  /// In zh, this message translates to:
+  /// **'我的 DSH 正常模式出了问题（{what}）。现在是安全模式，用的是随包的默认配置，我原来的配置没有动。请帮我找原因，动手改之前先告诉我要改什么。'**
+  String harmonySafeRepairPrompt(String what);
 
   /// No description provided for @hostDetailsConnectionType.
   ///

@@ -32,7 +32,7 @@
   "harmonyEngineUnclean": "没有正常退出",
   "harmonyFailureUnclean": "引擎没有正常退出",
   "harmonyFailureUncleanHint": "原因不明：可能是系统回收了应用或应用被关掉，也可能是引擎出了错。",
-  "harmonyFailureHeld": "连续几次都这样，引擎不会自己启动了，点重试再启动。",
+  "harmonyFailureHeld": "连续几次都这样，引擎不会自己启动了。可以再试一次，或换一种方式启动。",
   "harmonyResetKept": "主机列表、App 设置和已保存的密钥不受影响。确认后 App 会重新打开，在打开时完成重置。",
   "harmonyResetReopening": "重置已记下，App 正在重新打开",
   "harmonyResetCommittedTitle": "还差重新打开 App",
@@ -94,5 +94,11 @@
   "harmonySaveChooseLocation": "选择保存位置",
   "harmonySaving": "正在保存…",
   "harmonySaved": "已保存",
-  "harmonyCommandExportDescription": "把这个对话的完整记录打包成 ZIP，分享或保存到文件"
+  "harmonyCommandExportDescription": "把这个对话的完整记录打包成 ZIP，分享或保存到文件",
+  "harmonySafeEnterTitle": "以安全模式启动？",
+  "harmonySafeEnterBody": "用随包的默认配置启动，不加载你装的插件。对话都在，原来的配置不会改动。",
+  "harmonySafeReopenNote": "进行中的回复会中断，App 会重新打开。",
+  "harmonyRestoredReopening": "已恢复上次正常的配置，App 正在重新打开",
+  "harmonySafeRepairPrompt": "我的 DSH 正常模式出了问题（{what}）。现在是安全模式，用的是随包的默认配置，我原来的配置没有动。请帮我找原因，动手改之前先告诉我要改什么。",
+  "@harmonySafeRepairPrompt": {"placeholders": {"what": {"type": "String"}}}
 }

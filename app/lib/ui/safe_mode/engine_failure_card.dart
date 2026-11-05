@@ -41,7 +41,8 @@ class FailureCardModel {
   final List<FailureAction> secondary;
   final StatusTone tone;
 
-  static FailureCardModel of(RuntimeFailure f, {required bool lkgUseful}) {
+  /// [held]: the engine won't start by itself until someone says so ([EngineControl.shouldAutoStart]).
+  static FailureCardModel of(RuntimeFailure f, {required bool lkgUseful, bool held = false}) {
     if (f.safeMode && f.kind.isFatal) {
       return FailureCardModel(
         title: appL10n.phoneFailureSafeStartup,
@@ -58,12 +59,18 @@ class FailureCardModel {
           body: appL10n.phoneFailureLaunchHint,
           detail: f.causeUnknown ? null : f.summary,
           primary: FailureAction.retry,
-          secondary: const [FailureAction.remote, FailureAction.showLog],
+          secondary: [
+            // HarmonyOS: a safe run that couldn't launch can still go back to the person's own configuration.
+            if (f.safeMode && f.causeUnknown) FailureAction.startNormal,
+            FailureAction.remote,
+            FailureAction.showLog,
+          ],
         );
       case FailureKind.killed:
+        if (f.causeUnknown) return _unclean(f, lkgUseful: lkgUseful, held: held);
         return FailureCardModel(
-          title: f.causeUnknown ? appL10n.harmonyFailureUnclean : appL10n.phoneFailureKilled,
-          body: f.causeUnknown ? appL10n.harmonyFailureUncleanHint : appL10n.phoneFailureKilledHint,
+          title: appL10n.phoneFailureKilled,
+          body: appL10n.phoneFailureKilledHint,
           primary: FailureAction.retry,
           secondary: const [FailureAction.background, FailureAction.showLog],
           tone: StatusTone.warn,
@@ -100,6 +107,26 @@ class FailureCardModel {
               : const [FailureAction.retry, FailureAction.showLog],
         );
     }
+  }
+
+  /// HarmonyOS's engine runs in the app's process, so a configuration that breaks it
+  /// reads the same as the system reclaiming the app, and its failures are only
+  /// ever this or [FailureKind.launchFailed]. The ways out are on offer either way;
+  /// they come first once it has happened enough that the engine waits.
+  static FailureCardModel _unclean(RuntimeFailure f, {required bool lkgUseful, required bool held}) {
+    final rescue = [if (lkgUseful) FailureAction.restoreLkg, FailureAction.enterSafe];
+    final (primary, rest) = f.safeMode
+        ? (FailureAction.retry, const [FailureAction.startNormal])
+        : held
+        ? (rescue.first, [...rescue.skip(1), FailureAction.retry])
+        : (FailureAction.retry, rescue);
+    return FailureCardModel(
+      title: appL10n.harmonyFailureUnclean,
+      body: appL10n.harmonyFailureUncleanHint,
+      primary: primary,
+      secondary: [...rest, FailureAction.background, FailureAction.showLog],
+      tone: StatusTone.warn,
+    );
   }
 }
 
@@ -140,8 +167,11 @@ class EngineFailureCard extends ConsumerWidget {
     final status = ref.watch(localRuntimeProvider.select((s) => s.status));
     final failure = status.failure;
     if (failure == null || !visibleFor(status)) return const SizedBox.shrink();
-    final lkg = failure.kind.isFatal && !failure.safeMode ? ref.watch(lastKnownGoodProvider).value : null;
-    final model = FailureCardModel.of(failure, lkgUseful: lkg?.useful ?? false);
+    final held = !EngineControl.shouldAutoStart(status);
+    final lkg = (failure.kind.isFatal || failure.causeUnknown) && !failure.safeMode
+        ? ref.watch(lastKnownGoodProvider).value
+        : null;
+    final model = FailureCardModel.of(failure, lkgUseful: lkg?.useful ?? false, held: held);
     final hazards = failure.safeMode && failure.kind.isFatal
         ? ref.watch(safePreflightProvider).value ?? const <SafeHazard>[]
         : const <SafeHazard>[];
@@ -190,7 +220,7 @@ class EngineFailureCard extends ConsumerWidget {
             const SizedBox(height: 8),
             Text(model.body, style: theme.textTheme.bodyMedium?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
             // Where there is no safe mode to fall back on, this is what two in a row do.
-            if (failure.causeUnknown && !EngineControl.shouldAutoStart(status)) ...[
+            if (failure.causeUnknown && held) ...[
               const SizedBox(height: 8),
               Text(
                 l10n.harmonyFailureHeld,

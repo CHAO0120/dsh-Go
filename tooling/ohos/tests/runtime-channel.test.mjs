@@ -111,7 +111,7 @@ for (const name of ['RuntimeRecovery', 'OhosRecoveryStorage']) {
   await fs.writeFile(path.join(temp, name+'.mts'), text);
 }
 
-// 454 uses actual product modules; baseline keeps its original Controller.
+// The last good config runs on its real modules; a Controller without them keeps its own.
 if (controllerText.includes("from './RuntimeLastKnownGood'")) {
   const lkgIoUrl=pathToFileURL(path.join(temp,'lkg-io.mjs')).href;
   await fs.writeFile(path.join(temp,'lkg-io.mjs'), `import {recoveryIo} from '${recoveryFixtureUrl}';

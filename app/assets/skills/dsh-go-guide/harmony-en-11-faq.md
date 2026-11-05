@@ -30,7 +30,13 @@ Alerts need the app running, and none go out while it's suspended; also turn on 
 
 ## The engine keeps failing to start
 
-HarmonyOS has no Safe mode. After several unclean exits in a row the engine won't start by itself; tap **Retry** on the failure card to start it. The cause isn't known: the system may have reclaimed the app, or the app was closed, or the engine hit an error. The failure card links to the logs and a diagnostics bundle. Reset and uninstall both delete data on this phone; you rarely need them to fix a problem.
+After several unclean exits in a row the engine won't start by itself and waits for you. The cause isn't known: the system may have reclaimed the app, or the app was closed, or the engine hit an error. On the failure card:
+
+- **Restore configuration**: goes back to the plugins and settings of the last good run. A run counts as good after two minutes without stopping; with no such record, or nothing changed since, the button isn't there. It only restores configuration: it doesn't go back to an older engine, and it leaves chats and scheduled tasks alone.
+- **Enter Safe mode**: starts with the default configuration that comes with the app, without the plugins you installed. Your chats stay. Once fixed, tap **Return to normal mode**. Web settings changed in Safe mode aren't kept.
+- **Retry**: starts again with the configuration as it is.
+
+If the engine has already started since the app opened, restoring and entering or leaving Safe mode reopen the app; the dialog says so. The failure card also links to the logs and a diagnostics bundle. Reset and uninstall both delete data on this phone; you rarely need them to fix a problem.
 
 ## System actions don't work
 

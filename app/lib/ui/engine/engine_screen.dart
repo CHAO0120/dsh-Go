@@ -139,10 +139,8 @@ class EngineScreen extends ConsumerWidget {
                   value: settings.autoStartLocal,
                   onChanged: (v) => unawaited(ref.read(settingsProvider.notifier).setAutoStartLocal(v)),
                 ),
-                if (guest) ...[
-                  const SafeModeAutoSwitch(icon: null),
-                  const SafeModeSettingsTiles(showAutoSwitch: false, icon: false),
-                ],
+                if (guest) const SafeModeAutoSwitch(icon: null),
+                const SafeModeSettingsTiles(showAutoSwitch: false, icon: false),
               ],
             ),
             if (!missing)

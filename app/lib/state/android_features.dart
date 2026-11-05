@@ -9,7 +9,7 @@ final operatingSystemProvider = Provider<String>((ref) => Platform.operatingSyst
 /// Whether this OS has what only Android has today: 手机操控 (an accessibility
 /// service to drive the phone; HarmonyOS has 系统操作 instead), the pet's windows
 /// over other apps, a picture as a launcher shortcut, the rescue tools that work on
-/// its Linux guest (安全模式, Direct 引擎), the relay's direct link, and the line
+/// its Linux guest (自动安全模式, Direct 引擎), the relay's direct link, and the line
 /// about a maker cutting the network.
 ///
 /// This hides only what has no HarmonyOS form yet, in the hub, search and links

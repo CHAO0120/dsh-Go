@@ -381,8 +381,16 @@ export class RuntimeController {
     // The running interval qualified this captured launch image. A later stop
     // does not substitute a newer disk configuration into this write.
     this.lkgPin = this.lastGood.pinBooted(this.bootProfile, Date.now()).catch((): void => {
-      this.emit(new Map<string, Object | null>([['type', 'notice'], ['text', '上次正常配置尚未确认保存；本次运行仍可继续。']]));
+      this.logNote('上次正常配置尚未确认保存；本次运行仍可继续。');
     });
+  }
+
+  // For the log. Notices reach the person as they are, and these name the engine's
+  // internals; what they need to know the app says itself, in their language.
+  private logNote(text: string): void {
+    const entry = this.logs.append(text, 'system');
+    this.persistedLogs.append([entry]);
+    this.emit(new Map<string, Object | null>([['type', 'logs'], ['entries', [entry.toMap()]]]));
   }
 
   private assertLkgStopped(): void {
@@ -417,7 +425,7 @@ export class RuntimeController {
     try {
       await this.initialize(); this.assertLkgStopped(); await this.lkgPin;
       const result = await this.lastGood.restore();
-      this.emit(new Map<string, Object | null>([['type', 'notice'], ['text', '主配置已恢复；已用过的 Node 进程不能再次启动，请正常模式重新打开应用。']]));
+      this.logNote('主配置已恢复。');
       return result;
     } finally { this.pending = null; this.emitStatus(); }
   }
@@ -479,8 +487,7 @@ export class RuntimeController {
       await this.writeInstructions(dshHome, workspace, visualReplies);
       if (this.startCancelled) throw new RuntimeChannelError('ohos_start_cancelled', '启动已取消。');
       if (selectedMode === 'safe') {
-        this.emit(new Map<string, Object | null>([['type', 'notice'], ['text',
-          '安全模式使用独立的随包配置，不会改写原 web 配置；全局补丁和 .env 仍可能影响启动。']]));
+        this.logNote('安全模式使用独立的随包配置，不会改写原 web 配置；全局补丁和 .env 仍可能影响启动。');
       }
       Object.keys(environment).forEach((key: string) => this.logs.rememberSecret(environment[key]));
       const options: HostOptions = { runtimeRoot: this.installer.root, guestRoot: this.paths.guestRoot, dshHome: dshHome,
@@ -491,7 +498,7 @@ export class RuntimeController {
       this.bootProfile = null; this.pinnedProfile = false; this.runningSince = null; this.markedHealthy = false;
       if (selectedMode === 'normal') {
         try { this.bootProfile = await this.lastGood.captureBoot(); }
-        catch (_) { this.emit(new Map<string, Object | null>([['type', 'notice'], ['text', '本次启动配置无法建立可靠恢复快照；正常启动仍将继续。']])); }
+        catch (_) { this.logNote('本次启动配置无法建立可靠恢复快照；正常启动仍将继续。'); }
       }
       const attempt = util.generateRandomUUID();
       this.runMode = selectedMode;

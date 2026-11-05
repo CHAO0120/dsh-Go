@@ -74,9 +74,10 @@ String failureOneLiner(RuntimeFailure f) {
 }
 
 /// The text 「帮我修复」 pre-fills. The agent's briefing (written natively on every safe
-/// start) has the details; this only points it there.
-String repairPrompt(RuntimeStatus status) {
+/// start) has the details; this only points it there. HarmonyOS writes no briefing
+/// and has no `dsh-app-plugins`, so its words name neither.
+String repairPrompt(RuntimeStatus status, {bool harmony = false}) {
   final f = status.mainFailure ?? status.failure;
   final what = f == null ? appL10n.stateSafeManualEntry : failureOneLiner(f);
-  return appL10n.stateSafeRepairPrompt(what);
+  return harmony ? appL10n.harmonySafeRepairPrompt(what) : appL10n.stateSafeRepairPrompt(what);
 }
