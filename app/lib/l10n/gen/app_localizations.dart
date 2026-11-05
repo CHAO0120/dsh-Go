@@ -13940,6 +13940,18 @@ abstract class L10n {
   /// **'没有相册权限，未能保存'**
   String get iosPhotosDenied;
 
+  /// No description provided for @iosRelocationOriginUnavailable.
+  ///
+  /// In zh, this message translates to:
+  /// **'发现旧对话，但找不到它们原来的位置。原数据都还在，这些对话暂时不能继续。'**
+  String get iosRelocationOriginUnavailable;
+
+  /// No description provided for @iosRelocationSessionIsolated.
+  ///
+  /// In zh, this message translates to:
+  /// **'有些对话没能迁移，已经单独保留。原文件和原因都还在，可以在诊断里导出后反馈。'**
+  String get iosRelocationSessionIsolated;
+
   /// No description provided for @iosAccessSubtitle.
   ///
   /// In zh, this message translates to:

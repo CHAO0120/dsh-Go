@@ -7597,6 +7597,12 @@ class L10nZh extends L10n {
   String get iosPhotosDenied => '没有相册权限，未能保存';
 
   @override
+  String get iosRelocationOriginUnavailable => '发现旧对话，但找不到它们原来的位置。原数据都还在，这些对话暂时不能继续。';
+
+  @override
+  String get iosRelocationSessionIsolated => '有些对话没能迁移，已经单独保留。原文件和原因都还在，可以在诊断里导出后反馈。';
+
+  @override
   String get iosAccessSubtitle => '各项功能用到的系统权限';
 
   @override

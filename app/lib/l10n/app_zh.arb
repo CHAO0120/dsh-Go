@@ -4860,6 +4860,8 @@
   "iosPluginsPermissionLocalTrusted": "插件以 DSH 的权限运行：能读写文件、执行命令、读取 API Key，不受工作区沙箱限制。只装你信任的插件。",
   "iosIconChanged": "桌面图标已更换",
   "iosPhotosDenied": "没有相册权限，未能保存",
+  "iosRelocationOriginUnavailable": "发现旧对话，但找不到它们原来的位置。原数据都还在，这些对话暂时不能继续。",
+  "iosRelocationSessionIsolated": "有些对话没能迁移，已经单独保留。原文件和原因都还在，可以在诊断里导出后反馈。",
   "iosAccessSubtitle": "各项功能用到的系统权限",
   "launchScreenTitle": "启动画面",
   "launchDefault": "默认",

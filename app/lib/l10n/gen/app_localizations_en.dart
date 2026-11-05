@@ -8038,6 +8038,14 @@ class L10nEn extends L10n {
   String get iosPhotosDenied => 'Couldn’t save. Photos access is off.';
 
   @override
+  String get iosRelocationOriginUnavailable =>
+      'Found older chats, but not where they used to be. Everything is still here, but these chats can’t continue for now.';
+
+  @override
+  String get iosRelocationSessionIsolated =>
+      'Some chats couldn’t be moved and were set aside. The files and the reason are kept. You can export them from Diagnostics and report it.';
+
+  @override
   String get iosAccessSubtitle => 'What each feature needs from iOS';
 
   @override

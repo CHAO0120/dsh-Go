@@ -142,4 +142,44 @@ void main() {
     await flush();
     expect(container.read(localRuntimeProvider).loaded, isTrue);
   });
+
+  group('moving saved paths', () {
+    const origin = '(node:1) [IOS_RELOCATION_ORIGIN_UNAVAILABLE] Warning: no trusted origin';
+    const isolated = '(node:1) [IOS_RELOCATION_SESSION_ISOLATED] Warning: {"unknown-version":2}';
+
+    void log(int seq, String line) => bridge.stream.add(RuntimeLogsEvent([RuntimeLogEntry(seq, line, 'stderr')]));
+
+    RuntimeStatusEvent phase(RuntimePhase phase) => RuntimeStatusEvent(RuntimeStatus(phase: phase));
+
+    test('a warning becomes a lasting note and one toast, an ordinary line neither', () {
+      container.read(localRuntimeProvider);
+      log(1, 'dsh web: listening');
+      expect(container.read(localRuntimeProvider).relocation, isEmpty);
+      expect(container.read(localRuntimeProvider).notice, isNull);
+
+      log(2, origin);
+      expect(container.read(localRuntimeProvider).relocation, {RelocationIssue.originUnavailable});
+      final toast = container.read(localRuntimeProvider).notice;
+      expect(toast?.text, RelocationIssue.originUnavailable.text);
+
+      log(3, origin);
+      expect(container.read(localRuntimeProvider).notice?.seq, toast?.seq);
+
+      log(4, isolated);
+      expect(container.read(localRuntimeProvider).relocation, RelocationIssue.values.toSet());
+    });
+
+    test('the note goes with the start that reported it, and the next start isn\'t toasted again', () {
+      container.read(localRuntimeProvider);
+      log(1, origin);
+      final toast = container.read(localRuntimeProvider).notice;
+
+      bridge.stream.add(phase(RuntimePhase.starting));
+      expect(container.read(localRuntimeProvider).relocation, isEmpty);
+
+      log(2, origin);
+      expect(container.read(localRuntimeProvider).relocation, {RelocationIssue.originUnavailable});
+      expect(container.read(localRuntimeProvider).notice?.seq, toast?.seq);
+    });
+  });
 }

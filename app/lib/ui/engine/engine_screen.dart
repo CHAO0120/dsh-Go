@@ -129,6 +129,8 @@ class EngineScreen extends ConsumerWidget {
                 child: Text(l10n.engineStartReopensApp, style: Theme.of(context).textTheme.bodySmall),
               ),
             const EngineFailureCard(padding: EdgeInsets.fromLTRB(16, 0, 16, 16)),
+            for (final issue in state.relocation)
+              Padding(padding: const EdgeInsets.fromLTRB(16, 0, 16, 16), child: _RelocationNote(issue.text)),
             const SafeModeCard(padding: EdgeInsets.fromLTRB(16, 0, 16, 16)),
             SettingsSection(
               title: l10n.hubEngineStartup,
@@ -234,7 +236,8 @@ class EngineActions extends ConsumerWidget {
     final container = ProviderScope.containerOf(context, listen: false);
     // iOS can retain a native/reset error after the installed runtime is gone.
     // Keep the error visible, but offer installation instead of another start.
-    final iosNeedsInstall = phase == RuntimePhase.error &&
+    final iosNeedsInstall =
+        phase == RuntimePhase.error &&
         ref.watch(operatingSystemProvider) == 'ios' &&
         ref.watch(localRuntimeProvider.select((s) => s.status.installedVersion)) == null;
     if (phase == RuntimePhase.notInstalled || iosNeedsInstall) {
@@ -508,6 +511,36 @@ class _KeepOption extends StatelessWidget {
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+/// A lasting note beside the engine's controls: the toast is gone by the time someone comes
+/// looking for old conversations here. It offers nothing to press, since the data is safe as it is.
+class _RelocationNote extends StatelessWidget {
+  const _RelocationNote(this.text);
+
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = DshColors.of(context);
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: ShapeDecoration(color: colors.warningContainer, shape: AppShape.card),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(AppIcons.warning, size: 20, color: colors.warning),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              text,
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(color: colors.onWarningContainer, height: 1.6),
+            ),
+          ),
+        ],
       ),
     );
   }

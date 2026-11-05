@@ -12,5 +12,7 @@
   "iosPluginsPermissionLocalTrusted": "Plugins run with DSH’s permissions: they can read and write files, run commands, and read API keys. They aren’t restricted by the workspace sandbox. Only install plugins you trust.",
   "iosIconChanged": "Icon changed",
   "iosPhotosDenied": "Couldn’t save. Photos access is off.",
+  "iosRelocationOriginUnavailable": "Found older chats, but not where they used to be. Everything is still here, but these chats can’t continue for now.",
+  "iosRelocationSessionIsolated": "Some chats couldn’t be moved and were set aside. The files and the reason are kept. You can export them from Diagnostics and report it.",
   "iosAccessSubtitle": "What each feature needs from iOS"
 }
