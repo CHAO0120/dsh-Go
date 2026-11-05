@@ -32,8 +32,11 @@
     target.addEventListener(type, invalidate, true);
     removeListeners.push(() => target.removeEventListener(type, invalidate, true));
   }
-  function hidden(el) {
-    for (let at = el; at; at = parent(at) || at.ownerDocument.defaultView?.frameElement) {
+  function hidden(el, child = null) {
+    for (let at = el; at; child = at, at = parent(at) || at.ownerDocument.defaultView?.frameElement) {
+      // Closed details content can retain layout boxes while its anonymous content is hidden.
+      if (child && tag(at) === 'details' && !at.open && child !== at.querySelector(':scope > summary') &&
+          at.ownerDocument.defaultView.getComputedStyle(at, '::details-content').contentVisibility === 'hidden') return true;
       if (at.hidden || at.inert || attr(at, 'aria-hidden') === 'true') return true;
       const style = at.ownerDocument.defaultView.getComputedStyle(at);
       if (style.display === 'none' || style.visibility === 'hidden' || style.visibility === 'collapse' || style.contentVisibility === 'hidden') return true;
@@ -275,7 +278,7 @@
     function walk(node, context) {
       if (++visits > LIMIT_VISITS) { result.truncated = true; return; }
       if (node.nodeType === Node.TEXT_NODE) {
-        if (node.parentElement && !hidden(node.parentElement)) {
+        if (node.parentElement && !hidden(node.parentElement, node)) {
           const range = node.ownerDocument.createRange();
           range.selectNodeContents(node);
           if (Array.from(range.getClientRects()).some(r => r.width > 0 && r.height > 0)) text(node.nodeValue);
