@@ -133,6 +133,15 @@ DIAGNOSTIC_EDITS = {
     ),
 }
 ATTACHMENT_EDITS = (
+    ('* Establish this process\'s proof that one DSH_HOME entry and every ancestor\n* below the filesystem root are durable.',
+     '* Sync the native iOS default DSH_HOME entry within its host-owned HOME.\n* Custom store homes retain the original filesystem-root durability walk.'),
+    # The native iOS host owns HOME and validates DSH_HOME = HOME/.dsh, with no
+    # redirected layout directories. Sync the .dsh entry in that existing home,
+    # not container ancestors that iOS does not permit us to open.
+    ('\t\tawait ensureDurableDirectory(home, parse(home).root);',
+     '\t\tconst hostHome = process.env.HOME;\n'
+     '\t\tconst boundary = hostHome && resolve(hostHome) === hostHome && home === join(hostHome, ".dsh") && home === resolveDshHome() ? hostHome : parse(home).root;\n'
+     '\t\tawait ensureDurableDirectory(home, boundary);'),
     ('const loadSharp = createLazyRequire("sharp", import.meta.url);',
      'const loadSharp = createLazyRequire("./ios-sharp.cjs", import.meta.url);'),
     ('\tif (process.platform === "openharmony") throw new AttachmentError("鸿蒙本机尚无可用的图像解码/重编码库；请连接电脑处理图像。普通文件仍可上传或保存。", "OHOS_IMAGE_CODEC_UNAVAILABLE");\n',
