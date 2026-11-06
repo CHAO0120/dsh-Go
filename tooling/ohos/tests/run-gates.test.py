@@ -18,6 +18,81 @@ gates = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(gates)
 
 
+class SourceInventoryContract(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.base = Path(self.temp.name)
+        self.root = self.base / 'source'
+        self.root.mkdir()
+
+    def test_ignored_directory_link_remains_ignored_after_target_removal(self):
+        target = self.base / 'external-target'
+        target.mkdir()
+        (target / 'dependency.js').write_text('owned fixture')
+        (self.root / 'node_modules').symlink_to(target, target_is_directory=True)
+        before = gates.source_files(self.root)
+        self.assertEqual(before, {})
+        shutil.rmtree(target)
+        self.assertEqual(gates.source_files(self.root), before)
+
+    def test_custom_ignored_names_cover_files_and_directory_links(self):
+        target = self.base / 'external-target'
+        target.mkdir()
+        (self.root / 'skip-file').write_text('excluded')
+        (self.root / 'skip-link').symlink_to(target, target_is_directory=True)
+        ignored = {'skip-file', 'skip-link'}
+        self.assertEqual(gates.source_files(self.root, ignored=ignored), {})
+        target.rmdir()
+        self.assertEqual(gates.source_files(self.root, ignored=ignored), {})
+
+    def test_nonignored_link_identity_and_file_bytes_and_mode_stay_protected(self):
+        target = self.base / 'external-target'
+        target.mkdir()
+        link = self.root / 'source-link'
+        link.symlink_to(target, target_is_directory=True)
+        source = self.root / 'source.js'
+        source.write_text('before')
+        source.chmod(0o644)
+        before = gates.source_files(self.root)
+        self.assertEqual(before['source-link'], {'type': 'symlink', 'target': str(target)})
+        target.rmdir()
+        self.assertEqual(gates.source_files(self.root), before)
+        link.unlink()
+        link.symlink_to(self.base / 'other-missing')
+        self.assertNotEqual(gates.source_files(self.root)['source-link'], before['source-link'])
+        source.write_text('after!')  # Same length: SHA, not size, must detect it.
+        self.assertNotEqual(gates.source_files(self.root)['source.js']['sha256'], before['source.js']['sha256'])
+        source.write_text('before')
+        source.chmod(0o755)
+        self.assertNotEqual(gates.source_files(self.root)['source.js']['mode'], before['source.js']['mode'])
+
+    def test_empty_ignored_keeps_build_and_node_modules_source_and_rejects_links(self):
+        lib = self.root / 'app/lib'
+        (lib / 'build').mkdir(parents=True)
+        source = lib / 'build/owned.dart'
+        source.write_text('source')
+        (lib / 'node_modules').write_text('also source')
+        before = gates.source_files(lib, ignored=())
+        self.assertEqual(set(before), {'build/owned.dart', 'node_modules'})
+        protected = gates.flutter_inputs(self.root)
+        self.assertIn('app/lib/build/owned.dart', protected)
+        self.assertIn('app/lib/node_modules', protected)
+        source.write_text('changed')
+        self.assertNotEqual(gates.flutter_inputs(self.root), protected)
+        (lib / 'node_modules').unlink()
+        target = self.base / 'external-target'
+        target.mkdir()
+        (lib / 'node_modules').symlink_to(target, target_is_directory=True)
+        before = gates.source_files(lib, ignored=())
+        with self.assertRaisesRegex(ValueError, 'symlink'):
+            gates.flutter_inputs(self.root)
+        target.rmdir()
+        self.assertEqual(gates.source_files(lib, ignored=()), before)
+        with self.assertRaisesRegex(ValueError, 'symlink'):
+            gates.flutter_inputs(self.root)
+
+
 class RunnerContract(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()

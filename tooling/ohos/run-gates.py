@@ -63,6 +63,9 @@ def source_files(root, ignored=IGNORED):
     for current, dirs, files in os.walk(root, followlinks=False):
         dirs[:] = sorted(d for d in dirs if d not in ignored)
         for name in sorted(files + [d for d in dirs if (Path(current) / d).is_symlink()]):
+            # os.walk moves a directory symlink into files when its target disappears.
+            if name in ignored:
+                continue
             p = Path(current) / name
             rel = p.relative_to(root).as_posix()
             if p.is_symlink():
@@ -638,6 +641,8 @@ def main():
     g.run('patcher-contract', lambda: [sys.executable, '-I', '-B', '-m', 'unittest', 'discover', '-s', str(s / 'runtime/tests'), '-p', 'test_patch_dsh.py', '-v'], needs=('tools',), env=lambda: {'DSH_FS_LOCAL_ORIGINAL_JS': str(p('android_pristine') / 'node_modules/@deepseek-ai/dsh-fs-local/lib/index.js')}, tests=['runtime/tests/test_patch_dsh.py'])
     g.node_tests('sim-contract', [rt + 'sim.test.mjs'], needs=('tools',))
     g.node_tests('measurement-helpers', [rt + 'measurement-loader.test.mjs', rt + 'measurement-publication-fixture.test.mjs'], needs=('prepared-inputs',))
+    for mode in ('plain', 'jitless'):
+        g.node_tests('plugin-graph-' + mode, [rt + 'plugin-graph.test.mjs'], mode=mode, needs=('prepared-inputs',))
     g.run('bash-producer-contract', lambda: g.py(rt + 'build-just-bash.test.py', '--package', p('prepared') / 'process/node_modules/just-bash', '--out', o / 'bash-producer-contract'), needs=('prepared-inputs',), timeout=180, tests=[rt + 'build-just-bash.test.py'])
     g.run('licenses-registration', lambda: g.py(rt + 'licenses-registration.py', '--registration-root', s, '--process-prefix', p('prepared') / 'process', '--esbuild-prefix', p('esbuild_prefix')), needs=('prepared-inputs',), timeout=180)
     g.node_tests('output-utf8', [rt + 'output-utf8.test.mjs'], needs=('prepared-inputs',), extra=lambda: {'DSH_OUTPUT_COLLECTOR_TEST_MODULE': str(prefix() / 'node_modules/@deepseek-ai/dsh-subprocess-local/lib/output.js'), 'DSH_OUTPUT_COLLECTOR_TEST_SHA256': sha(prefix() / 'node_modules/@deepseek-ai/dsh-subprocess-local/lib/output.js')})
@@ -733,10 +738,17 @@ def main():
     for label, host in [('loopback', '127.0.0.1'), ('owned-http', g.config.get('ownedHttpHost', ''))]:
         g.run('mcp-' + label, lambda h=host: g.py(rt + 'add13/host-gate.py', '--source', s, '--payload', payload(), '--manifest', o / 'composed/manifest.json', '--node', node(), '--native-library-dir', o / 'round-native', '--publication-fixture', native() / 'libpublication-test-linked.so', '--out', o / ('mcp-' + label), '--expect', 'complete', '--mcp-host', h if label == 'loopback' else owned_http_host(h)), needs=('compose', 'native-publication-build', 'native-static-resources', 'round-native-libraries'), timeout=240)
     g.node_tests('spawn-boundary', [rt + 'child-process-boundary.test.mjs'], needs=('tools',))
+    for mode in ['plain', 'jitless']:
+        g.node_tests('plugin-archive-' + mode, [rt + 'plugin-archive.test.mjs'], mode=mode, needs=('prepared-inputs',))
     for filename in ['test.sh', 'test-integration.sh', 'test-proxy-env.sh', 'test-dispatcher-errors.sh']:
         g.run('net-' + filename[:-3], lambda f=filename: ['bash', s / 'runtime/ohos/net' / f], needs=('prepared-inputs', *(['network-interface-tools'] if filename == 'test-proxy-env.sh' else [])), env=lambda f=filename: {**g.common(), **({'NODE': str(p('fetch_node'))} if f == 'test.sh' else {})}, timeout=300)
     g.node_tests('net-bootstrap', [rt + 'net-bootstrap.test.mjs'], needs=('prepared-inputs',))
+    for mode in ['plain', 'jitless']:
+        g.node_tests('plugin-store-installer-' + mode, [rt + 'plugin-store.test.mjs', rt + 'plugin-installer.test.mjs'], mode=mode, needs=('prepared-inputs',))
     g.node_tests('provider-body-timeout', [rt + 'provider-body-timeout.test.mjs'], needs=('android-targets',))
+    for mode in ['strict', 'plain']:
+        g.node_tests('attachment-diagnostic-' + mode, [rt + 'attachment-error-recovery.test.mjs'],
+                     mode=mode, needs=('android-targets',), extra=lambda: {'DSH_PREFIX': str(prefix())})
     # Optional entries that would reach a real process past the OH subprocess backend.
     for name in ['forge-github-unavailable', 'liveshare-owner-unavailable', 'market-git-unavailable']:
         g.node_tests(name, [rt + name + '.test.mjs'], needs=('android-targets',))
@@ -746,6 +758,21 @@ def main():
         g.run(driver + '-ohos', lambda script=script, driver=driver: g.node('--jitless', '--import', s / 'runtime/ohos/sim/preload.mjs', script, prefix(), o / (driver + '-ohos.json'), 'ohos'),
               env={'DSH_GO_OHOS_SIM_PLATFORM': 'openharmony', 'DSH_GO_OHOS_SIM_ADDONS': '[]'}, needs=('android-targets',))
         g.run(driver + '-control', lambda script=script, driver=driver: g.node(script, prefix(), o / (driver + '-control.json'), 'native'), needs=('android-targets',))
+    def plugin_contract_env():
+        return {'DSH_PREFIX': str(prefix()),
+                'DSH_PLUGIN_BACKEND_MODULE': str(s / 'runtime/ohos/plugins/backend.mjs'),
+                'DSH_PLUGIN_CAPABILITIES_MODULE': str(s / 'runtime/ohos/capabilities/snapshot.mjs'),
+                'DSH_PLUGIN_SIM_PRELOAD': str(s / 'runtime/ohos/sim/preload.mjs')}
+    g.node_tests('plugin-package-lifecycle', [rt + 'plugin-package-lifecycle.test.mjs', rt + 'plugin-market-capabilities.test.mjs'],
+                 mode='strict', needs=('prepared-inputs', 'ohos-test-helpers'), extra=plugin_contract_env)
+    g.node_tests('plugin-registry-fallback', [rt + 'plugin-registry-fallback.test.mjs'],
+                 mode='strict', needs=('prepared-inputs', 'ohos-test-helpers'), extra=plugin_contract_env)
+    g.node_tests('plugin-market-capabilities-native', [rt + 'plugin-market-capabilities.test.mjs'],
+                 needs=('prepared-inputs', 'ohos-test-helpers'), extra=plugin_contract_env)
+    g.node_tests('plugin-profile-recovery', [rt + 'plugin-profile-recovery.test.mjs'],
+                 needs=('prepared-inputs', 'ohos-test-helpers'), extra=plugin_contract_env)
+    g.node_tests('plugin-write-failure', [rt + 'plugin-write-failure.test.mjs'],
+                 needs=('prepared-inputs', 'ohos-test-helpers'), extra=plugin_contract_env)
     for mode in ['plain', 'jitless']:
         g.node_tests('discovery-response-cleanup-' + mode, [rt + 'discovery-response-cleanup.test.mjs'],
                      mode=mode, needs=('prepared-inputs', 'android-targets'),
@@ -768,6 +795,24 @@ def main():
     g.node_tests('publication-native-boundaries', [rt + 'publication-native-boundaries.test.mjs', rt + 'publication-errno-boundaries.test.mjs'], needs=('native-publication-build', 'permission-tools'), extra=native_boundary_env, timeout=240)
     g.run('hap-native-paths', lambda: g.py(rt + 'hap-native-paths.py', '--prefix', o / 'targets/ohos-prefix', '--node', node(), '--headers', headers(), '--loader-addon', p('native_library_dir') / 'libdsh_require_builtin.so', '--compiler', p('cc'), '--out', o / 'hap-native-paths'), needs=('android-targets',), timeout=180)
     g.node_tests('native-loader', [rt + 'native-loader-probe.test.mjs'], needs=('android-targets',), extra=lambda: {'DSH_TEST_NODE': str(node()), 'DSH_TEST_O0_PRELOAD': str(s / 'runtime/ohos/sim/preload.mjs'), 'DSH_TEST_NATIVE_PREFIX': str(o / 'targets/ohos-prefix'), 'DSH_TEST_NATIVE_ADDON': str(p('native_library_dir') / 'libdsh_require_builtin.so'), 'DSH_GO_OHOS_NATIVE_LIBRARY_DIR': str(p('native_library_dir'))})
+    def plugin_hmr_env():
+        return {**plugin_contract_env(), 'DSH_GO_OHOS_NATIVE_LIBRARY_DIR': str(p('native_library_dir')),
+                'DSH_GO_OHOS_SIM_ADDONS': json.dumps([str(p('native_library_dir') / name)
+                    for name in ['libdsh_flock.so', 'libdsh_require_builtin.so']]),
+                'NARB_DISABLE_NATIVE_CACHE': '1'}
+    g.node_tests('plugin-hmr-update', [rt + 'plugin-hmr-update.test.mjs'], mode='strict',
+                 needs=('prepared-inputs', 'ohos-test-helpers', 'native-loader'), extra=plugin_hmr_env)
+    g.node_tests('plugin-generation-reinstall', [rt + 'plugin-generation-reinstall.test.mjs'], mode='strict',
+                 needs=('prepared-inputs', 'ohos-test-helpers', 'native-loader'), extra=plugin_hmr_env)
+    for mode in ['strict', 'plain']:
+        g.node_tests('plugin-generation-boundaries-' + mode, [rt + 'plugin-generation-boundaries.test.mjs'],
+                     mode=mode, needs=('prepared-inputs', 'ohos-test-helpers'), extra=plugin_contract_env)
+    g.node_tests('plugin-hmr-write-failure', [rt + 'plugin-hmr-write-failure.test.mjs'],
+                 needs=('prepared-inputs', 'ohos-test-helpers', 'native-loader'), extra=plugin_hmr_env)
+    g.node_tests('plugin-hmr-remove-failure', [rt + 'plugin-hmr-remove-failure.test.mjs'],
+                 needs=('prepared-inputs', 'ohos-test-helpers', 'native-loader'), extra=plugin_hmr_env)
+    g.node_tests('plugin-hmr-restart', [rt + 'plugin-hmr-restart.test.mjs'],
+                 needs=('prepared-inputs', 'ohos-test-helpers', 'native-loader'), extra=plugin_hmr_env)
     publication = ['publication-atomic', 'publication-atomic-fuse', 'publication-ledger', 'publication-ledger-lifecycle', 'publication-capabilities']
     lifecycle = ['lifecycle-journal', 'lifecycle-budget', 'lifecycle-tool-budgets', 'lifecycle-transport', 'lifecycle-engine', 'lifecycle-explicit-resume', 'runtime-capabilities']
     for mode in ['marker', 'strict']:
