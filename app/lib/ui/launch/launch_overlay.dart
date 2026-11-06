@@ -85,45 +85,15 @@ class _LaunchOverlayState extends State<LaunchOverlay> with TickerProviderStateM
 
   LaunchController get _c => widget.controller;
 
-  // TEMP(ohos-launch): what the launch screen's clock does on a HarmonyOS phone.
-  Timer? _probe;
-  int _probes = 0;
-
-  void _trace(String what) {
-    if (!_c.native) return;
-    String line;
-    try {
-      final binding = SchedulerBinding.instance;
-      line =
-          'trace $what phase=${_c.phase.name} mounted=$mounted custom=${_c.showsCustom} '
-          'value=${_play.value.toStringAsFixed(3)} animating=${_play.isAnimating} muted=${!TickerMode.valuesOf(context).enabled} '
-          'frames=${binding.framesEnabled} life=${binding.lifecycleState?.name} sched=${binding.schedulerPhase.name} '
-          'pending=${binding.hasScheduledFrame} sys=${binding.currentSystemFrameTimeStamp.inMicroseconds} '
-          'now=${binding.currentFrameTimeStamp.inMicroseconds}';
-    } catch (error) {
-      line = 'trace $what failed: $error';
-    }
-    unawaited(_c.channel.mark(line));
-  }
-
-  int _frames = 0;
-
   @override
   void initState() {
     super.initState();
-    _trace('init ${identityHashCode(this)}');
-    Timer(const Duration(milliseconds: 300), () => _trace('timer300'));
-    unawaited(Future<void>.delayed(const Duration(milliseconds: 600), () => _trace('delayed600')));
-    SchedulerBinding.instance.addPersistentFrameCallback((stamp) {
-      if (_frames++ < 12 && mounted) _trace('frame ${stamp.inMicroseconds}');
-    });
-    _probe = Timer.periodic(const Duration(milliseconds: 400), (_) {
-      if (++_probes > 20) _probe?.cancel();
-      _trace('tick');
-    });
     _c.addListener(_sync);
     SchedulerBinding.instance.addPostFrameCallback((_) {
-      if (mounted) _c.firstFrame();
+      if (!mounted) return;
+      _c.firstFrame();
+      // A layer rebuilt in a new place mid-launch starts with a fresh motion: pick up the phase.
+      _sync();
     });
   }
 
@@ -138,8 +108,6 @@ class _LaunchOverlayState extends State<LaunchOverlay> with TickerProviderStateM
 
   @override
   void dispose() {
-    _trace('dispose ${identityHashCode(this)}');
-    _probe?.cancel();
     _c.removeListener(_sync);
     _play.dispose();
     _custom.dispose();
@@ -156,7 +124,6 @@ class _LaunchOverlayState extends State<LaunchOverlay> with TickerProviderStateM
 
   void _sync() {
     if (!mounted) return;
-    _trace('sync');
     switch (_c.phase) {
       case LaunchPhase.cover || LaunchPhase.gone:
         break;
@@ -164,13 +131,7 @@ class _LaunchOverlayState extends State<LaunchOverlay> with TickerProviderStateM
         if (_c.showsCustom) {
           _startCustom();
         } else if (!_reduced && !_play.isAnimating && _play.value == 0) {
-          _trace('forward');
-          unawaited(
-            _play.forward().then((_) {
-              _trace('motionDone');
-              _c.motionDone();
-            }),
-          );
+          unawaited(_play.forward().then((_) => _c.motionDone()));
         }
       case LaunchPhase.leaving:
         if (_leave.isAnimating || _leave.isCompleted) break;
