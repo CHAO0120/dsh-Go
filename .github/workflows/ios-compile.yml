@@ -370,3 +370,7 @@ jobs:
           name: ios-launch-screenshot
           path: ${{ runner.temp }}/launch.png
           if-no-files-found: ignore
+
+      - name: Say how a crashed process died
+        if: ${{ failure() }}
+        run: python3 tooling/ios/engine-smoke/crash-notes.py 120
