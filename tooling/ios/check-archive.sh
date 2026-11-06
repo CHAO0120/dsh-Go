@@ -39,7 +39,7 @@ done
 guest="$frameworks/DshGuest.framework"
 for name in DshGuest DshGuestBridge; do
   if [ -f "$frameworks/$name.framework/$name" ]; then
-    lipo -verify_arch arm64 "$frameworks/$name.framework/$name" || fail "$name has no arm64 slice"
+    lipo "$frameworks/$name.framework/$name" -verify_arch arm64 || fail "$name has no arm64 slice"
   fi
 done
 for name in LICENSE.txt SOURCE.txt iSH-LICENSE.md iSH-LICENSE.IOS iSH-build.patch iSH-job-runtime.patch; do

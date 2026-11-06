@@ -144,7 +144,7 @@ jobs:
             for name in DshGuest DshGuestBridge; do
               binary="$out/$name.framework/$name"
               file "$binary"
-              xcrun lipo -verify_arch arm64 "$binary"
+              xcrun lipo "$binary" -verify_arch arm64
               install_name="$(xcrun otool -D "$binary" | tail -n 1)"
               test "$install_name" = "@rpath/$name.framework/$name"
               xcrun vtool -show-build "$binary"
