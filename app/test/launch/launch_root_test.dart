@@ -10,6 +10,7 @@ import 'package:dsh_app/runtime/runtime_state.dart';
 import 'package:dsh_app/state/settings_state.dart';
 import 'package:dsh_app/ui/launch/launch_overlay.dart';
 import 'package:dsh_app/ui/shell/root_gate.dart';
+import 'package:dsh_app/ui/theme/theme_reveal.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -36,6 +37,13 @@ class _CounterState extends State<_Counter> {
       child: TextButton(onPressed: () => setState(() => taps++), child: Text('taps $taps')),
     ),
   );
+}
+
+/// Builds the app root again a moment later, as a provider changing does.
+Future<void> _rebuildRoot(WidgetTester tester) async {
+  await tester.pump(const Duration(milliseconds: 100));
+  tester.element(find.byType(DshApp)).markNeedsBuild();
+  await tester.pump(const Duration(milliseconds: 100));
 }
 
 void main() {
@@ -192,6 +200,54 @@ void main() {
     await tester.pump(const Duration(milliseconds: 400));
     await tester.pump();
     expect(LaunchController.active.value, isNull);
+  });
+
+  // iOS: `coldEngine` is true whenever the engine is bundled, and on a first run nothing starts it.
+  testWidgets('a cold start with no engine coming: the layer still goes', (tester) async {
+    usePhone(tester);
+    final c = LaunchController(
+      snapshot: snapshotFor(sdk: 26, systemSplash: false, coldEngine: true, systemIcon: false),
+      channel: FakeLaunchChannel(),
+    );
+    LaunchController.active.value = c;
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [settingsProvider.overrideWith(() => FakeSettings(const AppSettings(loaded: true)))],
+        child: const DshApp(home: _Counter()),
+      ),
+    );
+    await tester.pump();
+    c.ready();
+    // Providers settling at launch build the root again, mid-motion.
+    await _rebuildRoot(tester);
+    await _rebuildRoot(tester);
+    for (var t = 0; t < 2000; t += 20) {
+      await tester.pump(const Duration(milliseconds: 20));
+    }
+    expect(LaunchController.active.value, isNull);
+  });
+
+  // MaterialApp builds Theme for AnimationStyle.noAnimation and AnimatedTheme for anything else:
+  // what the app's builder holds has to survive that swap, as the navigator does.
+  testWidgets('the theme cross-fade coming on or off keeps the layers over the navigator', (tester) async {
+    usePhone(tester);
+    addTearDown(tester.platformDispatcher.clearAccessibilityFeaturesTestValue);
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [settingsProvider.overrideWith(() => FakeSettings(const AppSettings(loaded: true)))],
+        child: const DshApp(home: _Counter()),
+      ),
+    );
+    final first = tester.state(find.byType(ThemeRevealHost));
+    // Long enough for the stored appearance to arrive and the cross-fade to come on.
+    for (var i = 0; i < 10; i++) {
+      await _rebuildRoot(tester);
+    }
+    final settled = tester.state(find.byType(ThemeRevealHost));
+    tester.platformDispatcher.accessibilityFeaturesTestValue = const FakeAccessibilityFeatures(disableAnimations: true);
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(tester.state(find.byType(ThemeRevealHost)), same(settled));
+    expect(settled, same(first));
   });
 
   testWidgets('the app root: the layer over everything, then gone; the page keeps its state', (tester) async {

@@ -164,7 +164,18 @@ if (values.mode === 'launch') {
   if (absent.length) fail('browser', `Not in the app bundle: ${absent.join(', ')}`);
   const noSystem = ['actions.mjs', 'results.mjs', 'catalog.json'].filter((name) => !existsSync(join(values.app, 'dsh-runtime/system', name)));
   if (noSystem.length) fail('system', `Not in the app bundle: ${noSystem.join(', ')}`);
-  const passed = up && crashes().length === 0 && missing.length === 0 && absent.length === 0 && noSystem.length === 0;
+  // Alive isn't enough: a launch screen that never leaves is a white screen over a working app.
+  // The app notes each startup stage ([dsh-startup], lib/launch/startup_trace.dart).
+  const said = [stdoutFile, stderrFile].map((file) => (existsSync(file) ? readFileSync(file, 'utf8') : ''))
+    .concat(quietly(() => simctl('spawn', values.simulator, 'log', 'show', '--last', '5m', '--style', 'compact',
+      '--predicate', 'process == "Runner" AND eventMessage CONTAINS "[dsh-startup]"'))).join('\n');
+  const stages = [...new Set(said.split('\n').filter((line) => line.includes('[dsh-startup]'))
+    .map((line) => line.slice(line.indexOf('[dsh-startup]') + 14).trim()))];
+  const finished = stages.includes('finished');
+  if (!stages.length) notice('app startup', 'No [dsh-startup] lines could be read.');
+  else if (!finished) fail('app startup', `The launch screen is still up 30 seconds after launch. Stages: ${stages.join(' | ')}`);
+  const passed = up && crashes().length === 0 && missing.length === 0 && absent.length === 0 && noSystem.length === 0 &&
+    (finished || !stages.length);
   if (passed) {
     notice('app launch', 'The real app is still running 30 seconds after launch.');
     annotateChunks('app threads', [].concat(quietly(() => threads(pid))).slice(0, 3), notice, 1);

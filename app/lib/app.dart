@@ -51,6 +51,13 @@ class _DshAppState extends ConsumerState<DshApp> with WidgetsBindingObserver {
   /// lands without a cross-fade, later ones fade (切换配色).
   bool _settled = false;
 
+  /// MaterialApp builds Theme for AnimationStyle.noAnimation and AnimatedTheme for anything else,
+  /// so the cross-fade coming on or off replaces everything above the builder. The navigator has a
+  /// global key to survive that; what the builder holds needs one too, or the launch screen and
+  /// the theme reveal start again from nothing, and a launch screen waiting for its motion to end
+  /// never leaves.
+  final _layers = GlobalKey(debugLabel: 'app layers');
+
   @override
   void initState() {
     super.initState();
@@ -185,6 +192,7 @@ class _DshAppState extends ConsumerState<DshApp> with WidgetsBindingObserver {
       builder: (context, child) {
         final media = MediaQuery.of(context);
         return MediaQuery(
+          key: _layers,
           data: media.copyWith(disableAnimations: media.disableAnimations || performance.reduceMotion),
           child: AppMotionScope(
             fluid: fluid,
