@@ -6,6 +6,8 @@
 // Prints each host event as a JSON line. A file named `restart` in the guest root makes
 // it stop the engine and start it again in this process; `quit` ends the run.
 #include <dlfcn.h>
+#include <execinfo.h>
+#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -89,8 +91,38 @@ static void begin(char** argv) {
   }
 }
 
+// A fatal signal in this process (iSH, the bridge, Node) says where it happened before the
+// process goes: the faulting address with its image and nearest symbol, then the thread's frames.
+// CI has no crash report to read otherwise.
+static void fatal(int signal_number, siginfo_t* info, void* context) {
+  (void)context;
+  Dl_info where;
+  if (info != NULL && dladdr(info->si_addr, &where) != 0) {
+    dprintf(STDERR_FILENO, "fatal signal %d at %p: %s +0x%lx (%s)
+", signal_number, info->si_addr,
+            where.dli_fname ? where.dli_fname : "?",
+            (unsigned long)((char*)info->si_addr - (char*)where.dli_fbase),
+            where.dli_sname ? where.dli_sname : "?");
+  } else {
+    dprintf(STDERR_FILENO, "fatal signal %d at %p
+", signal_number, info ? info->si_addr : NULL);
+  }
+  void* frames[64];
+  backtrace_symbols_fd(frames, backtrace(frames, 64), STDERR_FILENO);
+  signal(signal_number, SIG_DFL);
+  raise(signal_number);
+}
+
 int main(int argc, char** argv) {
   out = fdopen(dup(STDOUT_FILENO), "w");
+  struct sigaction on_fatal;
+  memset(&on_fatal, 0, sizeof on_fatal);
+  on_fatal.sa_sigaction = fatal;
+  on_fatal.sa_flags = SA_SIGINFO | SA_RESETHAND;
+  for (size_t i = 0; i < 6; ++i) {
+    const int fatal_signals[] = {SIGTRAP, SIGILL, SIGSEGV, SIGBUS, SIGABRT, SIGFPE};
+    sigaction(fatal_signals[i], &on_fatal, NULL);
+  }
   if (argc != 6) die("usage", "smoke <frameworks> <runtime root> <guest root> <cache> <trusted snapshot>");
   // The simulator smoke must consume the same addon layout as the app bundle.
   for (size_t i = 0; i < 4; ++i) {
