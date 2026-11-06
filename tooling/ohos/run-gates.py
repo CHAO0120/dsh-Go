@@ -804,6 +804,8 @@ def main():
                  needs=('prepared-inputs', 'ohos-test-helpers', 'native-loader'), extra=plugin_hmr_env)
     g.node_tests('plugin-generation-reinstall', [rt + 'plugin-generation-reinstall.test.mjs'], mode='strict',
                  needs=('prepared-inputs', 'ohos-test-helpers', 'native-loader'), extra=plugin_hmr_env)
+    g.node_tests('plugin-locale-bom', [rt + 'plugin-locale-bom.test.mjs'], mode='strict',
+                 needs=('prepared-inputs', 'ohos-test-helpers', 'native-loader'), extra=plugin_hmr_env)
     for mode in ['strict', 'plain']:
         g.node_tests('plugin-generation-boundaries-' + mode, [rt + 'plugin-generation-boundaries.test.mjs'],
                      mode=mode, needs=('prepared-inputs', 'ohos-test-helpers'), extra=plugin_contract_env)
