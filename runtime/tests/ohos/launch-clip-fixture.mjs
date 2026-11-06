@@ -153,6 +153,7 @@ export function launchFixture(repo, filesDir, options = {}) {
         if (name === '@ohos.file.fs') return { default: io };
         if (name === '@ohos.resourceManager') return { default: { ColorMode: { DARK: 0 } } };
         if (name === '@ohos.window') return {};
+        if (name === '@ohos.hilog') return { default: { info() {}, warn() {} } };
         if (name.endsWith('/Log')) return { default: { i() {}, e() {}, w() {}, d() {} } };
         if (name.endsWith('/FlutterNapi')) return { default: class FlutterNapi {} };
         if (name.endsWith('/FlutterAbility')) return { FlutterAbility };

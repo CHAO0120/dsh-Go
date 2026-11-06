@@ -103,6 +103,7 @@ export async function diagnosticsFixture(t, options = {}) {
   class MethodChannel { constructor(messenger,name) { this.name=name; channels.push(this); } setMethodCallHandler(value) { this.handler=value; } }
   const boundaries = {
     '@ohos.file.fs':{default:api},
+    '@ohos.hilog':{default:{info(){},warn(){}}},
     '@ohos.app.ability.common':{default:{}},
     '@ohos.app.ability.wantAgent':{default:{}},
     '@ohos.zlib':{default:nativeZlib},
