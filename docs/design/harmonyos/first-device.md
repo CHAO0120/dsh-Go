@@ -31,7 +31,7 @@
    密钥和密码在 `~/keys/dsh-ohos/`，不进仓库，也不要发给任何人。
 
 4. **在 AGC 上申请。** 登录 AppGallery Connect：
-   1. 创建 HarmonyOS 应用，包名 `io.github.ccch1mneyyy.dsh_app`；
+   1. 创建 HarmonyOS 应用，包名 `ccchimneyyy.dsh.go`；
    2. 登记设备 UDID；
    3. 上传 `debug.csr`，申请调试证书，下载存为 `~/keys/dsh-ohos/debug.cer`；
    4. 申请调试 Profile，勾选设备，下载存为 `~/keys/dsh-ohos/debug.p7b`。
@@ -58,7 +58,7 @@
 
 | # | 看什么 | 没过说明 |
 |---|---|---|
-| 1 | 能不能装上 | 公开 SDK 打的包可能被拒（`compileSdkType` 是 OpenHarmony），那就要 HarmonyOS 的 Command Line Tools 和 `tooling/ohos/build-hap.sh` |
+| 1 | 能不能装上 | 2026-11-06 在 HBN-AL00（HarmonyOS 7.0.0.111）上装上了，`compileSdkType` 是 OpenHarmony 也不拒；被拒先看签名和 Profile 里的包名、UDID |
 | 2 | 能不能打开，首屏出来没有 | 闪退多半是原生库加载，`libnode.so`、`libc++_shared.so` 从没在目标设备上加载过 |
 | 3 | 远程主机模式能不能连上、聊天 | 不碰本机引擎，先证明 Flutter 这一层是好的 |
 | 4 | 存 API key 重启后还在 | HUKS 和凭据库 |
@@ -105,7 +105,7 @@ tooling/ohos/device.sh motion 300
 ## 把设备还回去
 
 ```bash
-hdc uninstall io.github.ccch1mneyyy.dsh_app
+hdc uninstall ccchimneyyy.dsh.go
 ```
 
 然后在开发者选项里关闭开关，设备会重启。
