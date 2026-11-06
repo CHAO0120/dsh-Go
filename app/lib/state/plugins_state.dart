@@ -1489,6 +1489,7 @@ class PluginInstallsController extends Notifier<Map<String, PluginInstallJob>> {
   int _generation = 0;
   Future<void> _tail = Future.value();
   final Set<String> _cancelledQueued = {};
+  final Set<String> _cancelledRemovals = {};
   final Map<String, List<Completer<PluginInstallJob>>> _waiters = {};
 
   @override
@@ -1549,6 +1550,12 @@ class PluginInstallsController extends Notifier<Map<String, PluginInstallJob>> {
     if (job.phase == PluginInstallPhase.queued || job.phase == PluginInstallPhase.verifying) {
       _cancelledQueued.add(job.requestId);
       _put(job.copyWith(phase: PluginInstallPhase.cancelled, failure: describeCancelled));
+      return;
+    }
+    if (job.phase == PluginInstallPhase.removing && host.isLocal && ref.read(operatingSystemProvider) == 'ohos') {
+      // Removal has no install request to abort. Stop before the next install.
+      _cancelledRemovals.add(job.requestId);
+      _put(job.copyWith(phase: PluginInstallPhase.cancelling));
       return;
     }
     _put(job.copyWith(phase: PluginInstallPhase.cancelling));
@@ -1672,6 +1679,19 @@ class PluginInstallsController extends Notifier<Map<String, PluginInstallJob>> {
             ),
           );
         }
+        if (_cancelledRemovals.remove(requestId)) {
+          return finish(
+            (j) => j.copyWith(
+              phase: PluginInstallPhase.cancelled,
+              result: removed,
+              failure: PluginFailure(
+                PluginFailureKind.cancelled,
+                appL10n.statePluginInstallCancelled,
+                appL10n.pluginsUninstalledNamed(job.request.title ?? name),
+              ),
+            ),
+          );
+        }
         if (_cancelledQueued.remove(requestId)) {
           return finish((j) => j.copyWith(phase: PluginInstallPhase.cancelled, failure: describeCancelled));
         }
@@ -1693,7 +1713,12 @@ class PluginInstallsController extends Notifier<Map<String, PluginInstallJob>> {
         );
       } on DshException catch (error) {
         if (error is DshRemoteException) rethrow;
-        result = await _recover(client, requestId, name);
+        result = await _recover(
+          client,
+          requestId,
+          name,
+          requireResult: host.isLocal && ref.read(operatingSystemProvider) == 'ohos',
+        );
       }
       if (result.succeeded) {
         return finish((j) => j.copyWith(phase: PluginInstallPhase.succeeded, result: result));
@@ -1709,6 +1734,7 @@ class PluginInstallsController extends Notifier<Map<String, PluginInstallJob>> {
     } on Object catch (error) {
       return finish((j) => j.copyWith(phase: PluginInstallPhase.failed, failure: describePluginError(error)));
     } finally {
+      _cancelledRemovals.remove(requestId);
       unawaited(events.cancel());
       if (generation == _generation && ref.mounted) {
         unawaited(ref.read(installedPluginsProvider.notifier).refresh().catchError((Object _) {}));
@@ -1718,7 +1744,12 @@ class PluginInstallsController extends Notifier<Map<String, PluginInstallJob>> {
 
   /// The install response was lost (timeout, dropped tunnel): ask the Host
   /// for the running install's result, then fall back to the bundle list.
-  Future<PluginOperationResult> _recover(DshClient client, String requestId, String name) async {
+  Future<PluginOperationResult> _recover(
+    DshClient client,
+    String requestId,
+    String name, {
+    required bool requireResult,
+  }) async {
     for (var attempt = 0; attempt < 3; attempt++) {
       try {
         final result = await client.waitForInstall(requestId);
@@ -1730,6 +1761,8 @@ class PluginInstallsController extends Notifier<Map<String, PluginInstallJob>> {
         await Future<void>.delayed(Duration(seconds: 2 * (attempt + 1)));
       }
     }
+    // Inventory cannot establish the outcome of a retired OH local request.
+    if (requireResult) throw const _InstallResultUnknown();
     try {
       final bundles = await client.listBundles();
       if (bundles.any((b) => b.name == name && b.installed)) {

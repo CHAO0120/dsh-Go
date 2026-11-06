@@ -1719,6 +1719,14 @@
           "after": "8c8c617eec295d60e18189949705e04399cd7b7f4ad027e181c4666c99621a1c"
         }
       }
+    },
+    "ohos-plugin-locale-bom.diff": {
+      "0.2.2-rc.1": {
+        "node_modules/@deepseek-ai/dsh-app-boot/lib/index.js": {
+          "before": "8c8c617eec295d60e18189949705e04399cd7b7f4ad027e181c4666c99621a1c",
+          "after": "55d3674947850069069733aafa2975982c77e0b743dc59527173f382c0ce77db"
+        }
+      }
     }
   },
   "schema": 2,
@@ -1956,7 +1964,8 @@
       "zzzzzzzzzzzzzz-ohos-plugin-packages.diff",
       "ohos-plugin-hmr-transaction.diff",
       "ohos-plugin-remove-rollback.diff",
-      "ohos-plugin-manifest-bom.diff"
+      "ohos-plugin-manifest-bom.diff",
+      "ohos-plugin-locale-bom.diff"
     ]
   }
 }

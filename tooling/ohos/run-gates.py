@@ -804,6 +804,8 @@ def main():
                  needs=('prepared-inputs', 'ohos-test-helpers', 'native-loader'), extra=plugin_hmr_env)
     g.node_tests('plugin-generation-reinstall', [rt + 'plugin-generation-reinstall.test.mjs'], mode='strict',
                  needs=('prepared-inputs', 'ohos-test-helpers', 'native-loader'), extra=plugin_hmr_env)
+    g.node_tests('plugin-locale-bom', [rt + 'plugin-locale-bom.test.mjs'], mode='strict',
+                 needs=('prepared-inputs', 'ohos-test-helpers', 'native-loader'), extra=plugin_hmr_env)
     for mode in ['strict', 'plain']:
         g.node_tests('plugin-generation-boundaries-' + mode, [rt + 'plugin-generation-boundaries.test.mjs'],
                      mode=mode, needs=('prepared-inputs', 'ohos-test-helpers'), extra=plugin_contract_env)
@@ -944,6 +946,7 @@ def main():
     g.internal('flutter-input-identity', flutter_identity, needs=('flutter-l10n', 'install-record-wire'))
     flutter_tests = ['test/secrets', 'test/ohos/attachment_files_test.dart', 'test/runtime/phone_callback_bridge_test.dart', 'test/runtime/runtime_recovery_test.dart', 'test/runtime/ohos_install_record_test.dart', 'test/usage/ohos_device_contract_test.dart',
                      'test/safe_mode/safe_mode_logic_test.dart', 'test/state/engine_control_test.dart', 'test/runtime/runtime_controller_test.dart',
+                     'test/plugins/ohos_replace_cancel_test.dart',
                      'test/chat/attachment_file_budget_test.dart', 'test/remote/private_key_file_budget_test.dart',
                      'test/chat/attachment_owner_test.dart', 'test/remote/ssh_key_callback_lifetime_test.dart', 'test/share_hosted', 'test/share/share_panel_test.dart']
     g.run('flutter-consumers', lambda: g.flutter('test', '--no-pub', '--reporter', 'json', '--concurrency=1', *flutter_tests), cwd=g.flutter_source / 'app', env=g.flutter_env, needs=('flutter-input-identity',), timeout=300, tests=['app/' + x for x in flutter_tests], scope='Actual Linux Flutter engine and Dart consumers; not OHOS AOT/device')
@@ -952,6 +955,9 @@ def main():
           tests=['app/test/runtime/ohos_clipboard_consumer_test.dart'], scope='Actual HAR replies consumed by Flutter Clipboard, ApiKeyPage and EditableText; not device clipboard permission')
     g.run('flutter-paste-consumers', lambda: g.flutter('test', '--no-pub', '--reporter', 'json', '--concurrency=1', 'test/clipboard', 'test/forum/paste_authorized_test.dart'), cwd=g.flutter_source / 'app', env=g.flutter_env, needs=('flutter-input-identity',), timeout=300, tests=['app/test/clipboard/paste_reader_test.dart', 'app/test/forum/paste_authorized_test.dart'], scope='Actual Dart OH paste consumer and cancellation; native security authorization is a platform boundary')
     g.run('flutter-consumer-analyze', lambda: g.flutter('analyze', '--no-pub', 'lib/secrets', 'lib/state/attachment_files_ohos.dart', 'lib/share_hosted/hosted_links_state.dart', 'lib/ui/share_hosted', 'lib/ui/share/share_panel.dart', 'test/secrets', 'test/ohos/attachment_files_test.dart', 'test/share_hosted', 'test/share/share_panel_test.dart'), cwd=g.flutter_source / 'app', env=g.flutter_env, needs=('flutter-input-identity',), timeout=300)
+    g.run('flutter-plugin-install-recovery', lambda: g.flutter('test', '--no-pub', '--reporter', 'json', 'test/plugins/ohos_install_recovery_test.dart'), cwd=g.flutter_source / 'app',
+          env=g.flutter_env, needs=('flutter-input-identity',), timeout=300, tests=['app/test/plugins/ohos_install_recovery_test.dart'],
+          scope='Actual Dart OH local install result recovery and unchanged Android/remote contracts; not device')
     def retain_resolver(_):
         app = g.flutter_source / 'app'
         names = ['pubspec.lock', 'pubspec_overrides.yaml', '.dart_tool/package_config.json']
