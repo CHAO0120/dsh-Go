@@ -1,7 +1,9 @@
 // 启动画面的默认动画（app/lib/launch/launch_state.dart）。首帧要原样画出系统启动页：
 // module.json5 的 startWindowIcon 按实际大小居中（launch-page-config.md），底色是
 // startWindowBackground。系统启动页自己淡出（200 ms），没有 Android 12+ 的交接。图标总是这一张，
-// 系统不能换启动页图标，选了备用图标也一样。自定义启动画面在鸿蒙上隐藏。未在真机核实。
+// 系统不能换启动页图标，选了备用图标也一样。自定义启动画面在鸿蒙上隐藏。
+// start_icon 是 648 px（图块 540 px）：系统按实际像素画，3.375 倍的手机上约 160 vp，和安卓启动页的
+// 160 dp 一样大；原来的 192 px 在 HBN-AL00 上只有约 47 vp。
 import deviceInfo from '@ohos.deviceInfo';
 import hilog from '@ohos.hilog';
 import image from '@ohos.multimedia.image';
@@ -40,7 +42,7 @@ export default class LaunchPlugin implements FlutterPlugin, MethodCallHandler {
   }
 
   private async describe(manager: resourceManager.ResourceManager): Promise<Map<string, Any>> {
-    const encoded: Uint8Array = await manager.getMediaByName('icon');
+    const encoded: Uint8Array = await manager.getMediaByName('start_icon');
     const source = image.createImageSource(encoded.buffer.slice(encoded.byteOffset, encoded.byteOffset + encoded.byteLength));
     try {
       const map = await source.createPixelMap({ desiredPixelFormat: image.PixelMapFormat.RGBA_8888 });
