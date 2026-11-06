@@ -62,11 +62,15 @@ Drawer goldens use [Noto Emoji v2.051](https://github.com/googlefonts/noto-emoji
 
 Run these commands from the repository root for local reproduction and focused regressions; PR CI coverage follows the policy above. Record actual commands, CI links and results in the PR. If a device, asset or dependency is unavailable, say what was not run and why.
 
+[CI](.github/workflows/ci.yml) runs these checks on PRs and `main`: a PR runs the general checks plus what it touches, a push to `main` runs everything, and `CI OK` is the result to read. CI has no devices or real accounts, so verify those separately.
+
 **Flutter app:**
 
 ```bash
 (cd app && flutter pub get && flutter analyze && flutter test)
 ```
+
+**UI work on a phone (hot reload):** `tooling/dev-run.sh` installs the debug build over the release build already on the phone, then attaches Flutter, so pressing `r` applies a change within seconds. It uses `adb install -r` and `flutter attach` instead of `flutter run`, because a failed `flutter run` install uninstalls the app first, which erases the phone's data. Animations stutter in debug mode, so use it for layout, sizes and colours, and judge smoothness on a release build. It needs `app/android/key.properties` with the same key as the build on the phone.
 
 **Dart communication packages:**
 
