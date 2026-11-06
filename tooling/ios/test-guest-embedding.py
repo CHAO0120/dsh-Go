@@ -49,13 +49,16 @@ for name in DshNodeHost DshFlock DshRequireBuiltin; do
   printf '%s' "$1" >"$2/$name.framework/$name"
 done
 ''')
-        (scripts / 'build-ish.sh').write_text('''#!/bin/bash
+        (scripts / 'build-guest-addon.sh').write_text('''#!/bin/bash
 set -eu
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 if [ -f "$ROOT/fail-guest" ]; then exit 23; fi
 mkdir -p "$2/DshGuest.framework"
 printf '%s' "$1" >"$2/DshGuest.framework/DshGuest"
 printf 'fixture source notice' >"$2/DshGuest.framework/SOURCE.txt"
+if [ -f "$ROOT/fail-addon" ]; then exit 24; fi
+mkdir -p "$2/DshGuestBridge.framework"
+printf '%s' "$1" >"$2/DshGuestBridge.framework/DshGuestBridge"
 ''')
 
     def run_embed(self, sdk='iphoneos'):
@@ -73,12 +76,18 @@ printf 'fixture source notice' >"$2/DshGuest.framework/SOURCE.txt"
                 stale = self.root / 'products' / sdk / 'Runner.app/Frameworks/DshGuest.framework/old.node'
                 stale.parent.mkdir(parents=True)
                 stale.write_text('stale native code')
+                stale_owner = stale.parent.parent / 'DshGuestBridge.framework/old.node'
+                stale_owner.parent.mkdir(parents=True)
+                stale_owner.write_text('stale owner code')
                 result, app = self.run_embed(sdk)
                 self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
                 guest = app / 'Frameworks/DshGuest.framework'
                 self.assertEqual((guest / 'DshGuest').read_text(), sdk)
                 self.assertEqual((guest / 'SOURCE.txt').read_text(), 'fixture source notice')
                 self.assertFalse(stale.exists())
+                self.assertFalse(stale_owner.exists())
+                owner = app / 'Frameworks/DshGuestBridge.framework/DshGuestBridge'
+                self.assertEqual(owner.read_text(), sdk)
                 self.assertTrue((app / 'dsh-runtime/runtime.zip').is_file())
                 self.assertFalse((app / 'dsh-runtime/DshGuest').exists())
 
@@ -87,6 +96,12 @@ printf 'fixture source notice' >"$2/DshGuest.framework/SOURCE.txt"
         result, app = self.run_embed()
         self.assertEqual(result.returncode, 23, result.stdout + result.stderr)
         self.assertFalse((app / 'Frameworks/DshGuest.framework').exists())
+
+    def test_addon_compile_failure_stops_before_copying_frameworks(self):
+        (self.root / 'fail-addon').touch()
+        result, app = self.run_embed()
+        self.assertEqual(result.returncode, 24, result.stdout + result.stderr)
+        self.assertFalse((app / 'Frameworks').exists())
 
     def test_remote_only_build_does_not_build_or_embed_a_guest(self):
         (self.engine / '.ready').unlink()

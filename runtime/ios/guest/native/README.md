@@ -1,0 +1,17 @@
+# iOS guest 原生后端（I2）
+
+**未在 Apple 上编译 / 运行。** 固定 iSH c5c264da19148512167aa493d7bd4e50aae1b74e，先应用 I1 build.patch，再应用 job-runtime.patch，并给所有kernel/glue单元定义 DSH_IOS_GUEST_CONFINED=1。JIT保持关闭；不注册native offload handler或host代码路径。此目录为本项目自己的胶水，未复制上游App主程序。
+
+对外合同见 guest_backend.h。一个进程只有一个kernel和PID1 bookkeeping supervisor。initialize只接受安装fakefs容器，真正mount源为该容器/data，旁边meta.db。PID1不运行guest线程，也不会被guest信号触发pthread_kill。每个job创建PID1子进程，argv/env同步打包，cwd仅允许规范化/workspace路径，env不从宿主继承。并发start返回EBUSY；正常收尾后复用同一kernel，失败则永久quarantine直到App重启，禁止第二kernel绕过。
+
+workspace/temp均经bound_admission；安装根与完整宿主protected_paths始终拒绝双向路径交叠。temp还拒绝与workspace交叠。request.workspace_readonly按批准的mode落实到/workspace能力，temp仍受控可写；重复initialize必须保持最初保护路径多重集合完全相同（允许顺序变动，不允许缩减/替换）。只有/workspace与/tmp映射宿主能力目录；/proc和/dev/pts是guest伪文件系统。guest mount/umount被拒绝，workspace硬链接限制与MAP_PRIVATE私有copy实现沿用已验证C构件。fakefs保持guest root元数据，不能用realfs取代。权限批准由调用方完成，本C入口不是批准验证器；不得将任意用户路径当已批准能力。
+
+输出为两个专用reader，每stream最多一个同步callback；callback必须消费/安排JS消费后明确ACK，不能把排队当消费。Env消失时调用方先唤醒callback返回ECANCELED，再abandon。abandoned独立标记且排空剩余输出，绝不伪加delivered计数；正常wait要求真实ACK，abandoned wait只报告资源回收完成，另返回abandoned=1。正常任务无运行总时限，cancel/abandon才启动cleanup_timeout_ms窗口；TERM立即，200ms后KILL，kill入口则立即KILL。超时quarantine并继续保持原生context生命，不阻塞JS Env退出。
+
+start失败保证没有guest线程成功启动、不会再通过output借用context。初始阶段错误可能保留quarantine内核分配，这是上游缺乏完整初始化回滚的保守选择。start成功后wait成功保证所有guest/output pthread join、root退出、task reaping、挂载卸除完成；失败不保证context已退役，调用方必须保留独立于Env的原生owner。不能在JS cleanup/loop线程调用wait。
+
+begin_install_change/end_install_change提供进程级安装修改lease，仅COLD时可获得；持有期间initialize拒绝。启动过的kernel不支持卸载/重装，要重启App；这样不把status快照检查冒充与删除互斥。
+
+信号：不更改进程全局SIGPIPE处置。专用job pthread生命周期阻塞SIGPIPE并显式解除SIGUSR1屏蔽，覆盖guest自建pipe/socket；宿主stdin写在Darwin依赖其私有OFD的F_SETNOSIGPIPE，Linux采用局部mask与新生成pending信号消费。iSH初始化仍安装全局SIGUSR1唤醒handler，须在Apple CI核与NodeMobile宿主的共存；不可称没有全局信号副作用。
+
+Linux已实际clang交叉编译并whole-link，随后在QEMU AArch64 Linux用户态运行同源kernel+固定Alpine3.24.4：uname/release、workspace读写、exit7、stdin、正常sleep超过cleanup窗口、忽略TERM后KILL、输出放弃及普通guest管道、只读workspace拒写且temp可写全部通过。这不是Apple执行或App批准链端到端的替代。测例/日志由补丁交付包附带。

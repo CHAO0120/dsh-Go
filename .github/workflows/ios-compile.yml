@@ -131,22 +131,25 @@ jobs:
             app/ios/Engine/build/iphonesimulator/guest
           key: ${{ runner.os }}-ish-${{ steps.ish-inputs.outputs.key }}
 
-      - name: Compile iSH for the simulator and device
+      - name: Compile iSH and its N-API owner for the simulator and device
         id: ish-build
         run: |
           for sdk in iphonesimulator iphoneos; do
             out="app/ios/Engine/build/$sdk/guest"
             log="$RUNNER_TEMP/ish-$sdk.log"
-            if ! bash tooling/ios/build-ish.sh "$sdk" "$out" 2>&1 | tee "$log"; then
+            if ! bash tooling/ios/build-guest-addon.sh "$sdk" "$out" 2>&1 | tee "$log"; then
               tail -n 12 "$log" | cut -c1-600 | sed -e 's/%/%25/g' -e 's/^/::error title=iSH build::/'
               exit 1
             fi
-            binary="$out/DshGuest.framework/DshGuest"
-            file "$binary"
-            xcrun lipo -verify_arch arm64 "$binary"
-            install_name="$(xcrun otool -D "$binary" | tail -n 1)"
-            test "$install_name" = '@rpath/DshGuest.framework/DshGuest'
-            xcrun vtool -show-build "$binary"
+            for name in DshGuest DshGuestBridge; do
+              binary="$out/$name.framework/$name"
+              file "$binary"
+              xcrun lipo -verify_arch arm64 "$binary"
+              install_name="$(xcrun otool -D "$binary" | tail -n 1)"
+              test "$install_name" = "@rpath/$name.framework/$name"
+              xcrun vtool -show-build "$binary"
+            done
+            xcrun nm -gU "$out/DshGuestBridge.framework/DshGuestBridge" | grep 'napi_register_module_v1$'
           done
 
       - name: Save the compiled iSH cache

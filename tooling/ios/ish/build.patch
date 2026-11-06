@@ -1,6 +1,6 @@
-DSH iSH build-only patch. 未在 Apple 上编译 / Not compiled on Apple.
+DSH iSH confined backend build patch. 未在 Apple 上编译 / Not compiled on Apple.
 Pinned upstream: c5c264da19148512167aa493d7bd4e50aae1b74e
-Strict real VDSO; robust SDK paths; framework link target. No runtime activation.
+Strict real VDSO; robust SDK paths; confined C backend and framework link target.
 
 --- a/vdso/arm64/meson.build
 +++ b/vdso/arm64/meson.build
@@ -53,13 +53,45 @@ Strict real VDSO; robust SDK paths; framework link target. No runtime activation
 +    ] + get_option('vdso_c_args').split())
 --- a/meson.build
 +++ b/meson.build
-@@ -1862,3 +1862,17 @@
+@@ -51,7 +51,8 @@
+ #                or env CFLAGS=-DISH_GADGET_PROFILE meson setup ...
+ # Adds ~9 instructions per gret (ring-buffer write); not for production builds.
+ 
+-includes = [include_directories('.')]
++includes = [include_directories('.'), include_directories('dsh-native')]
++add_project_arguments('-DDSH_IOS_GUEST_CONFINED=1', language: 'c')
+ 
+ threads = dependency('threads')
+ librt = cc.find_library('rt', required: false)
+@@ -1786,6 +1787,21 @@
+         'platform/' + host_machine.system() + '.c',
+     ]
+ 
++    src += files(
++        'dsh-native/bound_admission.c',
++        'dsh-native/bound_file.c',
++        'dsh-native/bound_ish_directory.c',
++        'dsh-native/bound_ish_fd.c',
++        'dsh-native/bound_ish_fs.c',
++        'dsh-native/bound_ish_mapping.c',
++        'dsh-native/bound_parent.c',
++        'dsh-native/guest_backend.c',
++        'dsh-native/interruptible.c',
++        'dsh-native/job_bridge.c',
++        'dsh-native/job_stdio.c',
++        'dsh-native/job_task.c',
++        'dsh-native/job_threads.c',
++    )
+     libish = library('ish', src,
+         include_directories: includes)
+     ish = declare_dependency(
+@@ -1862,3 +1878,17 @@
  
  e2e_test = find_program('tests/e2e/e2e.bash')
  test('e2e', e2e_test, args: ['-y'], timeout: 180)
 +
 +# DSH: whole-kernel link, with unresolved symbols rejected on both platforms.
-+# No CLI main(), Node binding, bootstrap or writable-code/JIT path is enabled.
++# The embedding supplies the confined C task backend; JIT remains disabled.
 +dsh_link_args = ['-Wl,--no-undefined', '-Wl,-Bsymbolic']
 +dsh_suffix = 'so'
 +if host_machine.system() == 'darwin'

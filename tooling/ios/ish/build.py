@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Pinned, build-only iSH dependency. Apple compilation remains a CI gate."""
+"""Pinned iSH kernel and confined C backend. Apple compilation remains a CI gate."""
 import hashlib
 import json
 import os
@@ -19,6 +19,7 @@ ROOT = HERE.parents[2]
 LOCK = json.loads((HERE / 'source.lock.json').read_text())
 SDK_NAMES = ('iphoneos', 'iphonesimulator', 'linux')
 CACHE = ROOT / 'app/ios/Engine/ish-cache'
+NATIVE = ROOT / 'runtime/ios/guest/native'
 
 
 def run(args, **kwargs):
@@ -34,8 +35,9 @@ def digest(path):
 
 
 def cache_key(sdk):
-    inputs = [HERE.parent / 'build-ish.sh'] + sorted(p for p in HERE.rglob('*')
+    inputs = [HERE.parent / 'build-ish.sh', HERE.parent / 'build-guest-addon.sh'] + sorted(p for p in HERE.rglob('*')
               if p.is_file() and '__pycache__' not in p.parts)
+    inputs += sorted(p for p in NATIVE.iterdir() if p.is_file())
     data = [(str(p.relative_to(ROOT)), digest(p)) for p in inputs]
     # Xcode/SDK identity is added to the output receipt separately.
     versions = {tool: output([tool, '--version']).splitlines()[0]
@@ -120,7 +122,13 @@ def main():
         for name, expected in LOCK['buildInputs'].items():
             if digest(source / name) != expected:
                 raise RuntimeError('upstream build input mismatch: ' + name)
-        run(['patch', '--batch', '--fuzz=0', '-p1', '-i', HERE / 'build.patch'], cwd=source)
+        for patch in ('build.patch', 'job-runtime.patch'):
+            run(['patch', '--batch', '--fuzz=0', '-p1', '-i', HERE / patch], cwd=source)
+        native = source / 'dsh-native'
+        native.mkdir()
+        for path in NATIVE.iterdir():
+            if path.suffix in ('.c', '.h'):
+                shutil.copy2(path, native / path.name)
         build = work / 'build'
         setup = ['meson', 'setup', build, source, '--wrap-mode=nodownload',
                  '-Ddefault_library=static', '-Dguest_arch=arm64', '-Dkernel=ish',
@@ -165,6 +173,7 @@ def main():
             shutil.copy2(source / 'LICENSE.md', framework / 'iSH-LICENSE.md')
             shutil.copy2(source / 'LICENSE.IOS', framework / 'iSH-LICENSE.IOS')
             shutil.copy2(HERE / 'build.patch', framework / 'iSH-build.patch')
+            shutil.copy2(HERE / 'job-runtime.patch', framework / 'iSH-job-runtime.patch')
             products = {str(p.relative_to(out)): digest(p) for p in framework.rglob('*') if p.is_file()}
         else:
             products = {}

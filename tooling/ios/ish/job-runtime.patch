@@ -1,0 +1,108 @@
+DSH task runtime: 未在 Apple 上编译 / Apple unverified.
+Pinned c5c264da19148512167aa493d7bd4e50aae1b74e; apply after I1 build.patch.
+
+diff --git a/fs/mount.c b/fs/mount.c
+--- a/fs/mount.c
++++ b/fs/mount.c
+@@ -178,6 +178,10 @@
+ #define MS_FLAGS (MS_READONLY_|MS_NOSUID_|MS_NODEV_|MS_NOEXEC_)
+ 
+ dword_t sys_mount(addr_t source_addr, addr_t point_addr, addr_t type_addr, dword_t flags, addr_t data_addr) {
++#ifdef DSH_IOS_GUEST_CONFINED
++    // Only the trusted embedding host may change the mount namespace.
++    return _EPERM;
++#endif
+     char source[MAX_PATH];
+     if (user_read_string(source_addr, source, sizeof(source)))
+         return _EFAULT;
+@@ -230,6 +234,10 @@
+ #define UMOUNT_NOFOLLOW_ 8
+ 
+ dword_t sys_umount2(addr_t target_addr, dword_t flags) {
++#ifdef DSH_IOS_GUEST_CONFINED
++    // Only the trusted embedding host may change the mount namespace.
++    return _EPERM;
++#endif
+     char target_raw[MAX_PATH];
+     if (user_read_string(target_addr, target_raw, sizeof(target_raw)))
+         return _EFAULT;
+--- a/kernel/task.h
++++ b/kernel/task.h
+@@ -19,6 +19,9 @@
+     struct mm *mm; // locked by general_lock
+     struct mem *mem; // pointer to mm.mem, for convenience
+     pthread_t thread;
++#ifdef DSH_IOS_GUEST_CONFINED
++    uint64_t dsh_job_id; // trusted initial job; inherited by task_create_
++#endif
+     uint64_t threadid;
+ 
+     struct tgroup *group; // immutable
+--- a/kernel/task.c
++++ b/kernel/task.c
+@@ -1,4 +1,7 @@
+ #define _GNU_SOURCE
++#ifdef DSH_IOS_GUEST_CONFINED
++#include "job_threads.h"
++#endif
+ #include <errno.h>
+ #include <pthread.h>
+ #include <stdlib.h>
+@@ -262,7 +265,13 @@
+     // thread was never started. Under thread-stack exhaustion (EAGAIN) that
+     // has to become a guest-visible clone() failure, not a dead task or a
+     // die(). [T-ish-jit-oom-abort]
+-    int err = pthread_create(&task->thread, &task_thread_attr, task_thread, task);
++    int err;
++#ifdef DSH_IOS_GUEST_CONFINED
++    if (task->dsh_job_id != 0)
++        err = dsh_guest_task_start(task->dsh_job_id, &task->thread, task_thread, task);
++    else
++#endif
++        err = pthread_create(&task->thread, &task_thread_attr, task_thread, task);
+     if (err != 0)
+         return err == EAGAIN ? _EAGAIN : _ENOMEM;
+     return 0;
+--- a/kernel/native_offload.c
++++ b/kernel/native_offload.c
+@@ -43,8 +43,13 @@
+ #undef ISH_INTERNAL
+ #endif
+ 
+-#if !__APPLE__
++#if !__APPLE__ || defined(DSH_IOS_GUEST_CONFINED)
+ int native_offload_add(const char *spec) { (void)spec; return -1; }
++#ifdef DSH_IOS_GUEST_CONFINED
++int native_offload_add_handler(const char *name, native_handler_func handler) {
++    (void)name; (void)handler; return -1;
++}
++#endif
+ const char *native_offload_lookup(const char *guest_path) { (void)guest_path; return NULL; }
+ const char *native_offload_lookup_exec(const char *guest_path, const char *envp, bool *generic_out) {
+     (void)guest_path; (void)envp;
+--- a/kernel/init.c
++++ b/kernel/init.c
+@@ -29,7 +29,9 @@
+     sigemptyset(&sigact.sa_mask);
+     sigaddset(&sigact.sa_mask, SIGUSR1);
+     sigaction(SIGUSR1, &sigact, NULL);
++#ifndef DSH_IOS_GUEST_CONFINED
+     signal(SIGPIPE, SIG_IGN);
++#endif
+ }
+ 
+ // copied from include/asm-generic/resource.h in the kernel
+--- a/kernel/signal.c
++++ b/kernel/signal.c
+@@ -59,6 +59,11 @@
+ // duplicate as "already pending" loses a resume and wedges the GC handshake.
+ #define SIGRTMIN_ 32
+ static void deliver_signal_unlocked(struct task *task, int sig, struct siginfo_ info) {
++#ifdef DSH_IOS_GUEST_CONFINED
++    // The embedding's PID1 is a host-owned bookkeeping supervisor, not a
++    // runnable guest pthread. Never pthread_kill an unset/reused host identity.
++    if (task->pid == 1 && task->dsh_job_id == 0) return;
++#endif
+     if (sig < SIGRTMIN_ && sigset_has(task->pending, sig))
+         return;
+ 
