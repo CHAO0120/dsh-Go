@@ -89,6 +89,18 @@ void main() {
       expect(tester.getRect(_icon).width, closeTo(128, 0.01));
     });
 
+    testWidgets('built anew after the motion started (HarmonyOS): it still plays', (tester) async {
+      final c = await start(tester, sdk: 26, systemSplash: false);
+      await tester.pump();
+      expect(c.phase, LaunchPhase.playing);
+      // A parent of another type remounts the layer, as MaterialApp's Theme / AnimatedTheme swap did.
+      await tester.pumpWidget(KeyedSubtree(key: UniqueKey(), child: launchApp(c)));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 640));
+      expect(tester.getRect(_icon).width, closeTo(128, 0.01));
+      await _finish(tester, c);
+    });
+
     testWidgets('dark: the night page colour and a light wordmark', (tester) async {
       final c = await start(tester, dark: true, sdk: 30, systemSplash: false);
       await tester.pump();

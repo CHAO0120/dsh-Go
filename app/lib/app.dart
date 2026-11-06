@@ -171,9 +171,11 @@ class _DshAppState extends ConsumerState<DshApp> with WidgetsBindingObserver {
       themeMode: themeMode,
       // Palette and light / dark changes cross-fade the whole app (AppMotion).
       // A reveal from the finger brings the new colours in itself.
+      // Never AnimationStyle.noAnimation: MaterialApp then swaps AnimatedTheme for Theme, and
+      // everything under builder (the launch screen mid-motion too) is built anew.
       themeAnimationStyle: _settled && !reduced && !ThemeRevealHost.active
           ? AnimationStyle(duration: AppMotion.standard, curve: AppMotion.std)
-          : AnimationStyle.noAnimation,
+          : AnimationStyle(duration: Duration.zero),
       // zh_CN, not bare zh: otherwise CJK falls back to Japanese glyph shapes
       // on non-Chinese system locales. English keeps Chinese glyphs through
       // the theme's text locale (_themesFor).
