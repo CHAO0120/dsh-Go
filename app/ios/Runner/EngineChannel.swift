@@ -2,6 +2,75 @@ import Flutter
 import Foundation
 import Network
 import UIKit
+import Darwin
+
+// BEGIN GuestStartupTemporary: Foundation-only, also compiled by the Linux fixture.
+// Confined to EngineChannel's serial queue; no directory discovery or retry scan.
+private struct GuestStartupTemporary {
+  enum Outcome: Equatable {
+    case pending
+    case removed
+    case retained(String)
+  }
+  let url: URL
+  let generation: Int
+  private let device: UInt64
+  private let inode: UInt64
+
+  static func create(url: URL, generation: Int) throws -> GuestStartupTemporary {
+    // mkdir must create a new directory; EEXIST never grants ownership.
+    guard mkdir(url.path, 0o700) == 0 else {
+      throw NSError(domain: "dsh.guest.temporary", code: Int(errno))
+    }
+    var info = stat()
+    guard fstatat(AT_FDCWD, url.path, &info, AT_SYMLINK_NOFOLLOW) == 0,
+          (info.st_mode & mode_t(S_IFMT)) == mode_t(S_IFDIR) else {
+      // Without a recorded identity there is no authority to remove this path.
+      throw NSError(domain: "dsh.guest.temporary", code: Int(errno))
+    }
+    return GuestStartupTemporary(url: url, generation: generation,
+                                 device: UInt64(truncatingIfNeeded: info.st_dev), inode: UInt64(truncatingIfNeeded: info.st_ino))
+  }
+
+  private func identity() -> Outcome {
+    var info = stat()
+    guard fstatat(AT_FDCWD, url.path, &info, AT_SYMLINK_NOFOLLOW) == 0 else {
+      return errno == ENOENT ? .removed : .retained("identity_unavailable")
+    }
+    guard (info.st_mode & mode_t(S_IFMT)) == mode_t(S_IFDIR),
+          UInt64(truncatingIfNeeded: info.st_dev) == device, UInt64(truncatingIfNeeded: info.st_ino) == inode else {
+      return .retained("identity_changed")
+    }
+    return .pending
+  }
+
+  private func removeMatching() -> Outcome {
+    let state = identity()
+    guard state == .pending else { return state }
+    do {
+      try FileManager.default.removeItem(at: url)
+      return .removed
+    } catch { return .retained("remove_failed") }
+  }
+
+  // No native start was accepted, so there can be no consumer of this ticket.
+  func beforeAcceptanceFailed() -> Outcome { removeMatching() }
+
+  func complete(generation: Int, hostPhase: String, kernel: GuestKernelAccess) -> Outcome {
+    guard generation == self.generation, hostPhase == "exited" || hostPhase == "error" else { return .pending }
+    let state = identity()
+    guard state == .pending else { return state }
+    let lease: GuestRootfsLease
+    do { lease = try kernel.reserveRootfsMutation() }
+    catch { return .retained("cold_lease_unavailable") }
+    defer { lease.release() }
+    // Native COLD lease excludes initialization until deletion completes. READY,
+    // RUNNING and quarantine cannot grant it. Recheck identity after acquiring it.
+    return removeMatching()
+  }
+}
+// END GuestStartupTemporary
+
 
 /// The native side of the engine, loaded on first start: someone who only uses remote
 /// hosts never maps 90 MB of Node into the process.
@@ -432,6 +501,7 @@ final class EngineChannel: NSObject, FlutterStreamHandler {
   private var pending: String?
   private var requestedStop = false
   private var runtimeGeneration = 0
+  private var guestStartupTemporary: GuestStartupTemporary?
   private var native: NativeEngine?
   /// Both on the main thread only.
   private var phone: IOSPhoneBridge?
@@ -901,13 +971,16 @@ final class EngineChannel: NSObject, FlutterStreamHandler {
       emitStatus()
       return
     }
+    // The state read above joined the old engine if terminal. Retire its ticket
+    // before begin increments runtimeGeneration and creates a new directory.
+    finishGuestStartupTemporary(phase: phase)
     // The latest request replaces one still queued from before the engine finished stopping.
     queuedStart = nil
     try begin(environment, visualReplies: visualReplies)
   }
 
   private func begin(_ environment: [String: String], visualReplies: Bool) throws {
-    var pendingGuestTemporary: URL?
+    var pendingGuestTemporary: GuestStartupTemporary?
     pending = "start"
     lastError = nil
     emitStatus()
@@ -944,9 +1017,7 @@ final class EngineChannel: NSObject, FlutterStreamHandler {
       // Never mount cache/ohos-process: it holds virtual-shell spill/state.
       let linuxTemporary = FileManager.default.temporaryDirectory.appendingPathComponent("dsh-guest-" + UUID().uuidString, isDirectory: true)
       if linuxAvailable {
-        pendingGuestTemporary = linuxTemporary
-        try FileManager.default.createDirectory(at: linuxTemporary, withIntermediateDirectories: false,
-                                               attributes: [.posixPermissions: 0o700])
+        pendingGuestTemporary = try GuestStartupTemporary.create(url: linuxTemporary, generation: runtimeGeneration)
       }
       let protectedPaths = [dshHome, agentsHome, cache, installer.root, filesDirectory.appendingPathComponent("dsh-guest", isDirectory: true)].map { $0.standardizedFileURL.path }
       try native?.configureGuest([
@@ -962,11 +1033,20 @@ final class EngineChannel: NSObject, FlutterStreamHandler {
       try native?.begin(
         runtime: installer.root.path, guest: guestRoot.path, home: dshHome.path, cache: cache.path,
         workspace: workspace.path, env: launchEnvironment)
-      pendingGuestTemporary = nil // Node owner now owns successful cleanup; quarantine retains it.
+      // Native begin accepted an asynchronous start, not a successfully loaded
+      // JS owner. Keep a fallback ticket until this generation has fully joined.
+      if guestStartupTemporary != nil {
+        _ = appendLog("Linux 临时目录保留（previous_generation）。", stream: "system")
+      }
+      guestStartupTemporary = pendingGuestTemporary
+      pendingGuestTemporary = nil
       startPolling()
       startPhone()
     } catch {
-      if let temporary = pendingGuestTemporary { try? FileManager.default.removeItem(at: temporary) }
+      if let temporary = pendingGuestTemporary,
+         case .retained(let reason) = temporary.beforeAcceptanceFailed() {
+        _ = appendLog("Linux 临时目录保留（\(reason)）。", stream: "system")
+      }
       retirePhone()
       lastError = (error as? EngineFailure)?.message ?? "本机引擎启动失败。"
       throw error
@@ -1027,6 +1107,22 @@ final class EngineChannel: NSObject, FlutterStreamHandler {
     source.resume()
   }
 
+  private func finishGuestStartupTemporary(phase: String) {
+    // Host::State waits for the engine thread at exited/error. Only then can
+    // the COLD native install lease authorize cleanup of an unclaimed startup.
+    if let temporary = guestStartupTemporary {
+      let outcome = temporary.complete(generation: runtimeGeneration, hostPhase: phase,
+                                       kernel: NativeGuestKernelAccess.shared)
+      switch outcome {
+      case .pending: break
+      case .removed: guestStartupTemporary = nil
+      case .retained(let reason):
+        guestStartupTemporary = nil // Intentionally retained on disk; no scans/retries.
+        _ = appendLog("Linux 临时目录保留（\(reason)）。", stream: "system")
+      }
+    }
+  }
+
   private func collect() {
     guard let native else { return }
     // State first, then the queue: a final state read before this batch can't outrun it.
@@ -1034,6 +1130,7 @@ final class EngineChannel: NSObject, FlutterStreamHandler {
     let phase = state["phase"] as? String ?? "idle"
     let token = state["token"] as? String ?? ""
     let baseUrl = state["baseUrl"] as? String ?? ""
+    finishGuestStartupTemporary(phase: phase)
     let running = phase == "running" && !requestedStop
     lifecycle.runtime(baseUrl: running ? baseUrl : nil, token: running ? token : nil)
     if !token.isEmpty { rememberSecret(token) }
