@@ -11,13 +11,13 @@ typedef struct dsh_job_bridge dsh_job_bridge;
 typedef int (*dsh_job_output)(void *, int, uint64_t, const void *, size_t);
 dsh_job_bridge *dsh_job_bridge_new(struct dsh_job_threads *, uint64_t, int,
                                    struct dsh_job_stdio *, dsh_job_output,
-                                   void *);
+                                   void *, double (*)(void *), void *);
 // Receiver confirms bytes actually delivered. Thread-safe, monotonic; caller
 // retains owner until finish succeeds. Never call after destroy.
 int dsh_job_bridge_ack(dsh_job_bridge *, int, uint64_t);
 // All guest/output joins + original task reaping + EOF + real ACK, or explicit
 // abandoned output. Normal runtime has no deadline; timeout bounds cancellation
-// cleanup only. Any failure is sticky; never start another kernel/job.
+// cleanup only in the captured clock domain. Any failure is sticky; never start another kernel/job.
 int dsh_job_bridge_finish(dsh_job_bridge *, unsigned, int *);
 int dsh_job_bridge_destroy(dsh_job_bridge *);
 int dsh_job_bridge_abandon(dsh_job_bridge *);

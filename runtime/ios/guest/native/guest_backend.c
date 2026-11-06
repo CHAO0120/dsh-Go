@@ -194,8 +194,8 @@ static int unmount_job(void) {
   unlock(&mounts_lock);
   return host_error(e);
 }
-int dsh_guest_start(const struct dsh_guest_request *request,
-                    dsh_guest_output output, void *context, uint64_t *job_id) {
+int dsh_guest_start_with_clock(const struct dsh_guest_request *request,
+                    dsh_guest_output output, void *context, uint64_t *job_id, double (*now_ms)(void *), void *clock_context) {
   if (!request || !output || !job_id || !request->argc || !request->argv ||
       !request->argv[0] || request->argv[0][0] != '/' || !cwd_valid(request->cwd) ||
       !request->workspace || !request->temporary ||
@@ -266,7 +266,7 @@ int dsh_guest_start(const struct dsh_guest_request *request,
   }
   if (!e) e = host_error(dsh_job_install_stdio(task, &io));
   if (!e) {
-    bridge = dsh_job_bridge_new(threads, active_id, task->pid, &io, output, context);
+    bridge = dsh_job_bridge_new(threads, active_id, task->pid, &io, output, context, now_ms, clock_context);
     if (!bridge) e = errno;
   }
   if (!e) {
@@ -288,6 +288,10 @@ int dsh_guest_start(const struct dsh_guest_request *request,
   pthread_mutex_unlock(&gate);
   free(args); free(env);
   return e;
+}
+int dsh_guest_start(const struct dsh_guest_request *request,
+    dsh_guest_output output, void *context, uint64_t *job_id) {
+  return dsh_guest_start_with_clock(request, output, context, job_id, NULL, NULL);
 }
 static int active(uint64_t id) {
   return !id || id != active_id || !bridge ? ESTALE :

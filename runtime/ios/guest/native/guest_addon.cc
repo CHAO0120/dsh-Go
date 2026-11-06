@@ -1,6 +1,7 @@
 // Per-Environment N-API owner; the process-wide guest kernel lives separately.
 // No JS/Env lifetime waits for a guest thread or for a JavaScript output ACK.
 #include <node_api.h>
+#include "../../host/activity_clock_api.h"
 #include <uv.h>
 #include <atomic>
 #include <cerrno>
@@ -19,6 +20,41 @@ extern "C" {
 }
 
 namespace {
+struct CapturedClock {
+  dsh_activity_clock_v1 value{sizeof(dsh_activity_clock_v1), 1, nullptr, nullptr, nullptr};
+  void *image = nullptr;
+  ~CapturedClock() {
+    if (value.context && value.release) value.release(value.context);
+    if (image) dlclose(image);
+  }
+  int acquire() {
+    dsh_activity_clock_acquire_v1 get = nullptr;
+#ifdef __APPLE__
+    Dl_info info{};
+    if (!dladdr(reinterpret_cast<void *>(&locate), &info) || !info.dli_fname) return ENOSYS;
+    const std::string own(info.dli_fname), suffix = "/DshGuestBridge.framework/DshGuestBridge";
+    if (own.size() < suffix.size() || own.compare(own.size() - suffix.size(), suffix.size(), suffix)) return ENOSYS;
+    const auto host = own.substr(0, own.size() - suffix.size()) + "/DshNodeHost.framework/DshNodeHost";
+    image = dlopen(host.c_str(), RTLD_NOW | RTLD_LOCAL | RTLD_NOLOAD);
+    if (!image) return ENOSYS;
+    get = reinterpret_cast<dsh_activity_clock_acquire_v1>(dlsym(image, "dsh_host_activity_clock_acquire_v1"));
+    if (!get) return ENOSYS;
+#else
+    // Linux kernel/standalone addon probes have no embedded Host. A test Host
+    // may export this same fixed ABI; there is no JS-configurable pointer/path.
+    get = reinterpret_cast<dsh_activity_clock_acquire_v1>(dlsym(RTLD_DEFAULT, "dsh_host_activity_clock_acquire_v1"));
+    if (!get) return 0;
+    Dl_info info{};
+    if (!dladdr(reinterpret_cast<void *>(get), &info) || !info.dli_fname) return ENOSYS;
+    image = dlopen(info.dli_fname, RTLD_NOW | RTLD_LOCAL | RTLD_NOLOAD);
+    if (!image) return ENOSYS;
+#endif
+    const int error = get(&value);
+    if (error) return error;
+    return value.context && value.now_ms && value.release ? 0 : EPROTO;
+  }
+  static void locate() {}
+};
 struct Job;
 struct Owner {
   napi_env env = nullptr;
@@ -45,6 +81,7 @@ struct Job {
   explicit Job(Owner *o) : owner(o) { retain(o); }
   ~Job() { release(owner); } // Never invoke N-API here: this may be a native thread.
   Owner *owner;
+  CapturedClock clock;
   uint64_t id = 0, native_id = 0;
   std::string root, cwd, workspace, temporary;
   std::vector<std::string> argv, env, protected_paths;
@@ -187,7 +224,8 @@ void coordinate(std::shared_ptr<Job> job) {
       auto argv = pointers(job->argv), env = pointers(job->env);
       dsh_guest_request request{argv.data(), job->argv.size(), env.data(), job->env.size(),
           job->cwd.c_str(), job->workspace.c_str(), job->temporary.c_str(), job->read_only ? 1 : 0};
-      error = dsh_guest_start(&request, output, job.get(), &native_id);
+      error = dsh_guest_start_with_clock(&request, output, job.get(), &native_id,
+          job->clock.value.now_ms, job->clock.value.context);
     }
   } catch (const std::bad_alloc &) { error = ENOMEM; }
   bool cancelled, killed, dropped, stdin_closed;
@@ -352,6 +390,8 @@ napi_value start(napi_env env, napi_callback_info info) {
     budget = 131072;
     if (!strings(env, args[0], "protectedPaths", job->protected_paths, budget)) return fail(env, EINVAL, "invalid protected paths");
     { std::lock_guard<std::mutex> lock(o->mutex); if (o->closed || o->active) return fail(env, EBUSY, "this Environment already owns a guest task"); }
+    const int clock_error = job->clock.acquire();
+    if (clock_error) return fail(env, clock_error, "embedded Host activity clock is unavailable; rebuild Host and Guest frameworks together");
     napi_value resource, name;
     if (napi_create_object(env, &resource) != napi_ok ||
         napi_create_string_utf8(env, "DshGuestTask", NAPI_AUTO_LENGTH, &name) != napi_ok ||

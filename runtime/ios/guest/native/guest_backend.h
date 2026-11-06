@@ -40,6 +40,10 @@ int dsh_guest_begin_install_change(void);
 void dsh_guest_end_install_change(void);
 int dsh_guest_start(const struct dsh_guest_request *, dsh_guest_output, void *,
                     uint64_t *job_id);
+// Same start contract; trusted monotonic activity clock is borrowed until wait
+// succeeds (or retained with the quarantined context). NULL selects wall time.
+int dsh_guest_start_with_clock(const struct dsh_guest_request *, dsh_guest_output,
+    void *, uint64_t *, double (*now_ms)(void *), void *clock_context);
 int dsh_guest_stdin_write(uint64_t, const void *, size_t, size_t *written);
 int dsh_guest_stdin_close(uint64_t);
 int dsh_guest_ack(uint64_t, int stream, uint64_t end_offset);
@@ -50,7 +54,8 @@ int dsh_guest_kill(uint64_t);
 // dropped output separately from ACK, closes stdin and requests cancellation.
 int dsh_guest_abandon(uint64_t);
 // Only one native coordinator calls wait. Normal tasks have no total time limit.
-// timeout_ms starts at cancel/abandon, bounds cleanup, and must be >= 200 ms.
+// timeout_ms starts at cancel/abandon, in the captured activity-clock domain
+// (monotonic elapsed time for original start), and must be >= 200 ms.
 // Never run on the JS loop/cleanup thread. Timeout quarantines this kernel.
 // On success no callback uses context again. On failure caller retains context:
 // it may still be borrowed by quarantined native threads, independent of Env.

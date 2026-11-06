@@ -25,7 +25,11 @@ struct dsh_job_bridge {
   pthread_cond_t changed;
   dsh_job_threads *threads;
   struct task *supervisor;
-  uint64_t id, cancelled_at;
+  uint64_t id;
+  double cancelled_at;
+  bool cancelled;
+  double (*now_ms)(void *);
+  void *clock_context;
   int root_pid, stdin_fd, status, error;
   bool exited, settled, finishing, abandoned;
   struct reader readers[2];
@@ -37,6 +41,9 @@ static uint64_t millis(void) {
   struct timespec t;
   clock_gettime(CLOCK_MONOTONIC, &t);
   return (uint64_t)t.tv_sec * 1000 + (uint64_t)t.tv_nsec / 1000000;
+}
+static double budget_now(dsh_job_bridge *b) {
+  return b->now_ms ? b->now_ms(b->clock_context) : (double)millis();
 }
 static void exited(struct task *task, int code) {
   dsh_job_bridge *b = atomic_load(&active);
@@ -98,7 +105,8 @@ static void *read_output(void *argument) {
 }
 dsh_job_bridge *dsh_job_bridge_new(dsh_job_threads *m, uint64_t id, int root,
                                    struct dsh_job_stdio *io,
-                                   dsh_job_output output, void *context) {
+                                   dsh_job_output output, void *context,
+                                   double (*now_ms)(void *), void *clock_context) {
   if (!m || !id || root <= 0 || !io || !output || io->host[0] < 0 ||
       io->host[1] < 0 || io->host[2] < 0) {
     errno = EINVAL;
@@ -152,6 +160,7 @@ dsh_job_bridge *dsh_job_bridge_new(dsh_job_threads *m, uint64_t id, int root,
     errno = e;
     return NULL;
   }
+  b->now_ms = now_ms; b->clock_context = clock_context;
   b->threads = m;
   b->id = id;
   b->root_pid = root;
@@ -220,11 +229,12 @@ int dsh_job_bridge_finish(dsh_job_bridge *b, unsigned timeout_ms, int *status) {
     if (state == DSH_THREADS_READY) break;
     if (state != DSH_THREADS_RUNNING) { e = EIO; break; }
     pthread_mutex_lock(&b->lock);
-    uint64_t cancelled_at = b->cancelled_at;
+    double cancelled_at = b->cancelled_at;
+    bool cancelled = b->cancelled;
     int error = b->error;
     pthread_mutex_unlock(&b->lock);
     if (error) { e = error; break; }
-    if (cancelled_at && millis() - cancelled_at >= timeout_ms) {
+    if (cancelled && budget_now(b) - cancelled_at >= timeout_ms) {
       e = ETIMEDOUT; break;
     }
     struct timespec pause = {0, 10000000};
@@ -237,7 +247,7 @@ int dsh_job_bridge_finish(dsh_job_bridge *b, unsigned timeout_ms, int *status) {
                                                                            : 0);
   while (!e && !b->abandoned && (b->readers[0].delivered != b->readers[0].emitted ||
                 b->readers[1].delivered != b->readers[1].emitted)) {
-    if (b->cancelled_at && millis() - b->cancelled_at >= timeout_ms) {
+    if (b->cancelled && budget_now(b) - b->cancelled_at >= timeout_ms) {
       e = ETIMEDOUT;
       break;
     }
@@ -308,7 +318,7 @@ int dsh_job_bridge_abandon(dsh_job_bridge *b) {
   if (!b) return EINVAL;
   pthread_mutex_lock(&b->lock);
   b->abandoned = true;
-  if (!b->cancelled_at) b->cancelled_at = millis();
+  if (!b->cancelled) { b->cancelled_at = budget_now(b); b->cancelled = true; }
   if (b->stdin_fd >= 0) { close(b->stdin_fd); b->stdin_fd = -1; }
   pthread_cond_broadcast(&b->changed);
   pthread_mutex_unlock(&b->lock);
@@ -323,7 +333,7 @@ int dsh_job_bridge_abandoned(dsh_job_bridge *b) {
 
 void dsh_job_bridge_cancel_requested(dsh_job_bridge *b) {
   pthread_mutex_lock(&b->lock);
-  if (!b->cancelled_at) b->cancelled_at = millis();
+  if (!b->cancelled) { b->cancelled_at = budget_now(b); b->cancelled = true; }
   pthread_cond_broadcast(&b->changed);
   pthread_mutex_unlock(&b->lock);
 }

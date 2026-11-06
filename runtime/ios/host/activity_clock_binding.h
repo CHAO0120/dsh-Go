@@ -6,6 +6,9 @@
 #include <mutex>
 
 #include "activity_clock.h"
+#include "activity_clock_api.h"
+#include <cerrno>
+#include <new>
 
 namespace dsh_ios {
 namespace activity_binding {
@@ -59,3 +62,20 @@ class RunActivityClock {
   }
 };
 }  // namespace dsh_ios
+
+// No Node callback is involved: the native coordinator may read this after Env
+// teardown. Retire preserves the epoch and charges ordinary elapsed time.
+extern "C" __attribute__((visibility("default")))
+int dsh_host_activity_clock_acquire_v1(struct dsh_activity_clock_v1 *out) {
+  if (!out || out->size != sizeof(*out) || out->version != 1) return EINVAL;
+  std::shared_ptr<dsh_ios::ActivityClock> clock;
+  { std::lock_guard<std::mutex> lock(dsh_ios::activity_binding::mutex);
+    clock = dsh_ios::activity_binding::current; }
+  if (!clock) return ENOENT;
+  auto *owner = new (std::nothrow) std::shared_ptr<dsh_ios::ActivityClock>(std::move(clock));
+  if (!owner) return ENOMEM;
+  out->context = owner;
+  out->now_ms = [](void *p) { return (*static_cast<std::shared_ptr<dsh_ios::ActivityClock> *>(p))->Now(); };
+  out->release = [](void *p) { delete static_cast<std::shared_ptr<dsh_ios::ActivityClock> *>(p); };
+  return 0;
+}
