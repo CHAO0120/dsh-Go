@@ -22,7 +22,7 @@ export function nodeCommand({ roots, workspaceRoots, readOnly }) {
       for (const name of ['stdout', 'stderr']) worker[name].on('data', chunk => {
         bytes += chunk.length;
         if (bytes > 64 * 1024 * 1024) { overflow = true; void worker.terminate(); return; }
-        output[name].push(chunk);
+        output[name].push(Buffer.from(chunk));
       });
       worker.on('error', error => output.stderr.push(Buffer.from((error.stack ?? error.message) + '\n')));
       worker.once('exit', exitCode => {
