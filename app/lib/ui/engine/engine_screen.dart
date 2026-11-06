@@ -440,6 +440,8 @@ class _ResetDialogState extends State<_ResetDialog> {
             (false, true) => l10n.phoneResetBodyWithUi,
             (false, false) => l10n.phoneResetBodyEverything,
           }),
+          const SizedBox(height: 8),
+          Text(l10n.phoneResetAlsoDeletes),
           if (widget.harmony) ...[const SizedBox(height: 8), Text(l10n.harmonyResetKept)],
           const SizedBox(height: 12),
           _KeepOption(
