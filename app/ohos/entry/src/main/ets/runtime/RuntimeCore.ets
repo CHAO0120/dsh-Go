@@ -178,6 +178,8 @@ interface InstallJournal {
   stagingHashes: string[];
 }
 
+const EXTRACT_LANES = 8;
+
 export class RuntimeInstaller {
   private storage: RuntimeStorage;
   readonly base: string;
@@ -220,7 +222,8 @@ export class RuntimeInstaller {
       }
       const owned = new Set<string>(previous === null ? [] : previous.files.map((file: RuntimeFile) => file.path));
       const staged = new Set<string>();
-      if (await this.storage.exists(this.base + '/installing.json')) {
+      const resumed = await this.storage.exists(this.base + '/installing.json');
+      if (resumed) {
         const journal = JSON.parse(await this.storage.readText(this.base + '/installing.json')) as InstallJournal;
         if (journal.schema !== 1 || !Array.isArray(journal.ownedPaths) || !Array.isArray(journal.stagingHashes) ||
             !journal.ownedPaths.every((path: string) => validPayloadPath(path)) ||
@@ -252,30 +255,65 @@ export class RuntimeInstaller {
             await this.storage.removeEmptyParents(this.root + '/' + path, this.root);
           }
         }
-        const changed: RuntimeFile[] = [];
-        let checked = 0;
-        for (const file of manifest.files) {
-          if (!await this.storage.matches(this.root + '/' + file.path, file)) changed.push(file);
-          progress({step: 'verify', done: ++checked, total: manifest.files.length});
+        let changed: RuntimeFile[] = [];
+        if (previous === null && !resumed) {
+          // Nothing installed and nothing half-installed: there is nothing to reuse,
+          // and checking each of ~12k missing files took the phone minutes.
+          changed = manifest.files;
+        } else {
+          let checked = 0;
+          for (const file of manifest.files) {
+            if (!await this.storage.matches(this.root + '/' + file.path, file)) changed.push(file);
+            progress({step: 'verify', done: ++checked, total: manifest.files.length});
+          }
         }
         let total = 0;
         for (const file of changed) total += file.size;
+        const renamed = new Set<string>();
         let done = 0;
         progress({step: 'extract', done: done, total: total});
+        // Each file waits on flash for its fsync, so several are written at once. Files
+        // with the same content share a staging name and stay in one lane.
+        const lanes = new Map<string, RuntimeFile[]>();
         for (const file of changed) {
-          const target = this.root + '/' + file.path;
-          const staging = this.base + '/staging/' + file.sha256 + '.tmp';
-          await this.storage.ensureDirectory(target.substring(0, target.lastIndexOf('/')));
-          await this.storage.copyRawFile('dsh-runtime/files/' + file.path, staging, file);
-          if (!await this.storage.matches(staging, file)) {
-            throw new RuntimeChannelError('ohos_checksum_failed', '随包运行时文件校验失败，安装未提交。');
-          }
-          await this.storage.rename(staging, target);
-          done += file.size;
-          progress({step: 'extract', done: done, total: total});
+          const lane = lanes.get(file.sha256);
+          if (lane === undefined) lanes.set(file.sha256, [file]);
+          else lane.push(file);
         }
+        const queue: RuntimeFile[][] = Array.from(lanes.values());
+        let failure: Error | null = null;
+        const work = async (): Promise<void> => {
+          while (failure === null && queue.length > 0) {
+            for (const file of queue.shift() as RuntimeFile[]) {
+              if (failure !== null) return;
+              const target = this.root + '/' + file.path;
+              const staging = this.base + '/staging/' + file.sha256 + '.tmp';
+              await this.storage.ensureDirectory(target.substring(0, target.lastIndexOf('/')));
+              await this.storage.copyRawFile('dsh-runtime/files/' + file.path, staging, file);
+              if (!await this.storage.matches(staging, file)) {
+                throw new RuntimeChannelError('ohos_checksum_failed', '随包运行时文件校验失败，安装未提交。');
+              }
+              await this.storage.rename(staging, target);
+              renamed.add(file.sha256);
+              done += file.size;
+              progress({step: 'extract', done: done, total: total});
+            }
+          }
+        };
+        const workers: Promise<void>[] = [];
+        for (let i = 0; i < EXTRACT_LANES; i++) {
+          workers.push(work().catch((error: Error): void => { if (failure === null) failure = error; }));
+        }
+        await Promise.all(workers);
+        if (failure !== null) throw failure as Error;
         progress({step: 'configure', done: 0, total: 1});
-        for (const hash of staged) await this.storage.removeFile(this.base + '/staging/' + hash + '.tmp');
+        // A staging file renamed into place above is already gone; only leftovers of an
+        // interrupted run can remain.
+        const leftovers = Array.from(staged).filter((hash: string) => !renamed.has(hash));
+        for (let i = 0; i < leftovers.length; i += EXTRACT_LANES) {
+          await Promise.all(leftovers.slice(i, i + EXTRACT_LANES).map((hash: string): Promise<void> =>
+            this.storage.removeFile(this.base + '/staging/' + hash + '.tmp')));
+        }
       });
       await this.storage.writeTextAtomic(this.base + '/installed.json', JSON.stringify(manifest));
       await this.storage.removeFile(this.base + '/installing.json');

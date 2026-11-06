@@ -352,11 +352,18 @@ test('真实SIGKILL发生在首文件提交后：重开拒绝混合树，续装�
   assert.equal(committed, true, stderr);
   assert.equal(signal, 'SIGKILL');
   assert.equal(await c.installer.installed(), null);
-  assert.equal(await fs.readFile(c.installer.root + '/' + c.manifest.files[0].path, 'utf8'), files[c.manifest.files[0].path]);
+  // Files are written in several lanes, so the committed one need not be the first listed,
+  // and a rename in another lane may land just before the stop.
+  const committedFiles = [];
+  for (const file of c.manifest.files) {
+    const text = await fs.readFile(c.installer.root + '/' + file.path, 'utf8').catch(() => null);
+    if (text !== null) { assert.equal(text, files[file.path]); committedFiles.push(file.path); }
+  }
+  assert(committedFiles.length >= 1 && committedFiles.length < c.manifest.files.length, committedFiles.join());
   const inflatedBefore = inflateActivity.initialized;
   await c.installer.install(c.manifest, () => {});
   assert(c.resources.reads.every(asset => asset === RUNTIME_ARCHIVE_ASSET));
-  assert.equal(inflateActivity.initialized - inflatedBefore, Object.keys(files).length - 1);
+  assert.equal(inflateActivity.initialized - inflatedBefore, Object.keys(files).length - committedFiles.length);
   assert.equal(c.resources.opened.size, 0);
   assert.equal(activeInflaters(), 0);
   assert.equal((await c.installer.installed()).runtimeVersion, 'v1');
@@ -422,6 +429,8 @@ test('实际符号链接父目录拒绝写入；未知目录内容不因OH递归
   assert.deepEqual(await fs.readdir(outside), []);
   await fs.unlink(c.installer.root + '/node_modules');
   const d = c.installer.root + '/runtime/ohos/preload.mjs';
+  // Another lane may already have committed the real file before the link stopped the install.
+  await fs.rm(d, { force: true });
   await fs.mkdir(d, { recursive: true }); await fs.writeFile(d + '/foreign.txt', 'user');
   await assert.rejects(c.installer.install(c.manifest, () => {}), { code: 'ohos_install_path_conflict' });
   assert.equal(await fs.readFile(d + '/foreign.txt', 'utf8'), 'user');

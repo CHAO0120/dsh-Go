@@ -7,6 +7,8 @@ import { BusinessError } from '@ohos.base';
 import { RuntimeChannelError, RuntimeFile, RuntimeManifest, RuntimeStorage, validPayloadPath } from './RuntimeCore';
 import { OhosRuntimeArchive } from './OhosRuntimeArchive';
 
+const SYNC_LANES = 16;
+
 export class OhosRuntimeStorage implements RuntimeStorage {
   private static textWrites: Promise<void> = Promise.resolve();
   private static retiredFiles: fs.File[] = [];
@@ -15,6 +17,9 @@ export class OhosRuntimeStorage implements RuntimeStorage {
   private archive: OhosRuntimeArchive;
   private installBase: string | null = null;
   private installDirectories: Set<string> | null = null;
+  // Directories already checked as real directories during this install. Each of ~12k
+  // files used to lstat every ancestor several times, which cost the phone minutes.
+  private checkedDirectories: Set<string> | null = null;
 
   constructor(resources: resourceManager.ResourceManager, filesDir: string) {
     this.filesDir = filesDir;
@@ -51,47 +56,71 @@ export class OhosRuntimeStorage implements RuntimeStorage {
     }
     this.installBase = base;
     this.installDirectories = directories;
+    this.checkedDirectories = new Set<string>();
     try {
       await work();
       await this.flushInstallDirectories(base, directories);
     } finally {
+      this.checkedDirectories = null;
       this.installDirectories = null;
       this.installBase = null;
     }
   }
 
   private async flushInstallDirectories(base: string, directories: Set<string>): Promise<void> {
-    const live: string[] = [];
+    const levels = new Map<number, string[]>();
+    for (const directory of directories) {
+      const depth = directory.split('/').length;
+      const level = levels.get(depth);
+      if (level === undefined) levels.set(depth, [directory]);
+      else level.push(directory);
+    }
+    const depths = Array.from(levels.keys()).sort((a: number, b: number) => a - b);
+    const live: string[][] = [];
     const absent = new Set<string>();
     // Inspect top-down so a legitimate old directory replaced by a file does
     // not turn descendant lstat into ENOTDIR. Only actual ENOENT is ignored.
-    for (const directory of Array.from(directories).sort((a: string, b: string) => a.length - b.length)) {
-      const parent = directory.substring(0, directory.lastIndexOf('/'));
-      if (absent.has(parent)) { absent.add(directory); continue; }
-      let stat: fs.Stat;
-      try {
-        stat = await fs.lstat(directory);
-      } catch (error) {
-        if ((error as BusinessError).code !== 13900002) throw error as Error;
-        if (directory === base || directory === base + '/tree' || directory === base + '/staging') throw error as Error;
-        absent.add(directory);
-        continue;
-      }
-      if (stat.isSymbolicLink()) throw new RuntimeChannelError('ohos_path_link', '运行时提交目录不能为符号链接。');
-      if (!stat.isDirectory()) {
-        if (!stat.isFile() || directory === base || directory === base + '/tree' || directory === base + '/staging') {
-          throw new RuntimeChannelError('ohos_path_link', '运行时提交路径不是目录。');
+    // One depth at a time, its directories together: ~2.5k one by one took the phone seconds.
+    for (const depth of depths) {
+      const present: string[] = [];
+      await this.inLanes(levels.get(depth) as string[], async (directory: string): Promise<void> => {
+        const parent = directory.substring(0, directory.lastIndexOf('/'));
+        if (absent.has(parent)) { absent.add(directory); return; }
+        let stat: fs.Stat;
+        try {
+          stat = await fs.lstat(directory);
+        } catch (error) {
+          if ((error as BusinessError).code !== 13900002) throw error as Error;
+          if (directory === base || directory === base + '/tree' || directory === base + '/staging') throw error as Error;
+          absent.add(directory);
+          return;
         }
-        absent.add(directory);
-        continue;
-      }
-      live.push(directory);
+        if (stat.isSymbolicLink()) throw new RuntimeChannelError('ohos_path_link', '运行时提交目录不能为符号链接。');
+        if (!stat.isDirectory()) {
+          if (!stat.isFile() || directory === base || directory === base + '/tree' || directory === base + '/staging') {
+            throw new RuntimeChannelError('ohos_path_link', '运行时提交路径不是目录。');
+          }
+          absent.add(directory);
+          return;
+        }
+        present.push(directory);
+      });
+      live.push(present);
     }
     // File data was already fsynced before each rename. Publish directory
-    // entries children-first, before installed.json or journal removal.
-    for (const directory of live.reverse()) {
-      await this.checkParents(directory + '/.entry');
-      await this.syncDirectory(directory);
+    // entries children-first (a whole depth before its parents), before
+    // installed.json or journal removal.
+    for (const level of live.reverse()) {
+      await this.inLanes(level, async (directory: string): Promise<void> => {
+        await this.checkParents(directory + '/.entry');
+        await this.syncDirectory(directory);
+      });
+    }
+  }
+
+  private async inLanes(items: string[], each: (item: string) => Promise<void>): Promise<void> {
+    for (let i = 0; i < items.length; i += SYNC_LANES) {
+      await Promise.all(items.slice(i, i + SYNC_LANES).map(each));
     }
   }
 
@@ -143,10 +172,20 @@ export class OhosRuntimeStorage implements RuntimeStorage {
     let current = this.filesDir;
     for (const part of parts.slice(0, -1)) {
       current += '/' + part;
+      if (this.checkedDirectories?.has(current)) continue;
       const stat = await fs.lstat(current);
       if (!stat.isDirectory() || stat.isSymbolicLink()) {
         throw new RuntimeChannelError('ohos_path_link', '运行时目录含符号链接或非目录项。');
       }
+      this.checkedDirectories?.add(current);
+    }
+  }
+
+  private forgetDirectory(path: string): void {
+    const checked = this.checkedDirectories;
+    if (checked === null) return;
+    for (const directory of Array.from(checked)) {
+      if (directory === path || directory.startsWith(path + '/')) checked.delete(directory);
     }
   }
 
@@ -163,6 +202,7 @@ export class OhosRuntimeStorage implements RuntimeStorage {
     let current = this.filesDir;
     for (const part of path.substring(this.filesDir.length + 1).split('/')) {
       current += '/' + part;
+      if (this.checkedDirectories?.has(current)) continue;
       let stat: fs.Stat | null = await this.statIfPresent(current);
       if (stat === null) {
         try {
@@ -177,6 +217,7 @@ export class OhosRuntimeStorage implements RuntimeStorage {
       if (!stat.isDirectory() || stat.isSymbolicLink()) {
         throw new RuntimeChannelError('ohos_path_link', '运行时目录含符号链接或非目录项。');
       }
+      this.checkedDirectories?.add(current);
     }
   }
 
@@ -266,6 +307,7 @@ export class OhosRuntimeStorage implements RuntimeStorage {
           throw new RuntimeChannelError('ohos_install_path_conflict', '运行时文件位置存在非空目录，未删除未登记的内容。');
         }
         await fs.rmdir(to);
+        this.forgetDirectory(to);
       }
     }
     await fs.rename(from, to);
@@ -314,6 +356,7 @@ export class OhosRuntimeStorage implements RuntimeStorage {
         if (!stat.isDirectory() || stat.isSymbolicLink()) return;
         if ((await fs.listFile(parent, {recursion: false, listNum: 1})).length > 0) return;
         await fs.rmdir(parent);
+        this.forgetDirectory(parent);
         await this.syncParent(parent);
       }
       parent = parent.substring(0, parent.lastIndexOf('/'));

@@ -28,6 +28,8 @@ const LIFECYCLE_NOTICE = '前后台状态尚未同步，本机任务可能仍在
 // that crashes.
 const HEALTHY_MS = 30000;
 
+const PROGRESS_BYTES = 512 * 1024;
+
 export class RuntimeController {
   private static shared: RuntimeController | null = null;
   private static foreground: boolean = false;
@@ -196,15 +198,21 @@ export class RuntimeController {
     const manifest: RuntimeManifest = this.manifest;
     const began = Date.now();
     let step = '';
+    let reported = -1;
     await this.storage.withBundledRuntime(async (): Promise<void> => {
       await this.installer.install(manifest, (progress: InstallProgress) => {
         if (progress.step !== step) {
           hilog.info(0x3F00, 'DshRuntime', 'install %{public}s at %{public}d ms', progress.step, Date.now() - began);
           step = progress.step;
         }
+        // Dart draws one bar over unpacked bytes, as Android reports it: the per-file
+        // check before it restarted the bar, and an event per file cost the phone minutes.
+        if (progress.step !== 'extract') return;
+        if (reported >= 0 && progress.done < progress.total && progress.done - reported < PROGRESS_BYTES) return;
+        reported = progress.done;
         this.emit(new Map<string, Object | null>([
-        ['type', 'progress'], ['step', progress.step], ['done', progress.done], ['total', progress.total]
-      ]));
+          ['type', 'progress'], ['step', progress.step], ['done', progress.done], ['total', progress.total]
+        ]));
       });
     });
     hilog.info(0x3F00, 'DshRuntime', 'install finished in %{public}d ms', Date.now() - began);

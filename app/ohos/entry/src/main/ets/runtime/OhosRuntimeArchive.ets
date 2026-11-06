@@ -64,12 +64,13 @@ export class OhosRuntimeArchive {
   // instances so a diagnostics query cannot close an installer's descriptor.
   private static queue: Promise<void> = Promise.resolve();
   private static pendingRaw: resourceManager.ResourceManager | null = null;
-  private static pendingInflate: PendingInflate | null = null;
+  // Several members inflate at once during an install; each keeps its own stream.
+  private static pendingInflates: Set<PendingInflate> = new Set<PendingInflate>();
   private resources: resourceManager.ResourceManager;
   private source: RawArchiveSource | null = null;
   private index: RuntimeZip | null = null;
-  private extracting: boolean = false;
   private checksum: zlib.Checksum | null = null;
+  private opening: number = 0;
 
   constructor(resources: resourceManager.ResourceManager) {
     // guestRoot and remote-only queries must remain free of resource/file I/O.
@@ -89,10 +90,10 @@ export class OhosRuntimeArchive {
 
   async withBundledRuntime(work: () => Promise<void>): Promise<void> {
     const operation = OhosRuntimeArchive.queue.then(async () => {
-      if (OhosRuntimeArchive.pendingInflate !== null) {
-        const status = await OhosRuntimeArchive.pendingInflate.zip.inflateEnd({});
+      for (const pending of Array.from(OhosRuntimeArchive.pendingInflates)) {
+        const status = await pending.zip.inflateEnd({});
         if (status !== zlib.ReturnStatus.OK) throw new RuntimeChannelError('ohos_archive_close', '运行时解压状态未成功释放。');
-        OhosRuntimeArchive.pendingInflate = null;
+        OhosRuntimeArchive.pendingInflates.delete(pending);
       }
       if (OhosRuntimeArchive.pendingRaw !== null) {
         await OhosRuntimeArchive.pendingRaw.closeRawFd(RUNTIME_ARCHIVE_ASSET);
@@ -124,17 +125,21 @@ export class OhosRuntimeArchive {
   }
 
   async extract(file: RuntimeFile, write: (buffer: ArrayBuffer, length: number) => Promise<void>): Promise<void> {
-    if (this.source === null) {
-      await this.withBundledRuntime(async () => { await this.extract(file, write); });
+    // Concurrent members share an open session only when a caller holds it for the
+    // whole install. Members that open their own session take turns, so none closes
+    // the descriptor under another or reads before the index is ready.
+    if (this.source === null || this.opening > 0) {
+      this.opening++;
+      try {
+        await this.withBundledRuntime(async () => {
+          await this.inflate(this.source as RawArchiveSource, this.requireIndex().file(file), write);
+        });
+      } finally {
+        this.opening--;
+      }
       return;
     }
-    if (this.extracting) throw new RuntimeChannelError('ohos_archive_busy', '运行时归档正在读取另一文件。');
-    this.extracting = true;
-    try {
-      await this.inflate(this.source, this.requireIndex().file(file), write);
-    } finally {
-      this.extracting = false;
-    }
+    await this.inflate(this.source, this.requireIndex().file(file), write);
   }
 
   private async inflate(source: RawArchiveSource, entry: RuntimeZipEntry,
@@ -214,10 +219,10 @@ export class OhosRuntimeArchive {
     } finally {
       if (initialized) {
         const pending = new PendingInflate(zip, input, output);
-        OhosRuntimeArchive.pendingInflate = pending;
+        OhosRuntimeArchive.pendingInflates.add(pending);
         const status = await zip.inflateEnd({});
         if (status !== zlib.ReturnStatus.OK) throw new RuntimeChannelError('ohos_archive_close', '运行时解压状态未成功释放。');
-        OhosRuntimeArchive.pendingInflate = null;
+        OhosRuntimeArchive.pendingInflates.delete(pending);
       }
     }
   }
