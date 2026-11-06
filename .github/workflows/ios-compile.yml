@@ -211,6 +211,42 @@ jobs:
           "$node" tooling/ios/engine-smoke/annotate.mjs "$RUNNER_TEMP/smoke-work"
           exit "$status"
 
+      - name: Cache the fixed Alpine guest fixture
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/guest-archive/alpine-minirootfs-3.24.4-aarch64.tar.gz
+          key: ios-guest-alpine-3.24.4-aarch64-4b14c18f7e90a063b61462ea1462a5732c154bf6adad594974fe6487cd98a8de
+
+      - name: Run real guest tools through the simulator approval chain
+        run: |
+          mkdir -p "$RUNNER_TEMP/guest-archive"
+          archive="$RUNNER_TEMP/guest-archive/alpine-minirootfs-3.24.4-aarch64.tar.gz"
+          if [ ! -f "$archive" ]; then
+            curl --fail --location --retry 3 --output "$archive" https://dl-cdn.alpinelinux.org/alpine/v3.24/releases/aarch64/alpine-minirootfs-3.24.4-aarch64.tar.gz
+          fi
+          printf '%s  %s\n' 4b14c18f7e90a063b61462ea1462a5732c154bf6adad594974fe6487cd98a8de "$archive" | shasum -a 256 -c -
+          # Foundation/CryptoKit + the actual I3 installer, no alternate unpacker/database builder.
+          xcrun swiftc -swift-version 5 -parse-as-library app/ios/Runner/GuestRootfsArchive.swift app/ios/Runner/GuestRootfsInstaller.swift tooling/ios/engine-smoke/guest-install.swift -o "$RUNNER_TEMP/guest-install"
+          "$RUNNER_TEMP/guest-install" "$archive" "$RUNNER_TEMP/guest-installation"
+          for name in DshGuest DshGuestBridge; do
+            test -f "app/ios/Engine/build/iphonesimulator/guest/$name.framework/$name"
+            cp -R "app/ios/Engine/build/iphonesimulator/guest/$name.framework" "$RUNNER_TEMP/sim/"
+            test -f "$RUNNER_TEMP/sim/$name.framework/$name"
+          done
+          xcrun --sdk iphonesimulator clang -target arm64-apple-ios15.0-simulator tooling/ios/engine-smoke/guest-smoke.c -o "$RUNNER_TEMP/guest-smoke"
+          node="$(ls -d "$DSH_IOS_ENGINE_WORK"/node-v*-darwin-arm64/bin/node)"
+          "$node" tooling/ios/engine-smoke/guest-drive.mjs --simulator "$DSH_SIMULATOR" --smoke "$RUNNER_TEMP/guest-smoke" --frameworks "$RUNNER_TEMP/sim" --runtime "$RUNNER_TEMP/tree/files" --work "$RUNNER_TEMP/guest-smoke-work" --ws "$RUNNER_TEMP/tree/files" --rootfs "$RUNNER_TEMP/guest-installation/rootfs"
+
+      - name: Keep real guest approval evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: ios-guest-smoke
+          path: |
+            ${{ runner.temp }}/guest-smoke-work/guest-report.json
+            ${{ runner.temp }}/guest-smoke-work/engine.log
+          if-no-files-found: warn
+
       - name: Check whose file descriptors a stop closes
         if: ${{ !cancelled() && steps.prepare.outcome == 'success' }}
         run: |
