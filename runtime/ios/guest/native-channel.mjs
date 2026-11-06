@@ -9,7 +9,7 @@ export function createNativeGuestChannel(native, { root, protectedPaths = [], re
       if (!workspace || !temporary || !['read-only', 'workspace-write'].includes(request.mode)) throw new TypeError('Invalid guest mounts or policy');
       const completion = Promise.withResolvers();
       completion.promise.catch(() => {});
-      let id, ended = false, retry;
+      let id, ended = false, signalled = false, retry;
       const streams = [Promise.resolve(), Promise.resolve()];
       const input = Buffer.from(request.stdin ?? '');
       let offset = 0;
@@ -21,7 +21,7 @@ export function createNativeGuestChannel(native, { root, protectedPaths = [], re
         completion.reject(error);
       };
       const feed = () => {
-        if (ended) return;
+        if (ended || signalled) return;
         try {
           while (offset < input.length) {
             const chunk = input.subarray(offset, offset + 65536);
@@ -50,10 +50,11 @@ export function createNativeGuestChannel(native, { root, protectedPaths = [], re
           streams[stream - 1].catch(fail);
         } else if (value.type === 'exit') {
           clearTimeout(retry);
-          // Native emits exit only after output ACKs; also retain JS delivery ordering.
+          // Native confirms ACKs or explicit discard; still await every JS consumer.
+          // Cancellation cannot retire a live consumer merely because C has settled.
           ended = true;
           Promise.all(streams).then(() => {
-            if (value.abandoned || value.resourcesSettled !== true || native.status().state === 'quarantined') {
+            if ((value.abandoned && !signalled) || value.resourcesSettled !== true || native.status().state === 'quarantined') {
               completion.reject(Object.assign(new Error('Guest native exit was not cleanly settled'), { nativeError: value.error }));
             } else if (value.error) {
               // Recheck after a settled native error: uninstall can win after preflight.
@@ -74,6 +75,10 @@ export function createNativeGuestChannel(native, { root, protectedPaths = [], re
         if (name === 'SIGTERM') native.cancel(id);
         else if (name === 'SIGKILL') native.kill(id);
         else throw new TypeError('Unsupported guest signal');
+        // Record intent only after the native request succeeds. Discarded output
+        // is acceptable on this operation only after its consumers also settle.
+        signalled = true;
+        clearTimeout(retry);
       } });
     },
   });

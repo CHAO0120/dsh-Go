@@ -161,13 +161,15 @@ int output(void *context, int stream, uint64_t end, const void *bytes, size_t si
     std::unique_lock<std::mutex> lock(o->mutex);
     // A backend may emit before start() returns its native id. No ACK is legal
     // until the coordinator publishes that id; teardown can always interrupt.
-    o->changed.wait(lock, [&] { return job->start_ready || job->abandoned || o->closed; });
-    if (job->abandoned || o->closed) return ECANCELED;
+    o->changed.wait(lock, [&] { return job->start_ready || job->cancel || job->kill || job->abandoned || o->closed; });
+    if (job->cancel || job->kill || job->abandoned || o->closed) return ECANCELED;
     if (job->pending[stream - 1] || chunk->start != job->confirmed[stream - 1]) return EPROTO;
     job->pending[stream - 1] = chunk;
     wake(o);
-    o->changed.wait(lock, [&] { return chunk->acked || job->abandoned || o->closed; });
+    o->changed.wait(lock, [&] { return chunk->acked || job->cancel || job->kill || job->abandoned || o->closed; });
     job->pending[stream - 1].reset();
+    // ECANCELED makes the C bridge discard/drain, never falsely ACK bytes.
+    // Signal choice remains in control(): cancel=TERM escalation, kill=KILL.
     return chunk->acked ? 0 : ECANCELED;
   } catch (const std::bad_alloc &) { return ENOMEM; }
 }
@@ -264,7 +266,8 @@ void dispatch(uv_async_t *handle) {
     std::shared_ptr<Chunk> chunk;
     {
       std::lock_guard<std::mutex> lock(o->mutex);
-      if (!job->abandoned && (chunk = job->pending[stream - 1]) && !chunk->delivered)
+      if (!job->cancel && !job->kill && !job->abandoned &&
+          (chunk = job->pending[stream - 1]) && !chunk->delivered)
         chunk->delivered = true;
       else chunk.reset();
     }
@@ -395,6 +398,11 @@ napi_value control(napi_env env, napi_callback_info info) {
       return fail(env, EINVAL, "invalid output acknowledgement");
     {
       std::lock_guard<std::mutex> lock(o->mutex);
+      // Cancellation discards pending output; a late ACK is no longer a
+      // delivery confirmation. Do not call native ACK or advance confirmed.
+      // After exit, find_job rejects this old id as ESTALE, including when
+      // another job has already started in the same Environment.
+      if (job->cancel || job->kill) return undefined(env);
       auto chunk = job->pending[stream - 1];
       if (!chunk || !chunk->delivered || chunk->acked || chunk->end != end ||
           chunk->start != job->confirmed[stream - 1] || job->abandoned) error = EINVAL;
@@ -423,6 +431,7 @@ napi_value control(napi_env env, napi_callback_info info) {
       if (entry->second == 3) job->close_stdin = true;
       if (entry->second == 4) job->cancel = true;
       if (entry->second == 5) job->kill = true;
+      if (job->cancel || job->kill) o->changed.notify_all();
     }
     if (native_id) {
       if (entry->second == 3) error = dsh_guest_stdin_close(native_id);
