@@ -160,12 +160,20 @@ def main():
     (out / 'stub.cc').write_text(STUB)
     (out / 'probe.cjs').write_text(SCRIPT)
     core = ROOT / 'app/ohos/entry/src/main/cpp'
+    # On the phone libnode.so is a needed library of libdsh_host, and start() promotes it with
+    # dlopen(RTLD_NOLOAD | RTLD_GLOBAL). An empty library with that soname loads the same way here.
+    (out / 'libnode.cc').write_text('extern "C" int dsh_host_adapter_fixture_libnode() { return 0; }\n')
+    libnode = [os.environ.get('CXX','clang++'),'-shared','-fPIC','-Wl,-soname,libnode.so',
+               str(out/'libnode.cc'),'-o',str(out/'libnode.so')]
     command = [os.environ.get('CXX','clang++'),'-std=c++17','-shared','-fPIC','-pthread','-Wall','-Wextra',
                '-Werror','-Wno-format','-I',str(headers),'-I',str(node_root/'include/node'),
-               str(core/'host_core.cpp'),str(core/'napi_host.cpp'),str(out/'stub.cc'),'-o',str(out/'host.node')]
-    build = subprocess.run(command,text=True,capture_output=True)
-    rows = [{'kind':'build','command':command,'code':build.returncode,'stdout':build.stdout,'stderr':build.stderr}]
-    build.check_returncode()
+               str(core/'host_core.cpp'),str(core/'napi_host.cpp'),str(out/'stub.cc'),
+               '-Wl,--no-as-needed','-L',str(out),'-l:libnode.so','-Wl,-rpath,'+str(out),'-o',str(out/'host.node')]
+    rows = []
+    for argv in (libnode, command):
+        build = subprocess.run(argv,text=True,capture_output=True)
+        rows.append({'kind':'build','command':argv,'code':build.returncode,'stdout':build.stdout,'stderr':build.stderr})
+        build.check_returncode()
     results = []
     for mode in ['normal', 'safe']:
         command = [str(node_root/'bin/node'),'--jitless',str(out/'probe.cjs'),str(out/'host.node'),str(out/('fixture-'+mode)),mode]
