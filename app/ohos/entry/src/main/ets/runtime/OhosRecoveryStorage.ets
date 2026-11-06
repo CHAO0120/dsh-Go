@@ -5,6 +5,8 @@ import { OhosRuntimeStorage } from './OhosRuntimeStorage';
 import { RuntimeChannelError } from './RuntimeCore';
 import { RecoveryStorage } from './RuntimeRecovery';
 
+const REMOVE_LANES = 16;
+
 // Only this private reset transaction may remove these two fixed runtime roots.
 // Existing RuntimeStorage remains the owner of atomic metadata writes.
 export class OhosRecoveryStorage implements RecoveryStorage {
@@ -129,7 +131,10 @@ export class OhosRecoveryStorage implements RecoveryStorage {
       if (entries.length === 0) break;
       for (const name of entries) {
         if (name === '' || name === '.' || name === '..' || name.includes('/') || name.includes('\0')) this.invalid();
-        await this.removeOwned(path + '/' + name);
+      }
+      // A reset clears ~12k runtime files; one at a time took the phone close to a minute.
+      for (let i = 0; i < entries.length; i += REMOVE_LANES) {
+        await Promise.all(entries.slice(i, i + REMOVE_LANES).map((name: string): Promise<void> => this.removeOwned(path + '/' + name)));
       }
     }
     await fs.rmdir(path);
