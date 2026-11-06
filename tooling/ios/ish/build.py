@@ -84,6 +84,30 @@ def download():
     return archive
 
 
+def extract(archive, dest):
+    with tarfile.open(archive) as tar:
+        try:
+            tar.extractall(dest, filter='data')
+            return
+        except TypeError:
+            # A Python without extraction filters (Xcode's /usr/bin/python3). The archive is
+            # pinned by SHA-256; its paths are checked here instead.
+            pass
+        root = os.path.realpath(dest)
+
+        def inside(path):
+            return os.path.realpath(path).startswith(root + os.sep)
+
+        for member in tar.getmembers():
+            target = os.path.join(root, member.name)
+            link = member.issym() or member.islnk()
+            if (not inside(target) or member.isdev() or
+                    (link and (os.path.isabs(member.linkname) or
+                               not inside(os.path.join(os.path.dirname(target), member.linkname))))):
+                raise RuntimeError('unexpected path in the iSH source archive: ' + member.name)
+        tar.extractall(dest)
+
+
 def main():
     if len(sys.argv) == 3 and sys.argv[1] == '--cache-key' and sys.argv[2] in SDK_NAMES:
         print(cache_key(sys.argv[2]))
@@ -116,8 +140,7 @@ def main():
     # Re-extract verified source on misses; never trust a previously patched tree.
     with tempfile.TemporaryDirectory(prefix='ish-build-', dir=out) as tmp:
         work = pathlib.Path(tmp)
-        with tarfile.open(archive) as tar:
-            tar.extractall(work, filter='data')
+        extract(archive, work)
         source = work / ('ish-arm64-' + LOCK['commit'])
         for name, expected in LOCK['buildInputs'].items():
             if digest(source / name) != expected:
@@ -162,7 +185,7 @@ def main():
             if framework.exists():
                 shutil.rmtree(framework)
             framework.mkdir()
-            shutil.copy2(build / 'DshGuest', framework / 'DshGuest')
+            shutil.copy2(build / 'DshGuest.dylib', framework / 'DshGuest')
             info = dict(CFBundleExecutable='DshGuest', CFBundleIdentifier='io.github.ccch1mneyyy.dshgo.guest',
                 CFBundleName='DshGuest', CFBundlePackageType='FMWK', CFBundleShortVersionString='1.0',
                 CFBundleVersion='1', MinimumOSVersion='15.0',

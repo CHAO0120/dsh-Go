@@ -96,7 +96,7 @@ Strict real VDSO; robust SDK paths; confined C backend and framework link target
 +dsh_suffix = 'so'
 +if host_machine.system() == 'darwin'
 +    dsh_link_args = ['-Wl,-install_name,@rpath/DshGuest.framework/DshGuest']
-+    dsh_suffix = ''
++    dsh_suffix = 'dylib'
 +endif
 +shared_library('DshGuest',
 +    link_whole: [libish, libish_emu, libfakefs],
