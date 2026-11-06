@@ -104,11 +104,14 @@ jobs:
 
       - name: Install the iSH build tools
         run: |
-          brew install llvm
+          # Homebrew ships ld.lld in its own formula now, not with llvm.
+          brew install llvm lld
           python3 -m venv "$RUNNER_TEMP/ish-tools"
           "$RUNNER_TEMP/ish-tools/bin/pip" install meson==1.7.2 ninja==1.11.1.4
           echo "$RUNNER_TEMP/ish-tools/bin" >> "$GITHUB_PATH"
           echo "$(brew --prefix llvm)/bin" >> "$GITHUB_PATH"
+          echo "$(brew --prefix lld)/bin" >> "$GITHUB_PATH"
+          PATH="$(brew --prefix lld)/bin:$PATH" ld.lld --version
 
       - name: Identify the pinned iSH build inputs
         id: ish-inputs
