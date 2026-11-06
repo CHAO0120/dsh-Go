@@ -1519,22 +1519,26 @@ async function powerCutPoints(root, work) {
     const live = await walk(root);
     points.push({ durableDirs: new Map(durable.dirs), durableData: new Map(durable.data), liveDirs: live.dirs, liveData: live.data });
   };
-  fileIo.open = async (name, flags) => {
+  // The installer writes in several lanes: one operation (and its snapshot) at a time keeps
+  // every point a state the disk could really be in.
+  let queue = Promise.resolve();
+  const serial = run => { const next = queue.then(run); queue = next.catch(() => {}); return next; };
+  fileIo.open = (name, flags) => serial(async () => {
     const file = await original.open(name, flags);
     descriptors.set(file.fd, { name, directory: (flags & fileIo.OpenMode.DIR) !== 0 });
     if ((flags & fileIo.OpenMode.CREATE) !== 0) await mark();
     return file;
-  };
-  fileIo.close = async file => { await original.close(file); descriptors.delete(file.fd); };
-  fileIo.fsync = async fd => {
+  });
+  fileIo.close = file => serial(async () => { await original.close(file); descriptors.delete(file.fd); });
+  fileIo.fsync = fd => serial(async () => {
     await original.fsync(fd);
     const entry = descriptors.get(fd);
     if (entry.directory) durable.dirs.set(entry.name, await list(entry.name));
     else durable.data.set((await fs.lstat(entry.name)).ino, await fs.readFile(entry.name));
     await mark();
-  };
+  });
   for (const name of ['write', 'rename', 'unlink', 'mkdir', 'rmdir']) {
-    fileIo[name] = async (...args) => { const result = await original[name](...args); await mark(); return result; };
+    fileIo[name] = (...args) => serial(async () => { const result = await original[name](...args); await mark(); return result; });
   }
   try { await work(); }
   finally { Object.assign(fileIo, original); }
