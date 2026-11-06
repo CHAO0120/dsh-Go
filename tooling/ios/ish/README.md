@@ -4,8 +4,8 @@
 
 ```sh
 # Mac: LLVM 负责 Linux ELF VDSO；Xcode clang 负责 iOS Mach-O。
-brew install meson ninja llvm
-export PATH="$(brew --prefix llvm)/bin:$PATH"
+brew install meson ninja llvm lld
+export PATH="$(brew --prefix llvm)/bin:$(brew --prefix lld)/bin:$PATH"
 tooling/ios/build-ish.sh iphoneos app/ios/Engine/build/iphoneos/guest
 tooling/ios/build-ish.sh iphonesimulator app/ios/Engine/build/iphonesimulator/guest
 # 先prepare-engine，提供对应SDK的NodeMobile与头文件：
@@ -13,9 +13,9 @@ tooling/ios/build-guest-addon.sh iphoneos app/ios/Engine/build/iphoneos/guest
 tooling/ios/build-guest-addon.sh iphonesimulator app/ios/Engine/build/iphonesimulator/guest
 ```
 
-需要 Python 3.11.8+（含 tarfile data filter）、Meson、Ninja、LLVM clang/lld、patch 和 Xcode SDK。两种 SDK 都是 arm64，最低 iOS 15；脚本自身不签名，embed-engine.sh 负责复制与签名。JIT 固定关闭，ELF VDSO 作为数据编进 framework，禁止上游 dummy VDSO fallback。
+需要 Python 3.9+、Meson、Ninja、LLVM clang/lld、patch 和 Xcode SDK。解压器先核验固定源码包的全部路径，只接受目录和普通文件，拒绝链接和特殊文件，不依赖 `tarfile.data_filter`。两种 SDK 都是 arm64，最低 iOS 15；脚本自身不签名，embed-engine.sh 负责复制与签名。JIT 固定关闭，ELF VDSO 作为数据编进 framework，禁止上游 dummy VDSO fallback。
 
-上游 commit、URL、压缩包 SHA256 和关键构建文件 SHA256 在 source.lock.json。下载缓存仅存于 app/ios/Engine/ish-cache；每次实际编译都重新校验、解压、以零 fuzz 顺序打 build.patch 与 job-runtime.patch，不信任旧解压树。`--cache-key SDK` 无下载，计算全部脚本/patch/许可输入、runtime/ios/guest/native所有源码、LLVM clang/lld、Meson/Ninja、Xcode和SDK版本；Apple key 需在 Mac 上运行。输出 .ish-build.json 附带全部 framework 文件摘要，命中时逐个复验；缺失或修改会重编。此缓存是同一受信任 CI 的加速，不是对恶意 receipt 的签名证明。
+上游 commit、URL、压缩包 SHA256 和关键构建文件 SHA256 在 source.lock.json。下载缓存仅存于 app/ios/Engine/ish-cache；每次实际编译都重新校验、解压、以零 fuzz 顺序打 build.patch 与 job-runtime.patch，不信任旧解压树。`--cache-key SDK` 无下载，按全部脚本/patch/许可输入、runtime/ios/guest/native 所有源码、Xcode/SDK/实际 Apple clang 身份和可用构建工具版本划分 CI 缓存；Apple key 需在 Mac 上运行。输出 `.ish-build.json` 将目标身份与构建工具来源分别记录，并附带全部 framework 文件摘要。复用时逐个复验文件及目标身份，成功后直接返回，不探测 Meson/Ninja/LLVM、不下载或解压；Python 版本和 PATH 顺序不影响已验证产物复用。缓存缺失或损坏才要求完整构建工具，并输出上述安装及 PATH 命令。此缓存是同一受信任 CI 的加速，不是对恶意 receipt 的签名证明。
 
 本补丁修复全量链接实际暴露的四份重复 gadget（保留 math.S 与 gen.c 参数流一致的实现），为 ELF 增加 SHA512变量 GOT 访问，补齐 Linux stat/FD路径/netlink 条件分支，并修复静态 offset 生成器对路径空格和失败退出的处理。Apple 文件系统与 netlink 分支保留上游行为。Linux netlink 端口仅用于构建验证，接口字节统计仍为默认值，不作运行能力承诺。
 

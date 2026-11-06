@@ -50,12 +50,16 @@ flutter build ios --release --no-codesign
 生成未签名的 `DshGuest.framework`。上游源码和工具链缓存不进仓库。
 本补丁**未在 Apple 上编译**，首次真实验证由 `iOS compile` 的 `engine` 任务执行。
 
-Mac 首次构建还需 LLVM（生成 ARM64 Linux VDSO）、Meson 和 Ninja；CI 使用
-Meson 1.7.2、Ninja 1.11.1.4。安装后确保它们和 Homebrew LLVM 的 `bin` 在 `PATH` 上。
-脚本要求 Python 提供 `tarfile.data_filter`（可使用 Python 3.12 及以上）。
+Mac 首次构建还需 LLVM（生成 ARM64 Linux VDSO）、独立 lld、Meson 和 Ninja；CI 使用
+Meson 1.7.2、Ninja 1.11.1.4。可运行 `brew install llvm lld meson ninja`，并将
+`$(brew --prefix llvm)/bin`、`$(brew --prefix lld)/bin` 以及 Meson/Ninja 放进 `PATH`。
+iSH 构建脚本兼容 Python 3.9+；固定源码包使用先验证全部路径的解压器，仅接受目录和
+普通文件，不依赖 `tarfile.data_filter`，不会退回未过滤的 `extractall`。
 已准备本机引擎时，Xcode 嵌入阶段会调用该脚本；未准备引擎的远程专用包仍跳过。
 缓存分别在 `Engine/build/iphoneos/guest` 和 `Engine/build/iphonesimulator/guest`，
-命中前核对构建输入、工具链和产物 SHA256，固定源码压缩包在 `Engine/ish-cache`。
+命中前核对构建输入、Xcode/SDK/实际 Apple clang 和全部产物 SHA256；命中后不再探测
+构建工具、下载或解压，因此 Xcode 阶段的 Python 版本及 PATH 顺序变化不会使有效缓存失效。
+缓存未命中才检查 Meson/Ninja/LLVM/lld 并给出安装命令；固定源码压缩包在 `Engine/ish-cache`。
 
 `DshGuest.framework` 与其他引擎 framework 一起复制和签名，不在 App 启动时链接。
 它携带上游许可、固定源码地址和本地修改补丁；Archive 继续拒绝 framework 外的原生代码。

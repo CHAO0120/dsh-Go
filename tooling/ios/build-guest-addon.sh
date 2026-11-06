@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 未在 Apple 上编译. Builds the N-API owner separately from the iSH C kernel.
+# Builds the N-API owner separately from the iSH C kernel.
 # build-guest-addon.sh iphoneos|iphonesimulator OUTPUT_DIR
 # Produces unsigned DshGuestBridge.framework beside DshGuest.framework.
 set -euo pipefail

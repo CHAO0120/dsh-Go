@@ -34,21 +34,74 @@ def digest(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def cache_key(sdk):
+def source_key(sdk):
     inputs = [HERE.parent / 'build-ish.sh', HERE.parent / 'build-guest-addon.sh'] + sorted(p for p in HERE.rglob('*')
               if p.is_file() and '__pycache__' not in p.parts)
     inputs += sorted(p for p in NATIVE.iterdir() if p.is_file())
     data = [(str(p.relative_to(ROOT)), digest(p)) for p in inputs]
-    # Xcode/SDK identity is added to the output receipt separately.
-    versions = {tool: output([tool, '--version']).splitlines()[0]
-                for tool in ('clang', 'ld.lld', 'meson', 'ninja') if shutil.which(tool)}
-    if sdk != 'linux':
-        versions['xcode'] = output(['xcodebuild', '-version'])
-        versions['sdk'] = output(['xcrun', '--sdk', sdk, '--show-sdk-version'])
     cross = os.environ.get('DSH_ISH_LINUX_CROSS_FILE') if sdk == 'linux' else None
     if cross:
-        versions['linux_cross'] = digest(pathlib.Path(cross))
-    return hashlib.sha256(json.dumps([sdk, data, versions], sort_keys=True).encode()).hexdigest()
+        data.append(('linux_cross', digest(pathlib.Path(cross))))
+    return hashlib.sha256(json.dumps([sdk, data], sort_keys=True).encode()).hexdigest()
+
+
+def target_identity(sdk):
+    identity = {'schema': 2, 'inputs': source_key(sdk), 'sdk': sdk}
+    if sdk != 'linux':
+        identity['xcode'] = output(['xcodebuild', '-version'])
+        identity['sdk_version'] = output(['xcrun', '--sdk', sdk, '--show-sdk-version'])
+        compiler = output(['xcrun', '--sdk', sdk, '--find', 'clang'])
+        identity['compiler'] = output([compiler, '--version'])
+    return identity
+
+
+def producer_identity():
+    # Provenance and CI cache partitioning only. Reusing verified bytes does not
+    # require the tools that originally produced them to remain installed.
+    return {tool: output([tool, '--version']).splitlines()[0]
+            for tool in ('clang', 'ld.lld', 'meson', 'ninja') if shutil.which(tool)}
+
+
+def cache_key(sdk):
+    return hashlib.sha256(json.dumps([target_identity(sdk), producer_identity()],
+                                    sort_keys=True).encode()).hexdigest()
+
+
+def verified_receipt(out, identity):
+    try:
+        saved = json.loads((out / '.ish-build.json').read_text())
+        if not isinstance(saved, dict) or saved.get('identity') != identity:
+            return False
+        products = saved.get('products')
+        required = ({'DshGuest.so', 'libvdso.so.elf'} if identity['sdk'] == 'linux' else
+                    {'DshGuest.framework/' + name for name in (
+                        'DshGuest', 'Info.plist', 'LICENSE.txt', 'SOURCE.txt',
+                        'iSH-LICENSE.md', 'iSH-LICENSE.IOS', 'iSH-build.patch',
+                        'iSH-job-runtime.patch')})
+        if not isinstance(products, dict) or not required.issubset(products):
+            return False
+        for name, sha in products.items():
+            path = pathlib.Path(name)
+            if path.is_absolute() or '..' in path.parts or not isinstance(sha, str):
+                return False
+            if not (out / path).is_file() or digest(out / path) != sha:
+                return False
+        return True
+    except (ValueError, OSError, TypeError):
+        return False
+
+
+def require_build_tools(sdk, out):
+    missing = [tool for tool in ('clang', 'ld.lld', 'meson', 'ninja', 'patch')
+               if not shutil.which(tool)]
+    if missing:
+        import shlex
+        command = 'tooling/ios/build-ish.sh ' + shlex.quote(sdk) + ' ' + shlex.quote(str(out))
+        remedy = ('brew install llvm lld meson ninja; '
+                  'export PATH="$(brew --prefix llvm)/bin:$(brew --prefix lld)/bin:$PATH"; ' + command
+                  if sdk != 'linux' else 'Install clang, lld, meson, ninja and patch; then run ' + command)
+        raise RuntimeError('No valid iSH output receipt; rebuild tools missing: ' +
+                           ', '.join(missing) + '. Run: ' + remedy)
 
 
 def verify_vdso(path):
@@ -84,28 +137,56 @@ def download():
     return archive
 
 
-def extract(archive, dest):
-    with tarfile.open(archive) as tar:
-        try:
-            tar.extractall(dest, filter='data')
-            return
-        except TypeError:
-            # A Python without extraction filters (Xcode's /usr/bin/python3). The archive is
-            # pinned by SHA-256; its paths are checked here instead.
-            pass
-        root = os.path.realpath(dest)
-
-        def inside(path):
-            return os.path.realpath(path).startswith(root + os.sep)
-
-        for member in tar.getmembers():
-            target = os.path.join(root, member.name)
-            link = member.issym() or member.islnk()
-            if (not inside(target) or member.isdev() or
-                    (link and (os.path.isabs(member.linkname) or
-                               not inside(os.path.join(os.path.dirname(target), member.linkname))))):
-                raise RuntimeError('unexpected path in the iSH source archive: ' + member.name)
-        tar.extractall(dest)
+def extract_source(tar, destination):
+    """The pinned source contains only directories and regular files (Python 3.9)."""
+    destination = pathlib.Path(destination)
+    if destination.is_symlink() or not destination.is_dir() or any(destination.iterdir()):
+        raise RuntimeError('iSH extraction requires an empty private directory')
+    root = destination.resolve()
+    prefix = 'ish-arm64-' + LOCK['commit']
+    members = tar.getmembers()
+    paths = {}
+    # Validate the whole namespace before creating anything. Never delegate link
+    # handling to tarfile: the fixed upstream archive has no links or devices.
+    for member in members:
+        name = member.name.rstrip('/')
+        parts = pathlib.PurePosixPath(name).parts
+        if (not parts or parts[0] != prefix or name != '/'.join(parts) or
+                any(part in ('.', '..') or ':' in part for part in parts) or
+                '\\' in name or '\x00' in name or name in paths):
+            raise RuntimeError('invalid or duplicate iSH source path: ' + member.name)
+        if not (member.isdir() or member.isreg()) or member.issparse():
+            raise RuntimeError('unsupported iSH source member: ' + member.name)
+        if member.isreg() and (member.name.endswith('/') or member.size < 0):
+            raise RuntimeError('invalid iSH source file: ' + member.name)
+        paths[name] = member
+    for name in paths:
+        for parent in pathlib.PurePosixPath(name).parents:
+            if str(parent) in paths and not paths[str(parent)].isdir():
+                raise RuntimeError('iSH source parent is not a directory: ' + str(parent))
+    for name, member in paths.items():
+        target = root.joinpath(*pathlib.PurePosixPath(name).parts)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        # Only our regular files/directories can exist inside this initially
+        # empty staging root; reject pre-existing symlinks if it was altered.
+        for parent in (target, *target.parents):
+            if parent == root:
+                break
+            if parent.is_symlink():
+                raise RuntimeError('symlink in iSH extraction path')
+        if member.isdir():
+            target.mkdir(exist_ok=True)
+        else:
+            with tar.extractfile(member) as source, target.open('xb') as dest:
+                shutil.copyfileobj(source, dest)
+            target.chmod(member.mode & 0o777)
+            os.utime(target, (member.mtime, member.mtime))
+    # Set directory permissions/timestamps after children have been written.
+    for name, member in reversed(list(paths.items())):
+        if member.isdir():
+            target = root.joinpath(*pathlib.PurePosixPath(name).parts)
+            target.chmod(member.mode & 0o777)
+            os.utime(target, (member.mtime, member.mtime))
 
 
 def main():
@@ -118,29 +199,21 @@ def main():
     out = pathlib.Path(sys.argv[2]).resolve()
     out.mkdir(parents=True, exist_ok=True)
     apple = sdk != 'linux'
-    identity = {'inputs': cache_key(sdk), 'sdk': sdk}
-    if apple:
-        identity['xcode'] = output(['xcodebuild', '-version'])
-        sysroot = output(['xcrun', '--sdk', sdk, '--show-sdk-path'])
-        identity['sdk_version'] = output(['xcrun', '--sdk', sdk, '--show-sdk-version'])
+    identity = target_identity(sdk)
     receipt = out / '.ish-build.json'
-    if receipt.exists():
-        try:
-            saved = json.loads(receipt.read_text())
-        except (ValueError, OSError):
-            saved = {}
-        if saved.get('identity') == identity and saved.get('products') and all(
-                (out / p).is_file() and digest(out / p) == h for p, h in saved['products'].items()):
-            print('iSH build cache verified:', out)
-            return
-    for tool in ('clang', 'ld.lld', 'meson', 'ninja', 'patch'):
-        if not shutil.which(tool):
-            raise RuntimeError('required build tool missing: ' + tool)
+    if verified_receipt(out, identity):
+        print('iSH build cache verified:', out)
+        return
+    require_build_tools(sdk, out)
+    producer = producer_identity()
+    if apple:
+        sysroot = output(['xcrun', '--sdk', sdk, '--show-sdk-path'])
     archive = download()
     # Re-extract verified source on misses; never trust a previously patched tree.
     with tempfile.TemporaryDirectory(prefix='ish-build-', dir=out) as tmp:
         work = pathlib.Path(tmp)
-        extract(archive, work)
+        with tarfile.open(archive) as tar:
+            extract_source(tar, work)
         source = work / ('ish-arm64-' + LOCK['commit'])
         for name, expected in LOCK['buildInputs'].items():
             if digest(source / name) != expected:
@@ -209,7 +282,7 @@ def main():
             products['libvdso.so.elf'] = vdso_sha
         pending = receipt.with_suffix('.tmp')
         pending.write_text(json.dumps({'identity': identity, 'products': products,
-            'upstream': LOCK, 'vdso_sha256': vdso_sha}, indent=2) + '\n')
+            'producer': producer, 'upstream': LOCK, 'vdso_sha256': vdso_sha}, indent=2) + '\n')
         pending.replace(receipt)
         print('iSH build verified:', receipt)
 

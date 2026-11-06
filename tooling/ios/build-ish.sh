@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 未在 Apple 上编译. Build-only iSH dependency; does not activate a guest backend.
+# Builds or verifies the pinned iSH kernel and confined C backend.
 # build-ish.sh iphoneos|iphonesimulator|linux OUTPUT_DIR
 # build-ish.sh --cache-key SDK     (local inputs only; no download)
 set -euo pipefail
