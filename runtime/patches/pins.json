@@ -1719,6 +1719,14 @@
           "after": "8c8c617eec295d60e18189949705e04399cd7b7f4ad027e181c4666c99621a1c"
         }
       }
+    },
+    "ohos-effect-dispose-completion.diff": {
+      "0.2.2-rc.1": {
+        "node_modules/@deepseek-ai/cordis/lib/index.js": {
+          "before": "627409afa06a265f7253200d3bc4648e88805c39fd3768568eb9b9518a31fe8f",
+          "after": "b8b87360ebc67df2d0aabea214b8ed30d4bde3767e354ebb1b85fc6c15b45a05"
+        }
+      }
     }
   },
   "schema": 2,
@@ -1956,7 +1964,8 @@
       "zzzzzzzzzzzzzz-ohos-plugin-packages.diff",
       "ohos-plugin-hmr-transaction.diff",
       "ohos-plugin-remove-rollback.diff",
-      "ohos-plugin-manifest-bom.diff"
+      "ohos-plugin-manifest-bom.diff",
+      "ohos-effect-dispose-completion.diff"
     ]
   }
 }
