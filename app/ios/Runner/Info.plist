@@ -153,8 +153,12 @@
 		<key>NSAllowsLocalNetworking</key>
 		<true/>
 	</dict>
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_remotepairing._tcp</string>
+	</array>
 	<key>NSLocalNetworkUsageDescription</key>
-	<string>Connects to DSH on a computer or server you choose.</string>
+	<string>Connects to DSH hosts you choose and, when enabled, this iPhone's local developer service for phone control.</string>
 	<key>NSCameraUsageDescription</key>
 	<string>Takes photos to send to DSH as attachments.</string>
 	<key>NSRemindersFullAccessUsageDescription</key>

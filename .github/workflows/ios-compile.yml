@@ -25,6 +25,18 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  phone-protocol:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Check the optional native owner without Apple services
+        run: |
+          bash tooling/ios/build-phone-self-runner.sh --check
+          python3 tooling/ios/tests/phone-self-runner.test.py -v
+
   compile:
     runs-on: macos-26
     timeout-minutes: 60
@@ -42,6 +54,15 @@ jobs:
           sw_vers
           xcodebuild -version
           xcodebuild -showsdks | grep -i iphone
+
+      - name: Check real readiness crypto and the enabled Swift native interface
+        run: |
+          python3 tooling/ios/tests/phone-self-runner.test.py -v
+          xcrun swiftc -swift-version 5 -typecheck -D DSH_PHONE_SELF_RUNNER \
+            -sdk "$(xcrun --sdk iphonesimulator --show-sdk-path)" \
+            -target arm64-apple-ios17.0-simulator \
+            -import-objc-header tooling/ios/phone-self-runner/include/dsh_phone_self_runner.h \
+            app/ios/PhoneRunner/PhoneRunnerBootstrap.swift app/ios/Runner/IOSPhoneSelfRunner.swift
 
       - name: Install Flutter
         run: |
@@ -340,6 +361,14 @@ jobs:
         run: |
           node="$(ls -d "$DSH_IOS_ENGINE_WORK"/node-v*-darwin-arm64/bin/node)"
           "$node" tooling/ios/engine-smoke/tools-check.mjs --simulator "$DSH_SIMULATOR" --app app/build/ios/iphonesimulator/Runner.app --work "$RUNNER_TEMP/tools-check"
+
+      - name: Exercise the Swift on-device owner state machine
+        if: ${{ !cancelled() && steps.prepare.outcome == 'success' }}
+        working-directory: app
+        run: |
+          xcodebuild test -workspace ios/Runner.xcworkspace -scheme Runner \
+            -destination "id=$DSH_SIMULATOR" -only-testing:RunnerTests/IOSPhoneSelfRunnerTests \
+            -parallel-testing-enabled NO CODE_SIGNING_ALLOWED=NO
 
       - name: Keep what the tools answered
         if: always()

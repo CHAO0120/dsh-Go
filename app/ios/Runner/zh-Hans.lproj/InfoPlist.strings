@@ -1,5 +1,5 @@
 /* Info.plist in Chinese; English is in Info.plist itself. */
-"NSLocalNetworkUsageDescription" = "连接你选择的电脑或服务器上的 DSH。";
+"NSLocalNetworkUsageDescription" = "连接你选择的 DSH 主机；启用端上手机操控时，也用于连接这台 iPhone 自身的开发者服务。";
 "NSRemindersFullAccessUsageDescription" = "你批准本机引擎的请求时，读取或修改提醒事项。";
 "NSRemindersUsageDescription" = "你批准本机引擎的请求时，读取或修改提醒事项。";
 "NSContactsUsageDescription" = "你批准本机引擎的请求时，查找或新建联系人。";

@@ -52,11 +52,11 @@ const url = `http://127.0.0.1:${endpoint.port}/rpc`;
 const started = Date.now();
 steps.push(`up, ${endpoint.port}`);
 
-async function rpc(method, params = {}, headers = { authorization: `Bearer ${endpoint.token}` }) {
+async function rpc(method, params = {}, headers = { authorization: `Bearer ${endpoint.token}` }, metadata = {}) {
   const at = Date.now();
   const response = await fetch(url, {
     method: 'POST', headers: { 'content-type': 'application/json', ...headers },
-    body: JSON.stringify({ method, params }),
+    body: JSON.stringify({ method, params, ...metadata }),
   });
   const body = await response.json();
   steps.push(`${method} ${JSON.stringify(params)} ${response.status} ${Date.now() - at}ms ${body.ok ? 'ok' : `error: ${body.error}`}`);
@@ -76,6 +76,9 @@ try {
   must((await rpc('screen', {}, { authorization: `Bearer ${endpoint.token}`, origin: 'https://example.com' })).status === 401,
     'answered a web page');
 
+  must((await rpc('key', { key: 'home' }, undefined, { expiresAt: Date.now() - 1 })).status === 410,
+    'an expired queued action was not refused');
+
   // Reading and driving another app.
   const opened = await rpc('open', { app: 'com.apple.Preferences' });
   must(opened.ok, 'could not open Settings');
@@ -84,6 +87,13 @@ try {
   must(screen.ok && /屏幕 s\d+/.test(screen.text), 'no screen');
   must(typeof screen.image === 'string' && screen.image.length > 1000, 'no screenshot');
   notice('settings on screen', screen.text.slice(0, 1500));
+  must(!(await rpc('tap_xy', { observation: 's0', x: 0, y: 0 })).ok, 'accepted an expired screenshot');
+  must(!(await rpc('tap_xy', { observation: screen.screen, x: -1, y: 0 })).ok, 'accepted out-of-bounds screenshot coordinates');
+  const list = idOf(screen.text, /\] (列表|滚动区)(?: |$)/);
+  must(list !== undefined, 'Settings exposes no scroll container in the element tree');
+  const collected = await rpc('collect', { screen: screen.screen, list, max_pages: 1 });
+  must(collected.ok && /General|通用/.test(collected.text), 'could not collect the selected Settings list');
+  screen = await rpc('screen', { image: true });
   const general = idOf(screen.text, /General|通用/);
   must(general !== undefined, 'Settings has no General row in the tree');
   must(!(await rpc('tap', { screen: 's0', id: general })).ok, 'a stale screen number was accepted');

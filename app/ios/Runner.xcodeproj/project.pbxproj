@@ -7,6 +7,10 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		D5480000000000000000F102 /* PhoneRunnerBootstrap.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5480000000000000000F101 /* PhoneRunnerBootstrap.swift */; };
+		D5480000000000000000F103 /* PhoneRunnerBootstrap.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5480000000000000000F101 /* PhoneRunnerBootstrap.swift */; };
+		D5480000000000000000F105 /* IOSPhoneSelfRunner.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5480000000000000000F104 /* IOSPhoneSelfRunner.swift */; };
+		D5480000000000000000F107 /* IOSPhoneSelfRunnerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5480000000000000000F106 /* IOSPhoneSelfRunnerTests.swift */; };
 		D5480000000000000000E00A /* PhoneRunnerUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5480000000000000000E009 /* PhoneRunnerUITests.swift */; };
 		D5480000000000000000E00C /* PhoneRunnerSupport.m in Sources */ = {isa = PBXBuildFile; fileRef = D5480000000000000000E00B /* PhoneRunnerSupport.m */; };
 		1498D2341E8E89220040F4C2 /* GeneratedPluginRegistrant.m in Sources */ = {isa = PBXBuildFile; fileRef = 1498D2331E8E89220040F4C2 /* GeneratedPluginRegistrant.m */; };
@@ -101,6 +105,9 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		D5480000000000000000F101 /* PhoneRunnerBootstrap.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhoneRunnerBootstrap.swift; sourceTree = "<group>"; };
+		D5480000000000000000F104 /* IOSPhoneSelfRunner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IOSPhoneSelfRunner.swift; sourceTree = "<group>"; };
+		D5480000000000000000F106 /* IOSPhoneSelfRunnerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IOSPhoneSelfRunnerTests.swift; sourceTree = "<group>"; };
 		D5480000000000000000E009 /* PhoneRunnerUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhoneRunnerUITests.swift; sourceTree = "<group>"; };
 		D5480000000000000000E00B /* PhoneRunnerSupport.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = PhoneRunnerSupport.m; sourceTree = "<group>"; };
 		D5480000000000000000E00D /* PhoneRunnerSupport.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = PhoneRunnerSupport.h; sourceTree = "<group>"; };
@@ -186,6 +193,7 @@
 			isa = PBXGroup;
 			children = (
 				D5480000000000000000E009 /* PhoneRunnerUITests.swift */,
+				D5480000000000000000F101 /* PhoneRunnerBootstrap.swift */,
 				D5480000000000000000E00D /* PhoneRunnerSupport.h */,
 				D5480000000000000000E00B /* PhoneRunnerSupport.m */,
 				D5480000000000000000E00E /* PhoneRunner-Bridging-Header.h */,
@@ -198,6 +206,7 @@
 			isa = PBXGroup;
 			children = (
 				331C807B294A618700263BE5 /* RunnerTests.swift */,
+				D5480000000000000000F106 /* IOSPhoneSelfRunnerTests.swift */,
 			);
 			path = RunnerTests;
 			sourceTree = "<group>";
@@ -260,6 +269,7 @@
 				D5480000000000000000A004 /* VoiceChannel.swift */,
 				D5480000000000000000C090 /* IOSSystemTools.swift */,
 				D5480000000000000000C080 /* IOSPhoneRunner.swift */,
+				D5480000000000000000F104 /* IOSPhoneSelfRunner.swift */,
 				D5480000000000000000C070 /* IOSBrowser.swift */,
 				D5480000000000000000C060 /* ContinuedRun.swift */,
 				D5480000000000000000C050 /* SiriIntents.swift */,
@@ -341,6 +351,7 @@
 				D5480000000000000000B00B /* Embed Foundation Extensions */,
 				3B06AD1E1E4923F5004D2608 /* Thin Binary */,
 				D5480000000000000000C001 /* Embed DSH Engine */,
+				D5480000000000000000F110 /* Embed Phone Self Runner Notices */,
 			);
 			buildRules = (
 			);
@@ -449,6 +460,18 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXShellScriptBuildPhase section */
+		D5480000000000000000F110 /* Embed Phone Self Runner Notices */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = ();
+			inputPaths = ("$(SRCROOT)/../../tooling/ios/embed-phone-self-runner-notices.sh");
+			name = "Embed Phone Self Runner Notices";
+			outputPaths = ();
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/bash;
+			shellScript = "/bin/bash \"$SRCROOT/../../tooling/ios/embed-phone-self-runner-notices.sh\"";
+		};
 		D5480000000000000000C001 /* Embed DSH Engine */ = {
 			isa = PBXShellScriptBuildPhase;
 			alwaysOutOfDate = 1;
@@ -503,6 +526,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				D5480000000000000000E00A /* PhoneRunnerUITests.swift in Sources */,
+				D5480000000000000000F103 /* PhoneRunnerBootstrap.swift in Sources */,
 				D5480000000000000000E00C /* PhoneRunnerSupport.m in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -512,6 +536,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				331C808B294A63AB00263BE5 /* RunnerTests.swift in Sources */,
+				D5480000000000000000F107 /* IOSPhoneSelfRunnerTests.swift in Sources */,
 				D5480000000000000000B101 /* ShareViewController.swift in Sources */,
 				D5480000000000000000B103 /* ShareInbox.swift in Sources */,
 				D5480000000000000000C0A4 /* SiriIntents.swift in Sources */,
@@ -534,6 +559,8 @@
 				D5480000000000000000A003 /* VoiceChannel.swift in Sources */,
 				D5480000000000000000C091 /* IOSSystemTools.swift in Sources */,
 				D5480000000000000000C081 /* IOSPhoneRunner.swift in Sources */,
+				D5480000000000000000F102 /* PhoneRunnerBootstrap.swift in Sources */,
+				D5480000000000000000F105 /* IOSPhoneSelfRunner.swift in Sources */,
 				D5480000000000000000C071 /* IOSBrowser.swift in Sources */,
 				D5480000000000000000C061 /* ContinuedRun.swift in Sources */,
 				D5480000000000000000C051 /* SiriIntents.swift in Sources */,

@@ -97,7 +97,7 @@ python3 tooling/ios/tests/guest-admission.test.py -v
 - Siri 和快捷指令（iOS 16 以上）：问 DSH Go、语音输入、新建对话。都只是打开 App 停在输入框，不会自动发送。CI 只查过元数据，没实际喊过。
 - 内置浏览器：`mcp__browser__*`，App 内一个独立的 WKWebView，脚本跑在单独的 content world 里。每次运行里，每个站点第一次要用户批准。密码和支付字段不让填，弹页面交给用户。不能访问本机和内网地址，但只查写死的 IP，解析到内网的域名拦不住。iOS 17 以上登录状态和 App 其他网页分开存。
 - 系统工具：`mcp__system__*`，读写提醒事项和联系人、选图片、读一次位置、识别图片里的文字。只在用户看着 App 时才跑，每次都弹确认并写明要读写什么。选图片用系统选择器，它本身就算同意；文字识别只能用这个对话选过的图片，图片 30 分钟或本次运行结束后失效。这部分只编过、没在设备上跑过。
-- 控制其他 App：`tooling/ios/phone-runner.sh <设备 ID>` 从 Mac 启动一个不结束的 UI 测试（`PhoneRunner` target），这是 iOS 上唯一能读和操作其他 App 的办法。要开开发者模式、用和 App 相同的 Team 签名（共用 App Group），脚本要一直开着。它只监听本机回环，端口和令牌写在 App Group 里。用户在 App 里授权一次管 30 分钟，因为切到别的 App 后没法再弹确认；回 DSH Go 结束这一轮就停了。密码、验证码和支付字段由 runner 拒绝，交给用户。不接 Mac 启动还没做。CI 在模拟器上跑过，真机没跑过，也上不了架。
+- 控制其他 App：默认仍用 `tooling/ios/phone-runner.sh <设备 ID>` 从 Mac 启动长期运行的 XCTest（`PhoneRunner` target），读取结构化元素并执行操作；需要开发者模式、同 Team/App Group 签名以及常驻的 Mac 脚本。另有[端上 XCTest 实验](../../tooling/ios/phone-self-runner.md)：显式构建可选原生库后，用 RP 配对、本机隧道和已安装 helper 在手机启动同一套元素读屏；新握手不依赖 App Group，但必须预先挂载匹配 DDI，不声称设备重启后也能永远不用 Mac。用户现有一次 30 分钟授权、敏感输入拦截和 handoff 保留，没有增加逐步确认。Mac 路径已有模拟器烟测；新端上路径尚未做 Apple SDK/真机验证，不能上架或当成已可用功能宣传。
 - `dsh/native-media` 的语音不提供：回声消除管不到扬声器。`dsh/usage` 只读不上报：Worker 只收安卓的值。`dsh/dynamic_color`、`dsh/picture_shortcut` iOS 没有公开接口，入口隐藏。
 - 设备档位：内存低于 3.5 GiB 算低档，其余中档，不用 `high`。
 - 通知只在应用运行时发得出去。锁屏和离开应用后的提醒要 APNs，还没做，所以离开应用后等你确认的请求不会提醒你，回到应用才看得到。

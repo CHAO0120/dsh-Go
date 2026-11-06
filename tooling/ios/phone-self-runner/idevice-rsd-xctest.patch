@@ -1,0 +1,155 @@
+diff --git a/idevice/Cargo.toml b/idevice/Cargo.toml
+index 8389c9b..3094259 100644
+--- a/idevice/Cargo.toml
++++ b/idevice/Cargo.toml
+@@ -163,6 +163,7 @@ installation_proxy = [
+ installcoordination_proxy = ["xpc"]
+ xctest = [
+   "dvt",
++  "device_info",
+   "installation_proxy",
+   "afc",
+   "dep:uuid",
+diff --git a/idevice/src/remote_pairing/rp_pairing_file.rs b/idevice/src/remote_pairing/rp_pairing_file.rs
+index 1ac87c4..7348b98 100644
+--- a/idevice/src/remote_pairing/rp_pairing_file.rs
++++ b/idevice/src/remote_pairing/rp_pairing_file.rs
+@@ -89,7 +89,7 @@ impl RpPairingFile {
+     /// Parse from plist bytes (XML or binary).
+     pub fn from_bytes(bytes: &[u8]) -> Result<Self, IdeviceError> {
+         let mut p: Dictionary = plist::from_bytes(bytes)?;
+-        debug!("Read dictionary for rppairingfile: {p:#?}");
++        debug!("Loaded remote pairing record");
+ 
+         let public_key = match p
+             .remove("public_key")
+diff --git a/idevice/src/services/dvt/device_info.rs b/idevice/src/services/dvt/device_info.rs
+index de903bf..d95566b 100644
+--- a/idevice/src/services/dvt/device_info.rs
++++ b/idevice/src/services/dvt/device_info.rs
+@@ -118,7 +118,7 @@ impl<'a, R: ReadWrite> DeviceInfoClient<'a, R> {
+             )
+             .await?;
+         let data = self.read_reply().await?;
+-        Ok(data.as_boolean().unwrap_or(false))
++        data.as_boolean().ok_or_else(|| IdeviceError::UnexpectedResponse("isRunningPid returned a non-boolean response".into()))
+     }
+ 
+     /// Returns hardware information about the device
+diff --git a/idevice/src/services/dvt/xctest/mod.rs b/idevice/src/services/dvt/xctest/mod.rs
+index 3705645..7444407 100644
+--- a/idevice/src/services/dvt/xctest/mod.rs
++++ b/idevice/src/services/dvt/xctest/mod.rs
+@@ -1959,6 +1959,112 @@ impl std::fmt::Debug for XCUITestService {
+     }
+ }
+ 
++/// DSH pre-launch boundary: cancellation is safe before a launch RPC is sent.
++pub async fn run_rsd_prelaunch<T>(
++    cancel: &mut tokio::sync::watch::Receiver<bool>,
++    limit: std::time::Duration,
++    work: impl std::future::Future<Output = Result<T, IdeviceError>>,
++) -> Result<Option<T>, IdeviceError> {
++    tokio::select! {
++        biased;
++        _ = async { if !*cancel.borrow() { let _ = cancel.changed().await; } } => Ok(None),
++        result = tokio::time::timeout(limit, work) =>
++            result.map_err(|_| IdeviceError::TestRunnerTimeout)?.map(Some),
++    }
++}
++
++/// DSH launch boundary: never infer that cancellation undid a submitted launch.
++pub async fn run_rsd_launch(
++    limit: std::time::Duration,
++    work: impl std::future::Future<Output = Result<u64, IdeviceError>>,
++) -> Result<u64, IdeviceError> {
++    let pid = tokio::time::timeout(limit, work).await
++        .map_err(|_| IdeviceError::UnexpectedResponse("DSH_RUNNER_EXIT_UNCONFIRMED".into()))?
++        .map_err(|_| IdeviceError::UnexpectedResponse("DSH_RUNNER_EXIT_UNCONFIRMED".into()))?;
++    if pid == 0 || pid > u32::MAX as u64 {
++        return Err(IdeviceError::UnexpectedResponse("DSH_RUNNER_EXIT_UNCONFIRMED".into()));
++    }
++    Ok(pid)
++}
++
++/// Run an already authenticated RPPairing/RSD tunnel without a USB/lockdown host.
++/// DSH addition: keep the original session helpers and launch only the requested
++/// signed runner. Cancellation kills only the PID returned by this launch.
++pub async fn run_rsd<L: XCUITestListener>(
++    mut handle: crate::tcp::handle::AdapterHandle,
++    handshake: RsdHandshake,
++    cfg: TestConfig,
++    ios_major_version: u8,
++    listener: &mut L,
++    mut cancel: tokio::sync::watch::Receiver<bool>,
++) -> Result<(), IdeviceError> {
++    if ios_major_version < 17 {
++        return Err(IdeviceError::ServiceNotFound);
++    }
++    let connections = async {
++        let dvt = rsd_connect(&mut handle, &handshake, "com.apple.instruments.dtservicehub", "dsh-dvt", true).await?;
++        let ctrl = rsd_connect(&mut handle, &handshake, TESTMANAGERD_RSD_SERVICE, "dsh-ctrl", false).await?;
++        let main = rsd_connect(&mut handle, &handshake, TESTMANAGERD_RSD_SERVICE, "dsh-main", false).await?;
++        Ok::<_, IdeviceError>(TestManagerConnections { ctrl, main, dvt, rsd_handles: vec![handle] })
++    };
++    let Some(mut conns) = run_rsd_prelaunch(&mut cancel, std::time::Duration::from_secs(90), connections).await?
++        else { return Ok(()); };
++    let session_id = uuid::Uuid::new_v4();
++    let xctest_path = format!("/tmp/{}.xctestconfiguration", session_id.to_string().to_uppercase());
++    let xctest_config = cfg.build_xctest_configuration(session_id, ios_major_version)?;
++    let initialize = async {
++        let mut ctrl = TestManagerProxy::open(&mut conns.ctrl, ios_major_version).await?;
++        let mut main = TestManagerProxy::open(&mut conns.main, ios_major_version).await?;
++        initialize_testmanager_sessions(&mut ctrl, &mut main, &xctest_config).await?;
++        register_early_driver_channel_handler(&mut conns.main, &xctest_config).await;
++        initialize_testmanager_daemon_sessions(&mut ctrl, &mut main, ios_major_version,
++                                              &session_id, &xctest_config).await?;
++        Ok::<_, IdeviceError>((ctrl, main))
++    };
++    let Some((mut ctrl_proxy, mut main_proxy)) = run_rsd_prelaunch(&mut cancel,
++        std::time::Duration::from_secs(90), initialize).await? else { return Ok(()); };
++    let Some(mut process_control) = run_rsd_prelaunch(&mut cancel,
++        std::time::Duration::from_secs(10), XCTestProcessControlChannel::open(&mut conns.dvt)).await?
++        else { return Ok(()); };
++    if *cancel.borrow() { return Ok(()); }
++    let (launch_args, launch_env, launch_options) = build_launch_env(
++        ios_major_version, &session_id, &cfg.runner_app_path, &cfg.runner_app_container,
++        cfg.config_name(), &xctest_path, cfg.runner_env.as_ref(), cfg.runner_args.as_deref());
++    // Once launch is sent, retain the owner until it yields a PID or an error.
++    // Do not cancel a partially sent launch then let a new owner race its cleanup.
++    let pid = run_rsd_launch(std::time::Duration::from_secs(30),
++        process_control.launch_suspended_process(&cfg.runner_bundle_id, launch_args,
++                                                launch_env, launch_options)).await?;
++    let execution = async {
++        ctrl_proxy.authorize_test(ios_major_version, pid).await?;
++        let driver = start_test_plan_session(&mut conns.main, &mut main_proxy).await?;
++        run_dispatch_loop_until_done_or_disconnect(&mut conns.main, driver, &xctest_config,
++                                                   listener, None).await
++    };
++    let result = tokio::select! {
++        biased;
++        _ = async { if !*cancel.borrow() { let _ = cancel.changed().await; } } => Ok(()),
++        result = execution => result,
++    };
++    // The single native owner is not released until this cleanup and the tunnel
++    // have completed. Never look up a bundle PID: it could belong to a newer run.
++    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(10);
++    let _ = tokio::time::timeout_at(deadline, process_control.service.kill_app(pid)).await;
++    drop(process_control);
++    let cleanup = async {
++        let pid = u32::try_from(pid).map_err(|_| IdeviceError::TestRunnerTimeout)?;
++        let mut info = crate::services::dvt::device_info::DeviceInfoClient::new(&mut conns.dvt).await?;
++        while info.is_running_pid(pid).await? {
++            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
++        }
++        Ok::<_, IdeviceError>(())
++    };
++    match tokio::time::timeout_at(deadline, cleanup).await {
++        Ok(Ok(())) => result,
++        _ => Err(IdeviceError::UnexpectedResponse("DSH_RUNNER_EXIT_UNCONFIRMED".into())),
++    }
++}
++
+ impl XCUITestService {
+     /// Creates a new `XCUITestService` backed by the given provider.
+     pub fn new(provider: Arc<dyn IdeviceProvider>) -> Self {

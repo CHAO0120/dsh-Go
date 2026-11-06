@@ -144,6 +144,7 @@ final class IOSPhoneBridge: NSObject, URLSessionTaskDelegate {
         if status == 410 || request.expiresAt <= Date().timeIntervalSince1970 * 1000 {
           active = nil
           operation?.cancel(); operation = nil
+          runner.cancelPreparation()
           actions.cancel(request.id)
           browser.enteredBackground()
           system.stopAsking()

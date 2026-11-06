@@ -292,6 +292,18 @@ PY_APK
 最终 App 的开源许可页还应能打开 `WebRTC` 条目并查看汇编末尾 `zlib` 章节。上述命令和定向测试不代表已经运行最终发行 APK；构建与 UI 检查结果应另记在实际发行验证记录中。默认关闭 P2P 不会移除这些已打包依赖或免除通知收录。
 
 
+### 可选 iOS 端上 XCTest 原生库（实验）
+
+| 项 | 内容 |
+|---|---|
+| 项目 | [jkcoxson/idevice](https://github.com/jkcoxson/idevice) |
+| 固定来源 | `3854a5df4a5a6dee71ffce4d8befc2ea356a8065`，归档摘要见 [source-pins.json](tooling/ios/phone-self-runner/source-pins.json) |
+| 版权 / 许可 | Copyright 2026 Jackson Coxson；MIT |
+| 用途 | 仅显式启用的 iOS 实验构建：本机 RP pairing 隧道、RSD、testmanagerd 与签名 XCTest Runner 启动；默认 App 构建不链接 |
+| 本地修改 | [idevice-rsd-xctest.patch](tooling/ios/phone-self-runner/idevice-rsd-xctest.patch)：增加直接 RSD 会话入口和按本次 PID 的停止确认，移除配对记录明文 debug；不是合入外部 PR |
+
+源代码准备器验证固定归档并保留上游 MIT 文本；原生构建输出 `LICENSE.idevice.txt` 与锁定依赖的 `THIRD_PARTY_CRATES.json`，启用后的 App 把两者放入 `PhoneSelfRunnerNotices/`。清单中的许可证表达式不是完整的传递依赖版权/许可正文汇编；正式分发可选原生库前仍需核对实际链接组件及它们的通知义务，不能把当前实验构建视作许可审计已完成。该实现没有复制 `iphone-use-app` 或外部 self-runner PR 的源码。
+
 ## 四、Linux 运行时组件
 
 APK 内置的 Linux 运行时由 `runtime/build-runtime.sh` 构建，以下组件来自上游二进制或软件包，各自保留许可证；构建会裁剪文件，并为 APK 命名规则修改 proot 的 DT_NEEDED 和 libtalloc 的 DT_SONAME，具体修改记录在构建报告中：原生部分的许可证文本在 APK 的 `assets/runtime/licenses/` 下，Ubuntu 软件包的版权文件保留在运行时的 `/usr/share/doc/`。
