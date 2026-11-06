@@ -22,6 +22,7 @@
 #include "image_binding.h"
 #include "phone_binding.h"
 #include "activity_clock_binding.h"
+#include "guest_config_binding.h"
 
 namespace {
 // Secondary threads get 512 KiB by default here, less than V8's stack limit assumes.
@@ -90,7 +91,29 @@ size_t StopAtHeapLimit(void* data, size_t current, size_t) {
   return current + 16 * 1024 * 1024;
 }
 
-int RunEnvironment(const std::vector<std::string>& args, const std::vector<std::string>& exec_args) {
+// The callback is copied by Node into child Workers. Capture the immutable path
+// by value, never Run or Environment state. The default run has no callback.
+node::EmbedderPreloadCallback GuestPreload(const std::string& selector) {
+  if (selector.empty()) return nullptr;
+  return [selector](node::Environment*, v8::Local<v8::Value>, v8::Local<v8::Value> require) {
+    auto* isolate = v8::Isolate::GetCurrent();
+    auto context = isolate->GetCurrentContext();
+    auto text = [&](const std::string& value) {
+      return v8::String::NewFromUtf8(isolate, value.c_str()).ToLocalChecked();
+    };
+    v8::Local<v8::Value> module_id = text("module");
+    v8::Local<v8::Value> module, create, disk_require, ignored;
+    if (!require.As<v8::Function>()->Call(context, v8::Undefined(isolate), 1, &module_id).ToLocal(&module)) return;
+    if (!module.As<v8::Object>()->Get(context, text("createRequire")).ToLocal(&create)) return;
+    v8::Local<v8::Value> filename = text(selector);
+    if (!create.As<v8::Function>()->Call(context, module, 1, &filename).ToLocal(&disk_require)) return;
+    // Leave any exception pending: startup must fail, never silently use the
+    // default routing after an installed preload failed.
+    if (!disk_require.As<v8::Function>()->Call(context, v8::Undefined(isolate), 1, &filename).ToLocal(&ignored)) return;
+  };
+}
+
+int RunEnvironment(const std::vector<std::string>& args, const std::vector<std::string>& exec_args, const std::string& guest_selector) {
   std::vector<std::string> errors;
   const auto flags = static_cast<node::EnvironmentFlags::Flags>(
       node::EnvironmentFlags::kNoGlobalSearchPaths |
@@ -127,7 +150,7 @@ int RunEnvironment(const std::vector<std::string>& args, const std::vector<std::
       if (stop_requested) node::Stop(env);
     }
     // An empty callback selects Node's normal CLI entry and its --import chain.
-    if (!node::LoadEnvironment(env, node::StartExecutionCallback{}).IsEmpty()) {
+    if (!node::LoadEnvironment(env, node::StartExecutionCallback{}, GuestPreload(guest_selector)).IsEmpty()) {
       result = node::SpinEventLoop(env).FromMaybe(1);
     }
     {
@@ -151,6 +174,7 @@ struct Run {
   std::condition_variable finished_changed;
   bool finished = false;
   std::vector<std::string> arguments;
+  std::string guest_selector;
   int result = 1;
 };
 
@@ -165,10 +189,11 @@ void* RunOnEngineThread(void* raw) {
   } finished{run};
   if (!initialization) {
     dsh_ios::RegisterActivityClockBinding();
+    dsh_ios::guest_config::Register();
     RegisterPhoneBinding();
     RegisterImageBinding();
-    // Options parsed here hold for every later Environment. The host's argv is fixed
-    // for this installation, so what later runs would parse is the same.
+    // Process options stay fixed, including the original default --import.
+    // Installed selection happens in the per-Environment preload callback.
     RegisterPublicationBinding();
     initialization = node::InitializeOncePerProcess(run->arguments, {
         node::ProcessInitializationFlags::kNoStdioInitialization,
@@ -192,7 +217,10 @@ void* RunOnEngineThread(void* raw) {
     run->result = initialization->exit_code();
     return nullptr;
   }
-  run->result = RunEnvironment(initialization->args(), initialization->exec_args());
+  // Application arguments (including this run's patches) are not process options.
+  std::vector<std::string> args{run->arguments.front()};
+  args.insert(args.end(), run->arguments.begin() + 9, run->arguments.end());
+  run->result = RunEnvironment(args, initialization->exec_args(), run->guest_selector);
   return nullptr;
 }
 }  // namespace
@@ -223,6 +251,15 @@ extern "C" __attribute__((visibility("default"))) int dsh_node_start(int argc, c
   RaiseFileLimit();
 
   Run run;
+  if (dsh_ios::guest_config::Enabled()) {
+    const std::string root = std::string(argv[3]).substr(0, std::strlen(argv[3]) - std::strlen("runtime/ohos/preload.mjs"));
+    run.guest_selector = root + "runtime/ios/guest/preload-selector.cjs";
+    if (access(run.guest_selector.c_str(), R_OK) != 0 ||
+        access((root + "runtime/ohos/preload-guest.mjs").c_str(), R_OK) != 0) {
+      std::lock_guard<std::mutex> lock(environment_mutex); active = false;
+      return RejectStartup("ERR_IOS_GUEST_PRELOAD");
+    }
+  }
   // Node's defaults assume a server's memory: left alone, the heap grows until iOS ends
   // the app. These held a five-tool round with a large JSON worker; not yet set on a device.
   run.arguments = {argv[0], argv[1], "--max-old-space-size=256", "--max-semi-space-size=4", "--require", worker_preload, kPlatformImport, argv[2], argv[3]};

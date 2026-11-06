@@ -11,6 +11,8 @@ private final class NativeEngine {
     UnsafePointer<CChar>, Int32, UnsafePointer<UnsafePointer<CChar>?>?, UnsafePointer<UnsafePointer<CChar>?>?,
     UnsafeMutablePointer<UnsafeMutablePointer<CChar>?>?, UnsafeMutablePointer<UnsafeMutablePointer<CChar>?>?
   ) -> Int32
+  private typealias GuestConfig = @convention(c) (Int32, UnsafePointer<CChar>) -> Int32
+  private let guestConfig: GuestConfig
   private typealias Stop = @convention(c) () -> Void
   private typealias Text = @convention(c) () -> UnsafeMutablePointer<CChar>?
   private typealias Free = @convention(c) (UnsafeMutablePointer<CChar>?) -> Void
@@ -40,6 +42,7 @@ private final class NativeEngine {
       }
       return unsafeBitCast(found, to: type)
     }
+    guestConfig = try symbol("dsh_host_guest_config", as: GuestConfig.self)
     start = try symbol("dsh_host_start", as: Start.self)
     stopEngine = try symbol("dsh_host_stop", as: Stop.self)
     state = try symbol("dsh_host_state", as: Text.self)
@@ -71,6 +74,13 @@ private final class NativeEngine {
       free(code)
       free(message)
       throw failure
+    }
+  }
+
+  func configureGuest(_ snapshot: [String: Any]) throws {
+    let bytes = try JSONSerialization.data(withJSONObject: snapshot)
+    guard let json = String(data: bytes, encoding: .utf8), json.withCString({ guestConfig(snapshot["installed"] as? Bool == true ? 1 : 0, $0) }) == 0 else {
+      throw EngineFailure("ios_guest_config", "Linux 环境启动快照不可用。")
     }
   }
 
@@ -897,6 +907,7 @@ final class EngineChannel: NSObject, FlutterStreamHandler {
   }
 
   private func begin(_ environment: [String: String], visualReplies: Bool) throws {
+    var pendingGuestTemporary: URL?
     pending = "start"
     lastError = nil
     emitStatus()
@@ -925,12 +936,37 @@ final class EngineChannel: NSObject, FlutterStreamHandler {
       NSTimeZone.resetSystemTimeZone()
       var launchEnvironment = environment
       launchEnvironment["TZ"] = TimeZone.current.identifier
+      // Installation changes take effect at the next engine start. This is an
+      // App-owned snapshot, never a user environment/configuration override.
+      let linux = GuestRootfsInstaller(base: filesDirectory.appendingPathComponent("dsh-guest", isDirectory: true))
+      let linuxInstalled = (try? linux.installed()) == true
+      let linuxAvailable = linuxInstalled && NativeGuestKernelAccess.shared.available
+      // Never mount cache/ohos-process: it holds virtual-shell spill/state.
+      let linuxTemporary = FileManager.default.temporaryDirectory.appendingPathComponent("dsh-guest-" + UUID().uuidString, isDirectory: true)
+      if linuxAvailable {
+        pendingGuestTemporary = linuxTemporary
+        try FileManager.default.createDirectory(at: linuxTemporary, withIntermediateDirectories: false,
+                                               attributes: [.posixPermissions: 0o700])
+      }
+      let protectedPaths = [dshHome, agentsHome, cache, installer.root, filesDirectory.appendingPathComponent("dsh-guest", isDirectory: true)].map { $0.standardizedFileURL.path }
+      try native?.configureGuest([
+        "installed": linuxAvailable,
+        "root": linux.root.path,
+        "temporaryRoot": linuxTemporary.path,
+        "addon": (native?.frameworks ?? "") + "/DshGuestBridge.framework/DshGuestBridge",
+        "protectedPaths": protectedPaths,
+        "metadata": ["v": 1, "source": "ios-native-owner", "state": linuxAvailable ? "ready" : "unavailable",
+                     "installed": linuxInstalled ? "present" : "absent", "available": linuxAvailable,
+                     "enforcement": "partial", "python": "unknown"]
+      ])
       try native?.begin(
         runtime: installer.root.path, guest: guestRoot.path, home: dshHome.path, cache: cache.path,
         workspace: workspace.path, env: launchEnvironment)
+      pendingGuestTemporary = nil // Node owner now owns successful cleanup; quarantine retains it.
       startPolling()
       startPhone()
     } catch {
+      if let temporary = pendingGuestTemporary { try? FileManager.default.removeItem(at: temporary) }
       retirePhone()
       lastError = (error as? EngineFailure)?.message ?? "本机引擎启动失败。"
       throw error

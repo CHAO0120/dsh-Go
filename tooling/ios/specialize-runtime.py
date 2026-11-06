@@ -238,15 +238,37 @@ def specialize(expanded, out, composer):
     for name in DIAGNOSTIC_EDITS:
         data = attachments if name == ATTACHMENTS else (expanded / 'files' / name).read_bytes()
         diagnostics[name] = diagnostics_for_ios(name, data)
+    guest_spec = importlib.util.spec_from_file_location('ios_guest_specialization', Path(__file__).with_name('guest-specialization.py'))
+    guest = importlib.util.module_from_spec(guest_spec)
+    guest_spec.loader.exec_module(guest)
+    for name, anchors in guest.INPUT_GUARDS.items():
+        data = (expanded / 'files' / name).read_bytes()
+        if entries[name]['sha256'] != composer.digest(data) or entries[name]['size'] != len(data):
+            raise ValueError('iOS guest owner input differs from shared manifest: ' + name)
+        for anchor in anchors:
+            if data.count(anchor.encode()) != 1:
+                raise ValueError('iOS guest cleanup owner API differs from pinned source: ' + name)
+    guest_overrides = {}
+    guest_mapping = {}
+    for name in guest.EDITS:
+        data = diagnostics.get(name, (expanded / 'files' / name).read_bytes())
+        target = 'runtime/ios/guest/overrides/' + name
+        guest_mapping[name] = target
+        guest_overrides[target] = guest.specialize(name, data)
     codec = (Path(__file__).resolve().parents[2] / 'runtime/ios/image/ios-sharp.cjs').read_bytes()
     worker_env = (Path(__file__).resolve().parents[2] / WORKER_ENV).read_bytes()
     relocation = {name: (Path(__file__).resolve().parents[2] / name).read_bytes()
-                  for name in RELOCATION_FILES}
+                  for name in (*RELOCATION_FILES, *guest.FILES)}
     preload = (expanded / 'files' / PRELOAD).read_text()
     if preload.count(PRELOAD_BEFORE) != 1 or '../ios/storage/preload.mjs' in preload:
         raise ValueError('iOS relocation preload differs from the shared input')
+    guest_preload = (Path(__file__).with_name('guest-preload.js.txt')).read_text()
+    guest_boot = preload.replace(PRELOAD_BEFORE, PRELOAD_AFTER + guest_preload)
     preload = preload.replace(PRELOAD_BEFORE, PRELOAD_AFTER).encode()
-    for name in (HELPER, PROVENANCE, ATTACHMENTS, PRELOAD, *DIAGNOSTIC_EDITS):
+    relocation.update(guest_overrides)
+    relocation['runtime/ios/guest/overrides.json'] = composer.json_bytes(guest_mapping)
+    relocation['runtime/ohos/preload-guest.mjs'] = ("await import('../ios/guest/overrides.mjs');\n" + guest_boot).encode()
+    for name in (HELPER, PROVENANCE, ATTACHMENTS, PRELOAD, *DIAGNOSTIC_EDITS, *guest.EDITS):
         data = (expanded / 'files' / name).read_bytes()
         if entries[name]['sha256'] != composer.digest(data) or entries[name]['size'] != len(data):
             raise ValueError('iOS specialization input differs from shared manifest: ' + name)

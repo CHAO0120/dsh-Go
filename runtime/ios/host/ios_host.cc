@@ -11,6 +11,7 @@
 
 #include "host_core.h"
 #include "relocation_origin.h"
+#include "guest_config_binding.h"
 
 extern "C" int dsh_node_start(int argc, char** argv);
 extern "C" int dsh_node_stop();
@@ -44,6 +45,21 @@ std::string ExitCode(const std::optional<int>& code) {
   return "\"exitCode\":" + (code ? std::to_string(*code) : std::string("null"));
 }
 }  // namespace
+
+// Called only by the App before engine start; no JS or environment setter exists.
+extern "C" __attribute__((visibility("default")))
+int dsh_host_guest_config(int enabled, const char* json) {
+  if ((enabled != 0 && enabled != 1) || !json || std::strlen(json) > 65536) return 1;
+  std::lock_guard<std::mutex> lock(host_mutex);
+  if (host) {
+    const auto phase = host->State().phase;
+    if (phase != "exited" && phase != "error") return 1;
+  }
+  std::lock_guard<std::mutex> config_lock(dsh_ios::guest_config::mutex);
+  dsh_ios::guest_config::snapshot = json;
+  dsh_ios::guest_config::enabled = enabled != 0;
+  return 0;
+}
 
 extern "C" __attribute__((visibility("default")))
 int dsh_host_start(const char* runtime_root, const char* guest_root, const char* dsh_home, const char* cache_dir,
