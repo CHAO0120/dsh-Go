@@ -946,6 +946,7 @@ def main():
     g.internal('flutter-input-identity', flutter_identity, needs=('flutter-l10n', 'install-record-wire'))
     flutter_tests = ['test/secrets', 'test/ohos/attachment_files_test.dart', 'test/runtime/phone_callback_bridge_test.dart', 'test/runtime/runtime_recovery_test.dart', 'test/runtime/ohos_install_record_test.dart', 'test/usage/ohos_device_contract_test.dart',
                      'test/safe_mode/safe_mode_logic_test.dart', 'test/state/engine_control_test.dart', 'test/runtime/runtime_controller_test.dart',
+                     'test/plugins/ohos_replace_cancel_test.dart',
                      'test/chat/attachment_file_budget_test.dart', 'test/remote/private_key_file_budget_test.dart',
                      'test/chat/attachment_owner_test.dart', 'test/remote/ssh_key_callback_lifetime_test.dart', 'test/share_hosted', 'test/share/share_panel_test.dart']
     g.run('flutter-consumers', lambda: g.flutter('test', '--no-pub', '--reporter', 'json', '--concurrency=1', *flutter_tests), cwd=g.flutter_source / 'app', env=g.flutter_env, needs=('flutter-input-identity',), timeout=300, tests=['app/' + x for x in flutter_tests], scope='Actual Linux Flutter engine and Dart consumers; not OHOS AOT/device')
