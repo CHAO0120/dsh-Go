@@ -31,6 +31,10 @@ final class DshPlugin: NSObject, FlutterPlugin, FlutterSceneLifeCycleDelegate {
     shortcuts = ShortcutsChannel(messenger: messenger)
     shares = ShareChannel(messenger: messenger)
     keep = [
+      GuestChannel(messenger: messenger, kernel: NativeGuestKernelAccess.shared, support: Result {
+        try FileManager.default.url(for: .applicationSupportDirectory, in: .userDomainMask,
+          appropriateFor: nil, create: true)
+      }),
       AppChannel(messenger: messenger),
       FilesChannel(messenger: messenger),
       MediaChannel(messenger: messenger),

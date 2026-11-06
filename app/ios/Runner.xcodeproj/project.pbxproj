@@ -51,6 +51,12 @@
 		D5480000000000000000B005 /* ShareInbox.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5480000000000000000B004 /* ShareInbox.swift */; };
 		D5480000000000000000B006 /* ShareChannel.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5480000000000000000B007 /* ShareChannel.swift */; };
 		D5480000000000000000B008 /* ShareExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = D5480000000000000000B009 /* ShareExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		D5480000000000000000F002 /* GuestRootfsArchive.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5480000000000000000F001 /* GuestRootfsArchive.swift */; };
+		D5480000000000000000F004 /* GuestRootfsInstaller.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5480000000000000000F003 /* GuestRootfsInstaller.swift */; };
+		D5480000000000000000F006 /* GuestChannel.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5480000000000000000F005 /* GuestChannel.swift */; };
+		D5480000000000000000F008 /* GuestKernelAccess.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5480000000000000000F007 /* GuestKernelAccess.swift */; };
+		D5480000000000000000F00A /* libsqlite3.tbd in Frameworks */ = {isa = PBXBuildFile; fileRef = D5480000000000000000F009 /* libsqlite3.tbd */; };
+		D5480000000000000000F00C /* libz.tbd in Frameworks */ = {isa = PBXBuildFile; fileRef = D5480000000000000000F00B /* libz.tbd */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -147,6 +153,12 @@
 		D5480000000000000000B00C /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		D5480000000000000000B00D /* ShareExtension.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = ShareExtension.entitlements; sourceTree = "<group>"; };
 		D5480000000000000000B00E /* Runner.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Runner.entitlements; sourceTree = "<group>"; };
+		D5480000000000000000F001 /* GuestRootfsArchive.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GuestRootfsArchive.swift; sourceTree = "<group>"; };
+		D5480000000000000000F003 /* GuestRootfsInstaller.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GuestRootfsInstaller.swift; sourceTree = "<group>"; };
+		D5480000000000000000F005 /* GuestChannel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GuestChannel.swift; sourceTree = "<group>"; };
+		D5480000000000000000F007 /* GuestKernelAccess.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GuestKernelAccess.swift; sourceTree = "<group>"; };
+		D5480000000000000000F009 /* libsqlite3.tbd */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.text-based-dylib-definition; name = libsqlite3.tbd; path = usr/lib/libsqlite3.tbd; sourceTree = SDKROOT; };
+		D5480000000000000000F00B /* libz.tbd */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.text-based-dylib-definition; name = libz.tbd; path = usr/lib/libz.tbd; sourceTree = SDKROOT; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -154,6 +166,8 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				D5480000000000000000F00A /* libsqlite3.tbd in Frameworks */,
+				D5480000000000000000F00C /* libz.tbd in Frameworks */,
 				78A318202AECB46A00862997 /* FlutterGeneratedPluginSwiftPackage in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -236,6 +250,12 @@
 				1498D2321E8E86230040F4C2 /* GeneratedPluginRegistrant.h */,
 				1498D2331E8E89220040F4C2 /* GeneratedPluginRegistrant.m */,
 				74858FAE1ED2DC5600515810 /* AppDelegate.swift */,
+				D5480000000000000000F001 /* GuestRootfsArchive.swift */,
+				D5480000000000000000F003 /* GuestRootfsInstaller.swift */,
+				D5480000000000000000F005 /* GuestChannel.swift */,
+				D5480000000000000000F007 /* GuestKernelAccess.swift */,
+				D5480000000000000000F009 /* libsqlite3.tbd */,
+				D5480000000000000000F00B /* libz.tbd */,
 				D5480000000000000000A002 /* DshPlugin.swift */,
 				D5480000000000000000A004 /* VoiceChannel.swift */,
 				D5480000000000000000C090 /* IOSSystemTools.swift */,
@@ -506,6 +526,10 @@
 			buildActionMask = 2147483647;
 			files = (
 				74858FAF1ED2DC5600515810 /* AppDelegate.swift in Sources */,
+				D5480000000000000000F002 /* GuestRootfsArchive.swift in Sources */,
+				D5480000000000000000F004 /* GuestRootfsInstaller.swift in Sources */,
+				D5480000000000000000F006 /* GuestChannel.swift in Sources */,
+				D5480000000000000000F008 /* GuestKernelAccess.swift in Sources */,
 				D5480000000000000000A001 /* DshPlugin.swift in Sources */,
 				D5480000000000000000A003 /* VoiceChannel.swift in Sources */,
 				D5480000000000000000C091 /* IOSSystemTools.swift in Sources */,
