@@ -8049,6 +8049,68 @@ class L10nEn extends L10n {
   String get iosAccessSubtitle => 'What each feature needs from iOS';
 
   @override
+  String get iosLinuxTitle => 'Linux environment';
+
+  @override
+  String get iosLinuxIntro =>
+      'Once it\'s installed, commands the virtual shell can\'t run go to Linux, such as Python installed with apk. Approvals stay the same, and it can reach only the workspace and a temporary folder.';
+
+  @override
+  String get iosLinuxInstall => 'Install the Linux environment';
+
+  @override
+  String get iosLinuxDownloadSize => 'About 4 MB';
+
+  @override
+  String get iosLinuxDownloading => 'Downloading';
+
+  @override
+  String get iosLinuxVerifying => 'Checking';
+
+  @override
+  String get iosLinuxExtracting => 'Unpacking';
+
+  @override
+  String get iosLinuxFinishing => 'Finishing';
+
+  @override
+  String get iosLinuxSystem => 'System';
+
+  @override
+  String get iosLinuxStorage => 'Storage used';
+
+  @override
+  String get iosLinuxUninstall => 'Uninstall the Linux environment';
+
+  @override
+  String get iosLinuxUninstallBody =>
+      'This deletes the Linux environment and everything installed in it. Files in your workspaces stay.';
+
+  @override
+  String get iosLinuxUninstallConfirm => 'Uninstall';
+
+  @override
+  String get iosLinuxUninstalling => 'Uninstalling…';
+
+  @override
+  String get iosLinuxRestartEngine => 'Installed. Restart the engine on this phone for commands to use it.';
+
+  @override
+  String get iosLinuxErrorNetwork => 'The download didn\'t work. Check the connection and try again.';
+
+  @override
+  String get iosLinuxErrorDamaged => 'The download was incomplete and has been discarded. Try again.';
+
+  @override
+  String get iosLinuxErrorNoSpace => 'There isn\'t enough storage on this phone.';
+
+  @override
+  String get iosLinuxErrorInUse => 'The Linux environment is in use. Reopen the app to uninstall it.';
+
+  @override
+  String get iosLinuxErrorOther => 'That didn\'t finish. Try again.';
+
+  @override
   String get launchScreenTitle => 'Launch screen';
 
   @override

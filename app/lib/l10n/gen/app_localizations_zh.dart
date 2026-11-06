@@ -7606,6 +7606,66 @@ class L10nZh extends L10n {
   String get iosAccessSubtitle => '各项功能用到的系统权限';
 
   @override
+  String get iosLinuxTitle => 'Linux 环境';
+
+  @override
+  String get iosLinuxIntro => '装好后，虚拟 shell 跑不了的命令会在 Linux 里运行，比如用 apk 装的 Python。审批照旧，只能碰工作区和临时目录。';
+
+  @override
+  String get iosLinuxInstall => '安装 Linux 环境';
+
+  @override
+  String get iosLinuxDownloadSize => '约 4 MB';
+
+  @override
+  String get iosLinuxDownloading => '正在下载';
+
+  @override
+  String get iosLinuxVerifying => '正在校验';
+
+  @override
+  String get iosLinuxExtracting => '正在解压';
+
+  @override
+  String get iosLinuxFinishing => '即将完成';
+
+  @override
+  String get iosLinuxSystem => '系统';
+
+  @override
+  String get iosLinuxStorage => '占用空间';
+
+  @override
+  String get iosLinuxUninstall => '卸载 Linux 环境';
+
+  @override
+  String get iosLinuxUninstallBody => '会删除 Linux 环境和在里面装的所有软件。工作区里的文件不受影响。';
+
+  @override
+  String get iosLinuxUninstallConfirm => '卸载';
+
+  @override
+  String get iosLinuxUninstalling => '正在卸载…';
+
+  @override
+  String get iosLinuxRestartEngine => '已装好。重启本机引擎后，命令才会用上它。';
+
+  @override
+  String get iosLinuxErrorNetwork => '下载没成功。检查网络后再试一次。';
+
+  @override
+  String get iosLinuxErrorDamaged => '下载的文件不完整，已经丢掉了，再试一次。';
+
+  @override
+  String get iosLinuxErrorNoSpace => '手机存储空间不够了。';
+
+  @override
+  String get iosLinuxErrorInUse => 'Linux 环境正在使用，重新打开 App 后才能卸载。';
+
+  @override
+  String get iosLinuxErrorOther => '没有完成，再试一次。';
+
+  @override
   String get launchScreenTitle => '启动画面';
 
   @override

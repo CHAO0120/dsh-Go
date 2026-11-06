@@ -13958,6 +13958,126 @@ abstract class L10n {
   /// **'各项功能用到的系统权限'**
   String get iosAccessSubtitle;
 
+  /// No description provided for @iosLinuxTitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'Linux 环境'**
+  String get iosLinuxTitle;
+
+  /// No description provided for @iosLinuxIntro.
+  ///
+  /// In zh, this message translates to:
+  /// **'装好后，虚拟 shell 跑不了的命令会在 Linux 里运行，比如用 apk 装的 Python。审批照旧，只能碰工作区和临时目录。'**
+  String get iosLinuxIntro;
+
+  /// No description provided for @iosLinuxInstall.
+  ///
+  /// In zh, this message translates to:
+  /// **'安装 Linux 环境'**
+  String get iosLinuxInstall;
+
+  /// No description provided for @iosLinuxDownloadSize.
+  ///
+  /// In zh, this message translates to:
+  /// **'约 4 MB'**
+  String get iosLinuxDownloadSize;
+
+  /// No description provided for @iosLinuxDownloading.
+  ///
+  /// In zh, this message translates to:
+  /// **'正在下载'**
+  String get iosLinuxDownloading;
+
+  /// No description provided for @iosLinuxVerifying.
+  ///
+  /// In zh, this message translates to:
+  /// **'正在校验'**
+  String get iosLinuxVerifying;
+
+  /// No description provided for @iosLinuxExtracting.
+  ///
+  /// In zh, this message translates to:
+  /// **'正在解压'**
+  String get iosLinuxExtracting;
+
+  /// No description provided for @iosLinuxFinishing.
+  ///
+  /// In zh, this message translates to:
+  /// **'即将完成'**
+  String get iosLinuxFinishing;
+
+  /// No description provided for @iosLinuxSystem.
+  ///
+  /// In zh, this message translates to:
+  /// **'系统'**
+  String get iosLinuxSystem;
+
+  /// No description provided for @iosLinuxStorage.
+  ///
+  /// In zh, this message translates to:
+  /// **'占用空间'**
+  String get iosLinuxStorage;
+
+  /// No description provided for @iosLinuxUninstall.
+  ///
+  /// In zh, this message translates to:
+  /// **'卸载 Linux 环境'**
+  String get iosLinuxUninstall;
+
+  /// No description provided for @iosLinuxUninstallBody.
+  ///
+  /// In zh, this message translates to:
+  /// **'会删除 Linux 环境和在里面装的所有软件。工作区里的文件不受影响。'**
+  String get iosLinuxUninstallBody;
+
+  /// No description provided for @iosLinuxUninstallConfirm.
+  ///
+  /// In zh, this message translates to:
+  /// **'卸载'**
+  String get iosLinuxUninstallConfirm;
+
+  /// No description provided for @iosLinuxUninstalling.
+  ///
+  /// In zh, this message translates to:
+  /// **'正在卸载…'**
+  String get iosLinuxUninstalling;
+
+  /// No description provided for @iosLinuxRestartEngine.
+  ///
+  /// In zh, this message translates to:
+  /// **'已装好。重启本机引擎后，命令才会用上它。'**
+  String get iosLinuxRestartEngine;
+
+  /// No description provided for @iosLinuxErrorNetwork.
+  ///
+  /// In zh, this message translates to:
+  /// **'下载没成功。检查网络后再试一次。'**
+  String get iosLinuxErrorNetwork;
+
+  /// No description provided for @iosLinuxErrorDamaged.
+  ///
+  /// In zh, this message translates to:
+  /// **'下载的文件不完整，已经丢掉了，再试一次。'**
+  String get iosLinuxErrorDamaged;
+
+  /// No description provided for @iosLinuxErrorNoSpace.
+  ///
+  /// In zh, this message translates to:
+  /// **'手机存储空间不够了。'**
+  String get iosLinuxErrorNoSpace;
+
+  /// No description provided for @iosLinuxErrorInUse.
+  ///
+  /// In zh, this message translates to:
+  /// **'Linux 环境正在使用，重新打开 App 后才能卸载。'**
+  String get iosLinuxErrorInUse;
+
+  /// No description provided for @iosLinuxErrorOther.
+  ///
+  /// In zh, this message translates to:
+  /// **'没有完成，再试一次。'**
+  String get iosLinuxErrorOther;
+
   /// No description provided for @launchScreenTitle.
   ///
   /// In zh, this message translates to:

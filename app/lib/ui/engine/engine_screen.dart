@@ -27,6 +27,7 @@ import '../theme/theme.dart';
 import '../web/local_web_screen.dart';
 import 'engine_status.dart';
 import 'engine_capabilities.dart';
+import 'linux_section.dart';
 import 'local_uninstall.dart';
 import 'log_view.dart';
 
@@ -171,6 +172,8 @@ class EngineScreen extends ConsumerWidget {
                 ),
               ],
             ),
+            // iOS runs what the virtual shell can't in Linux, installed here on demand.
+            if (Theme.of(context).platform == TargetPlatform.iOS) const LinuxSection(),
             SettingsSection(
               title: l10n.phoneEngineRuntime,
               children: [
