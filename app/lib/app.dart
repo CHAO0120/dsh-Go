@@ -51,6 +51,10 @@ class _DshAppState extends ConsumerState<DshApp> with WidgetsBindingObserver {
   /// lands without a cross-fade, later ones fade (切换配色).
   bool _settled = false;
 
+  /// Reduced motion as of the last build. Switching it changes the theme's page transitions,
+  /// and that lands at once rather than half a cross-fade later (减少动画).
+  bool? _reducedBefore;
+
   @override
   void initState() {
     super.initState();
@@ -163,6 +167,8 @@ class _DshAppState extends ConsumerState<DshApp> with WidgetsBindingObserver {
     if (!waiting && !_settled) {
       WidgetsBinding.instance.addPostFrameCallback((_) => _settled = true);
     }
+    final reducedChanged = _reducedBefore != null && _reducedBefore != reduced;
+    _reducedBefore = reduced;
     return MaterialApp(
       title: AppInfo.name,
       debugShowCheckedModeBanner: false,
@@ -173,7 +179,7 @@ class _DshAppState extends ConsumerState<DshApp> with WidgetsBindingObserver {
       // A reveal from the finger brings the new colours in itself.
       // Never AnimationStyle.noAnimation: MaterialApp then swaps AnimatedTheme for Theme, and
       // everything under builder (the launch screen mid-motion too) is built anew.
-      themeAnimationStyle: _settled && !reduced && !ThemeRevealHost.active
+      themeAnimationStyle: _settled && !reduced && !reducedChanged && !ThemeRevealHost.active
           ? AnimationStyle(duration: AppMotion.standard, curve: AppMotion.std)
           : AnimationStyle(duration: Duration.zero),
       // zh_CN, not bare zh: otherwise CJK falls back to Japanese glyph shapes
