@@ -194,10 +194,11 @@ class _DshAppState extends ConsumerState<DshApp> with WidgetsBindingObserver {
               child: Stack(
                 fit: StackFit.expand,
                 children: [
-                  if (Platform.operatingSystem == 'ohos')
-                    EasedKeyboardInset(child: MirroredSideInsets(child: child!))
-                  else
-                    MirroredSideInsets(child: child!),
+                  LaunchUnder(
+                    child: Platform.operatingSystem == 'ohos'
+                        ? EasedKeyboardInset(child: MirroredSideInsets(child: child!))
+                        : MirroredSideInsets(child: child!),
+                  ),
                   const LaunchLayer(),
                 ],
               ),

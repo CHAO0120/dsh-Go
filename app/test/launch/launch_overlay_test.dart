@@ -288,6 +288,21 @@ void main() {
     expect(c.phase, LaunchPhase.gone);
   });
 
+  testWidgets('the app under it is laid out but not painted until the layer leaves', (tester) async {
+    final c = await start(tester, sdk: 30, systemSplash: false);
+    await tester.pump();
+    expect(c.phase, LaunchPhase.playing);
+    LaunchController.active.value = c;
+    addTearDown(() => LaunchController.active.value = null);
+    await tester.pumpWidget(const Directionality(textDirection: TextDirection.ltr, child: LaunchUnder(child: Text('app'))));
+    expect(find.text('app'), findsNothing);
+    expect(find.text('app', skipOffstage: false), findsOneWidget);
+    c.skip();
+    await tester.pump();
+    expect(c.phase, LaunchPhase.leaving);
+    expect(find.text('app'), findsOneWidget);
+  });
+
   testWidgets('the home under it is built all along and keeps its state', (tester) async {
     final c = await start(tester, sdk: 30, systemSplash: false);
     expect(find.text('home', skipOffstage: false), findsOneWidget);
