@@ -83,7 +83,9 @@ export function validateStartOptions(phoneStorage: boolean, mode: string | null)
 // Both values come from this application's public Context, never the channel env.
 export function resolveNativeLibraryDir(bundleCodeDir: string, nativeLibraryPath: string): string {
   const root = bundleCodeDir.replace(/\/+$/, '');
-  const relative = nativeLibraryPath.endsWith('/') ? nativeLibraryPath.slice(0, -1) : nativeLibraryPath;
+  let relative = nativeLibraryPath.endsWith('/') ? nativeLibraryPath.slice(0, -1) : nativeLibraryPath;
+  // HarmonyOS 7.0.0.111 reports the absolute sandbox path here, already under bundleCodeDir.
+  if (root !== '' && relative.startsWith(root + '/')) relative = relative.substring(root.length + 1);
   if (!root.startsWith('/') || root === '' || root.includes('\0') || relative.includes('\0') ||
       relative.split('/').some((part: string) => part === '' || part === '.' || part === '..')) {
     throw new RuntimeChannelError('ohos_native_library_path', '系统原生库目录无效，请检查 HAP 的解压与库隔离配置。');

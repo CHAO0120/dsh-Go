@@ -455,9 +455,15 @@ test('start参数拒绝暗中改变宿主配置，模式仅允许normal或safe�
   core.validateStartOptions(false, 'normal');
 });
 
-test('原生库目录从公开Context的根和相对分量拼接，不接受绝对、空、NUL或越界分量', () => {
+test('原生库目录从公开Context的根和相对分量拼接，只接受根下的绝对路径，不接受空、NUL或越界分量', () => {
   assert.equal(core.resolveNativeLibraryDir('/private/安装包/', 'libs/arm64/'), '/private/安装包/libs/arm64');
   assert.equal(core.resolveNativeLibraryDir('/app/code', 'libs/arm64'), '/app/code/libs/arm64');
+  // What HarmonyOS 7.0.0.111 on a phone reports.
+  assert.equal(core.resolveNativeLibraryDir('/data/storage/el1/bundle', '/data/storage/el1/bundle/libs/arm64'),
+    '/data/storage/el1/bundle/libs/arm64');
+  for (const absolute of ['/app/code/', '/app/code/../x', '/app/codex/libs', '/app/code//libs']) {
+    assert.throws(() => core.resolveNativeLibraryDir('/app/code', absolute), { code: 'ohos_native_library_path' }, absolute);
+  }
   for (const root of ['', '/', '//', 'relative', '/code\0bad']) {
     assert.throws(() => core.resolveNativeLibraryDir(root, 'libs/arm64'), { code: 'ohos_native_library_path' });
   }
