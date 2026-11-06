@@ -1,4 +1,4 @@
-import { createNodeScriptWorker } from './node-script.mjs';
+import { createNodeScriptWorker, formatNodeScriptError } from './node-script.mjs';
 
 /** Preserve just-bash routing: a node command is buffered inside its statement. */
 export function nodeCommand({ roots, workspaceRoots, readOnly }) {
@@ -24,7 +24,7 @@ export function nodeCommand({ roots, workspaceRoots, readOnly }) {
         if (bytes > 64 * 1024 * 1024) { overflow = true; void worker.terminate(); return; }
         output[name].push(Buffer.from(chunk));
       });
-      worker.on('error', error => output.stderr.push(Buffer.from((error.stack ?? error.message) + '\n')));
+      worker.on('error', error => output.stderr.push(Buffer.from(formatNodeScriptError(error) + '\n')));
       worker.once('exit', exitCode => {
         ctx.signal?.removeEventListener('abort', abort);
         resolve({ stdout: Buffer.concat(output.stdout).toString('latin1'), stdoutKind: 'bytes',

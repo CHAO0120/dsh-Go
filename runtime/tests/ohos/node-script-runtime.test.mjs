@@ -262,3 +262,32 @@ test('a real shell pipeline feeds Node program source exactly once', async t => 
   const result = await f.run(['bash','-c',"printf 'console.log(6*7)' | node"]);
   assert.equal(result.exitCode,0,result.stderr.toString());assert.equal(result.stdout.toString(),'42\n');
 });
+
+// Real Worker errors must remain command outcomes, never owner-listener errors.
+for (const route of ['direct', 'bash']) {
+  test(`${route} Worker thrown values preserve diagnostics and release the queued lane`, { timeout: 15000 }, async t => {
+    const f = await fixture(t);
+    const values = [
+      ['Object.assign(new Error("真实错误"), {stack:"Error: 真实错误\\n    at fixed-worker-frame"})', 'Error: 真实错误\n    at fixed-worker-frame\n'],
+      ['"中文抛值"', '中文抛值\n'],
+      ['null', 'null\n'],
+      ['({toString:1,valueOf:2,detail:"中文对象"})', "{ toString: 1, valueOf: 2, detail: '中文对象' }\n"],
+    ];
+    const next = await f.script("process.stdout.write('queue-continues');");
+    for (const [expression, expected] of values) {
+      const entry = await f.script(`process.stdout.write('before-error\\n',()=>setImmediate(()=>{throw ${expression};}));`);
+      const argv = route === 'direct' ? ['node', entry] : ['bash', '-c', `node '${entry}'`];
+      const failed = f.spawn(argv);
+      const queued = f.spawn(['node', next]);
+      const [result, following] = await Promise.all([f.complete(failed), f.complete(queued)]);
+      assert.equal(result.exitCode, 1);
+      assert.equal(result.signal, null);
+      assert.equal(result.stdout.toString(), 'before-error\n');
+      assert.deepEqual(result.stderr, Buffer.from(expected));
+      assert.equal(following.exitCode, 0);
+      assert.equal(following.stderr.length, 0);
+      assert.equal(following.stdout.toString(), 'queue-continues');
+      assert.equal(f.runtime.live.size, 0);
+    }
+  });
+}

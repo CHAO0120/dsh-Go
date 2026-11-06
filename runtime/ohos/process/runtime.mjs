@@ -11,7 +11,7 @@ import { MAX_TIMER_DELAY_MS } from '@deepseek-ai/dsh-timeout';
 import { capabilities, subprocessCommands, unavailableMessage } from './commands.mjs';
 import { distinctRoots, isInside } from './paths.mjs';
 import { createOwnedGitServer } from './owned-server.mjs';
-import { createNodeScriptWorker, nodeScriptAvailable } from './node-script.mjs';
+import { createNodeScriptWorker, formatNodeScriptError, nodeScriptAvailable } from './node-script.mjs';
 
 const confinedProgram = '/dsh-go/ohos/confined';
 const validateArgv = argv => {
@@ -290,7 +290,7 @@ export class VirtualSubprocessRuntime {
             else state.outcome = { exitCode: message.exitCode, signal: null };
           });
           worker.once('error', error => {
-            if (nodeTask) write('stderr', Buffer.from((error.stack ?? `${error.name}: ${error.message}`) + '\n'));
+            if (nodeTask) write('stderr', Buffer.from(formatNodeScriptError(error) + '\n'));
             else state.failure = error;
           });
           worker.once('exit', exitCode => {

@@ -2,6 +2,13 @@ import { realpathSync, statSync } from 'node:fs';
 import { isAbsolute, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { Worker } from 'node:worker_threads';
+import { inspect } from 'node:util';
+
+// Worker error events may carry any deserialized thrown value, including null.
+export function formatNodeScriptError(error) {
+  if (error != null && typeof error.stack === 'string') return error.stack;
+  return typeof error === 'string' ? error : inspect(error);
+}
 
 const failure = (code, message) => Object.assign(new Error(message), { code });
 const inside = (root, path) => path === root || path.startsWith(root + '/');
