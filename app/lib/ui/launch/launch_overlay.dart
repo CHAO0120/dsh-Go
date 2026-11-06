@@ -85,9 +85,21 @@ class _LaunchOverlayState extends State<LaunchOverlay> with TickerProviderStateM
 
   LaunchController get _c => widget.controller;
 
+  // TEMP(ohos-launch-jank): every frame's build and raster time while the launch screen is up.
+  final Stopwatch _since = Stopwatch()..start();
+  void _timings(List<ui.FrameTiming> frames) {
+    if (!_c.native) return;
+    final line = frames
+        .map((f) => '${f.buildDuration.inMicroseconds ~/ 100 / 10}/${f.rasterDuration.inMicroseconds ~/ 100 / 10}/'
+            '${f.totalSpan.inMicroseconds ~/ 100 / 10}')
+        .join(' ');
+    unawaited(_c.channel.mark('jank t=${_since.elapsedMilliseconds} ${_c.phase.name} v=${_play.value.toStringAsFixed(2)} $line'));
+  }
+
   @override
   void initState() {
     super.initState();
+    SchedulerBinding.instance.addTimingsCallback(_timings);
     _c.addListener(_sync);
     SchedulerBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
@@ -108,6 +120,7 @@ class _LaunchOverlayState extends State<LaunchOverlay> with TickerProviderStateM
 
   @override
   void dispose() {
+    SchedulerBinding.instance.removeTimingsCallback(_timings);
     _c.removeListener(_sync);
     _play.dispose();
     _custom.dispose();
