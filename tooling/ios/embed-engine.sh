@@ -50,17 +50,25 @@ if [ ! -f "$STAMP" ] || [ "$(cat "$STAMP")" != "$INPUTS" ] ||
   printf '%s' "$INPUTS" >"$STAMP"
 fi
 
+GUEST_BUILT="$BUILT/guest"
+# The guest has separate source/toolchain inputs and checks its own cache. It is
+# bundled, but no kernel starts until the user installs Linux and runs a guest job.
+env -i PATH="$PATH" HOME="$HOME" DEVELOPER_DIR="${DEVELOPER_DIR:-}" \
+  /bin/bash "$ROOT/tooling/ios/build-ish.sh" "$PLATFORM_NAME" "$GUEST_BUILT"
+
 FRAMEWORKS="$TARGET_BUILD_DIR/$FRAMEWORKS_FOLDER_PATH"
 RESOURCES="$TARGET_BUILD_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH"
 mkdir -p "$FRAMEWORKS" "$RESOURCES/dsh-runtime"
 rm -rf "$FRAMEWORKS/NodeMobile.framework" "$FRAMEWORKS/DshNodeHost.framework" \
-  "$FRAMEWORKS/DshFlock.framework" "$FRAMEWORKS/DshRequireBuiltin.framework"
+  "$FRAMEWORKS/DshFlock.framework" "$FRAMEWORKS/DshRequireBuiltin.framework" \
+  "$FRAMEWORKS/DshGuest.framework"
 rm -f "$FRAMEWORKS/libdsh_flock.so" "$FRAMEWORKS/libdsh_require_builtin.so"
 cp -R "$ENGINE/NodeMobile.xcframework/$SLICE/NodeMobile.framework" "$FRAMEWORKS/"
 rm -rf "$FRAMEWORKS/NodeMobile.framework/Headers" "$FRAMEWORKS/NodeMobile.framework/Modules" \
   "$FRAMEWORKS/NodeMobile.framework/_CodeSignature"
 cp -R "$BUILT/DshNodeHost.framework" "$FRAMEWORKS/"
 cp -R "$BUILT/DshFlock.framework" "$BUILT/DshRequireBuiltin.framework" "$FRAMEWORKS/"
+cp -R "$GUEST_BUILT/DshGuest.framework" "$FRAMEWORKS/"
 cp "$ENGINE/runtime.zip" "$RESOURCES/dsh-runtime/runtime.zip"
 # The phone tools' backend is iOS's own, so it isn't in the archive runtime/ohos composes.
 mkdir -p "$RESOURCES/dsh-runtime/phone"
@@ -83,7 +91,7 @@ fi
 if [ "${CODE_SIGNING_ALLOWED:-YES}" = "NO" ] || [ -z "${EXPANDED_CODE_SIGN_IDENTITY:-}" ]; then
   exit 0
 fi
-for item in NodeMobile.framework DshNodeHost.framework DshFlock.framework DshRequireBuiltin.framework; do
+for item in NodeMobile.framework DshNodeHost.framework DshFlock.framework DshRequireBuiltin.framework DshGuest.framework; do
   /usr/bin/codesign --force --sign "$EXPANDED_CODE_SIGN_IDENTITY" ${OTHER_CODE_SIGN_FLAGS:-} \
     --preserve-metadata=identifier,entitlements "$FRAMEWORKS/$item"
 done

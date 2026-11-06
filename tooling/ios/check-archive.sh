@@ -33,8 +33,15 @@ app="$archive/Products/Applications/Runner.app"
 frameworks="$app/Frameworks"
 note 'archive frameworks' "$(ls "$frameworks" | tr '\n' ' ')"
 # What the engine opens itself, by these exact paths, when it starts.
-for name in DshNodeHost DshFlock DshRequireBuiltin; do
+for name in DshNodeHost DshFlock DshRequireBuiltin DshGuest; do
   [ -f "$frameworks/$name.framework/$name" ] || fail "the engine needs $name.framework/$name"
+done
+guest="$frameworks/DshGuest.framework"
+if [ -f "$guest/DshGuest" ]; then
+  lipo -verify_arch arm64 "$guest/DshGuest" || fail "DshGuest has no arm64 slice"
+fi
+for name in LICENSE.txt SOURCE.txt iSH-LICENSE.md iSH-LICENSE.IOS iSH-build.patch; do
+  [ -s "$guest/$name" ] || fail "DshGuest is missing its source/license notice: $name"
 done
 note 'archive size' "$(du -sh "$app" | cut -f1), top level: $(ls "$app" | grep -vE '\.(png|car|nib|storyboardc|lproj)$' | head -30 | tr '\n' ' ')"
 

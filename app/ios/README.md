@@ -43,6 +43,24 @@ flutter build ios --release --no-codesign
 
 `embed-engine.sh` 清除增量构建遗留的两个裸 `.so`，启用签名时逐个签 framework；`CODE_SIGNING_ALLOWED=NO` 仍产出未签名代码，安装前必须由 Xcode 或重签工具签妥全部嵌套 framework。包装改变不是签名验证成功的替代，第三方重签与真机启动须实际复核。模拟器 engine-smoke 会要求新 executable 路径存在，再进入原真实工具回合。
 
+## iSH 的构建产物
+
+`tooling/ios/build-ish.sh iphoneos OUTPUT_DIR`（或 `iphonesimulator`）从固定的
+`OpenMinis/ish-arm64` 提交下载源码，核对 SHA256 后打 `tooling/ios/ish/build.patch`，
+生成未签名的 `DshGuest.framework`。上游源码和工具链缓存不进仓库。
+本补丁**未在 Apple 上编译**，首次真实验证由 `iOS compile` 的 `engine` 任务执行。
+
+Mac 首次构建还需 LLVM（生成 ARM64 Linux VDSO）、Meson 和 Ninja；CI 使用
+Meson 1.7.2、Ninja 1.11.1.4。安装后确保它们和 Homebrew LLVM 的 `bin` 在 `PATH` 上。
+脚本要求 Python 提供 `tarfile.data_filter`（可使用 Python 3.12 及以上）。
+已准备本机引擎时，Xcode 嵌入阶段会调用该脚本；未准备引擎的远程专用包仍跳过。
+缓存分别在 `Engine/build/iphoneos/guest` 和 `Engine/build/iphonesimulator/guest`，
+命中前核对构建输入、工具链和产物 SHA256，固定源码压缩包在 `Engine/ish-cache`。
+
+`DshGuest.framework` 与其他引擎 framework 一起复制和签名，不在 App 启动时链接。
+它携带上游许可、固定源码地址和本地修改补丁；Archive 继续拒绝 framework 外的原生代码。
+这一项只交付构建和打包：尚未提供安装 Linux 的入口，也未改动默认虚拟 shell 的路由。
+
 ## 现状
 
 - CI 会在 iOS 模拟器上真跑：真 NodeMobile 的工具回合、取消、停止和恢复会话；停止时不误关别人的 fd；真 App 里的安装、启动、登录、停止、重启和重置；真 App 启动后 30 秒还活着；在 App 进程里真调用提醒、联系人、定位、OCR 和网页操作，只有点确认框是测试代点的（`RunnerTests`，选图除外）。上述 CI 运行门是 Debug 构建。2026-11-06 一台 iPad Air 5（iPadOS 18.7.7）装了自签的 Release 包：App 三次冷启动都正常，本机引擎在加载没签名的 addon 时失败，addon 因此改成了 framework，改后还没在真机上跑过。这不说明 iPhone 上 TestFlight 包的白屏已经解决，下面的验收项也还没做。

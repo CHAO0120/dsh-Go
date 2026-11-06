@@ -63,6 +63,7 @@ jobs:
       - name: Check where the engine looks for its addons
         run: |
           python3 -B tooling/ios/test-native-loader.py -v
+          python3 -B tooling/ios/test-guest-embedding.py -v
           python3 -B runtime/tests/ohos/host-core.py --ios --out "$RUNNER_TEMP/host-core-ios"
           python3 -B runtime/tests/ohos/host-core.py --out "$RUNNER_TEMP/host-core-hap"
 
@@ -100,6 +101,68 @@ jobs:
             exit 1
           fi
           ls -la app/ios/Engine
+
+      - name: Install the iSH build tools
+        run: |
+          brew install llvm
+          python3 -m venv "$RUNNER_TEMP/ish-tools"
+          "$RUNNER_TEMP/ish-tools/bin/pip" install meson==1.7.2 ninja==1.11.1.4
+          echo "$RUNNER_TEMP/ish-tools/bin" >> "$GITHUB_PATH"
+          echo "$(brew --prefix llvm)/bin" >> "$GITHUB_PATH"
+
+      - name: Identify the pinned iSH build inputs
+        id: ish-inputs
+        run: |
+          device="$(bash tooling/ios/build-ish.sh --cache-key iphoneos)"
+          simulator="$(bash tooling/ios/build-ish.sh --cache-key iphonesimulator)"
+          key="$(printf '%s\n%s\n' "$device" "$simulator" | shasum -a 256 | cut -d' ' -f1)"
+          echo "key=$key" >> "$GITHUB_OUTPUT"
+
+      - name: Restore the iSH frameworks and fixed source archive
+        id: ish-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            app/ios/Engine/ish-cache
+            app/ios/Engine/build/iphoneos/guest
+            app/ios/Engine/build/iphonesimulator/guest
+          key: ${{ runner.os }}-ish-${{ steps.ish-inputs.outputs.key }}
+
+      - name: Compile iSH for the simulator and device
+        id: ish-build
+        run: |
+          for sdk in iphonesimulator iphoneos; do
+            out="app/ios/Engine/build/$sdk/guest"
+            log="$RUNNER_TEMP/ish-$sdk.log"
+            if ! bash tooling/ios/build-ish.sh "$sdk" "$out" 2>&1 | tee "$log"; then
+              tail -n 12 "$log" | cut -c1-600 | sed -e 's/%/%25/g' -e 's/^/::error title=iSH build::/'
+              exit 1
+            fi
+            binary="$out/DshGuest.framework/DshGuest"
+            file "$binary"
+            xcrun lipo -verify_arch arm64 "$binary"
+            install_name="$(xcrun otool -D "$binary" | tail -n 1)"
+            test "$install_name" = '@rpath/DshGuest.framework/DshGuest'
+            xcrun vtool -show-build "$binary"
+          done
+
+      - name: Save the compiled iSH cache
+        if: steps.ish-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            app/ios/Engine/ish-cache
+            app/ios/Engine/build/iphoneos/guest
+            app/ios/Engine/build/iphonesimulator/guest
+          key: ${{ steps.ish-cache.outputs.cache-primary-key }}
+
+      - name: Keep the iSH build logs
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: ios-ish-build
+          path: ${{ runner.temp }}/ish-*.log
+          if-no-files-found: ignore
 
       - name: Compile the native pieces for the simulator
         run: |
