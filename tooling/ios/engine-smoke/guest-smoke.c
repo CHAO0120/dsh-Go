@@ -98,14 +98,12 @@ static void fatal(int signal_number, siginfo_t* info, void* context) {
   (void)context;
   Dl_info where;
   if (info != NULL && dladdr(info->si_addr, &where) != 0) {
-    dprintf(STDERR_FILENO, "fatal signal %d at %p: %s +0x%lx (%s)
-", signal_number, info->si_addr,
+    dprintf(STDERR_FILENO, "fatal signal %d at %p: %s +0x%lx (%s)\n", signal_number, info->si_addr,
             where.dli_fname ? where.dli_fname : "?",
             (unsigned long)((char*)info->si_addr - (char*)where.dli_fbase),
             where.dli_sname ? where.dli_sname : "?");
   } else {
-    dprintf(STDERR_FILENO, "fatal signal %d at %p
-", signal_number, info ? info->si_addr : NULL);
+    dprintf(STDERR_FILENO, "fatal signal %d at %p\n", signal_number, info ? info->si_addr : NULL);
   }
   void* frames[64];
   backtrace_symbols_fd(frames, backtrace(frames, 64), STDERR_FILENO);
