@@ -48,6 +48,14 @@
         }
       }
     },
+    "ohos-attachment-diagnostic.diff": {
+      "0.2.2-rc.1": {
+        "node_modules/@deepseek-ai/dsh-llm-pi-ai/lib/index.js": {
+          "after": "ba17be4f1f2a0f33fbb379b1d4b2483c1f54fa3031fa1727848c134c99f9037a",
+          "before": "2d43d15d51b97f6d87eadb15761d2347b4ef42dffa5c16c4b766b79158840d4f"
+        }
+      }
+    },
     "ohos-attachment-publication.diff": {
       "0.2.2-rc.1": {
         "node_modules/@deepseek-ai/dsh-attachment-local/lib/index.js": {
@@ -125,6 +133,26 @@
         "node_modules/@deepseek-ai/dsh-subprocess-local/lib/output.js": {
           "after": "feea1fd338ab0c3b2cab0509fbaf9e6d4a849fede0715350cf6591f98bcaf229",
           "before": "a32309bee49a3cb7f518cd748e2b2f2c0dd680de0bc19e1533e2182913567c04"
+        }
+      }
+    },
+    "ohos-plugin-hmr-transaction.diff": {
+      "0.2.2-rc.1": {
+        "node_modules/@deepseek-ai/dsh-app-boot/lib/index.js": {
+          "after": "30e68c69b8a38d58f3e59fece0dbb63bc4f8e79212df91c25e76358502d2bd47",
+          "before": "eb73911bd27c3730bf5d70b9cf7193fff5cb301984f981b6e91edff33c2a8592"
+        },
+        "node_modules/@deepseek-ai/dsh-plugin-manager/lib/index.js": {
+          "after": "8846e689bbf5d1eed7cfcf01b11df5b779c229de167e612eebecc81ed25fb3c5",
+          "before": "dc3759d204ac47faa2cacc8e3c380bff552b82208a1c027edee47951f095d6fa"
+        }
+      }
+    },
+    "ohos-plugin-remove-rollback.diff": {
+      "0.2.2-rc.1": {
+        "node_modules/@deepseek-ai/dsh-plugin-manager/lib/index.js": {
+          "after": "fcb0f7c35e4ffbd18d27aae4e074b851ef1a19e9af93eb95814a92f8b9f22ca5",
+          "before": "8846e689bbf5d1eed7cfcf01b11df5b779c229de167e612eebecc81ed25fb3c5"
         }
       }
     },
@@ -1440,6 +1468,22 @@
         }
       }
     },
+    "zzzzzzzzzzzzzz-ohos-plugin-packages.diff": {
+      "0.2.2-rc.1": {
+        "node_modules/@deepseek-ai/dsh-app-boot/lib/index.js": {
+          "after": "eb73911bd27c3730bf5d70b9cf7193fff5cb301984f981b6e91edff33c2a8592",
+          "before": "0efe3b6c4be30e101982c0740b55d3e035fb754e32ad366a197a9b7ec5be6cdb"
+        },
+        "node_modules/@deepseek-ai/dsh-plugin-manager/lib/index.js": {
+          "after": "dc3759d204ac47faa2cacc8e3c380bff552b82208a1c027edee47951f095d6fa",
+          "before": "38bc99d9150695996b9374649ccd0ab3842abd47193862a06451f9071e0b8725"
+        },
+        "node_modules/@deepseek-ai/dsh/lib/profile-boot-e2mS45fC.js": {
+          "after": "5554f9d72f9095c627980344cdaddd064a0db9a429483110b1985043bffdf3f3",
+          "before": "25c966fcb5ab8e58e31c2610ccec3360b0cb2069bbef844640d5afdf27aebe5c"
+        }
+      }
+    },
     "zzzzzzzzzzzzzz-plugin-manager-lock-lifetime.diff": {
       "0.2.2-rc.1": {
         "node_modules/@deepseek-ai/dsh-plugin-manager/lib/index.js": {
@@ -1553,6 +1597,14 @@
         "node_modules/@deepseek-ai/dsh-repeat-tool-reminder/lib/index.js": {
           "after": "07160bc51a4246d5473a0704e9f3f97cdec1ed70ce0b87d0c1e7f19a542345c6",
           "before": "c27587fc302f45c9ea6863bfaa2f96894a8a67e894ddfd74cf02477a79ab67e5"
+        }
+      }
+    },
+    "ohos-plugin-manifest-bom.diff": {
+      "0.2.2-rc.1": {
+        "node_modules/@deepseek-ai/dsh-app-boot/lib/index.js": {
+          "before": "30e68c69b8a38d58f3e59fece0dbb63bc4f8e79212df91c25e76358502d2bd47",
+          "after": "8c8c617eec295d60e18189949705e04399cd7b7f4ad027e181c4666c99621a1c"
         }
       }
     }
@@ -1738,6 +1790,7 @@
       "zzzzzzzzzzzzzzzzzzzzzzzzzz-repeat-preview-unicode.diff",
       "ohos-attachment-publication.diff",
       "ohos-discovery-response-cleanup.diff",
+      "ohos-attachment-diagnostic.diff",
       "ohos-hap-native-libraries.diff",
       "ohos-mcp-stdio-unavailable.diff",
       "ohos-network-transport.diff",
@@ -1759,7 +1812,11 @@
       "zzzzzzzzzzzzzz-ohos-composition-imports.diff",
       "ohos-forge-github-unavailable.diff",
       "ohos-liveshare-owner-unavailable.diff",
-      "ohos-market-git-unavailable.diff"
+      "ohos-market-git-unavailable.diff",
+      "zzzzzzzzzzzzzz-ohos-plugin-packages.diff",
+      "ohos-plugin-hmr-transaction.diff",
+      "ohos-plugin-remove-rollback.diff",
+      "ohos-plugin-manifest-bom.diff"
     ]
   }
 }

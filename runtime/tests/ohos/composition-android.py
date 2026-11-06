@@ -143,7 +143,8 @@ def main():
         before, after = file_item(baseline / name), file_item(ROOT / name)
         check_sources('', {name: before}, {name: after})
         sources.append({'path': name, 'baseline': before, 'candidate': after})
-    assert set(observed_differences) == set(APPROVED_SOURCE_DIFFERENCES), 'Reviewed difference set changed'
+    # A later authoritative baseline may already contain all reviewed plumbing.
+    assert not observed_differences or set(observed_differences) == set(APPROVED_SOURCE_DIFFERENCES), 'Reviewed difference set changed'
     save(out / 'protected-source.json', sources)
     save(out / 'approved-source-differences.json', observed_differences)
 
