@@ -32,6 +32,10 @@ app="$archive/Products/Applications/Runner.app"
 [ -d "$app" ] || { fail "no Runner.app in the archive"; exit 1; }
 frameworks="$app/Frameworks"
 note 'archive frameworks' "$(ls "$frameworks" | tr '\n' ' ')"
+# What the engine opens itself, by these exact paths, when it starts.
+for name in DshNodeHost DshFlock DshRequireBuiltin; do
+  [ -f "$frameworks/$name.framework/$name" ] || fail "the engine needs $name.framework/$name"
+done
 note 'archive size' "$(du -sh "$app" | cut -f1), top level: $(ls "$app" | grep -vE '\.(png|car|nib|storyboardc|lproj)$' | head -30 | tr '\n' ' ')"
 
 # Dart's compiled code, and the snapshot symbols the engine looks for in it.

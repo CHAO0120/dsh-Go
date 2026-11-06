@@ -42,7 +42,7 @@ FRAMEWORK="$OUT/DshNodeHost.framework"
 rm -rf "$FRAMEWORK"
 mkdir -p "$FRAMEWORK"
 cp "$ROOT/runtime/ios/host/worker-preload.cjs" "$FRAMEWORK/worker-preload.cjs"
-"$CLANGXX" "${COMMON[@]}" -std=c++20 -stdlib=libc++ -fexceptions -frtti -DNAPI_VERSION=8 \
+"$CLANGXX" "${COMMON[@]}" -std=c++20 -stdlib=libc++ -fexceptions -frtti -DNAPI_VERSION=8 -DDSH_IOS_HOST \
   "-I$ENGINE/include" "-I$HOST_CORE" "-I$HOST_RUNTIME" "$@" \
   "$ROOT/runtime/ios/host/node_runner.cc" "$ROOT/runtime/ios/host/ios_host.cc" \
   "$ROOT/runtime/ios/host/phone_binding.cc" "$ROOT/runtime/ios/host/image_binding.cc" \

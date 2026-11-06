@@ -208,6 +208,16 @@ def activity_for_ios(name, original):
     return data
 
 
+def diagnostics_for_ios(name, original):
+    data = original
+    for before, after in DIAGNOSTIC_EDITS[name]:
+        before, after = before.encode(), after.encode()
+        if data.count(before) != 1:
+            raise ValueError('iOS diagnostic differs from composed input: ' + name)
+        data = data.replace(before, after)
+    return data
+
+
 def specialize(expanded, out, composer):
     expanded = expanded.resolve(strict=True)
     output = out.resolve()
@@ -225,14 +235,9 @@ def specialize(expanded, out, composer):
                 for name in ACTIVITY_EDITS}
     clock = (Path(__file__).resolve().parents[2] / ACTIVITY_CLOCK).read_bytes()
     diagnostics = {}
-    for name, edits in DIAGNOSTIC_EDITS.items():
+    for name in DIAGNOSTIC_EDITS:
         data = attachments if name == ATTACHMENTS else (expanded / 'files' / name).read_bytes()
-        for before, after in edits:
-            before, after = before.encode(), after.encode()
-            if data.count(before) != 1:
-                raise ValueError('iOS diagnostic differs from composed input: ' + name)
-            data = data.replace(before, after)
-        diagnostics[name] = data
+        diagnostics[name] = diagnostics_for_ios(name, data)
     codec = (Path(__file__).resolve().parents[2] / 'runtime/ios/image/ios-sharp.cjs').read_bytes()
     worker_env = (Path(__file__).resolve().parents[2] / WORKER_ENV).read_bytes()
     relocation = {name: (Path(__file__).resolve().parents[2] / name).read_bytes()

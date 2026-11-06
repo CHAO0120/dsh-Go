@@ -60,6 +60,12 @@ jobs:
           flutter pub get --enforce-lockfile
           flutter gen-l10n
 
+      - name: Check where the engine looks for its addons
+        run: |
+          python3 -B tooling/ios/test-native-loader.py -v
+          python3 -B runtime/tests/ohos/host-core.py --ios --out "$RUNNER_TEMP/host-core-ios"
+          python3 -B runtime/tests/ohos/host-core.py --out "$RUNNER_TEMP/host-core-hap"
+
       - name: Compile for the simulator
         working-directory: app
         run: bash ../tooling/ios/build.sh --simulator --debug
