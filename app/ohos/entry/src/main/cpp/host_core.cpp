@@ -111,6 +111,21 @@ class Environment {
   std::map<std::string, std::optional<std::string>> previous_;
 };
 
+// The app's WebView (ArkWeb, Chromium's "[../../file.cc:12]") and the Flutter
+// engine ("[WARNING:flutter/file.cpp(12)]") write to the same process-wide stderr
+// while Node runs. On a phone they buried the engine's own lines.
+bool ForeignLine(const std::string& line) {
+  if (line.empty() || line[0] != '[') return false;
+  const auto close = line.find(']');
+  if (close == std::string::npos) return false;
+  const auto tag = line.substr(1, close - 1);
+  if (tag.rfind("../../", 0) == 0) return tag.find(".cc:") != std::string::npos || tag.find(".cpp:") != std::string::npos;
+  for (const char* level : {"VERBOSE", "INFO:", "WARNING:", "ERROR:", "FATAL:"}) {
+    if (tag.rfind(level, 0) == 0) return tag.find(".cc(") != std::string::npos || tag.find(".cpp(") != std::string::npos;
+  }
+  return false;
+}
+
 // File descriptors 1/2 are process-wide. Capture is deliberately scoped to the
 // single engine lifetime; no raw bytes are forwarded to hilog or Ark.
 class Capture {
@@ -141,7 +156,7 @@ class Capture {
     std::fflush(stdout);
     std::fflush(stderr);
     for (int i = 0; i != 2; ++i) {
-      if (saved_[i] >= 0) { dup2(saved_[i], i + 1); close(saved_[i]); saved_[i] = -1; }
+      if (saved_[i] >= 0) dup2(saved_[i], i + 1);
       if (pipes_[i][1] >= 0) { close(pipes_[i][1]); pipes_[i][1] = -1; }
     }
     ending_ = true;
@@ -149,6 +164,19 @@ class Capture {
       if (readers_[i].joinable()) readers_[i].join();
       if (pipes_[i][0] >= 0) { close(pipes_[i][0]); pipes_[i][0] = -1; }
     }
+    // Readers hand foreign lines back to these until they have finished.
+    for (int i = 0; i != 2; ++i) {
+      if (saved_[i] >= 0) { close(saved_[i]); saved_[i] = -1; }
+    }
+  }
+  void Emit(int index, const std::string& stream, const std::string& line, bool overflow) {
+    if (!overflow && ForeignLine(line)) {
+      // Back to wherever the app's output went before the capture.
+      const auto out = line + "\n";
+      if (saved_[index] >= 0 && write(saved_[index], out.data(), out.size()) < 0) {}
+      return;
+    }
+    line_(stream, overflow ? "[OHOS host: oversized log line discarded]" : line);
   }
   void Read(int index) {
     const std::string stream = index == 0 ? "stdout" : "stderr";
@@ -161,7 +189,7 @@ class Capture {
       if (count > 0) {
         for (ssize_t n = 0; n < count; ++n) {
           if (bytes[n] == '\n') {
-            line_(stream, overflow ? "[OHOS host: oversized log line discarded]" : pending);
+            Emit(index, stream, pending, overflow);
             pending.clear(); overflow = false;
           } else if (!overflow) {
             if (pending.size() == kMaximumLine) { pending.clear(); overflow = true; }
@@ -176,9 +204,7 @@ class Capture {
         poll(&fd, 1, 50);
       } else break;
     }
-    if (overflow || !pending.empty()) {
-      line_(stream, overflow ? "[OHOS host: oversized log line discarded]" : pending);
-    }
+    if (overflow || !pending.empty()) Emit(index, stream, pending, overflow);
   }
   int pipes_[2][2]{{-1, -1}, {-1, -1}};
   int saved_[2]{-1, -1};

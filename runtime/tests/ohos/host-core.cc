@@ -42,6 +42,10 @@ int Run(int argc, char** argv) {
   Write(1, "\x1b[32mdsh web: http://127.0.0.1:3080/?tok");
   Write(1, "en=fixture_LAUNCH\x1b[0m\n");
   Write(2, "DEEPSEEK_API_KEY=fixture_SECRET\n");
+  // The app's WebView and Flutter engine share stderr; their lines are not the engine's.
+  Write(2, "[../../arkweb/chromium_ext/gpu/shared_image_util.cc:73] web_NOISE\n");
+  Write(2, "[WARNING:flutter/shell/platform/ohos/platform_view_ohos.cpp(1417)] flutter_NOISE\n");
+  Write(2, "[runtime] [ERROR] node kept\n");
   if (scenario == "multiline-secret") Write(2, "password=fixture_FIRST\r\nfixture_SECOND\n");
   Write(1, "http://127.0.0.1:3080/?token=another_SECRET\n");
   if (scenario == "large") {
@@ -171,6 +175,13 @@ int main(int argc, char** argv) {
     assert(event.line.find("fixture_FIRST") == std::string::npos && event.line.find("fixture_SECOND") == std::string::npos);
   }
   assert(tail && (ready || scenario == "stop-race"));
+  assert(forwarded.find("web_NOISE") == std::string::npos && forwarded.find("flutter_NOISE") == std::string::npos);
+  bool kept = false;
+  for (const auto& event : events) {
+    assert(event.line.find("_NOISE") == std::string::npos);
+    if (event.line == "[runtime] [ERROR] node kept") kept = true;
+  }
+  assert(kept || scenario == "large");
   assert(forwarded.find("fixture_SECRET") == std::string::npos && forwarded.find("fixture_LAUNCH") == std::string::npos);
   assert(forwarded.find("another_SECRET") == std::string::npos);
   assert(forwarded.find("fixture_FIRST") == std::string::npos && forwarded.find("fixture_SECOND") == std::string::npos);
