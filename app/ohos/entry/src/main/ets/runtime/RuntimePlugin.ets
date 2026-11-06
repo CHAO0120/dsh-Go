@@ -6,12 +6,15 @@ import EventChannel, { StreamHandler, EventSink } from '@ohos/flutter_ohos/src/m
 import Any from '@ohos/flutter_ohos/src/main/ets/plugin/common/Any';
 import { AbilityAware, AbilityPluginBinding } from '@ohos/flutter_ohos';
 import { BusinessError } from '@ohos.base';
+import hilog from '@ohos.hilog';
 import { RuntimeChannelError } from './RuntimeCore';
 import { RuntimeController } from './RuntimeController';
 import { ManagedSkillOwner } from './ManagedSkillService';
 import { PhoneBridge } from '../phone/PhoneBridge';
 import type { HostPhoneKey } from 'libdsh_host.so';
 
+
+const POLLED: string[] = ['getStatus', 'getLogs', 'getLogSnapshot', 'failureLog', 'guestRoot'];
 export class RuntimePlugin implements FlutterPlugin, MethodCallHandler, StreamHandler, AbilityAware {
   private methods: MethodChannel | null = null;
   private events: EventChannel | null = null;
@@ -74,7 +77,15 @@ export class RuntimePlugin implements FlutterPlugin, MethodCallHandler, StreamHa
   }
 
   onMethodCall(call: MethodCall, result: MethodResult): void {
-    this.handle(call, result).catch((error: Error) => {
+    // Method names and error codes only: arguments can carry keys and paths.
+    const traced = !POLLED.includes(call.method);
+    const began = Date.now();
+    if (traced) hilog.info(0x3F00, 'DshRuntime', '%{public}s begin', call.method);
+    this.handle(call, result).then((): void => {
+      if (traced) hilog.info(0x3F00, 'DshRuntime', '%{public}s done in %{public}d ms', call.method, Date.now() - began);
+    }).catch((error: Error) => {
+      hilog.warn(0x3F00, 'DshRuntime', '%{public}s failed with %{public}s after %{public}d ms', call.method,
+        error instanceof RuntimeChannelError ? error.code : 'ohos_runtime_error', Date.now() - began);
       if (error instanceof RuntimeChannelError) result.error(error.code, error.message, null);
       else result.error('ohos_runtime_error', '鸿蒙本机运行时操作失败，请查看状态或重新打开 App。', null);
     });

@@ -1,4 +1,5 @@
 // 未经 HarmonyOS SDK 编译、未在真机核实。Node 停止的 Linux 证据不替代 OH NAPI 验证。
+import hilog from '@ohos.hilog';
 import common from '@ohos.app.ability.common';
 import util from '@ohos.util';
 import connection from '@ohos.net.connection';
@@ -53,6 +54,7 @@ export class RuntimeController {
   private failureLines: string[] = [];
   private pending: string | null = null;
   private startCancelled: boolean = false;
+  private startBegan: number = 0;
   private requestedStop: boolean = false;
   private timer: number | null = null;
   private lastNative: HostState | null = null;
@@ -192,11 +194,20 @@ export class RuntimeController {
   private async installPayload(): Promise<void> {
     if (this.manifest === null) throw new RuntimeChannelError('ohos_payload_missing', this.setupError ?? 'HAP 中没有运行时载荷。');
     const manifest: RuntimeManifest = this.manifest;
+    const began = Date.now();
+    let step = '';
     await this.storage.withBundledRuntime(async (): Promise<void> => {
-      await this.installer.install(manifest, (progress: InstallProgress) => this.emit(new Map<string, Object | null>([
+      await this.installer.install(manifest, (progress: InstallProgress) => {
+        if (progress.step !== step) {
+          hilog.info(0x3F00, 'DshRuntime', 'install %{public}s at %{public}d ms', progress.step, Date.now() - began);
+          step = progress.step;
+        }
+        this.emit(new Map<string, Object | null>([
         ['type', 'progress'], ['step', progress.step], ['done', progress.done], ['total', progress.total]
-      ])));
+      ]));
+      });
     });
+    hilog.info(0x3F00, 'DshRuntime', 'install finished in %{public}d ms', Date.now() - began);
   }
 
   private async readInstallation(): Promise<void> {
@@ -470,13 +481,17 @@ export class RuntimeController {
     if (this.pending === 'start') return;
     if (this.pending !== null) throw new RuntimeChannelError('start_busy', '运行时正在安装。');
     this.pending = 'start'; this.startCancelled = false; this.lastError = null;
+    this.startBegan = Date.now();
     this.emitStatus();
     try {
       await this.initialize();
+      this.traceStart('initialized');
       const selectedMode = await this.recovery.selectMode(mode);
+      this.traceStart('mode ' + selectedMode);
       if ((native.phase === 'starting' || native.phase === 'running') && selectedMode === this.runMode) return;
       if (native.consumed) throw new RuntimeChannelError('ohos_restart_required', '启动模式已保存；一个 App 进程只启动一次 Node，请重新打开 App。');
       this.installed = await this.installer.installed();
+      this.traceStart('installation read');
       if (!this.current()) throw new RuntimeChannelError('ohos_install_required', '运行时尚未完整安装到当前版本，请先安装。');
       const nativeLibraryDir = resolveNativeLibraryDir(this.context.bundleCodeDir, this.context.applicationInfo.nativeLibraryPath);
       const dshHome = this.paths.dshHome;
@@ -487,6 +502,7 @@ export class RuntimeController {
       await this.storage.ensureDirectory(this.paths.outputs);
       await new OhosRuntimeStorage(this.context.resourceManager, this.context.cacheDir).ensureDirectory(cache);
       await this.writeInstructions(dshHome, workspace, visualReplies);
+      this.traceStart('directories ready');
       if (this.startCancelled) throw new RuntimeChannelError('ohos_start_cancelled', '启动已取消。');
       if (selectedMode === 'safe') {
         this.logNote('安全模式使用独立的随包配置，不会改写原 web 配置；全局补丁和 .env 仍可能影响启动。');
@@ -497,6 +513,7 @@ export class RuntimeController {
       this.requestedStop = false;
       this.runtimeGeneration++;
       const host = await loadNativeHost();
+      this.traceStart('native host loaded');
       this.bootProfile = null; this.pinnedProfile = false; this.runningSince = null; this.markedHealthy = false;
       if (selectedMode === 'normal') {
         try { this.bootProfile = await this.lastGood.captureBoot(); }
@@ -509,6 +526,7 @@ export class RuntimeController {
       this.checkRecovery();
       if (this.startCancelled) throw new RuntimeChannelError('ohos_start_cancelled', '启动已取消。');
       host.start(options);
+      this.traceStart('node started');
       this.bindOwner();
       this.startPolling();
     } catch (error) {
@@ -524,6 +542,10 @@ export class RuntimeController {
     } finally {
       this.pending = null; this.collect(); this.emitStatus();
     }
+  }
+
+  private traceStart(step: string): void {
+    hilog.info(0x3F00, 'DshRuntime', 'start %{public}s at %{public}d ms', step, Date.now() - this.startBegan);
   }
 
   async reset(keep: string[], reinstall: boolean): Promise<void> {

@@ -138,6 +138,7 @@ export const lkgIo={...recoveryIo,async open(...args){try{return await recoveryI
 }
 
 controllerText = controllerText.replace("import common from '@ohos.app.ability.common';", '')
+  .replace("import hilog from '@ohos.hilog';", 'const hilog = { info() {}, warn() {} };')
   .replace("import UIAbility from '@ohos.app.ability.UIAbility';", '')
   .replace("import util from '@ohos.util';", `import { util } from '${fixtureUrl}';`)
   .replace("import connection from '@ohos.net.connection';", `import { connection } from '${hostFixtureUrl}';`)
@@ -197,6 +198,7 @@ await fs.writeFile(path.join(temp, 'PhoneBridge.mts'), phoneText);
 let pluginText = await fs.readFile(path.join(source, 'RuntimePlugin.ets'), 'utf8');
 pluginText = pluginText.replace("from '../phone/PhoneBridge'", "from './PhoneBridge.mts'").replace(/^import .* from '@ohos\/flutter_ohos[^\n]+\n/gm, '')
   .replace("import { BusinessError } from '@ohos.base';", '')
+  .replace("import hilog from '@ohos.hilog';", 'const hilog = { info() {}, warn() {} };')
   .replace("from './RuntimeCore'", "from './RuntimeCore.mts'")
   .replace("from './ManagedSkillService'", "from './ManagedSkillService.mts'")
   .replace("from './RuntimeController'", "from './RuntimeController.mts'");
