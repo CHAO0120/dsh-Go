@@ -74,10 +74,19 @@ int dsh_guest_initialize(const struct dsh_guest_options *options) {
   if (!options || !options->root || !options->protected_paths ||
       !options->protected_count || options->protected_count > 128) return EINVAL;
   char root[PATH_MAX], data[PATH_MAX];
-  if (!realpath(options->root, root)) return errno;
-  if (!strcmp(root, "/") || strlen(root) > sizeof data - 6) return EINVAL;
   pthread_mutex_lock(&gate);
   if (install_change) { pthread_mutex_unlock(&gate); return EBUSY; }
+  // The install lease also protects root lookup: never carry a canonical path
+  // across a concurrent uninstall. Preflight failures have not entered iSH.
+  if (!realpath(options->root, root)) {
+    int e = errno;
+    pthread_mutex_unlock(&gate);
+    return e;
+  }
+  if (!strcmp(root, "/") || strlen(root) > sizeof data - 6) {
+    pthread_mutex_unlock(&gate);
+    return EINVAL;
+  }
   if (state != DSH_GUEST_COLD) {
     int e = state == DSH_GUEST_QUARANTINED ? EIO :
             root_path && !strcmp(root_path, root) ? 0 : EBUSY;
