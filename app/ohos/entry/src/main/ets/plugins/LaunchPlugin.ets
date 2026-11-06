@@ -3,6 +3,7 @@
 // startWindowBackground。系统启动页自己淡出（200 ms），没有 Android 12+ 的交接。图标总是这一张，
 // 系统不能换启动页图标，选了备用图标也一样。自定义启动画面在鸿蒙上隐藏。未在真机核实。
 import deviceInfo from '@ohos.deviceInfo';
+import hilog from '@ohos.hilog';
 import image from '@ohos.multimedia.image';
 import resourceManager from '@ohos.resourceManager';
 import {
@@ -81,6 +82,9 @@ export default class LaunchPlugin implements FlutterPlugin, MethodCallHandler {
   }
 
   onMethodCall(call: MethodCall, result: MethodResult): void {
+    // The launch screen's steps (Android logs the same marks), to see on a phone where it waits.
+    const mark: Any = call.method === 'mark' ? call.argument('name') : call.method;
+    hilog.info(0x3F00, 'DshLaunch', '%{public}s', typeof mark === 'string' ? mark : call.method);
     switch (call.method) {
       case 'begin':
       case 'snapshot':
