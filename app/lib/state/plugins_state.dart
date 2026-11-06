@@ -1713,7 +1713,12 @@ class PluginInstallsController extends Notifier<Map<String, PluginInstallJob>> {
         );
       } on DshException catch (error) {
         if (error is DshRemoteException) rethrow;
-        result = await _recover(client, requestId, name);
+        result = await _recover(
+          client,
+          requestId,
+          name,
+          requireResult: host.isLocal && ref.read(operatingSystemProvider) == 'ohos',
+        );
       }
       if (result.succeeded) {
         return finish((j) => j.copyWith(phase: PluginInstallPhase.succeeded, result: result));
@@ -1739,7 +1744,12 @@ class PluginInstallsController extends Notifier<Map<String, PluginInstallJob>> {
 
   /// The install response was lost (timeout, dropped tunnel): ask the Host
   /// for the running install's result, then fall back to the bundle list.
-  Future<PluginOperationResult> _recover(DshClient client, String requestId, String name) async {
+  Future<PluginOperationResult> _recover(
+    DshClient client,
+    String requestId,
+    String name, {
+    required bool requireResult,
+  }) async {
     for (var attempt = 0; attempt < 3; attempt++) {
       try {
         final result = await client.waitForInstall(requestId);
@@ -1751,6 +1761,8 @@ class PluginInstallsController extends Notifier<Map<String, PluginInstallJob>> {
         await Future<void>.delayed(Duration(seconds: 2 * (attempt + 1)));
       }
     }
+    // Inventory cannot establish the outcome of a retired OH local request.
+    if (requireResult) throw const _InstallResultUnknown();
     try {
       final bundles = await client.listBundles();
       if (bundles.any((b) => b.name == name && b.installed)) {

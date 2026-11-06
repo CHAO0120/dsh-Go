@@ -955,6 +955,9 @@ def main():
           tests=['app/test/runtime/ohos_clipboard_consumer_test.dart'], scope='Actual HAR replies consumed by Flutter Clipboard, ApiKeyPage and EditableText; not device clipboard permission')
     g.run('flutter-paste-consumers', lambda: g.flutter('test', '--no-pub', '--reporter', 'json', '--concurrency=1', 'test/clipboard', 'test/forum/paste_authorized_test.dart'), cwd=g.flutter_source / 'app', env=g.flutter_env, needs=('flutter-input-identity',), timeout=300, tests=['app/test/clipboard/paste_reader_test.dart', 'app/test/forum/paste_authorized_test.dart'], scope='Actual Dart OH paste consumer and cancellation; native security authorization is a platform boundary')
     g.run('flutter-consumer-analyze', lambda: g.flutter('analyze', '--no-pub', 'lib/secrets', 'lib/state/attachment_files_ohos.dart', 'lib/share_hosted/hosted_links_state.dart', 'lib/ui/share_hosted', 'lib/ui/share/share_panel.dart', 'test/secrets', 'test/ohos/attachment_files_test.dart', 'test/share_hosted', 'test/share/share_panel_test.dart'), cwd=g.flutter_source / 'app', env=g.flutter_env, needs=('flutter-input-identity',), timeout=300)
+    g.run('flutter-plugin-install-recovery', lambda: g.flutter('test', '--no-pub', '--reporter', 'json', 'test/plugins/ohos_install_recovery_test.dart'), cwd=g.flutter_source / 'app',
+          env=g.flutter_env, needs=('flutter-input-identity',), timeout=300, tests=['app/test/plugins/ohos_install_recovery_test.dart'],
+          scope='Actual Dart OH local install result recovery and unchanged Android/remote contracts; not device')
     def retain_resolver(_):
         app = g.flutter_source / 'app'
         names = ['pubspec.lock', 'pubspec_overrides.yaml', '.dart_tool/package_config.json']
