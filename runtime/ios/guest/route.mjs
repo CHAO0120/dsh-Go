@@ -169,9 +169,8 @@ export function planScript(ast, { shellCommands, parse }) {
     } else if (name === 'set' && words.some(word => /^-[a-z]*x/.test(literalWord(word) ?? ''))) {
       opaque.add('shell trace expansion');
     } else if (name === 'awk' || name === 'sed') {
-      // Their embedded languages can launch commands independently of Bash's
-      // AST. Keep existing virtual behavior; do not silently transfer them in
-      // a mixed request until an actual language-level proof is available.
+      // Embedded languages may launch commands beyond this AST. They can run
+      // wholly in Linux, but cannot be combined with the engine's Node Worker.
       opaque.add(`${name} embedded language`);
     }
   };
@@ -233,24 +232,31 @@ export function planScript(ast, { shellCommands, parse }) {
   }
   if (dormantSources.size) opaque.add('unresolved shell source in deferred body');
   if (dormantNames.size) opaque.add('unresolved executable in deferred body');
+  // This transform is installed only when a trusted Linux owner is present.
+  // Keep one Linux filesystem/PATH for ordinary scripts, even when every
+  // command also exists virtually. Dynamic code stays wholly inside Linux;
+  // only statically identified, self-contained Node Worker scripts stay virtual.
   return Object.freeze({
-    route: unresolvedCommand ? 'unsupported' : !missing.size ? 'virtual' : node || opaque.size ? 'unsupported' : 'guest',
+    route: node ? missing.size || unresolvedCommand || opaque.size ? 'unsupported' : 'virtual' : 'guest',
     missing: [...missing].sort(), node, unresolvedCommand, opaque: [...opaque].sort(),
   });
 }
 
 export function routingTransform(argv, options) {
-  // The pinned worker invokes a literal bash/sh with argv in extraArgs. Its
-  // first parse is just that command; the second parse is the complete -c body.
-  // Shell files/stdin retain the old virtual behavior instead of racing a file
-  // reread or transferring code that this pass did not inspect.
-  const eligible = (argv[0] === 'bash' || argv[0] === 'sh') && argv[1] === '-c' && argv.length >= 3;
+  // For -c, inspect the complete body before expansion or any user effects.
+  // File/stdin invocations go straight to Linux at the outer parse: never read
+  // a mutable script in the virtual filesystem just to decide where to run it.
+  const shell = argv[0] === 'bash' || argv[0] === 'sh';
+  const inline = argv[1] === '-c' && argv.length >= 3;
   let parses = 0, decision;
   return {
     get decision() { return decision; },
     plugin: { name: 'ios-guest-route', transform({ ast, metadata }) {
-      if (!eligible || parses++ !== 1) return { ast, metadata };
-      decision = planScript(ast, options);
+      if (!shell || inline && parses++ !== 1) return { ast, metadata };
+      decision = inline ? planScript(ast, options) : Object.freeze({
+        route: 'guest', missing: [], node: false, unresolvedCommand: false,
+        opaque: ['shell file or stdin runs only in Linux'],
+      });
       // An arbitrary exception is swallowed by just-bash's command dispatcher.
       // An empty AST makes the interpreter perform no user effects; the worker
       // reports the decision instead of publishing this placeholder exit code.

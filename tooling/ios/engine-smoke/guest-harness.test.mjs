@@ -20,13 +20,16 @@ test('audit oracle requires one matching pair inside one persisted turn',()=>{
 test('SSE peer emits only deterministic bash tool calls, never approval decisions',async()=>{
  const model=await startGuestModel('/synthetic');
  try {
-  for(const mode of ['deny','identity','exit','cancel','after']){
+  for(const mode of ['deny','identity','osrelease','apkpath','pipeline','full','exit','cancel','after']){
    const messages=[{role:'user',content:`[DSH_IOS_SMOKE:${mode}]`}];
    const call=async msgs=>{const r=await fetch(model.baseURL+'/chat/completions',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({stream:true,messages:msgs,tools:[{function:{name:'bash'}}]})});assert.equal(r.status,200);return (await r.text()).split('\n').filter(l=>l.startsWith('data: {')).map(l=>JSON.parse(l.slice(6)));};
    const frames=await call(messages),parts=frames.flatMap(f=>f.choices[0].delta.tool_calls??[]);
    assert.equal(parts[0].function.name,'bash');assert.equal(parts[0].id,model.calls.get(mode));
    const args=JSON.parse(parts.map(p=>p.function.arguments??'').join(''));
-   assert.equal(args.sandbox_permissions,'workspace-write');assert.ok(args.command.startsWith('/bin/sh -c'));
+   assert.equal(args.sandbox_permissions,mode==='full'?'danger-full-access':'workspace-write');
+   const probes={osrelease:'cat /etc/os-release',apkpath:'command -v apk',pipeline:"cat /etc/os-release | grep '^ID='",full:'apk --version'};
+   if(Object.hasOwn(probes,mode))assert.equal(args.command,probes[mode]);
+   else assert.ok(args.command.startsWith('/bin/sh -c'));
    assert.equal(JSON.stringify(args).includes('allowed-once'),false);
    const done=await call([...messages,{role:'tool',content:'real tool result',tool_call_id:parts[0].id}]);
    assert.equal(done.some(f=>f.choices[0].delta.tool_calls),false);

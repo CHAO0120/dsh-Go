@@ -9,6 +9,10 @@ export async function startGuestModel(workspace) {
   const calls = new Map();
   const scripts = {
     deny: "/bin/sh -c 'printf forbidden > /workspace/deny-marker'",
+    osrelease: 'cat /etc/os-release',
+    apkpath: 'command -v apk',
+    pipeline: "cat /etc/os-release | grep '^ID='",
+    full: 'apk --version',
     identity: "/bin/sh -c 'uname -a; cat /etc/alpine-release; printf guest-ok > \"/workspace/中文 标记.txt\"; cat \"/workspace/中文 标记.txt\"; if command -v python3 >/dev/null; then printf python3=present:; python3 -c \"print(1+1)\"; else printf \"python3=absent\\n\"; fi'",
     exit: "/bin/sh -c 'printf exit > /workspace/exit-marker; exit 7'",
     cancel: "/bin/sh -c ': > /workspace/heartbeat; printf ready > /workspace/ready; while :; do printf x >> /workspace/heartbeat; sleep 0.1; done'",
@@ -41,11 +45,11 @@ export async function startGuestModel(workspace) {
         JSON.stringify(message.content).includes('[DSH_IOS_SMOKE:'));
       if (tools.length && lastUser < 0) throw new Error('smoke turn marker missing');
       const results = body.messages.slice(lastUser + 1).filter((message) => message.role === 'tool');
-      const scenario = JSON.stringify(body.messages[lastUser]?.content).match(/DSH_IOS_SMOKE:(deny|identity|exit|cancel|after)/)?.[1];
+      const scenario = JSON.stringify(body.messages[lastUser]?.content).match(/DSH_IOS_SMOKE:(deny|identity|osrelease|apkpath|pipeline|full|exit|cancel|after)/)?.[1];
       if (tools.length && !scenario) throw new Error('unknown guest scenario');
       const step = tools.length && results.length === 0 ? ['bash', {
         description: 'Real guest CI approval fixture', command: scripts[scenario],
-        sandbox_permissions: 'workspace-write', justification: 'Approve this one synthetic CI guest task in its isolated workspace.'
+        sandbox_permissions: scenario === 'full' ? 'danger-full-access' : 'workspace-write', justification: 'Approve this one synthetic CI guest task in its isolated workspace.'
       }] : undefined;
       if (step && !tools.includes(step[0])) {
         res.writeHead(422); res.end(JSON.stringify({ error: { message: `required test tool unavailable: ${step[0]}` } })); return;

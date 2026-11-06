@@ -88,7 +88,9 @@ EDITS = {'runtime/ohos/process/index.mjs': (('  get temporaryRoot() { return thi
                                       'const filesystem = executionFilesystem(roots, policy, '
                                       'workerData.iosGuestTemporaryRoot ? [{ mountPoint: "/tmp", root: '
                                       'workerData.iosGuestTemporaryRoot }] : []);')),
- 'runtime/ohos/process/runtime.mjs': (('  #createOwnedGitServer;',
+ 'runtime/ohos/process/runtime.mjs': (('    if (policy.mode !== \'read-only\' && policy.mode !== \'workspace-write\') throw new Error(\'非法的受限运行模式\');',
+                                        '    if (policy.mode !== \'read-only\' && policy.mode !== \'workspace-write\' && !(policy.mode === \'danger-full-access\' && this.#guest)) throw new Error(\'非法的受限运行模式\');'),
+                                       ('  #createOwnedGitServer;',
                                        '  #createOwnedGitServer;\n'
                                        '  #guest;\n'
                                        '  #guestOutput;\n'
@@ -183,7 +185,12 @@ EDITS = {'runtime/ohos/process/index.mjs': (('  get temporaryRoot() { return thi
                                              "    iosGuest: ctx.get('subprocess')?.guestMetadata ?? "
                                              'guestMetadataView(undefined, false),\n'
                                              '    v: 1, bootId, platform:')),
- 'node_modules/@deepseek-ai/dsh-tool-bash/lib/index.js': (('import z from "@deepseek-ai/schemastery";',
+ 'node_modules/@deepseek-ai/dsh-bash-sandbox/lib/index.js': (('\t\tif (mode === "danger-full-access") return SandboxBashExecutor.decorateResult',
+                                                                '\t\t// iOS Linux still needs a one-use workspace ticket in full-access mode.\n'
+                                                                '\t\tif (mode === "danger-full-access" && this.ctx.subprocess.guestMetadata == null) return SandboxBashExecutor.decorateResult'),),
+ 'node_modules/@deepseek-ai/dsh-tool-bash/lib/index.js': (('function bashDescription(ctx) {',
+                                                            'function bashDescription(ctx) {\n\tconst guestMetadata = ctx.get("subprocess")?.guestMetadata;'),
+                                                           ('import z from "@deepseek-ai/schemastery";',
                                                            'const guestDescription = metadata => '
                                                            "globalThis[Symbol.for('dsh.go.ios.guest.owner')]?.description?.(metadata) "
                                                            "?? '可选 Linux 环境尚未启用。';\n"
@@ -191,8 +198,8 @@ EDITS = {'runtime/ohos/process/index.mjs': (('  get temporaryRoot() { return thi
                                                           ('。没有系统进程、PTY、Python 或 WASM；',
                                                            '。当前虚拟 shell 本身没有系统进程、PTY、Python 或 WASM；'),
                                                           (' + ohos;',
-                                                           " + ohos + (ohos ? '\\n' + "
-                                                           "guestDescription(ctx.get('subprocess')?.guestMetadata) : "
+                                                           " + (ohos ? (guestMetadata ? '' : ohos + '\\n') + "
+                                                           "guestDescription(guestMetadata) : "
                                                            "'');"))}
 INPUT_GUARDS = {'runtime/ohos/lifecycle/budget.mjs': ('export class ActiveBudgetClock {', '  constructor(bootId) {'),
  'runtime/ohos/lifecycle/coordinator.mjs': ("import { ActiveBudgetClock } from './budget.mjs';",

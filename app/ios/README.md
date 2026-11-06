@@ -63,12 +63,30 @@ iSH 构建脚本兼容 Python 3.9+；固定源码包使用先验证全部路径�
 
 `DshGuest.framework` 与其他引擎 framework 一起复制和签名，不在 App 启动时链接。
 它携带上游许可、固定源码地址和本地修改补丁；Archive 继续拒绝 framework 外的原生代码。
-这一项只交付构建和打包：尚未提供安装 Linux 的入口，也未改动默认虚拟 shell 的路由。
+可选 Linux 安装入口和 guest owner 已接入；安装后重启本机引擎才启用 Linux 路由。工作区准入、权限与路由的本轮修复仍需 iPhone 真机复验，模拟器或 Linux 上的测试不代替真机结果。
+
+### 可选 Linux 的 shell 契约
+
+- 没安装 Linux 时，保留 just-bash 和引擎 Node Worker；不把它们描述成真正的 Linux。
+- 已安装且由可信原生 owner 接入时，普通脚本整段交给 Linux。`cat /etc/os-release`、`ls /`、`command -v apk` 和管道不再按虚拟命令清单决定环境；guest 不可用或缺包时明确失败，不回退虚拟后端重跑。
+- guest 使用 `/bin/sh`（Alpine ash），不是完整 Bash。需要 Bash 时在 guest 安装后显式调用；`git`、`rg`、`jq` 等也需要 guest 自己安装，不能借用虚拟桩。只有工作区 `/workspace` 和私有 `/tmp` 是宿主挂载，`danger-full-access` 也不能突破 iOS 沙箱或扩大挂载；执行仍需工具策略生成的一次性票据。
+- 静态明确的 `node script.mjs` 等仍用引擎 Node Worker，可配合简单的虚拟管道命令；含 guest 命令、动态或不透明执行的 Node 混合脚本先拒绝，不执行前半段。脚本文件、stdin 及未选择 Worker 的动态命令或 `source`/`eval` 都只在 Linux 内执行，其中的 `node` 是 guest 程序，不会切回引擎 Worker。
+
+本机可运行的回归检查（不启动 iSH）：
+
+```sh
+npm ci --ignore-scripts --prefix runtime/ohos/process
+python3 runtime/ohos/process/build-just-bash.py
+node --test tooling/ios/guest-tests/route.test.mjs runtime/tests/ios-guest-policy.test.mjs
+python3 tooling/ios/tests/guest-admission.test.py -v
+```
+
+票据与真实 worker 集成测试另需从 `runtime/locks/dsh-0.2.2-rc.1/` 安装的独立 npm 前缀；先安装 `runtime/ohos/node/build-tools` 的锁定依赖并运行 `node runtime/ohos/process/build-rg-regex.mjs`，再按 [runtime.test.mjs](../../tooling/ios/guest-tests/runtime.test.mjs) 的启动说明运行。该测试使用真实工具、审批、Worker 和生成的 override，但 native 通道只记录请求，不运行 iSH；JIT 与 `--jitless` 分别验证。真机还应分别在只读、工作区可写和完全权限会话里测试独立环境探测、包管理、普通管道、Node Worker 及混合脚本拒绝。
 
 ## 现状
 
 - CI 会在 iOS 模拟器上真跑：真 NodeMobile 的工具回合、取消、停止和恢复会话；停止时不误关别人的 fd；真 App 里的安装、启动、登录、停止、重启和重置；真 App 启动后 30 秒还活着；在 App 进程里真调用提醒、联系人、定位、OCR 和网页操作，只有点确认框是测试代点的（`RunnerTests`，选图除外）。上述 CI 运行门是 Debug 构建。2026-11-06 一台 iPad Air 5（iPadOS 18.7.7）装了自签的 Release 包：App 三次冷启动都正常，本机引擎在加载没签名的 addon 时失败，addon 因此改成了 framework，改后还没在真机上跑过。这不说明 iPhone 上 TestFlight 包的白屏已经解决，下面的验收项也还没做。
-- 本机引擎和鸿蒙是同一层（`runtime/ohos/`）：同进程的 Node（NodeMobile 24.22.1，`--jitless`），命令是 just-bash 模拟的。没有真正的 Linux，不能起子进程，没有 Python。首次安装解压约 160 MB。引擎第一次启动时才加载，只连远程的人不占这份内存。
+- 本机引擎和鸿蒙共用基础层（`runtime/ohos/`）：同进程的 Node（NodeMobile 24.22.1，`--jitless`）。未安装可选 Linux 时，命令由 just-bash 模拟，没有 Linux 或 Python；安装并启用后按上面的 guest 契约运行，软件包以 guest 实际安装情况为准，仍不能任意启动 iOS 宿主进程。基础引擎首次安装解压约 160 MB；可选 Linux 另占空间。引擎第一次启动时才加载，只连远程的人不占这份内存。
 - 和鸿蒙不同：停止后能原地再启动，不用重开应用（`runtime/ios/host/node_runner.cc`）。
 - 和鸿蒙不同：本机引擎能处理图片。sharp 在这里装不了，所以 `runtime/ios/image/ios-sharp.cjs` 替代它，像素走系统的 ImageIO（`runtime/ios/host/image_binding.cc`），附件库自己的规则不变。ImageIO 写不了 WebP，所以带透明的图存 PNG，比目标大时压不下去（只影响透明图）。校验和缩放都走缩略图路径，大图的像素不用全部放进内存，但实际峰值还没在设备上量过。
 - App 切到后台后，系统很快会暂停引擎；后台的本地监听被回收时，回到前台会自动重启引擎。iOS 26 以上，本机正在跑的一轮会向系统申请继续运行（`BGContinuedProcessingTask`），系统同意就接着跑并显示进度，也可能随时收回，收回后和暂停一样。这部分只编过、没在设备上跑过。

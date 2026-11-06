@@ -45,7 +45,12 @@ export function guestDescription(metadata) {
   if (!metadata || metadata.source === 'none') return '可选 Linux 执行环境当前不可用，安装状态未知。' + unknown.hint;
   if (metadata.testOnly) return '当前仅接入 Linux 测试后端，不代表 iSH 已安装或可用于设备。';
   if (!metadata.available) return '可选 Linux 执行环境当前不可用（' + metadata.state + '）。' + unknown.hint;
-  return '可信原生 owner 的缓存报告：可选 Linux 执行环境可用；约束状态为 ' + metadata.enforcement + '。本查询没有启动或探测环境。';
+  return '可信原生 owner 的缓存报告：Linux 执行环境可用；约束状态为 ' + metadata.enforcement + '。本查询没有启动或探测环境。'
+    + '普通 shell 脚本（包括环境探测、管道、脚本文件和批量 stdin）默认整段在 Linux /bin/sh（Alpine ash）执行，不保证 Bash 专有语法。'
+    + '缺少 git、rg、jq 等命令时请在 Linux 内安装；失败不会回退到虚拟 shell。'
+    + '仅静态明确且不混用 Linux 或不透明执行的 node <script.js|script.cjs|script.mjs> 脚本仍使用引擎 Node Worker；混合脚本先拒绝、不执行。'
+    + '未选择 Node Worker 的动态命令或 source/eval 全在 Linux 内执行，其中的 node 指 Linux 程序，不是引擎 Worker。'
+    + '宿主仅映射工作区 /workspace 和私有临时目录 /tmp；完全权限也不会扩大这些宿主挂载范围。';
 }
 
 // Apply transport/queue availability without booting or probing either one.

@@ -15,6 +15,11 @@ on:
       - 'tooling/ios/build-ish.sh'
       - 'tooling/ios/build-guest-addon.sh'
       - 'tooling/ios/engine-smoke/**'
+      - 'tooling/ios/guest-specialization.py'
+      - 'tooling/ios/guest-tests/**'
+      - 'tooling/ios/tests/guest-*'
+      - 'runtime/tests/ios-guest-policy.test.mjs'
+      - 'runtime/tests/fixtures/ios-guest-runtime.mjs'
       - 'app/ios/Runner/Guest*'
       - '.github/workflows/ios-guest.yml'
   workflow_dispatch:
@@ -27,7 +32,37 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  routing:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '24.22.1'
+      - name: Build the pinned virtual shell and worker dependencies
+        run: |
+          npm ci --ignore-scripts --no-audit --no-fund --prefix runtime/ohos/process
+          npm ci --ignore-scripts --no-audit --no-fund --prefix runtime/ohos/node/build-tools
+          python3 runtime/ohos/process/build-just-bash.py
+          node runtime/ohos/process/build-rg-regex.mjs
+      - name: Prepare isolated locked DSH test inputs
+        run: |
+          prefix="$RUNNER_TEMP/ios-guest-test-dsh"
+          mkdir "$prefix"
+          cp runtime/locks/dsh-0.2.2-rc.1/package*.json "$prefix/"
+          npm ci --ignore-scripts --no-audit --no-fund --prefix "$prefix"
+          python3 -I -B runtime/lib/rtbuild.py patch-dsh --prefix "$prefix" --dsh-version 0.2.2-rc.1 --target ohos --out "$prefix/patch-results.json" --target-report "$prefix/target-report.json"
+          echo "IOS_GUEST_TEST_PREFIX=$prefix" >> "$GITHUB_ENV"
+      - name: Check routing, approval tickets and descriptor admission without Apple code
+        run: |
+          node --test tooling/ios/guest-tests/route.test.mjs tooling/ios/guest-tests/runtime.test.mjs runtime/tests/ios-guest-policy.test.mjs tooling/ios/engine-smoke/guest-harness.test.mjs
+          python3 tooling/ios/tests/guest-admission.test.py -v
+
   guest:
+    needs: routing
     runs-on: macos-26
     timeout-minutes: 45
     defaults:

@@ -75,6 +75,25 @@ static int under(const char *a, const char *b) {
   return !strncmp(a, b, n) && (a[n] == 0 || a[n] == '/');
 }
 static int open_root(const char *canonical) {
+#ifdef __APPLE__
+  // App-container ancestors need not be openable on iOS. Bind the canonical
+  // directory directly, then verify the opened capability still names it.
+  int fd = open(canonical, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
+  if (fd < 0)
+    return -1;
+  char path[PATH_MAX];
+  int error = 0;
+  if (fcntl(fd, F_GETPATH, path) < 0)
+    error = errno;
+  else if (strcmp(path, canonical))
+    error = EPERM;
+  if (error) {
+    close(fd);
+    errno = error;
+    return -1;
+  }
+  return fd;
+#else
   int fd = open("/", O_RDONLY | O_DIRECTORY | O_CLOEXEC);
   if (fd < 0)
     return -1;
@@ -104,6 +123,7 @@ static int open_root(const char *canonical) {
     p = slash + 1;
   }
   return fd;
+#endif
 }
 dsh_root *dsh_admit_workspace(struct dsh_path_span requested,
                               const struct dsh_path_span *protected_paths,

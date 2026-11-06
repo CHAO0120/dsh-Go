@@ -248,6 +248,9 @@ async function round(ready, mode, reuse) {
       assert.ok(text.includes('python3=absent')||text.includes('python3=present:2'),'optional Python observation missing');
       assert.equal(results[0].data.message.isError,false);
     }
+    if(mode==='osrelease'||mode==='pipeline')assert.match(text,/(?:^|\n)ID=alpine(?:\r?\n|$)/);
+    if(mode==='apkpath')assert.match(text,/\/sbin\/apk(?:\r?\n|$)/);
+    if(mode==='full')assert.match(text,/apk-tools/);
     if(mode==='exit')assert.match(text,/\[exit code: 7\]/);
     if(mode==='after')assert.match(text,/guest-after-cancel/);
     if(mode==='cancel'){
@@ -267,9 +270,9 @@ async function round(ready, mode, reuse) {
 try {
   const ready=await waitReady(0,240000);
   let session;
-  for(const mode of ['deny','identity','exit','cancel','after'])session=await round(ready,mode,session);
+  for(const mode of ['deny','identity','osrelease','apkpath','pipeline','full','exit','cancel','after'])session=await round(ready,mode,session);
   // Every sensitive call requested a fresh approval. allowed-once did not become a standing grant.
-  assert.equal(report.approvals,5);report.status='PASS';report.stage='complete';
+  assert.equal(report.approvals,9);report.status='PASS';report.stage='complete';
 }catch(error){report.error=String(error.message);}
 if(!exited){writeFileSync(`${guest}/quit`,'');await Promise.race([once(engine,'exit'),delay(20000)]);if(!exited)engine.kill();}
 report.modelRequests=model.requests.map(r=>({scenario:r.scenario,requestedTool:r.requestedTool}));

@@ -4,7 +4,7 @@ import { SerialGuestChannel } from './channel.mjs';
 import { GuestPaths, guestEnvironment } from './paths.mjs';
 
 export const guestUnavailableMessage = '这个命令在 iOS 本机不可用，可以连接电脑执行；也可以安装可选的 Linux 环境后重试。';
-const unsupported = 'ERR_IOS_GUEST_MIXED: 此脚本同时需要 Linux 与 Node Worker，或包含尚不能证明路由的动态执行；请拆成独立工具调用，未执行此脚本。';
+const unsupported = 'ERR_IOS_GUEST_MIXED: 此脚本将 Node Worker 与 Linux 命令或无法安全判定的执行混用；请拆成独立工具调用，未执行此脚本。';
 
 export class GuestProvider {
   #queue;
@@ -40,14 +40,17 @@ export class GuestProvider {
       if (metadata.installed !== 'present') return fail(metadata.installed === 'absent' ? guestInstallRequiredMessage :
         'ERR_IOS_GUEST_INSTALL_INVALID: Linux 安装状态不完整，请在设置中重新安装 Linux 环境。', 127);
     }
-    if (!['bash', 'sh'].includes(argv[0]) || argv[1] !== '-c' || argv.length < 3) {
-      return fail('ERR_IOS_GUEST_ROUTE: 仅已完整预判的 bash/sh -c 请求可进入此路由。', 2);
+    if (!Array.isArray(argv) || !['bash', 'sh'].includes(argv[0])
+      || [...argv].some(value => typeof value !== 'string' || value.includes('\0'))) {
+      return fail('ERR_IOS_GUEST_ROUTE: Linux shell 路由仅接受有效的 bash/sh 参数数组。', 2);
     }
     // Only the policy consumed from a one-use approved confinement ticket may
     // authorize native work. No direct spawn receives an inferred wider mode.
-    if (!policy || !['read-only', 'workspace-write'].includes(policy.mode)) {
+    if (!policy || !['read-only', 'workspace-write', 'danger-full-access'].includes(policy.mode)) {
       return fail('EACCES: IOS_GUEST_POLICY_REQUIRED: Linux 执行需要现有沙箱审批产生的受限票据。', 126);
     }
+    // Full access cannot widen the native guest's workspace/temp mounts.
+    const mode = policy.mode === 'read-only' ? 'read-only' : 'workspace-write';
     const paths = new GuestPaths({ workspaceRoot: policy.workspaceRoot, temporaryRoot: this.#temporaryRoot, forbiddenRoots: this.#forbiddenRoots });
     const guestCwd = paths.toGuest(cwd);
     if (guestCwd !== '/workspace' && !guestCwd.startsWith('/workspace/')) {
@@ -58,8 +61,8 @@ export class GuestProvider {
       argv: Object.freeze(['/bin/sh', ...argv.slice(1)]),
       cwd: guestCwd, stdin,
       env: guestEnvironment(env, guestCwd),
-      mode: policy.mode,
-      mounts: Object.freeze(paths.mounts.map(row => Object.freeze({ ...row, readOnly: policy.mode === 'read-only' }))),
+      mode,
+      mounts: Object.freeze(paths.mounts.map(row => Object.freeze({ ...row, readOnly: mode === 'read-only' }))),
     });
     return this.#queue.execute(request, { signal, graceMs, output });
   }
