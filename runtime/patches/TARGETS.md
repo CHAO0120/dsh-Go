@@ -2,7 +2,7 @@
 
 ## 目的与边界
 
-Android 构建只应用 `targetSets.android` 里的公共补丁，现在是 main-63e255f 的 57 个，公共 diff 和各版本 pin 对象保持 main 原字节与数值。OHOS 的 81 项先应用这 57 个公共补丁，再应用 24 个 OHOS 专用补丁；平台判断为 false 并不等于 JavaScript 文件字节没有变化，因此不能把所有 diff 一起打进 Android 再依赖运行时判断。
+Android 构建只应用 `targetSets.android` 里的公共补丁，现在是 main-cf2f7c8 的 101 个，公共 diff 和各版本 pin 对象保持 main 原字节与数值。OHOS 的 125 项先应用这 101 个公共补丁，再应用 24 个 OHOS 专用补丁；平台判断为 false 并不等于 JavaScript 文件字节没有变化，因此不能把所有 diff 一起打进 Android 再依赖运行时判断。
 
 本次恢复的是 **DSH npm 前缀树的文件字节**。构建工具自身、构建报告、时间戳或压缩器可能改变完整 runtime / APK 的字节；本包没有执行 Android APK、arm64 原生 runtime 或 HAP 构建，也不宣称这些整体产物与旧版完全相同。
 
@@ -29,7 +29,7 @@ schema 1 不再用于新的补丁应用或记录。迁移前先为每个现有 d
 
 ## Android 集合是 OHOS 集合的子集
 
-`zzzzzzz-input-recovery.diff` 和 `zzzzzzzz-model-defaults.diff` 曾经不在 `targetSets.ohos`。前者和 `zzzzzzzzzzzzz-ohos-lifecycle.diff` 都改 `dsh-agent-loop`，后者的 before pin 接在前者之后。现在两个都在。此次合 main 后，Android 的完整 57 项作为 OH 的公共前缀；包括 lifecycle 在内的 OH rc.4 前后 pin 按新链重算，共享 diff 与 main pin 对象不改。
+`zzzzzzz-input-recovery.diff` 和 `zzzzzzzz-model-defaults.diff` 曾经不在 `targetSets.ohos`。前者和 `zzzzzzzzzzzzz-ohos-lifecycle.diff` 都改 `dsh-agent-loop`，后者的 before pin 接在前者之后。现在两个都在。每次合 main 后，Android 的完整公共链作为 OH 的公共前缀；与新公共补丁改同一文件的 OH 覆盖 pin 按新链重算，共享 diff 与 main pin 对象不改。
 
 `runtime/tests/input-recovery.test.mjs` 从 agent-loop 里摘几个 region 来跑。鸿蒙的 agent 在领取输入前会调用 region 之外的 `ohosLifecycle()`，所以它要把这个函数一起摘进去，否则是 ReferenceError，而不是输入丢了。
 

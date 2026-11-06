@@ -2,7 +2,7 @@
 """Replay the actual old/new shell recipe blocks and mutate their real inputs.
 
 External archives are identical small fixtures, not Android image downloads.
-The baseline must be the verified main-45e1a7d runtime directory.
+The baseline must be the verified main-cf2f7c8 runtime directory.
 """
 import argparse
 from contextlib import contextmanager
@@ -69,10 +69,10 @@ def main():
     baseline = args.baseline.resolve()
     for name, expected in {
         'build-runtime.sh': '1ddfc945b7a59fe9243178303d982b04caf6f4178787a5b09a4a5dc1bbfb88ab',
-        'lib/rtbuild.py': '235370e7cfd7173a34cd71a348a909b083cc49d118e5ac8ed27a298d6aa821aa',
-        'patches/pins.json': 'e27a3b1e1e27c9a4c84622122a239369abf025083e313b1c1cc932444d5ac568',
+        'lib/rtbuild.py': 'c8c78649306509bd688b31c519bbf1b2509ec318c244f6ee2986000df195c611',
+        'patches/pins.json': 'df95d9f86cc75d112a5b4f701a377edce66823ce03e4316ef93e1301c2093e82',
     }.items():
-        assert sha((baseline / name).read_bytes()) == expected, 'not the main-45e1a7d baseline: ' + name
+        assert sha((baseline / name).read_bytes()) == expected, 'not the main-cf2f7c8 baseline: ' + name
     cases = []
     with tempfile.TemporaryDirectory(prefix='android-recipe-contract-') as temporary:
         root = Path(temporary)
