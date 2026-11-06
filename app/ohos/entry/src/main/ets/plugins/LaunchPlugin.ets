@@ -65,6 +65,8 @@ export default class LaunchPlugin implements FlutterPlugin, MethodCallHandler {
         // 引擎和 App 同进程，由 Dart 启动；已在跑的只有进程活过上一个窗口的情况。关了自动启动时
         // 动画也会播完（最多 1.36 s）才收，这里读不到那个设置。
         reply.set('coldEngine', nativeHostState().phase !== 'running');
+        // The app's own first ~0.7 s stalls frames here; the motion waits for it (launch_state.dart).
+        reply.set('motionAfterReady', true);
         return reply;
       } finally { await map.release(); }
     } finally { await source.release(); }
