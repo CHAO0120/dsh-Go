@@ -5,6 +5,7 @@
 #include "file_access.h"
 #include <napi/native_api.h>
 #include <hilog/log.h>
+#include <dlfcn.h>
 #include <cmath>
 #include <cstring>
 #include "../../../../../../runtime/ohos/host/phone_contract.h"
@@ -91,6 +92,11 @@ napi_value Start(napi_env env, napi_callback_info info) {
     Check(napi_get_cb_info(env, info, &count, &argument, nullptr, nullptr));
     if (count != 1) throw dsh::HostError("ERR_OHOS_HOST_ARGUMENT", "Host options are required");
     auto options = Options(env, argument);
+    // The require-builtin addon finds V8 with dlsym(RTLD_DEFAULT). libnode came in
+    // as a local dependency of this library, so its symbols are global only after this.
+    if (dlopen("libnode.so", RTLD_NOW | RTLD_NOLOAD | RTLD_GLOBAL) == nullptr) {
+      throw dsh::HostError("ERR_OHOS_HOST_NODE_SYMBOLS", "The embedded Node library could not be made global");
+    }
     Host().Start(std::move(options), dsh_node_start, dsh_node_stop);
     return Undefined(env);
   } catch (const std::exception& error) { return Throw(env, error); }
