@@ -63,7 +63,7 @@ Strict real VDSO; robust SDK paths; confined C backend and framework link target
  
  threads = dependency('threads')
  librt = cc.find_library('rt', required: false)
-@@ -1786,6 +1787,21 @@
+@@ -1786,6 +1787,22 @@
          'platform/' + host_machine.system() + '.c',
      ]
  
@@ -76,6 +76,7 @@ Strict real VDSO; robust SDK paths; confined C backend and framework link target
 +        'dsh-native/bound_ish_mapping.c',
 +        'dsh-native/bound_parent.c',
 +        'dsh-native/guest_backend.c',
++        'dsh-native/guest_dns.c',
 +        'dsh-native/interruptible.c',
 +        'dsh-native/job_bridge.c',
 +        'dsh-native/job_stdio.c',
@@ -102,7 +103,7 @@ Strict real VDSO; robust SDK paths; confined C backend and framework link target
 +    link_whole: [libish, libish_emu, libfakefs],
 +    dependencies: dependencies,
 +    name_prefix: '', name_suffix: dsh_suffix,
-+    install: false, link_args: dsh_link_args)
++    install: false, link_args: dsh_link_args + (host_machine.system() == 'darwin' ? ['-lresolv'] : []))
 --- a/tools/staticdefine.sh
 +++ b/tools/staticdefine.sh
 @@ -1,23 +1,41 @@

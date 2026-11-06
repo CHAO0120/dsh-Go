@@ -1,4 +1,5 @@
 #include "guest_backend.h"
+#include "guest_dns.h"
 #include "bound_admission.h"
 #include "bound_ish_fs.h"
 #include "job_bridge.h"
@@ -218,6 +219,13 @@ int dsh_guest_start(const struct dsh_guest_request *request,
       if (!temporary) e = errno;
       free(deny);
     }
+  }
+  // Refresh before exposing any approved host directory to the guest namespace.
+  // A DNS preparation failure starts no task, borrows no context, and remains
+  // READY so the caller can retry after the network/configuration is repaired.
+  if (!e) {
+    current = supervisor;
+    e = dsh_dns_sync();
   }
   int touched = 0;
   if (!e) {
