@@ -800,6 +800,8 @@ def main():
                 'DSH_GO_OHOS_SIM_ADDONS': json.dumps([str(p('native_library_dir') / name)
                     for name in ['libdsh_flock.so', 'libdsh_require_builtin.so']]),
                 'NARB_DISABLE_NATIVE_CACHE': '1'}
+    g.node_tests('plugin-effect-dispose', [rt + 'plugin-effect-dispose.test.mjs'], mode='strict',
+                 needs=('prepared-inputs', 'ohos-test-helpers', 'native-loader'), extra=plugin_hmr_env)
     g.node_tests('plugin-hmr-update', [rt + 'plugin-hmr-update.test.mjs'], mode='strict',
                  needs=('prepared-inputs', 'ohos-test-helpers', 'native-loader'), extra=plugin_hmr_env)
     g.node_tests('plugin-generation-reinstall', [rt + 'plugin-generation-reinstall.test.mjs'], mode='strict',
