@@ -42,7 +42,8 @@ device() {
   [[ "$(wc -l <<<"$targets")" == 1 ]] || die "more than one device attached, keep one: $targets"
 }
 
-param() { "$HDC" shell param get "$1" | tr -d '\r'; }
+# A real phone ends the value with a space (HarmonyOS 7.0.0.111).
+param() { "$HDC" shell param get "$1" | tr -d '\r' | sed 's/[[:space:]]*$//'; }
 
 api_level() {
   local api
