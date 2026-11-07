@@ -1,0 +1,11 @@
+--- a/node_modules/@deepseek-ai/dsh-subagent/lib/index.js
++++ b/node_modules/@deepseek-ai/dsh-subagent/lib/index.js
+@@ -1624,7 +1624,7 @@
+ 			* between this operation's failure and its releaser running, which no test can schedule
+ 			* deterministically: the ownership edge then belongs to that live Activation, so the
+ 			* conservative keep leaves it for finishDisposal's releaseOwnership. */
+-			if (live !== void 0 && live.closing === void 0) return;
++			if (live !== void 0 && live.parent === parent && live.closing === void 0) return;
+ 			if (parentActivation.ownedChildren.delete(childId)) this.wake(parentActivation);
+ 		};
+ 	}

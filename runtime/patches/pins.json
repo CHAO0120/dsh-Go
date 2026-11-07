@@ -1176,6 +1176,14 @@
         }
       }
     },
+    "zzzzzzzzzz-subagent-failed-delivery-ownership.diff": {
+      "0.2.2-rc.1": {
+        "node_modules/@deepseek-ai/dsh-subagent/lib/index.js": {
+          "after": "7eb2f7f11f403c3c975e41448945bebced15f189aefd59388e7e6f1aef214996",
+          "before": "5aad8aadee1879f1e8a878431630f885adbe6f9ee9cb1832838abbc56bc1fbea"
+        }
+      }
+    },
     "zzzzzzzzzz-workspace-watch-error.diff": {
       "0.2.2-rc.1": {
         "node_modules/@deepseek-ai/dsh-api-workspace-files/lib/index.js": {
