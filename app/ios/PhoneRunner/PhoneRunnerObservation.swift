@@ -211,7 +211,9 @@ final class PhoneRunnerObservation {
         image.size.width.isFinite, image.size.height.isFinite,
         image.size.width > 0, image.size.height > 0,
         let colorSpace = CGColorSpace(name: CGColorSpace.sRGB) else { throw PhoneRunnerObservationError.image }
-      self.appBundleID = appBundleID; self.orientation = orientation
+      self.appBundleID = appBundleID
+      self.orientation = PhoneRunnerObservation.interfaceOrientation(device: orientation,
+        pixelWidth: pixels.width, pixelHeight: pixels.height)
       pixelWidth = pixels.width; pixelHeight = pixels.height
       imageOrientation = image.imageOrientation.rawValue
       scale = Double(image.scale); pointSize = image.size
@@ -240,6 +242,14 @@ final class PhoneRunnerObservation {
 
   private let now: () -> TimeInterval?
   private(set) var latest: Record?
+
+  /// XCUIDevice reports the device's physical orientation: face up or down for a phone lying
+  /// flat, and unknown on the simulator. The interface keeps its last orientation then, so those
+  /// readings fall back to the screenshot's shape (portrait 1, landscape 3). A rotation between
+  /// observation and action still changes the shape or the reading and is refused.
+  static func interfaceOrientation(device: Int, pixelWidth: Int, pixelHeight: Int) -> Int {
+    (1...4).contains(device) ? device : (pixelHeight >= pixelWidth ? 1 : 3)
+  }
 
   init(now: @escaping () -> TimeInterval? = PhoneRunnerObservationClock.now) { self.now = now }
 

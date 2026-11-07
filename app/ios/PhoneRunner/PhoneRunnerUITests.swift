@@ -477,8 +477,10 @@ final class PhoneTools {
     let current = try frontApplication()
     guard current.identifier == binding.application.identifier,
       binding.application.app.state == .runningForeground else { throw PhoneRunnerObservationError.app }
-    let direction = XCUIDevice.shared.orientation.rawValue
-    guard (1...4).contains(direction), direction == binding.frame.orientation else {
+    // Flat or unknown: the interface keeps the orientation the bound frame was checked in.
+    let reading = XCUIDevice.shared.orientation.rawValue
+    let direction = (1...4).contains(reading) ? reading : binding.frame.orientation
+    guard direction == binding.frame.orientation else {
       throw PhoneRunnerObservationError.orientation
     }
     try context.checkApp(current.identifier, input: true)

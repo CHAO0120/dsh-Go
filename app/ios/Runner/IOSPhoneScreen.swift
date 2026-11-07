@@ -536,8 +536,13 @@ final class IOSPhoneScreen {
     let count = width * height
     let luminance: [UInt8] = pixels.withUnsafeBytes { raw in
       let bytes = raw.bindMemory(to: UInt8.self)
-      return (0..<count).map { i in
-        UInt8((77 * Int(bytes[i * 4]) + 150 * Int(bytes[i * 4 + 1]) + 29 * Int(bytes[i * 4 + 2])) >> 8)
+      // Split into typed steps: the one-line form does not type-check in reasonable time.
+      return (0..<count).map { (i: Int) -> UInt8 in
+        let base = i * 4
+        let red: Int = 77 * Int(bytes[base])
+        let green: Int = 150 * Int(bytes[base + 1])
+        let blue: Int = 29 * Int(bytes[base + 2])
+        return UInt8((red + green + blue) >> 8)
       }
     }
     struct Dot { let x: Double; let y: Double; let diameter: Double }

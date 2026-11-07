@@ -272,7 +272,7 @@ final class IOSPhoneXCTestObservationTests: XCTestCase {
     XCTAssertNil(cache.latest)
   }
 
-  func testEachDirectionMustMatchAndUnknownDirectionCannotBeUsed() throws {
+  func testEachDirectionMustMatchAndAFlatReadingFollowsTheScreenshotShape() throws {
     let clock = Clock(), call = try context()
     let cache = PhoneRunnerObservation(now: { clock.value })
     for direction in 1...4 {
@@ -280,11 +280,21 @@ final class IOSPhoneXCTestObservationTests: XCTestCase {
       try cache.remember(screen: "s1", frame: observed, context: call, capturedAt: 100)
       XCTAssertNoThrow(try cache.validate(screen: "s1", fresh: observed, context: call, consume: true))
     }
+    // The test image is 16x12 (landscape): unknown, face up and face down read as landscape (3),
+    // so against a portrait observation they are a change, as is any other direction.
     for direction in [0, 2, 5, 6] {
       try cache.remember(screen: "s2", frame: frame(), context: call, capturedAt: 100)
       expect(.orientation) { _ = try cache.validate(screen: "s2", fresh: frame(orientation: direction), context: call, consume: true) }
       XCTAssertNil(cache.latest)
     }
+    // Lying flat while the interface stays landscape is the same frame.
+    for direction in [0, 5, 6] {
+      try cache.remember(screen: "s3", frame: frame(orientation: 3), context: call, capturedAt: 100)
+      XCTAssertNoThrow(try cache.validate(screen: "s3", fresh: frame(orientation: direction), context: call, consume: true))
+    }
+    XCTAssertEqual(PhoneRunnerObservation.interfaceOrientation(device: 5, pixelWidth: 12, pixelHeight: 16), 1)
+    XCTAssertEqual(PhoneRunnerObservation.interfaceOrientation(device: 0, pixelWidth: 16, pixelHeight: 12), 3)
+    XCTAssertEqual(PhoneRunnerObservation.interfaceOrientation(device: 4, pixelWidth: 12, pixelHeight: 16), 4)
   }
 
   func testACompletedReadConnectionMayCloseWithoutCancellingTheLaterApprovedCall() throws {
