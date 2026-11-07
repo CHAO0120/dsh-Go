@@ -263,7 +263,7 @@ jobs:
           gradle --version 2>/dev/null | grep -E '^(Gradle|Kotlin|JVM)' | sed 's/^/GRADLE_VERSION /'
           python3 -I - <<'PYEOF'
           import glob, xml.etree.ElementTree as ET
-          files = sorted(glob.glob('app/build/test-results/testArm64DebugUnitTest/*.xml'))
+          files = sorted(set(glob.glob('../build/**/test-results/testArm64DebugUnitTest/*.xml', recursive=True) + glob.glob('**/build/**/test-results/testArm64DebugUnitTest/*.xml', recursive=True)))
           T = F = E = S = 0
           for f in files:
               r = ET.parse(f).getroot()
