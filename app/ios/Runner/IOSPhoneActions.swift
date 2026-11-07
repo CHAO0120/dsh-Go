@@ -54,14 +54,45 @@ final class IOSPhoneApproval: UIViewController, UIScrollViewDelegate {
   private let denyTitle: String
   private let answer: (Bool) -> Void
   private let preview: Data?
+  private let notifications: NotificationCenter
+  private let mayReveal: @MainActor () -> Bool
+  private var contentStack: UIStackView?
+  private var headingView: UILabel?
+  private var detailView: UITextView?
   private var previewImageView: UIImageView?
+  private var decodedPreview: UIImage?
+  private var contentVisible = false
+  private var lifecycleAllowsContent = true
   init(heading: String = "允许这一次手机动作？", detail: String, allow: String = "允许一次", deny: String = "拒绝",
-       preview: Data? = nil, answer: @escaping (Bool) -> Void) {
+       preview: Data? = nil, notifications: NotificationCenter = .default,
+       mayReveal: (@MainActor () -> Bool)? = nil, answer: @escaping (Bool) -> Void) {
     self.heading = heading; self.detail = detail; self.allowTitle = allow; self.denyTitle = deny; self.answer = answer
     self.preview = preview
+    self.notifications = notifications
+    self.mayReveal = mayReveal ?? {
+      UIApplication.shared.applicationState == .active && UIApplication.shared.isProtectedDataAvailable
+    }
     super.init(nibName: nil, bundle: nil)
     modalPresentationStyle = .pageSheet
     isModalInPresentation = true
+    // Selector notifications run synchronously on UIKit's lifecycle thread.
+    // Do not enqueue a Task/main.async: the app-switcher snapshot may follow
+    // immediately after the lifecycle callback returns.
+    for name in [UIApplication.willResignActiveNotification, UIApplication.didEnterBackgroundNotification,
+                 UIApplication.protectedDataWillBecomeUnavailableNotification] {
+      notifications.addObserver(self, selector: #selector(redactContent(_:)), name: name, object: nil)
+    }
+    for name in [UIApplication.didBecomeActiveNotification, UIApplication.protectedDataDidBecomeAvailableNotification] {
+      notifications.addObserver(self, selector: #selector(restoreContentIfActive(_:)), name: name, object: nil)
+    }
+    for name in [UIScene.willDeactivateNotification, UIScene.didEnterBackgroundNotification] {
+      notifications.addObserver(self, selector: #selector(redactSceneContent(_:)), name: name, object: nil)
+    }
+    notifications.addObserver(self, selector: #selector(restoreSceneContentIfActive(_:)),
+      name: UIScene.didActivateNotification, object: nil)
+    // On iOS 9+, selector registration does not require manual removal after
+    // deallocation: NotificationCenter cleans stale entries on later delivery.
+    // There is no observer block retaining this controller (iOS 15+ target).
   }
   required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
   override func viewDidLoad() {
@@ -71,17 +102,19 @@ final class IOSPhoneApproval: UIViewController, UIScrollViewDelegate {
     title.text = heading
     title.numberOfLines = 0
     title.font = .preferredFont(forTextStyle: .headline)
+    headingView = title
     let text = UITextView()
     text.isEditable = false
     text.isSelectable = true
     text.text = detail
     text.font = .preferredFont(forTextStyle: .body)
+    detailView = text
     let deny = UIButton(type: .system)
     deny.setTitle(denyTitle, for: .normal)
-    deny.addAction(UIAction { [weak self] _ in self?.answer(false) }, for: .touchUpInside)
+    deny.addAction(UIAction { [weak self] _ in self?.choose(false) }, for: .touchUpInside)
     let allow = UIButton(type: .system)
     allow.setTitle(allowTitle, for: .normal)
-    allow.addAction(UIAction { [weak self] _ in self?.answer(true) }, for: .touchUpInside)
+    allow.addAction(UIAction { [weak self] _ in self?.choose(true) }, for: .touchUpInside)
     let buttons = UIStackView(arrangedSubviews: [deny, allow])
     buttons.distribution = .fillEqually
     var rows: [UIView] = [title]
@@ -94,12 +127,14 @@ final class IOSPhoneApproval: UIViewController, UIScrollViewDelegate {
       zoom.minimumZoomScale = 1; zoom.maximumZoomScale = 8; zoom.delegate = self
       zoom.heightAnchor.constraint(equalToConstant: 220).isActive = true
       zoom.accessibilityLabel = "上次观察的标号截图，可缩放核对；不是实时画面"
+      decodedPreview = image
       previewImageView = picture; rows.append(zoom)
     }
     rows += [text, buttons]
     let stack = UIStackView(arrangedSubviews: rows)
     stack.axis = .vertical; stack.spacing = 16
     stack.translatesAutoresizingMaskIntoConstraints = false
+    contentStack = stack
     view.addSubview(stack)
     NSLayoutConstraint.activate([
       stack.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 20),
@@ -108,6 +143,64 @@ final class IOSPhoneApproval: UIViewController, UIScrollViewDelegate {
       stack.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -20),
       buttons.heightAnchor.constraint(equalToConstant: 48),
     ])
+    refreshVisibility()
+  }
+  override func viewWillAppear(_ animated: Bool) {
+    super.viewWillAppear(animated)
+    refreshVisibility()
+  }
+  override func viewDidAppear(_ animated: Bool) {
+    super.viewDidAppear(animated)
+    refreshVisibility()
+  }
+  private var mayShowContentNow: Bool {
+    guard mayReveal() else { return false }
+    if let scene = viewIfLoaded?.window?.windowScene {
+      return scene.activationState == .foregroundActive
+    }
+    return true
+  }
+  private func refreshVisibility() { setContentVisible(lifecycleAllowsContent && mayShowContentNow) }
+  private func setContentVisible(_ visible: Bool) {
+    contentVisible = visible
+    guard isViewLoaded else { return }
+    UIView.performWithoutAnimation {
+      if !visible { view.endEditing(true) }
+      contentStack?.isHidden = !visible
+      view.accessibilityElementsHidden = !visible
+      view.isUserInteractionEnabled = visible
+      // Remove sensitive content from the displayed views as well as hiding
+      // their common container. The original approved values remain private
+      // in this controller for return to the same sheet; this is not erasure.
+      headingView?.text = visible ? heading : nil
+      detailView?.isSelectable = visible
+      detailView?.text = visible ? detail : nil
+      previewImageView?.image = visible ? decodedPreview : nil
+    }
+  }
+  private func choose(_ allowed: Bool) {
+    guard contentVisible, mayShowContentNow else { setContentVisible(false); return }
+    answer(allowed)
+  }
+  @objc private func redactContent(_ notification: Notification) {
+    lifecycleAllowsContent = false
+    setContentVisible(false)
+  }
+  @objc private func restoreContentIfActive(_ notification: Notification) {
+    if mayShowContentNow { lifecycleAllowsContent = true }
+    refreshVisibility()
+  }
+  private func concernsThisScene(_ notification: Notification) -> Bool {
+    guard let ownScene = viewIfLoaded?.window?.windowScene else { return true }
+    return (notification.object as? UIScene) === ownScene
+  }
+  @objc private func redactSceneContent(_ notification: Notification) {
+    guard concernsThisScene(notification) else { return }
+    redactContent(notification)
+  }
+  @objc private func restoreSceneContentIfActive(_ notification: Notification) {
+    guard concernsThisScene(notification) else { return }
+    restoreContentIfActive(notification)
   }
   func viewForZooming(in scrollView: UIScrollView) -> UIView? { previewImageView }
 }

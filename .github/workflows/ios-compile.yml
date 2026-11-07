@@ -378,6 +378,7 @@ jobs:
             -only-testing:RunnerTests/IOSPhoneCoreDeviceTests \
             -only-testing:RunnerTests/IOSPhoneScreenTests \
             -only-testing:RunnerTests/IOSPhoneOperationTests \
+            -only-testing:RunnerTests/IOSPhoneApprovalTests \
             -only-testing:RunnerTests/IOSPhoneClipboardTests \
             -only-testing:RunnerTests/IOSPhoneXCTestObservationTests \
             -only-testing:RunnerTests/IOSPhoneRPCDispatchTests \

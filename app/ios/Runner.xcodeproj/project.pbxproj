@@ -18,6 +18,7 @@
 		D5500000000000000000040B /* IOSPhoneXCTestObservationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5500000000000000000040A /* IOSPhoneXCTestObservationTests.swift */; };
 		D55000000000000000000409 /* IOSPhoneClipboardTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D55000000000000000000408 /* IOSPhoneClipboardTests.swift */; };
 		D55000000000000000000407 /* IOSPhoneOperationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D55000000000000000000406 /* IOSPhoneOperationTests.swift */; };
+		D55000000000000000000611 /* IOSPhoneApprovalTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D55000000000000000000610 /* IOSPhoneApprovalTests.swift */; };
 		D55000000000000000000405 /* IOSPhoneScreenTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D55000000000000000000404 /* IOSPhoneScreenTests.swift */; };
 		D55000000000000000000331 /* PhoneRunnerObservation.swift in Sources */ = {isa = PBXBuildFile; fileRef = D55000000000000000000330 /* PhoneRunnerObservation.swift */; };
 		D5500000000000000000032B /* IOSPhoneRPCDispatch.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5500000000000000000032A /* IOSPhoneRPCDispatch.swift */; };
@@ -145,6 +146,7 @@
 		D5500000000000000000040A /* IOSPhoneXCTestObservationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IOSPhoneXCTestObservationTests.swift; sourceTree = "<group>"; };
 		D55000000000000000000408 /* IOSPhoneClipboardTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IOSPhoneClipboardTests.swift; sourceTree = "<group>"; };
 		D55000000000000000000406 /* IOSPhoneOperationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IOSPhoneOperationTests.swift; sourceTree = "<group>"; };
+		D55000000000000000000610 /* IOSPhoneApprovalTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IOSPhoneApprovalTests.swift; sourceTree = "<group>"; };
 		D55000000000000000000404 /* IOSPhoneScreenTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IOSPhoneScreenTests.swift; sourceTree = "<group>"; };
 		D55000000000000000000330 /* PhoneRunnerObservation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhoneRunnerObservation.swift; sourceTree = "<group>"; };
 		D5500000000000000000032A /* IOSPhoneRPCDispatch.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IOSPhoneRPCDispatch.swift; sourceTree = "<group>"; };
@@ -275,6 +277,7 @@
 				D5500000000000000000040A /* IOSPhoneXCTestObservationTests.swift */,
 				D55000000000000000000408 /* IOSPhoneClipboardTests.swift */,
 				D55000000000000000000406 /* IOSPhoneOperationTests.swift */,
+				D55000000000000000000610 /* IOSPhoneApprovalTests.swift */,
 				D55000000000000000000404 /* IOSPhoneScreenTests.swift */,
 				D55000000000000000000400 /* IOSPhonePairingStoreTests.swift */,
 			);
@@ -635,6 +638,7 @@
 				D5500000000000000000040B /* IOSPhoneXCTestObservationTests.swift in Sources */,
 				D55000000000000000000409 /* IOSPhoneClipboardTests.swift in Sources */,
 				D55000000000000000000407 /* IOSPhoneOperationTests.swift in Sources */,
+				D55000000000000000000611 /* IOSPhoneApprovalTests.swift in Sources */,
 				D55000000000000000000405 /* IOSPhoneScreenTests.swift in Sources */,
 				D55000000000000000000401 /* IOSPhonePairingStoreTests.swift in Sources */,
 				D5480000000000000000B101 /* ShareViewController.swift in Sources */,
