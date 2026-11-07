@@ -1,0 +1,15 @@
+{
+  "base_commit": "3a91fab9e80d2a92be071a74b8b208214d7e6277",
+  "base_pins_git_blob": "a22f01d4735512d88ee094545781b4f821c2c8a0",
+  "base_pins_canonical_sha256": "4c1603fedb30379526e66a83dcf2c34016fab0f79e7edd88f3a95d1fbfdeb918",
+  "new_patches": {
+    "zzz-terminal-members-monotonic-wait.diff": {
+      "0.2.2-rc.1": {
+        "node_modules/@deepseek-ai/dsh-subprocess-local/lib/index.js": {
+          "before": "4784084d8dd7abf217b75fe546dec6c87975a167e1a20ed035e220d279080d1c",
+          "after": "db7ba7bff3d65c0663f554114f1542e454d392530ac49daba6818a11d2f84061"
+        }
+      }
+    }
+  }
+}
