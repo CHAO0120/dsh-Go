@@ -105,6 +105,65 @@ struct PetOverlayPhoneTask: Equatable {
   }
 }
 
+/// A temporary environment failure must not become a permanent admission
+/// latch, or hide an asset/render failure that still needs attention. Recovery
+/// changes readiness only; task pause, snooze and approval belong to the policy.
+struct PetOverlayFailureState {
+  private(set) var code: String?
+
+  mutating func record(_ next: String) {
+    if let code, !Self.isTransient(code), Self.isTransient(next) { return }
+    code = next
+  }
+
+  mutating func clear() { code = nil }
+
+  @discardableResult
+  mutating func recover(protectedDataAvailable: Bool, audioMayPrepare: Bool) -> Bool {
+    guard protectedDataAvailable, let code else { return false }
+    switch code {
+    case "overlay_device_locked": break
+    case "overlay_audio_busy", "overlay_audio_failed", "overlay_audio_replaced",
+      "overlay_audio_interrupted":
+      guard audioMayPrepare else { return false }
+    default: return false
+    }
+    self.code = nil
+    return true
+  }
+
+  private static func isTransient(_ code: String) -> Bool {
+    switch code {
+    case "overlay_device_locked", "overlay_audio_busy", "overlay_audio_failed",
+      "overlay_audio_replaced", "overlay_audio_interrupted": return true
+    default: return false
+    }
+  }
+}
+
+/// Apple QA1749 requires a later user action before setActive after media reset.
+/// Keep that gate independent of the displayed error: another failure or a
+/// foreground/route/stop callback must not accidentally authorize activation.
+struct PetOverlayAudioRecoveryState {
+  var interrupted = false
+  private(set) var requiresUserAction = false
+
+  var blocker: String? {
+    if requiresUserAction { return "overlay_media_reset" }
+    return interrupted ? "overlay_audio_interrupted" : nil
+  }
+
+  mutating func mediaServicesReset() {
+    interrupted = false
+    requiresUserAction = true
+  }
+
+  mutating func retry(userInitiated: Bool) {
+    interrupted = false
+    if userInitiated { requiresUserAction = false }
+  }
+}
+
 /// Independent of UIKit/AVKit so stale lifecycle callbacks and explicit
 /// consent can be tested against the production policy on a Swift host.
 struct PetOverlayPolicy {

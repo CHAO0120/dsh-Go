@@ -22,7 +22,13 @@ final class IOSPetOverlay: NSObject {
   private var notifications: [NSObjectProtocol] = []
   private weak var embeddedHost: UIView?
   private var sourceConstraints: [NSLayoutConstraint] = []
-  private var lastError: String?
+  private var failure = PetOverlayFailureState()
+  private var lastError: String? {
+    get { failure.code }
+    set {
+      if let newValue { failure.record(newValue) } else { failure.clear() }
+    }
+  }
   private var lastStatus: NSDictionary?
   private var lastRender: RenderKey?
   private var outputSize = CGSize(width: 480, height: 318)
@@ -43,6 +49,7 @@ final class IOSPetOverlay: NSObject {
   /// background. Phone admission must use isKeepingAlive while backgrounded.
   var isUsable: Bool {
     policy.enabled && !policy.snoozed && picture.supported && lastError == nil &&
+      UIApplication.shared.isProtectedDataAvailable && picture.audioMayPrepare &&
       state.packID != nil && renderer?.pack?.id == state.packID
   }
 
@@ -51,7 +58,10 @@ final class IOSPetOverlay: NSObject {
   }
 
   var statusSnapshot: [String: Any] {
-    let reason = lastError ?? (policy.enabled && state.packID == nil ? "overlay_pet_not_selected" : nil)
+    let reason = lastError
+      ?? (policy.enabled && !UIApplication.shared.isProtectedDataAvailable ? "overlay_device_locked" : nil)
+      ?? (policy.enabled ? picture.audioPreparationBlocker : nil)
+      ?? (policy.enabled && state.packID == nil ? "overlay_pet_not_selected" : nil)
     return [
       "enabled": policy.enabled, "alwaysShow": policy.alwaysShow,
       // iOS has no Android overlay permission. Supported is not the same as
@@ -81,6 +91,7 @@ final class IOSPetOverlay: NSObject {
     policy.enabled = defaults.object(forKey: Self.enabledKey) as? Bool ?? false
     policy.alwaysShow = defaults.object(forKey: Self.alwaysKey) as? Bool ?? false
     picture.onChange = { [weak self] in self?.pictureChanged() }
+    picture.onRecoveryPossible = { [weak self] in self?.recoverTransientFailure() }
     picture.onFailure = { [weak self] code in
       guard let self else { return }
       self.lastError = code
@@ -131,11 +142,14 @@ final class IOSPetOverlay: NSObject {
     }
     observe(UIApplication.protectedDataWillBecomeUnavailableNotification) { [weak self] in
       guard let self else { return }
-      self.lastError = "overlay_device_locked"
+      if self.policy.hasDemand { self.lastError = "overlay_device_locked" }
       self.pauseCurrentTask()
       self.picture.stop()
       self.stopDrawing()
       self.emit()
+    }
+    observe(UIApplication.protectedDataDidBecomeAvailableNotification) { [weak self] in
+      self?.recoverTransientFailure()
     }
     observe(UIAccessibility.reduceMotionStatusDidChangeNotification) { [weak self] in self?.renderNow(force: true) }
     observe(UIApplication.didReceiveMemoryWarningNotification) { [weak self] in
@@ -241,6 +255,7 @@ final class IOSPetOverlay: NSObject {
       }
     case "unsnooze":
       guard inForeground else { return foregroundRequired(result) }
+      picture.retryFromUser()
       policy.snoozed = false
       lastError = nil
       evaluate(); result(statusSnapshot)
@@ -286,6 +301,7 @@ final class IOSPetOverlay: NSObject {
         if always { self.policy.alwaysShow = true; UserDefaults.standard.set(true, forKey: Self.alwaysKey) }
         else { self.policy.enabled = true; UserDefaults.standard.set(true, forKey: Self.enabledKey) }
         self.policy.snoozed = false
+        self.picture.retryFromUser()
         self.lastError = nil
         self.evaluate()
       }
@@ -411,9 +427,24 @@ final class IOSPetOverlay: NSObject {
   }
 
   private func becameActive() {
+    picture.retryAfterForeground()
+    failure.recover(protectedDataAvailable: UIApplication.shared.isProtectedDataAvailable,
+      audioMayPrepare: picture.audioMayPrepare)
     if picture.active { picture.stop(keepInline: policy.hasDemand && isUsable) }
     evaluate()
     if wantsRestore { restoreConversation(); presentStopConfirmation() }
+  }
+
+  private func recoverTransientFailure() {
+    let recovered = failure.recover(protectedDataAvailable: UIApplication.shared.isProtectedDataAvailable,
+      audioMayPrepare: picture.audioMayPrepare)
+    if recovered || (policy.hasDemand && isUsable) {
+      // With no demand this only restores configuration readiness. If a task
+      // was paused, evaluate cannot clear that policy or confirm another action.
+      evaluate()
+    } else {
+      emit()
+    }
   }
 
   private func restoreConversation() {
@@ -452,6 +483,7 @@ final class IOSPetOverlay: NSObject {
         self.policy.confirmResume(id: id) else { return }
       self.wantsRestore = false
       self.lastError = nil
+      self.picture.retryFromUser()
       self.policy.snoozed = false
       resume(id)
       self.evaluate()

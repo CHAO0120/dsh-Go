@@ -11,6 +11,7 @@ struct PetOverlayContract {
   static func main() throws {
     guard CommandLine.arguments.count == 2 else { fatalError("Pass app/assets/pets") }
     let assets = URL(fileURLWithPath: CommandLine.arguments[1], isDirectory: true)
+    checkFailureRecovery()
     var policy = PetOverlayPolicy()
     check(!policy.enabled && !policy.alwaysShow && !policy.hasDemand, "default off")
     check(policy.begin(id: 3, sessionID: "fixture", line: "Maps"), "authenticated owner begin")
@@ -103,5 +104,73 @@ struct PetOverlayContract {
       } catch is PetOverlayPackFailure { checks += 1 }
     }
     print("PASS: \(checks) production Swift policy/pack/frame assertions; no AVKit/device claims")
+  }
+
+  static func checkFailureRecovery() {
+    var failure = PetOverlayFailureState()
+    check(!failure.recover(protectedDataAvailable: true, audioMayPrepare: true), "no spurious recovery")
+    failure.record("overlay_device_locked")
+    check(!failure.recover(protectedDataAvailable: false, audioMayPrepare: true), "locked data stays blocked")
+    check(failure.code == "overlay_device_locked", "lock error survives an unrelated audio event")
+    check(failure.recover(protectedDataAvailable: true, audioMayPrepare: false), "unlock clears only the lock latch")
+    check(failure.code == nil, "idle unlock no longer needs an explicit Recover tap")
+
+    for code in ["overlay_audio_busy", "overlay_audio_replaced", "overlay_audio_interrupted",
+      "overlay_audio_failed"] {
+      failure.record(code)
+      check(!failure.recover(protectedDataAvailable: false, audioMayPrepare: true), code + " cannot recover while locked")
+      check(!failure.recover(protectedDataAvailable: true, audioMayPrepare: false), code + " requires eligible audio")
+      check(failure.code == code, code + " survives a still-busy route change")
+      check(failure.recover(protectedDataAvailable: true, audioMayPrepare: true), code + " recovers when conditions allow a new attempt")
+      check(failure.code == nil, code + " does not permanently block a new task")
+      check(!failure.recover(protectedDataAvailable: true, audioMayPrepare: true), code + " recovery is idempotent")
+    }
+
+    for code in ["overlay_unsupported", "overlay_pack_missing", "overlay_pack_invalid", "overlay_sheet_invalid",
+      "overlay_source_missing", "overlay_pip_start_failed", "overlay_display_stalled", "overlay_render_failed",
+      "overlay_media_reset"] {
+      failure.record(code)
+      check(!failure.recover(protectedDataAvailable: true, audioMayPrepare: true), code + " is not cleared by unrelated recovery")
+      failure.record("overlay_device_locked")
+      failure.record("overlay_audio_interrupted")
+      check(failure.code == code, code + " is not hidden by a later transient failure")
+      failure.clear()
+    }
+
+    var audio = PetOverlayAudioRecoveryState()
+    check(audio.blocker == nil, "audio starts without a reset gate")
+    audio.interrupted = true
+    check(audio.blocker == "overlay_audio_interrupted", "interruption blocks a new attempt")
+    audio.retry(userInitiated: false)
+    check(audio.blocker == nil, "foreground can retry an interruption without an ended event")
+    audio.mediaServicesReset()
+    check(audio.blocker == "overlay_media_reset", "reset requires a later user action")
+    audio.retry(userInitiated: false)
+    check(audio.blocker == "overlay_media_reset", "foreground alone cannot clear a reset gate")
+    audio.interrupted = true
+    audio.interrupted = false
+    check(audio.blocker == "overlay_media_reset", "later interruption events cannot clear a reset gate")
+    failure.record("overlay_pack_invalid")
+    failure.clear()
+    check(audio.blocker == "overlay_media_reset", "displayed error changes cannot authorize audio after reset")
+    audio.retry(userInitiated: true)
+    check(audio.blocker == nil, "explicit user recovery permits a new activation attempt")
+    audio.mediaServicesReset()
+    check(audio.requiresUserAction, "a second reset requires another user action")
+
+    var policy = PetOverlayPolicy()
+    policy.enabled = true
+    check(policy.begin(id: 40, sessionID: "recovery-fixture", line: nil), "recovery owner begins")
+    check(policy.requestPause() == 40, "interrupted owner was paused")
+    policy.snoozed = true
+    failure.record("overlay_audio_interrupted")
+    check(failure.recover(protectedDataAvailable: true, audioMayPrepare: true), "readiness recovers independently")
+    check(policy.paused && policy.needsStopConfirmation && policy.snoozed,
+      "automatic recovery cannot resume an existing task or clear user-close snooze")
+    check(!policy.confirmResume(id: 39) && policy.paused, "recovery cannot authorize an old owner")
+    check(policy.end(id: 40) && failure.code == nil, "ending the owner does not retain an old audio failure")
+    policy.snoozed = false // Explicit user choice, not an effect of recovery.
+    check(policy.begin(id: 41, sessionID: "next-fixture", line: nil) && !policy.paused && policy.hasDemand,
+      "fresh owner is eligible after recovery; its action approval remains outside overlay policy")
   }
 }

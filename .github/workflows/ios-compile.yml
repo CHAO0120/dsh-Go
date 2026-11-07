@@ -55,6 +55,9 @@ jobs:
           xcodebuild -version
           xcodebuild -showsdks | grep -i iphone
 
+      - name: Check pet overlay recovery and production state contracts
+        run: bash tooling/ios/pet-overlay-tests/contract.sh
+
       - name: Check real readiness crypto and the enabled Swift native interface
         run: |
           python3 tooling/ios/tests/phone-self-runner.test.py -v

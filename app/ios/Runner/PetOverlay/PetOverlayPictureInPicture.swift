@@ -16,6 +16,7 @@ final class PetOverlayPictureInPicture: NSObject,
   AVPictureInPictureControllerDelegate, AVPictureInPictureSampleBufferPlaybackDelegate {
   let sourceView = PetOverlayVideoView()
   var onChange: (() -> Void)?
+  var onRecoveryPossible: (() -> Void)?
   var onFailure: ((String) -> Void)?
   var onUnexpectedStop: (() -> Void)?
   var onSetPlaying: ((Bool) -> Bool)?
@@ -27,6 +28,9 @@ final class PetOverlayPictureInPicture: NSObject,
   private var notifications: [NSObjectProtocol] = []
   private var previousAudio: (AVAudioSession.Category, AVAudioSession.Mode, AVAudioSession.CategoryOptions)?
   private var ownsAudio = false
+  private var audioActivated = false
+  private var audioRecovery = PetOverlayAudioRecoveryState()
+  private var lastAudioMayPrepare = true
   private var requested = false
   private var expectedStop = false
   private var restoring = false
@@ -40,7 +44,17 @@ final class PetOverlayPictureInPicture: NSObject,
   var suspended: Bool { picture?.isPictureInPictureSuspended == true }
   // AVAudioSession has no public synchronous "is active now" query. This
   // records our successful activation and an unchanged owned configuration.
-  var audioConfigured: Bool { ownsAudio && audioMatches() }
+  var audioConfigured: Bool { ownsAudio && audioActivated && audioRecovery.blocker == nil && audioMatches() }
+  // Eligibility for a new attempt, not an observation that the OS session is
+  // active. A demanded preparation still has to succeed in setActive(true).
+  var audioMayPrepare: Bool { audioPreparationBlocker == nil }
+  var audioPreparationBlocker: String? {
+    if let blocker = audioRecovery.blocker { return blocker }
+    let audio = AVAudioSession.sharedInstance()
+    if audio.category == .record || audio.category == .playAndRecord ||
+      (audio.category == .playback && audio.mode == .spokenAudio) { return "overlay_audio_busy" }
+    return nil
+  }
   var keepingAlive: Bool { requested && active && !suspended && audioConfigured }
   var inlineVisible: Bool {
     guard let window = sourceView.window, !window.isHidden,
@@ -56,6 +70,7 @@ final class PetOverlayPictureInPicture: NSObject,
 
   override init() {
     super.init()
+    lastAudioMayPrepare = audioMayPrepare
     sourceView.isUserInteractionEnabled = false
     sourceView.accessibilityElementsHidden = true
     sourceView.backgroundColor = .black
@@ -89,28 +104,73 @@ final class PetOverlayPictureInPicture: NSObject,
     let center = NotificationCenter.default
     notifications.append(center.addObserver(forName: AVAudioSession.interruptionNotification,
       object: nil, queue: .main) { [weak self] note in
-      guard let kind = note.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt,
-        kind == AVAudioSession.InterruptionType.began.rawValue else { return }
+      guard let raw = note.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt,
+        let kind = AVAudioSession.InterruptionType(rawValue: raw) else { return }
       Task { @MainActor in
-        guard let self, self.ownsAudio || self.requested || self.active else { return }
-        self.fail("overlay_audio_interrupted")
+        guard let self else { return }
+        switch kind {
+        case .began:
+          self.audioRecovery.interrupted = true
+          self.audioActivated = false
+          self.lastAudioMayPrepare = false
+          if self.ownsAudio || self.requested || self.active { self.fail("overlay_audio_interrupted") }
+          else { self.onChange?() }
+        case .ended:
+          self.audioRecovery.interrupted = false
+          self.lastAudioMayPrepare = self.audioMayPrepare
+          if self.audioMayPrepare { self.onRecoveryPossible?() }
+          else { self.onChange?() }
+        @unknown default: break
+        }
       }
     })
     notifications.append(center.addObserver(forName: AVAudioSession.routeChangeNotification,
       object: nil, queue: .main) { [weak self] _ in
       Task { @MainActor in
-        guard let self, self.ownsAudio, !self.audioMatches() else { return }
-        // Voice/Media has taken over. Never restore over its newer configuration.
-        self.fail("overlay_audio_replaced")
+        guard let self else { return }
+        let mayPrepare = self.audioMayPrepare
+        let recovered = mayPrepare && !self.lastAudioMayPrepare
+        self.lastAudioMayPrepare = mayPrepare
+        if self.ownsAudio, !self.audioMatches() {
+          // Voice/Media has taken over. Never restore over its newer configuration.
+          self.fail("overlay_audio_replaced")
+        }
+        // Only a blocked -> eligible change triggers a retry. Our own category
+        // notifications, or an unrelated route change, cannot spin failed setup.
+        if recovered { self.onRecoveryPossible?() }
+        else { self.onChange?() }
       }
     })
     notifications.append(center.addObserver(forName: AVAudioSession.mediaServicesWereResetNotification,
       object: nil, queue: .main) { [weak self] _ in
       Task { @MainActor in
-        guard let self, self.ownsAudio || self.requested || self.active else { return }
-        self.fail("overlay_media_reset")
+        guard let self else { return }
+        self.audioRecovery.mediaServicesReset()
+        self.audioActivated = false
+        self.lastAudioMayPrepare = false
+        if self.ownsAudio || self.requested || self.active { self.fail("overlay_media_reset") }
+        else { self.onChange?() }
       }
     })
+  }
+
+  /// Apple does not guarantee a matching interruption-ended notification.
+  /// Foreground return permits a new interruption recovery attempt; a media
+  /// reset still needs retryFromUser. Category guards/setActive remain decisive.
+  func retryAfterForeground() {
+    guard UIApplication.shared.applicationState == .active,
+      UIApplication.shared.isProtectedDataAvailable else { return }
+    audioRecovery.retry(userInitiated: false)
+    lastAudioMayPrepare = audioMayPrepare
+  }
+
+  /// Only native enable/resume confirmation or the foreground Recover button
+  /// calls this. Returning to the app is not a user request to reactivate audio.
+  func retryFromUser() {
+    guard UIApplication.shared.applicationState == .active,
+      UIApplication.shared.isProtectedDataAvailable else { return }
+    audioRecovery.retry(userInitiated: true)
+    lastAudioMayPrepare = audioMayPrepare
   }
 
   func prepareInline() throws {
@@ -120,6 +180,9 @@ final class PetOverlayPictureInPicture: NSObject,
     guard inlineVisible else {
       throw PetOverlayPackFailure("overlay_source_missing")
     }
+    // A recovery event may arrive before the old controller finishes stopping.
+    // Its didStop callback retries preparation after releasing that old lease.
+    guard !(expectedStop && (active || starting)) else { return }
     try acquireAudio()
     requested = true
     picture?.canStartPictureInPictureAutomaticallyFromInline = true
@@ -204,20 +267,20 @@ final class PetOverlayPictureInPicture: NSObject,
   }
 
   private func acquireAudio() throws {
+    if let blocker = audioPreparationBlocker { throw PetOverlayPackFailure(blocker) }
+    let audio = AVAudioSession.sharedInstance()
     if ownsAudio {
       guard audioMatches() else { throw PetOverlayPackFailure("overlay_audio_replaced") }
-      return
+      if audioActivated { return }
     }
-    let audio = AVAudioSession.sharedInstance()
-    guard audio.category != .record, audio.category != .playAndRecord,
-      !(audio.category == .playback && audio.mode == .spokenAudio) else {
-      throw PetOverlayPackFailure("overlay_audio_busy")
-    }
-    previousAudio = (audio.category, audio.mode, audio.categoryOptions)
     do {
-      try audio.setCategory(.playback, mode: .moviePlayback, options: .mixWithOthers)
-      ownsAudio = true
+      if !ownsAudio {
+        previousAudio = (audio.category, audio.mode, audio.categoryOptions)
+        try audio.setCategory(.playback, mode: .moviePlayback, options: .mixWithOthers)
+        ownsAudio = true
+      }
       try audio.setActive(true)
+      audioActivated = true
     } catch {
       releaseAudio()
       throw PetOverlayPackFailure("overlay_audio_failed")
@@ -232,6 +295,7 @@ final class PetOverlayPictureInPicture: NSObject,
   private func releaseAudio() {
     let restore = ownsAudio && audioMatches(), prior = previousAudio
     ownsAudio = false
+    audioActivated = false
     previousAudio = nil
     guard restore, let prior else { return }
     let audio = AVAudioSession.sharedInstance()
@@ -267,12 +331,14 @@ final class PetOverlayPictureInPicture: NSObject,
 
   func pictureInPictureControllerDidStopPictureInPicture(_ controller: AVPictureInPictureController) {
     starting = false
+    let stoppedAsRequested = expectedStop
     let userClosed = !expectedStop && !restoring
     expectedStop = false
     restoring = false
     if !requested || userClosed { requested = false; releaseAudio() }
     if userClosed { onUnexpectedStop?() }
     onChange?()
+    if stoppedAsRequested && audioMayPrepare { onRecoveryPossible?() }
   }
 
   func pictureInPictureController(_ controller: AVPictureInPictureController,
