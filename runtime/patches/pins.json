@@ -1400,6 +1400,14 @@
         }
       }
     },
+    "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz-workspace-dispose-observer.diff": {
+      "0.2.2-rc.1": {
+        "node_modules/@deepseek-ai/dsh-workspace-changes/lib/index.js": {
+          "after": "9d9bd678befb3506b35714d74205c80fb0f4eecb2e0d9c1fc058ee66855f4fce",
+          "before": "b73138187c8b251cf1da086fddf959fe3cca46df9c68d3aaca95bad01f3e9a62"
+        }
+      }
+    },
     "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz-fs-line-style.diff": {
       "0.2.2-rc.1": {
         "node_modules/@deepseek-ai/dsh-fs-local/lib/index.js": {

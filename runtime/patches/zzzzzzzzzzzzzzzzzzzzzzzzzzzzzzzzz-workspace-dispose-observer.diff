@@ -1,0 +1,11 @@
+--- a/node_modules/@deepseek-ai/dsh-workspace-changes/lib/index.js
++++ b/node_modules/@deepseek-ai/dsh-workspace-changes/lib/index.js
+@@ -1077,7 +1077,7 @@
+ 		else if (event.type === "turn/end") recorders.get(session)?.end(event.data.turn);
+ 	});
+ 	ctx.on("session/disposed", (session) => {
+-		forget(session);
++		return forget(session);
+ 	});
+ 	ctx.on("agent/turn-stopping", async ({ agent, turn }) => {
+ 		await recorders.get(agent.session)?.stopping(turn);
