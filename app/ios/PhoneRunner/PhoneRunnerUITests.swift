@@ -257,7 +257,10 @@ final class PhoneTools {
     let identifier: String
     let label: String
     let value: String
+    let placeholder: String
     var secure: Bool { type == .secureTextField }
+    /// XCTest reports an empty field's value as its placeholder.
+    var shownText: String { !placeholder.isEmpty && value == placeholder ? "" : value }
   }
 
   private static let springBoard = "com.apple.springboard"
@@ -559,7 +562,8 @@ final class PhoneTools {
       let label = node.label.isEmpty ? node.placeholderValue ?? node.title : node.label
       if Self.worthShowing(type, label: label, value: value) {
         let id = found.count + 1
-        found[id] = Element(frame: frame, type: type, identifier: node.identifier, label: label, value: value)
+        found[id] = Element(frame: frame, type: type, identifier: node.identifier, label: label, value: value,
+                            placeholder: type == .secureTextField ? "" : node.placeholderValue ?? "")
         var line = "[\(id)] \(Self.name(of: type))"
         if !label.isEmpty { line += " \"\(label.prefix(200))\"" }
         if !value.isEmpty, value != label { line += " = \"\(value.prefix(200))\"" }
@@ -726,16 +730,19 @@ final class PhoneTools {
     touch(CGPoint(x: target.frame.midX, y: target.frame.midY))
     RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.5))
     let initial = try preparedTextInput(target)
-    guard initial.value == target.value, initial.value.count <= 1024 else {
+    guard initial.value == target.shownText, initial.value.count <= 1024 else {
       throw ToolError("输入焦点中的原值与观察不一致，没有继续输入；请重新 screen。")
     }
-    if !initial.value.isEmpty {
+    if !initial.raw.isEmpty {
+      // Everything the field shows goes, the placeholder too: deleting in an empty field does
+      // nothing, and text that happens to equal the placeholder still has to go.
       _ = try inputApplication()
-      initial.app.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: initial.value.count))
+      initial.app.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: initial.raw.count))
       try checkTypingResult()
     }
     let cleared = try preparedTextInput(target)
-    // A placeholder, nil value, or partly deleted string is not proof of empty.
+    // A nil value or a partly deleted string is not proof of empty; the field's own placeholder is
+    // how XCTest reports an empty field.
     guard cleared.value.isEmpty else {
       throw ToolError("未能确证原内容已清空，没有写入新文字；请核对屏幕并用 handoff。")
     }
@@ -757,7 +764,20 @@ final class PhoneTools {
   /// Each new typing primitive gets fresh pixels around its AX focus snapshot.
   /// This is intentionally conservative when a keyboard, clock or caret moves.
   /// No absence of a sensitive hint proves that an arbitrary field is safe.
-  private func preparedTextInput(_ target: Element) throws -> (app: XCUIApplication, value: String) {
+  /// Focus moves a field and brings up the keyboard; a picture still moving is read again
+  /// rather than refused at once. Every read checks the whole binding again.
+  private func preparedTextInput(_ target: Element) throws -> (app: XCUIApplication, value: String, raw: String) {
+    for attempt in 1...3 {
+      do {
+        return try preparedTextInputOnce(target)
+      } catch PhoneRunnerObservationError.changed where attempt < 3 {
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.5))
+      }
+    }
+    throw PhoneRunnerObservationError.changed
+  }
+
+  private func preparedTextInputOnce(_ target: Element) throws -> (app: XCUIApplication, value: String, raw: String) {
     let application = try inputApplication()
     let before = try capture(input: true)
     guard before.application.identifier == application.identifier else { throw PhoneRunnerObservationError.app }
@@ -781,14 +801,25 @@ final class PhoneTools {
         throw ToolError("输入焦点的标识不唯一或已变化，没有继续输入；请重新 screen。")
       }
     } else {
-      guard snapshot.frame == target.frame, label == target.label else {
+      guard label == target.label else {
         throw ToolError("无法把当前输入焦点绑定到观察中的目标，没有继续输入；请重新 screen。")
       }
+      if snapshot.frame != target.frame {
+        // Focus often moves or narrows a field: a Cancel button appears, or the keyboard lifts a
+        // bottom search bar. Then only the one field of this type and label in the app will do.
+        let peers = app.descendants(matching: target.type)
+          .matching(NSPredicate(format: "label == %@ OR placeholderValue == %@", label, label))
+        guard !label.isEmpty, peers.count == 1 else {
+          throw ToolError("无法把当前输入焦点绑定到观察中的目标，没有继续输入；请重新 screen。")
+        }
+      }
     }
-    guard let value = snapshot.value as? String else {
+    guard let raw = snapshot.value as? String else {
       throw ToolError("输入框没有可核对的完整值，没有继续输入；请用 handoff。")
     }
-    guard !PhoneRunnerTextRules.hasSensitiveHint(label + " " + value) else {
+    let placeholder = snapshot.placeholderValue ?? ""
+    let value = !placeholder.isEmpty && raw == placeholder ? "" : raw
+    guard !PhoneRunnerTextRules.hasSensitiveHint(label + " " + raw) else {
       throw ToolError("焦点附近出现密码、验证码、支付或掩码提示，没有继续输入；请用 handoff。")
     }
     let after = try capture(input: true)
@@ -798,7 +829,7 @@ final class PhoneTools {
     }
     _ = try inputApplication()
     try checkTypingResult()
-    return (app, value)
+    return (app, value, raw)
   }
 
   private func checkTypingResult() throws {
