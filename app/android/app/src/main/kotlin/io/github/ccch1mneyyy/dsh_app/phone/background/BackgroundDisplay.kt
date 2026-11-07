@@ -88,16 +88,18 @@ class BackgroundDisplay(
 
     override fun collect(screenId: String, listElementId: Int, maxPages: Int, until: String?): CollectResult {
         check(screenId == lastScreenId) { Reasons.of("staleSnapshot") }
+        val selected = lastElements.getOrNull(listElementId - 1)
+            ?: throw IllegalStateException(Reasons.of("elementMissing"))
+        check(selected.isScrollable) { Reasons.of("inputRejected") }
         if (maxPages.coerceIn(1, 30) == 1) {
-            val selected = lastElements.getOrNull(listElementId - 1)
-                ?: throw IllegalStateException(Reasons.of("elementMissing"))
-            check(selected.isScrollable) { Reasons.of("inputRejected") }
-            val labels = lastElements.drop(listElementId)
-                .takeWhile { it.indent > selected.indent }
-                .map { it.label }.filter { it.isNotEmpty() }.distinct()
+            val fresh = observe(detail = false, image = false)
+            val labels = BackgroundTree.refreshedListItems(selected, lastElements)
+                ?: throw IllegalStateException(Reasons.of("staleSnapshot"))
             val stop = if (until != null && labels.any { it.contains(until) }) "untilMatched" else "pageLimit"
-            return CollectResult(labels, 1, stop, null)
+            return CollectResult(labels, 1, stop, fresh)
         }
+        // A signature identifies a semantic list only within the returned element range.
+        val unambiguous = BackgroundTree.followCollectedList(selected, lastElements) != null
         val seen = LinkedHashSet<String>()
         var pages = 0
         var stop = "listEnd"
@@ -105,14 +107,18 @@ class BackgroundDisplay(
         while (pages < maxPages.coerceIn(1, 30)) {
             val snap = observe(detail = false, image = false)
             last = snap
+            val current = if (unambiguous) BackgroundTree.followCollectedList(selected, lastElements) else null
+            if (current == null) { stop = Reasons.of("staleSnapshot"); break }
+            val labels = BackgroundTree.refreshedListItems(current, lastElements)
+            if (labels == null) { stop = Reasons.of("staleSnapshot"); break }
             val before = seen.size
-            for (e in lastElements) if (e.label.isNotEmpty()) seen.add(e.label)
+            seen.addAll(labels)
             pages++
             if (until != null && seen.any { it.contains(until) }) { stop = "untilMatched"; break }
             if (seen.size == before) { stop = "listEnd"; break }
             if (pages >= maxPages) { stop = "pageLimit"; break }
-            // Preserve the legacy whole-page collect path; explicit list tracking is separate.
-            val result = perform(PhoneAction.Scroll(snap.id, null, PhoneAction.Direction.DOWN))
+            // Use this observation's matched list id; the privileged side rechecks its fingerprint.
+            val result = perform(PhoneAction.Scroll(snap.id, current.id, PhoneAction.Direction.DOWN))
             if (!result.ok) { stop = result.message; break }
         }
         return CollectResult(seen.toList(), pages, stop, last)

@@ -45,6 +45,8 @@ internal object LegacyDownloads {
         val extension = name.substring(dot)
         val budget = 255 - suffix.length // The numeric suffix is ASCII.
         val extensionBytes = extension.toByteArray(Charsets.UTF_8).size
+        // When the extension itself must be shortened, the retry number still precedes its dot.
+        if (suffix.isNotEmpty() && extensionBytes > budget) return suffix + utf8Prefix(extension, budget)
         val prefix = utf8Prefix(stem, budget - extensionBytes)
         // A numbered name remains usable with an empty stem; keep its complete extension when it fits.
         return if (prefix.isNotEmpty() || (suffix.isNotEmpty() && extensionBytes <= budget)) "$prefix$suffix$extension"

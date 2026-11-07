@@ -272,6 +272,7 @@ class RuntimeController private constructor(private val app: Context) : DshProce
     }
 
     fun stop() {
+        LaunchStart.cancelPending()
         managedSkillGate.stop(runGen)
         val intent = Intent(app, DshService::class.java).setAction(DshService.ACTION_STOP)
         app.startService(intent)

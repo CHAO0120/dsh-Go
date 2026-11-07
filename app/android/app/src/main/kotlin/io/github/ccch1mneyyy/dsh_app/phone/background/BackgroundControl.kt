@@ -19,6 +19,7 @@ import java.util.concurrent.Future
 import java.util.concurrent.FutureTask
 import io.github.ccch1mneyyy.dsh_app.phone.PhoneRegistry
 import java.util.concurrent.atomic.AtomicLong
+import java.util.concurrent.atomic.AtomicReference
 
 /**
  * The 不打扰模式 surface the core's `PhonePlugin` calls into: the `background` block of `status`,
@@ -62,6 +63,7 @@ class BackgroundControl private constructor(context: Context) {
     @Volatile private var channel: PrivilegedChannel? = null
     @Volatile private var driver: BackgroundDisplay? = null
     @Volatile private var driverTaskId: Long? = null
+    private var driverSelection: PrivilegedKeepState.Ticket? = null
     private val endedTaskId = AtomicLong(Long.MIN_VALUE)
 
     private fun notifyChanged() = runCatching { onStatusChanged() }
@@ -178,6 +180,10 @@ class BackgroundControl private constructor(context: Context) {
         }
         if (selected != "off" && !androidOk()) return mapOf("ok" to false, "reason" to AppStrings.get(app, R.string.background_requires_android))
         val changing = selected != mode || selected == "off"
+        // Reject an already-unwanted choice before releasing the active task's display.
+        synchronized(keepGuard) {
+            if (!mayStart() || selectionChange != null) return keepFailure("selectionChanged")
+        }
         // Release through the old live cache before retiring that selection.
         if (changing) endTask()
         val (selection, transition) = synchronized(keepGuard) {
@@ -331,10 +337,17 @@ class BackgroundControl private constructor(context: Context) {
 
     /** Connects, probes the gate, and registers the driver for the running task. */
     fun beginTask(taskId: Long): Boolean {
-        if (mode == "off" || !androidOk()) return false
+        if (!androidOk()) return false
+        val selection = synchronized(keepGuard) {
+            if (mode == "off" || selectionChange != null) return false
+            keep.selectionTicket()
+        }
+        val allowed = { selectionChange == null && keep.selectionCurrent(selection) }
         synchronized(this) {
-            if (taskId <= endedTaskId.get() || (driverTaskId ?: Long.MIN_VALUE) > taskId) return false
-            if (driverTaskId == taskId && driver != null && PhoneRegistry.backgroundDriver === driver) return true
+            synchronized(keepGuard) {
+                if (!allowed() || taskId <= endedTaskId.get() || (driverTaskId ?: Long.MIN_VALUE) > taskId) return false
+                if (driverSelection == selection && driverTaskId == taskId && driver != null && PhoneRegistry.backgroundDriver === driver) return true
+            }
         }
         // Channel setup may block. It must not hold the display ownership lock
         // while an old task is trying to release through an already-live channel.
@@ -343,25 +356,38 @@ class BackgroundControl private constructor(context: Context) {
                 Thread.currentThread().interrupt(); return false
             } catch (_: Exception) { return false }
         }
-        if (Thread.currentThread().isInterrupted || activeChannel() == null) return false
+        if (Thread.currentThread().isInterrupted) return false
+        val connected = activeChannel(mayStart = allowed) ?: return false
         synchronized(this) {
-            if (mode == "off" || taskId <= endedTaskId.get() || (driverTaskId ?: Long.MIN_VALUE) > taskId) return false
-            if (driverTaskId == taskId && driver != null && PhoneRegistry.backgroundDriver === driver) return true
-            if (driver != null) endTask()
-            val d = BackgroundDisplay(
-                channelProvider = { activeChannel() },
-                releaseChannelProvider = { channel?.takeIf { it.alive() } },
-            ).also { driver = it }
-            // Publish the pending owner before checking cancellation: a stop
-            // either records the ended ID first, or sees this owner and releases
-            // it after the remaining registration (which performs no setup IPC).
-            driverTaskId = taskId
-            if (taskId <= endedTaskId.get()) {
-                driver = null
-                driverTaskId = null
-                return false
+            synchronized(keepGuard) {
+                if (!allowed() || taskId <= endedTaskId.get() || (driverTaskId ?: Long.MIN_VALUE) > taskId) return false
+                if (driverSelection == selection && driverTaskId == taskId && driver != null && PhoneRegistry.backgroundDriver === driver) return true
             }
-            PhoneRegistry.backgroundDriver = d
+            // Release may perform IPC; never hold keepGuard across it.
+            if (driver != null) endTask()
+            synchronized(keepGuard) {
+                if (!allowed() || taskId <= endedTaskId.get()) return false
+                // Cleanup borrows only this driver's last accepted channel, including reconnects.
+                val ownedChannel = AtomicReference(connected)
+                val d = BackgroundDisplay(
+                    channelProvider = {
+                        activeChannel(mayStart = allowed)?.takeIf { allowed() }?.also { ownedChannel.set(it) }
+                    },
+                    releaseChannelProvider = { ownedChannel.get().takeIf { it.alive() } },
+                ).also { driver = it }
+                driverSelection = selection
+                // Publish the pending owner before checking cancellation: a stop
+                // either records the ended ID first, or sees this owner and releases
+                // it after the remaining registration (which performs no setup IPC).
+                driverTaskId = taskId
+                if (taskId <= endedTaskId.get()) {
+                    driver = null
+                    driverTaskId = null
+                    driverSelection = null
+                    return false
+                }
+                PhoneRegistry.backgroundDriver = d
+            }
             notifyChanged()
             return true
         }
@@ -380,6 +406,7 @@ class BackgroundControl private constructor(context: Context) {
             val ended = driver
             driver = null
             driverTaskId = null
+            driverSelection = null
             if (PhoneRegistry.backgroundDriver === ended) PhoneRegistry.backgroundDriver = null
             ended?.release()
             notifyChanged()

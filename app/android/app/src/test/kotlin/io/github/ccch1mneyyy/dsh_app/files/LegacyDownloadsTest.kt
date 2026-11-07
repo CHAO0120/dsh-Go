@@ -194,17 +194,25 @@ class LegacyDownloadsTest {
         assertEquals("original", File(dir, name).readText())
     }
 
-    @Test fun anExtensionTooLargeForTheNumberStillUsesTheBoundedFallback() = withDirectory { dir ->
+    @Test fun anOversizedExtensionKeepsGrowingRetryNumbersBeforeItsDot() {
         val rocket = "\uD83D\uDE80"
-        val name = rocket + "." + "x".repeat(250)
-        File(dir, name).writeText("original")
-        for (number in 2..9) File(dir, " ($number)." + "x".repeat(250)).writeText("peer")
-        val saved = ByteArrayInputStream(byteArrayOf(9)).use { LegacyDownloads.copy(it, dir, name) }
-        assertEquals(rocket + "." + "x".repeat(245) + " (10)", saved.name)
-        assertEquals(255, saved.name.toByteArray(Charsets.UTF_8).size)
-        assertArrayEquals(byteArrayOf(9), saved.readBytes())
-        assertEquals("original", File(dir, name).readText())
-        for (number in 2..9) assertEquals("peer", File(dir, " ($number)." + "x".repeat(250)).readText())
+        val cases = listOf(
+            "x".repeat(250) to (" (10)." + "x".repeat(249)),
+            ("界".repeat(83) + "x") to (" (10)." + "界".repeat(83)),
+        )
+        for ((extension, expected) in cases) withDirectory { dir ->
+            val name = "$rocket.$extension"
+            assertEquals(255, name.toByteArray(Charsets.UTF_8).size)
+            File(dir, name).writeText("original")
+            for (number in 2..9) File(dir, " ($number).$extension").writeText("peer")
+            val saved = ByteArrayInputStream(byteArrayOf(9)).use { LegacyDownloads.copy(it, dir, name) }
+            assertEquals(expected, saved.name)
+            assertEquals(255, saved.name.toByteArray(Charsets.UTF_8).size)
+            assertEquals(saved.name, saved.name.toByteArray(Charsets.UTF_8).toString(Charsets.UTF_8))
+            assertArrayEquals(byteArrayOf(9), saved.readBytes())
+            assertEquals("original", File(dir, name).readText())
+            for (number in 2..9) assertEquals("peer", File(dir, " ($number).$extension").readText())
+        }
     }
 
     private fun withDirectory(block: (File) -> Unit) {

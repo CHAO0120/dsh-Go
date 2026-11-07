@@ -42,6 +42,22 @@ data class Element(
 )
 
 object BackgroundTree {
+    /** Unique semantic match in the returned range, not a persistent Android node identity. */
+    internal fun followCollectedList(selected: Element, observed: List<Element>): Element? =
+        observed.filter {
+            it.isScrollable && it.role == selected.role && it.label == selected.label &&
+                it.viewId == selected.viewId && it.region == selected.region && it.indent == selected.indent
+        }.singleOrNull()
+
+    /** Revalidate the selected snapshot position before reading only its fresh subtree. */
+    internal fun refreshedListItems(selected: Element, fresh: List<Element>): List<String>? {
+        val current = fresh.getOrNull(selected.id - 1) ?: return null
+        if (!current.isScrollable || current.role != selected.role ||
+            current.label != selected.label || current.viewId != selected.viewId) return null
+        return fresh.drop(selected.id).takeWhile { it.indent > current.indent }
+            .map { it.label }.filter { it.isNotEmpty() }.distinct()
+    }
+
     const val LINE_CAP = 60
     const val SCREEN_CAP = 3000
 

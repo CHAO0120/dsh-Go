@@ -83,20 +83,64 @@ class BackgroundDisplayTest {
         assertStale("b7")
     }
 
-    @Test fun onePageCollectUsesOnlyTheSelectedScrollableSubtree() {
-        val display = withLists()
-        val left = display.collect("b7", 2, 1, "right")
-        assertEquals(listOf("left", "nested"), left.items)
-        assertEquals(1, left.pages)
-        assertEquals("pageLimit", left.stopReason)
-        assertNull(left.screen)
-        assertEquals("untilMatched", display.collect("b7", 2, 1, "nested").stopReason)
-        assertEquals(listOf("right"), display.collect("b7", 6, 1, null).items)
-        assertNotNull(display.target("b7", 6))
-        val empty = display.collect("b7", 9, 1, null)
-        assertEquals(emptyList<String>(), empty.items)
-        assertEquals(1, empty.pages)
-        assertEquals("pageLimit", empty.stopReason)
+    @Test fun refreshedCollectUsesNewItemsOnlyInsideTheSelectedSubtree() {
+        val fresh = listElements().toMutableList()
+        val selected = fresh[1]
+        fresh[2] = fresh[2].copy(label = "updated left")
+        assertEquals(listOf("updated left", "left", "nested"), BackgroundTree.refreshedListItems(selected, fresh))
+        assertEquals(listOf("right"), BackgroundTree.refreshedListItems(fresh[5], fresh))
+        assertEquals(emptyList<String>(), BackgroundTree.refreshedListItems(fresh[8], fresh))
+    }
+
+    @Test fun refreshedCollectRejectsChangedOrMissingListIdentity() {
+        val old = listElements()
+        val selected = old[1].copy(viewId = "example:id/left")
+        val fresh = old.toMutableList().apply { this[1] = selected }
+        for (changed in listOf(selected.copy(role = "文本"), selected.copy(label = "changed"),
+            selected.copy(viewId = "example:id/right"), selected.copy(viewId = null),
+            selected.copy(isScrollable = false))) {
+            fresh[1] = changed
+            assertNull(BackgroundTree.refreshedListItems(selected, fresh))
+        }
+        assertNull(BackgroundTree.refreshedListItems(selected, emptyList()))
+        fresh[1] = selected
+        assertEquals(listOf("left", "nested"), BackgroundTree.refreshedListItems(selected, fresh))
+    }
+
+    @Test fun collectFollowsTheUniqueSignatureWhenPageIdsMove() {
+        val original = listOf(
+            Element(1, "列表", "left list", Region.MIDDLE, isScrollable = true),
+            Element(2, "文本", "left one", Region.MIDDLE, indent = 1),
+            Element(3, "列表", "right list", Region.MIDDLE, isScrollable = true),
+            Element(4, "文本", "outside until", Region.MIDDLE, indent = 1),
+        )
+        val selected = original[2]
+        assertEquals(selected, BackgroundTree.followCollectedList(selected, original))
+        val fresh = listOf(
+            original[0], original[1],
+            Element(3, "文本", "left two", Region.MIDDLE, indent = 1),
+            selected.copy(id = 4),
+            Element(5, "文本", "right new", Region.MIDDLE, indent = 1),
+        )
+        val followed = BackgroundTree.followCollectedList(selected, fresh)!!
+        assertEquals(4, followed.id)
+        assertEquals(listOf("right new"), BackgroundTree.refreshedListItems(followed, fresh))
+        assertEquals(3, selected.id)
+    }
+
+    @Test fun collectStopsForAmbiguousMissingOrChangedSemanticLists() {
+        val selected = Element(1, "列表", "", Region.MIDDLE, isScrollable = true)
+        assertEquals(selected, BackgroundTree.followCollectedList(selected, listOf(selected)))
+        assertNull(BackgroundTree.followCollectedList(selected, listOf(selected, selected.copy(id = 3))))
+        assertNull(BackgroundTree.followCollectedList(selected, emptyList()))
+        for (changed in listOf(selected.copy(isScrollable = false), selected.copy(role = "文本"),
+            selected.copy(label = "different"), selected.copy(viewId = "example:id/other"),
+            selected.copy(region = Region.TOP), selected.copy(indent = 1))) {
+            assertNull(BackgroundTree.followCollectedList(selected, listOf(changed)))
+        }
+        val named = selected.copy(viewId = "example:id/list")
+        assertNull(BackgroundTree.followCollectedList(named, listOf(selected)))
+        assertNull(BackgroundTree.followCollectedList(named, listOf(named, named.copy(id = 2))))
     }
 
     @Test fun onePageCollectRejectsMissingAndNonScrollableTargets() {
@@ -116,7 +160,15 @@ class BackgroundDisplayTest {
             isAccessible = true
             set(display, "example.opened")
         }
-        val elements = listOf(
+        val elements = listElements()
+        BackgroundDisplay::class.java.getDeclaredField("lastElements").apply {
+            isAccessible = true
+            set(display, elements)
+        }
+        return display
+    }
+
+    private fun listElements() = listOf(
             Element(1, "文本", "header", Region.MIDDLE),
             Element(2, "列表", "", Region.MIDDLE, isScrollable = true),
             Element(3, "文本", "left", Region.MIDDLE, indent = 1),
@@ -127,12 +179,6 @@ class BackgroundDisplayTest {
             Element(8, "列表", "not scrollable", Region.MIDDLE),
             Element(9, "文本", "", Region.MIDDLE, isScrollable = true),
         )
-        BackgroundDisplay::class.java.getDeclaredField("lastElements").apply {
-            isAccessible = true
-            set(display, elements)
-        }
-        return display
-    }
 
     private fun withLastElement(): BackgroundDisplay {
         val display = BackgroundDisplay(
