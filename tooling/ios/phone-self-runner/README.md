@@ -212,8 +212,15 @@ prove even portrait mapping: corner/center grid tests on a device remain a
 release gate. Screenshot, ASCII and keyboard requests are not disabled by this
 touch-specific check. Keys are
 limited to home, enter, backspace, tab, escape, arrowUp/Down/Left/Right. ASCII is
-printable US-layout ASCII plus LF/TAB, 1..1024 bytes, validated in full before the
+printable US-layout ASCII (0x20..0x7e), 1..1024 bytes, validated in full before the
 first report. Other scripts go through the app's explicit clipboard/paste flow.
+Both the Rust ASCII parser and the Swift text plan reject LF and TAB in literal
+text, so embedded LF/TAB are not translated to Enter/Tab reports. The named-key operation
+is a separate native primitive and does not bypass the app's approval rules.
+The Swift plan also conservatively refuses strings containing only 3..8 decimal
+digits after ignoring whitespace and separators U+002D, U+2010, U+2011, U+2013,
+and U+2212. This OTP/PIN heuristic is not a complete sensitive-data classifier
+and does not normalize or rewrite accepted text.
 Native paste only emits Command+V and never receives the clipboard content.
 ASCII/paste accept an optional `replace` boolean (default false); true prepends
 Command+A inside that same approved/frame-bound request. The first Command+A

@@ -844,7 +844,7 @@ fn ascii_key(byte: u8) -> Option<(u16, bool)> {
         b'a'..=b'z' => (0x04 + (byte - b'a') as u16, false),
         b'A'..=b'Z' => (0x04 + (byte - b'A') as u16, true),
         b'1'..=b'9' => (0x1e + (byte - b'1') as u16, false),
-        b'0' => (0x27, false), b'\n' => (0x28, false), b'\t' => (0x2b, false), b' ' => (0x2c, false),
+        b'0' => (0x27, false), b' ' => (0x2c, false),
         b'!' => (0x1e, true), b'@' => (0x1f, true), b'#' => (0x20, true), b'$' => (0x21, true),
         b'%' => (0x22, true), b'^' => (0x23, true), b'&' => (0x24, true), b'*' => (0x25, true),
         b'(' => (0x26, true), b')' => (0x27, true), b'-' => (0x2d, false), b'_' => (0x2d, true),
@@ -1057,10 +1057,12 @@ mod tests {
             json!({"op":"tap","x":0.0,"y":1.0,"nativeFrameId":FRAME_ID}),
             json!({"op":"tap","x":0.0,"y":1.0,"durationMs":1500,"nativeFrameId":FRAME_ID}),
             json!({"op":"swipe","fromX":0.1,"fromY":0.8,"toX":0.1,"toY":0.2,"durationMs":300,"nativeFrameId":FRAME_ID}),
-            json!({"op":"ascii","text":"Hello\n\t!~","nativeFrameId":FRAME_ID}),
+            json!({"op":"ascii","text":"Hello !~","nativeFrameId":FRAME_ID}),
             json!({"op":"ascii","text":"Replace","replace":true,"nativeFrameId":FRAME_ID}),
             json!({"op":"ascii","text":"a".repeat(1024),"nativeFrameId":FRAME_ID}),
             json!({"op":"key","key":"arrowLeft","nativeFrameId":FRAME_ID}),
+            json!({"op":"key","key":"enter","nativeFrameId":FRAME_ID}),
+            json!({"op":"key","key":"tab","nativeFrameId":FRAME_ID}),
             json!({"op":"paste","nativeFrameId":FRAME_ID}),
             json!({"op":"paste","replace":true,"nativeFrameId":FRAME_ID}),
         ] { assert!(Input::parse(value.to_string().as_bytes()).is_some(), "{value}"); }
@@ -1077,14 +1079,20 @@ mod tests {
             json!({"op":"ascii","text":"ok中","nativeFrameId":FRAME_ID}),
             json!({"op":"ascii","text":"a".repeat(1025),"nativeFrameId":FRAME_ID}),
             json!({"op":"ascii","text":"ok\r","nativeFrameId":FRAME_ID}),
+            json!({"op":"ascii","text":"\n","nativeFrameId":FRAME_ID}),
+            json!({"op":"ascii","text":"\t","nativeFrameId":FRAME_ID}),
+            json!({"op":"ascii","text":"first\nsecond","nativeFrameId":FRAME_ID}),
+            json!({"op":"ascii","text":"first\tsecond","replace":true,"nativeFrameId":FRAME_ID}),
             json!({"op":"ascii","text":"","nativeFrameId":FRAME_ID}),
             json!({"op":"ascii","text":"valid","replace":"yes","nativeFrameId":FRAME_ID}),
             json!({"op":"paste","replace":1,"nativeFrameId":FRAME_ID}),
             json!({"op":"paste","nativeFrameId":"stale"}),
         ] { assert!(Input::parse(value.to_string().as_bytes()).is_none(), "{value}"); }
         for byte in 0..=255 {
-            assert_eq!(ascii_key(byte).is_some(), byte == b'\n' || byte == b'\t' || (32..=126).contains(&byte));
+            assert_eq!(ascii_key(byte).is_some(), (32..=126).contains(&byte));
         }
+        assert_eq!(named_key(&NamedKey::Enter), Some(0x28));
+        assert_eq!(named_key(&NamedKey::Tab), Some(0x2b));
         assert!(matches!(Input::parse(json!({"op":"tap","x":0.0,"y":1.0,"nativeFrameId":FRAME_ID}).to_string().as_bytes()), Some(Input::Tap { duration_ms: 50, .. })));
         assert!(matches!(Input::parse(json!({"op":"ascii","text":"a","nativeFrameId":FRAME_ID}).to_string().as_bytes()), Some(Input::Ascii { replace: false, .. })));
         assert!(matches!(Input::parse(json!({"op":"paste","nativeFrameId":FRAME_ID}).to_string().as_bytes()), Some(Input::Paste { replace: false, .. })));

@@ -218,6 +218,45 @@ final class IOSPhoneOperationTests: XCTestCase {
     }
   }
 
+  func testUnicodeHyphenNumericCodesAreHandedToTheUser() throws {
+    for separator in ["\u{2010}", "\u{2011}", "\u{2013}", "\u{2212}"] {
+      for input in ["123" + separator + "456", "１２３" + separator + "４５６",
+                    "١٢٣" + separator + "٤٥٦"] {
+        XCTAssertThrowsError(try type(input)) { error in
+          XCTAssertTrue((error as? IOSPhoneOperationError)?.message.contains("handoff") == true)
+        }
+      }
+    }
+    for input in ["1\u{2010}2\u{2011}3", "12\u{2212}34\u{2013}56",
+                  "\u{00a0}12\u{2010}34\u{2011}56\u{00a0}"] {
+      XCTAssertThrowsError(try type(input))
+    }
+  }
+
+  func testUnicodeCodeSeparatorsKeepTheThreeThroughEightDigitBoundary() throws {
+    for separator in ["\u{2010}", "\u{2011}", "\u{2013}", "\u{2212}"] {
+      for count in [2, 3, 8, 9] {
+        let input = Array(repeating: "1", count: count).joined(separator: separator)
+        if (3...8).contains(count) {
+          XCTAssertThrowsError(try type(input))
+        } else {
+          let accepted = try type(input)
+          XCTAssertEqual(accepted.text, input)
+          XCTAssertEqual(accepted.parameters["text"] as? String, input)
+        }
+      }
+    }
+  }
+
+  func testOrdinaryUnicodeHyphenatedTextIsPreservedExactly() throws {
+    for input in ["Room\u{2010}123", "synthetic\u{2011}text", "A\u{2212}123", "word\u{2013}word"] {
+      let accepted = try type(input)
+      XCTAssertEqual(accepted.text, input)
+      XCTAssertEqual(accepted.parameters["text"] as? String, input)
+      XCTAssertTrue(accepted.consentDescription(targetLabel: nil).contains(input))
+    }
+  }
+
   func testEveryConsentIdentifierRejectsControlsBeforeAPlanExists() throws {
     let fields: [(String, [String: Any], String)] = [
       ("apps", [:], "query"), ("open", [:], "app"),

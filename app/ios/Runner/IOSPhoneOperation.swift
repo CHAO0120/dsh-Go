@@ -51,7 +51,7 @@ struct IOSPhoneOperation {
       }
       // Short all-digit strings commonly represent OTP/PIN/CVV. Refuse this
       // conservative class even if OCR failed to recognize the nearby label.
-      let numeric = text.unicodeScalars.filter { !CharacterSet.whitespacesAndNewlines.contains($0) && $0 != "-" }
+      let numeric = text.unicodeScalars.filter { !Self.isNumericSeparator($0) }
       if (3...8).contains(numeric.count), numeric.allSatisfy({ CharacterSet.decimalDigits.contains($0) }) {
         throw IOSPhoneOperationError(message: "这段输入可能是验证码或安全码，请用 handoff 交给用户。")
       }
@@ -88,6 +88,15 @@ struct IOSPhoneOperation {
   var usesClipboard: Bool { method == .type && text?.utf8.contains(where: { $0 >= 128 }) == true }
   var submits: Bool { parameters["submit"] as? Bool == true }
   var pages: Int { parameters["max_pages"] as? Int ?? 10 }
+
+  /// Only the conservative numeric-code heuristic ignores these separators.
+  /// The immutable execution text is never normalized or rewritten.
+  private static func isNumericSeparator(_ scalar: UnicodeScalar) -> Bool {
+    switch scalar.value {
+    case 0x002d, 0x2010, 0x2011, 0x2013, 0x2212: return true
+    default: return CharacterSet.whitespacesAndNewlines.contains(scalar)
+    }
+  }
 
   /// Identifiers are quoted and bounded; the approved input text stays complete.
   /// Clipboard contents and pairing data are never consulted to build this text.
