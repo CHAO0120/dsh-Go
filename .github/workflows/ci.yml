@@ -254,6 +254,38 @@ jobs:
           gradle-version: ${{ env.GRADLE_VERSION }}
       - working-directory: app/android
         run: gradle --stacktrace :app:testArm64DebugUnitTest
+      # reverse temp branch only (request 029): print JUnit XML counts and every RuntimeResetWitnessTest case (reporting, no effect on the result)
+      - name: JUnit XML summary (reverse temp branch only)
+        if: ${{ !cancelled() }}
+        working-directory: app/android
+        run: |
+          java -version 2>&1 | sed 's/^/JAVA_VERSION /'
+          gradle --version 2>/dev/null | grep -E '^(Gradle|Kotlin|JVM)' | sed 's/^/GRADLE_VERSION /'
+          python3 -I - <<'PYEOF'
+          import glob, xml.etree.ElementTree as ET
+          files = sorted(glob.glob('app/build/test-results/testArm64DebugUnitTest/*.xml'))
+          T = F = E = S = 0
+          for f in files:
+              r = ET.parse(f).getroot()
+              t, fa, er, sk = (int(r.get(k, 0)) for k in ('tests', 'failures', 'errors', 'skipped'))
+              T += t; F += fa; E += er; S += sk
+              name = r.get('name') or f
+              print(f"SUITE {name} tests={t} failures={fa} errors={er} skipped={sk}")
+              for c in r.iter('testcase'):
+                  bad = [k for k in ('failure', 'error', 'skipped') if c.find(k) is not None]
+                  if bad or 'RuntimeResetWitness' in name:
+                      print(f"  CASE {c.get('name')} time={c.get('time')} status={','.join(bad) or 'pass'}")
+                  for k in ('failure', 'error', 'skipped'):
+                      for x in c.findall(k):
+                          print(f"    {k.upper()} message={(x.get('message') or '')[:800]}")
+                          print('    ' + (x.text or '')[:4000].replace(chr(10), chr(10) + '    '))
+              if 'RuntimeResetWitness' in name:
+                  for k in ('system-out', 'system-err'):
+                      for x in r.findall(k):
+                          if (x.text or '').strip():
+                              print(f"  {k.upper()}<<<"); print((x.text or '')[:4000]); print('  >>>')
+          print(f"JUNIT_TOTAL files={len(files)} tests={T} failures={F} errors={E} skipped={S}")
+          PYEOF
 
   ci-ok:
     name: CI OK
