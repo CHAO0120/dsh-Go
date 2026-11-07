@@ -338,15 +338,20 @@ class RuntimeController private constructor(private val app: Context) : DshProce
                         null
                     }
                 }
-                // Stopped (or started again) while this was queued: launching now would leave an orphan.
-                if (stopGen >= gen || gen != runGen) {
+                // startProcess advances runGen under this same monitor. Publish only while
+                // this queued launch still owns that generation; once published, its non-null
+                // process prevents another start from advancing the generation underneath it.
+                val p = synchronized(this@RuntimeController) {
+                    if (stopGen >= gen || gen != runGen) null
+                    else DshProcess(app, manifest, installer.rootfs, this).also {
+                        launched = it
+                        lastLaunch = it.launchDiagnostics
+                        process = it
+                    }
+                } ?: run {
                     PhoneControl.get(app).onEngineStopped()
                     return@execute
                 }
-                val p = DshProcess(app, manifest, installer.rootfs, this)
-                launched = p
-                lastLaunch = p.launchDiagnostics
-                process = p
                 timeline.spawned()
                 val direct = directEngine()
                 p.start(env, if (storage) PhoneStorage.binds() else emptyList(), safe, phone, direct.requested, direct.failed) { actualDirect ->
@@ -447,7 +452,7 @@ class RuntimeController private constructor(private val app: Context) : DshProce
                 // A finished waiter may have reported incomplete cleanup. Captured identities
                 // outlive its launcher; do not retire their rootfs while any still remain.
                 val cleanup = DshProcess(app, manifest, installer.rootfs, this).reapStrays(allowObservationGap = true)
-                check(!cleanup.ownedRemaining) { "runtime stop incomplete; retry reset after cleanup" }
+                check(cleanup.complete) { "runtime stop incomplete; retry reset after cleanup" }
                 lastLaunch = null
                 try {
                     check(runtimeLogs.pauseDisk()) { "log reset pause timed out" }
@@ -776,17 +781,17 @@ class RuntimeController private constructor(private val app: Context) : DshProce
                 DshService.stopSelfIfRunning(app, runGen)
                 return
             }
-            source.startupError?.let {
-                // A local startup failure is neither a user stop nor proof of a
-                // plugin failure; do not count it toward automatic safe mode.
-                error = "start failed: $it"
+            val tail = synchronized(runTail) { runTail.toList() }
+            var f = CrashClassifier.classify(code, readyAt, SystemClock.elapsedRealtime(), System.currentTimeMillis(), tail, runSafe, source.direct)
+            val startupError = source.startupError
+            if (startupError != null && !CrashClassifier.classifyAfterTokenTimeout(source.startupTokenTimedOut, f)) {
+                // Local setup/port failures and silent deadlines are not plugin evidence.
+                error = "start failed: $startupError"
                 setPhase(Phase.ERROR)
                 DshService.postStoppedAlert(app)
                 DshService.stopSelfIfRunning(app, runGen)
                 return
             }
-            val tail = synchronized(runTail) { runTail.toList() }
-            var f = CrashClassifier.classify(code, readyAt, SystemClock.elapsedRealtime(), System.currentTimeMillis(), tail, runSafe, source.direct)
             if (SafePolicy.directLaunchFailed(f, source.direct)) {
                 // Direct can't launch on this device: PRoot from now on with this runtime, no failure card,
                 // no strike. A new runtime, or the user turning Direct on again, gives it another try.
@@ -819,7 +824,7 @@ class RuntimeController private constructor(private val app: Context) : DshProce
             prefs.edit().putInt(K_STRIKES, strikes).apply()
             if (outcome.state != safeState) setSafeState(outcome.state, outcome.reason ?: safeReason)
             log("[dsh-app] classified as ${f.kind.wire}${if (f.safeMode) " (safe mode)" else ""}; consecutive failures: $strikes", "system")
-            error = "DSH exited unexpectedly (code $code)"
+            error = startupError?.let { "start failed: $it" } ?: "DSH exited unexpectedly (code $code)"
             if (outcome.restartSafe) {
                 log("[dsh-app] restarting in safe mode", "system")
                 outcome.notice?.let { notice(it) }

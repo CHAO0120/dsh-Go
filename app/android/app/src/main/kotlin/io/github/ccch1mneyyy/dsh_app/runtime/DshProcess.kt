@@ -55,6 +55,9 @@ class DshProcess(
     @Volatile var startupError: String? = null
         private set
 
+    @Volatile var startupTokenTimedOut: Boolean = false
+        private set
+
     /** The launch command got the phone-control overlay (see [PhoneGuest.launchArg]). */
     var phoneMounted: Boolean = false
         private set
@@ -206,6 +209,7 @@ class DshProcess(
             synchronized(this) {
                 // Token detection and stop share this lock; a late deadline cannot retire either.
                 if (process === p && p.isAlive && !readyReported && !stopping) {
+                    startupTokenTimedOut = true
                     failStart("no startup token received within ${TOKEN_TIMEOUT_MS / 1000}s")
                 }
             }
