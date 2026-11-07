@@ -534,6 +534,7 @@ object SafeMode {
 //   export <output.tar>  preserve raw original conversations outside the original HOME
 'use strict'
 const fs = require('fs')
+const createHash = require('crypto').createHash
 const path = require('path')
 const cp = require('child_process')
 
@@ -623,21 +624,82 @@ function withLock (file, fn) {
   const lock = file + '.lock'
   const deadline = Date.now() + 5000
   for (;;) {
+    let fd
     try {
-      fs.writeFileSync(lock, process.pid + '\n', { flag: 'wx', mode: 0o600 })
+      fd = fs.openSync(lock, 'wx', 0o600)
+      let failure
+      try { fs.writeFileSync(fd, process.pid + '\n') } catch (e) { failure = e }
+      try { fs.closeSync(fd) } catch (e) {
+        failure = failure ? new AggregateError([failure, e], 'lock write and close failed', { cause: failure }) : e
+      }
+      if (failure) throw failure
       break
     } catch (e) {
-      if (e.code !== 'EEXIST') throw e
-      const pid = parseInt(String(readText(lock) || '').trim(), 10)
-      if (pid > 0 && !alive(pid)) {
+      if (fd !== undefined) {
         fs.rmSync(lock, { force: true })
-        continue
+        throw e
       }
+      if (e.code !== 'EEXIST') throw e
+      if (takeOverExitedLock(lock)) continue
       if (Date.now() > deadline) die('package.json 正被别的进程修改（锁文件 ' + lock + '），稍后再试')
       sleep(100)
     }
   }
   try { return fn() } finally { fs.rmSync(lock, { force: true }) }
+}
+// Keep the raw record for the shared hash and the identity recheck.
+function holderExited (record) {
+  if (!/^\d+\n$/.test(record) || record.indexOf('\n') !== record.length - 1) return false
+  const pid = Number(record.trim())
+  if (pid === 0 || pid > 2147483647 || pid === process.pid) return false
+  try { process.kill(pid, 0); return false } catch (e) { return e.code === 'ESRCH' }
+}
+function readClaimRecord (file) {
+  try { return fs.readFileSync(file, 'utf8') }
+  catch (e) { if (e.code === 'ENOENT') return undefined; throw e }
+}
+function completedSlot (file) {
+  try {
+    if (!fs.lstatSync(file).isFile()) throw new Error('invalid takeover completion at ' + file)
+    return true
+  } catch (e) { if (e.code === 'ENOENT') return false; throw e }
+}
+function takeOverExitedLock (lock) {
+  const record = readText(lock)
+  if (record === null || !holderExited(record)) return false
+  const legacy = lock + '.takeover-' + createHash('sha256').update(record).digest('hex').slice(0, 16)
+  const legacyRecord = readClaimRecord(legacy)
+  if (legacyRecord !== undefined && !holderExited(legacyRecord)) return false
+  const directory = legacy + '.slots'
+  fs.mkdirSync(directory, { recursive: true, mode: 0o700 })
+  const temp = directory + '/.owner-' + process.pid + '-' + require('crypto').randomBytes(12).toString('hex') + '.tmp'
+  let ownTemp = false
+  let ownedSlot
+  try {
+    const fd = fs.openSync(temp, 'wx', 0o600)
+    ownTemp = true
+    try { fs.writeFileSync(fd, process.pid + '\n') } finally { fs.closeSync(fd) }
+    let index = 0
+    for (;;) {
+      if (!Number.isSafeInteger(index)) throw new Error('takeover slot limit exceeded')
+      const slot = directory + '/' + index
+      if (completedSlot(slot + '.done')) { index++; continue }
+      const owner = readClaimRecord(slot)
+      if (owner !== undefined) {
+        if (!holderExited(owner)) return false
+        index++; continue
+      }
+      try { fs.linkSync(temp, slot); ownedSlot = slot; break }
+      catch (e) { if (e.code === 'EEXIST') continue; throw e }
+    }
+    if (readText(lock) !== record || !holderExited(record)) return false
+    try { fs.rmSync(lock, { force: true }) } catch (e) { return false }
+    return true
+  } finally {
+    try {
+      if (ownedSlot !== undefined) fs.writeFileSync(ownedSlot + '.done', '', { flag: 'wx', mode: 0o600 })
+    } finally { if (ownTemp) fs.rmSync(temp, { force: true }) }
+  }
 }
 function writeAtomic (file, text) {
   const tmp = file + '.' + process.pid + '.' + Date.now() + '.tmp'

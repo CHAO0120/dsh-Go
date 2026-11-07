@@ -870,6 +870,14 @@
         }
       }
     },
+    "zzzzzzzz-atomic-stale-slot-recovery.diff": {
+      "0.2.2-rc.1": {
+        "node_modules/@deepseek-ai/dsh-atomic-write/lib/index.js": {
+          "after": "f1ce304bde9b132c684d65de6ad4725b2c264fa8b73417ff2ccd1c4edd6fca2c",
+          "before": "000b8994abcbec4e01b2b714fe8c2a37e61670c52e7d3acaf40ec8d39f484dc7"
+        }
+      }
+    },
     "zzzzzzzz-model-defaults.diff": {
       "0.2.1-rc.4": {
         "node_modules/@deepseek-ai/dsh-agent-default-model/lib/index.js": {
