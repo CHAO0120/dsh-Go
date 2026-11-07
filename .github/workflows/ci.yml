@@ -213,6 +213,30 @@ jobs:
             echo "DSH_TOOLS_DIR=$prefix/node_modules/@deepseek-ai/dsh-tools"
             echo "DSH_FS_LOCAL_ORIGINAL_JS=$prefix/fs-local-original.js"
           } >> "$GITHUB_ENV"
+      # reverse temp branch only (request 032): environment, native addons, pins and target identity (reporting, no effect on the result)
+      - name: Request 032 environment, pins and target (reverse temp branch only)
+        run: |
+          set +e
+          echo "uid=$(id -u) node=$(node --version) npm=$(npm --version) python=$(python3 --version 2>&1) git=$(git --version)"
+          grep PRETTY_NAME /etc/os-release; uname -srm
+          node -p "'NODE_VERSIONS ' + JSON.stringify(process.versions)"
+          echo "HEAD=$(git rev-parse HEAD)"
+          sha256sum runtime/patches/pins.json | sed 's/^/PINS /'
+          ls runtime/patches/ | grep -c '' | sed 's/^/PATCH_FILES /'
+          ls runtime/patches/zzzzzzzzzz-subagent-failed-delivery-ownership.diff 2>&1 | sed 's/^/NEW_PATCH /'
+          sha256sum "$DSH_PREFIX/node_modules/@deepseek-ai/dsh-subagent/lib/index.js" | sed 's/^/TARGET /'
+          sha256sum runtime/tests/subagent-failed-delivery-ownership.test.mjs | sed 's/^/TESTFILE /'
+          sha256sum "$DSH_FS_LOCAL_ORIGINAL_JS" "$DSH_PREFIX/node_modules/@deepseek-ai/dsh-fs-local/lib/index.js" | sed 's/^/FSLOCAL /'
+          find "$DSH_PREFIX/node_modules" -name '*.node' -printf 'ADDON %s %p\n' 2>/dev/null | head -40
+          echo "ENV DSH_PREFIX=$DSH_PREFIX DSH_TEST_PREFIX=$DSH_TEST_PREFIX PNPM_BIN=$PNPM_BIN DSH_INSTALL=$DSH_INSTALL DSH_TOOLS_DIR=$DSH_TOOLS_DIR DSH_FS_LOCAL_ORIGINAL_JS=$DSH_FS_LOCAL_ORIGINAL_JS"
+          ls -la "$PNPM_BIN"; node "$PNPM_BIN" --version 2>&1 | sed 's/^/PNPM_VERSION /'
+          exit 0
+      # reverse temp branch only (request 032 A): the requested target command, once, before the attached full suite
+      - name: Request 032 A target (reverse temp branch only)
+        run: |
+          echo "=== REQ032 A TARGET BEGIN $(date -u +%H:%M:%SZ)"
+          DSH_PREFIX="$DSH_PREFIX" node --test runtime/tests/subagent-failed-delivery-ownership.test.mjs && echo "TARGET_EXIT=0" || echo "TARGET_EXIT=$?"
+          echo "=== REQ032 A TARGET END $(date -u +%H:%M:%SZ)"
       - name: Unit tests
         run: |
           node --test runtime/tests/*.test.mjs app/tool/engine_auth/*.test.mjs
