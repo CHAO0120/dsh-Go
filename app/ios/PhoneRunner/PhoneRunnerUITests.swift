@@ -420,8 +420,10 @@ final class PhoneTools {
     return context
   }
 
-  private func capture(input: Bool) throws -> (application: Application, image: UIImage,
-                                              frame: PhoneRunnerObservation.Frame, time: TimeInterval) {
+  private typealias Captured = (application: Application, image: UIImage,
+                                 frame: PhoneRunnerObservation.Frame, time: TimeInterval)
+
+  private func capture(input: Bool) throws -> Captured {
     let context = try context(input: input)
     let application = try frontApplication()
     try context.checkApp(application.identifier, input: input)
@@ -487,17 +489,26 @@ final class PhoneTools {
     return binding.application
   }
 
+  /// Just after an action a push or a flashing scroll indicator may still be moving. Read again a
+  /// couple of times before refusing; only a picture that held still across the snapshot is kept.
+  private func stillScreen() throws -> (before: Captured, root: XCUIElementSnapshot, after: Captured) {
+    for attempt in 1...3 {
+      let before = try capture(input: false)
+      let root = try before.application.app.snapshot()
+      let after = try capture(input: false)
+      if before.frame.matches(after.frame) { return (before, root, after) }
+      // Numbers only, for working out what moves on a real screen; never pixels or text.
+      print("[phone-runner] frame changed (read \(attempt) of 3): \(before.frame.difference(after.frame))")
+      if attempt < 3 { RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.5)) }
+    }
+    throw PhoneRunnerObservationError.changed
+  }
+
   private func screen(_ params: [String: Any]) throws -> [String: Any] {
     observation.invalidate(); observedApplication = nil; screenshotMetrics = nil; elements = [:]
-    let before = try capture(input: false)
-    let app = before.application.app
     let detail = params["detail"] as? Bool ?? false
-    let root = try app.snapshot()
-    let after = try capture(input: false)
-    guard before.frame.matches(after.frame) else {
-      print("[phone-runner] frame changed: \(before.frame.difference(after.frame))")
-      throw PhoneRunnerObservationError.changed
-    }
+    let (before, root, after) = try stillScreen()
+    let app = before.application.app
     serial += 1
     var found: [Int: Element] = [:]
     var lines: [String] = []
@@ -665,7 +676,12 @@ final class PhoneTools {
 
   private func settled() throws -> [String: Any] {
     RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.6))
-    return try screen([:])
+    do {
+      return try screen([:])
+    } catch PhoneRunnerObservationError.changed {
+      // The action itself went through; saying it stopped would invite doing it twice.
+      throw ToolError("这一步已经做了，但屏幕还在变化，没有读到稳定的画面。请重新 screen 核对结果，不要重复这一步。")
+    }
   }
 
   private func tap(_ params: [String: Any]) throws -> [String: Any] {

@@ -33,6 +33,11 @@ const steps = [];
 
 function finish(problem) {
   runner.kill('SIGTERM');
+  // The runner's own diagnostics (numbers only): what kept a screen from holding still.
+  const said = existsSync(logFile)
+    ? readFileSync(logFile, 'utf8').split('\n').filter((line) => line.includes('[phone-runner]'))
+    : [];
+  if (said.length) notice('phone runner diagnostics', said.slice(-14).join('\n'));
   if (problem) {
     fail('phone runner', `${problem}\n${steps.join('\n')}`);
     const lines = existsSync(logFile) ? readFileSync(logFile, 'utf8').split('\n') : [];

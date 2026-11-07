@@ -87,9 +87,11 @@ def license_inputs(package):
             if path.is_symlink() or not path.resolve(strict=True).is_relative_to(root):
                 raise ValueError('Supplement original escapes package')
             result.append((filename, read_notice(path), 'crate-original'))
+        # Both sides resolved: a temporary directory under /var is /private/var on macOS.
+        texts = (HERE / 'notice-texts').resolve(strict=True)
         for document in supplement['documents']:
             path = HERE / 'notice-texts' / document['file']
-            if path.is_symlink() or not path.resolve(strict=True).is_relative_to(HERE / 'notice-texts'):
+            if path.is_symlink() or not path.resolve(strict=True).is_relative_to(texts):
                 raise ValueError('Supplement document escapes notice-texts')
             data = read_notice(path)
             if digest(data) != document['sha256']:
