@@ -369,8 +369,9 @@ class _PhoneControlScreenState extends ConsumerState<PhoneControlScreen> {
     final status = state.status;
     final returnAfterDone = ref.watch(phoneReturnPrefProvider);
     Future<void> setEnabled(bool value) async {
-      if (await ref.read(phoneChannelProvider).setEnabled(value))
+      if (await ref.read(phoneChannelProvider).setEnabled(value)) {
         await ref.read(phoneProvider.notifier).refreshStatus();
+      }
     }
 
     return AppPage.list(
