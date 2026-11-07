@@ -1,0 +1,54 @@
+--- a/node_modules/@deepseek-ai/dsh-attachment-local/lib/index.js
++++ b/node_modules/@deepseek-ai/dsh-attachment-local/lib/index.js
+@@ -4,7 +4,7 @@
+ import { dshCachePath, resolveDshHome } from "@deepseek-ai/dsh-home-paths";
+ import { createHash, randomUUID } from "node:crypto";
+ import { constants, createReadStream } from "node:fs";
+-import { chmod, link, mkdir, open, readFile, rename, rm, unlink, writeFile } from "node:fs/promises";
++import { chmod, link, mkdir, open, readFile, realpath, rename, rm, unlink, writeFile } from "node:fs/promises";
+ import { createLazyRequire } from "@deepseek-ai/dsh-lazy-require";
+ //#region lib/types/compression-limiter.js
+ /** Instance-owned concurrency bound for native image transformations. */
+@@ -375,7 +375,10 @@
+ }
+ /**
+ * Create one private directory tree and persist every ancestor entry up to a
+-* caller-vouched durable boundary. The walk deliberately ignores what mkdir
++* caller-vouched durable boundary. For a filesystem-root boundary, the normal
++* App direct launcher may instead vouch for its installed physical root when
++* both path spellings are canonical and the target is inside that root.
++* The walk deliberately ignores what mkdir
+ * reports as newly created: a concurrent first save can create a level this
+ * process then merely observes, so "already existed" is not "already durable"
+ * — the entry may still be unsynced in the creator, and a crash would drop a
+@@ -386,12 +389,17 @@
+ */
+ async function ensureDurableDirectory(path, boundary) {
+ 	const target = resolve(path);
+-	const stop = resolve(boundary);
++	let stop = resolve(boundary);
+ 	await mkdir(target, {
+ 		recursive: true,
+ 		mode: 448
+ 	});
+ 	await chmod(target, 448);
++	const direct = globalThis[Symbol.for("dsh.go.direct")];
++	if (stop === parse(target).root && direct && direct.within(target, direct.root) &&
++		await realpath(target) === target && await realpath(direct.root) === direct.root) {
++		stop = direct.root;
++	}
+ 	let level = target;
+ 	while (level !== stop) {
+ 		const parent = dirname(level);
+@@ -402,8 +410,9 @@
+ 	}
+ }
+ /**
+-* Establish this process's proof that one DSH_HOME entry and every ancestor
+-* below the filesystem root are durable. Mere existence is insufficient: a
++* Establish this process's proof that one DSH_HOME entry and its ancestors
++* up to the filesystem root, or the normal App's vouched direct root, are
++* durable. Mere existence is insufficient: a
+ * concurrent process may have created the directory but not synced its parent.
+ */
+ async function ensureDurableHome(path) {
