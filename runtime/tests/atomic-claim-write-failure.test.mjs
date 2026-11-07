@@ -96,19 +96,17 @@ test('a live claimant keeps its existing claim and the old lock while another co
   assert.equal(await readFile(`${filename}.lock`, 'utf8'), record);
 });
 
-test('a previously killed claimant is still not automatically reclaimed', async t => {
-  const filename = await fixture(t), { record, claim } = await deadLock(t, filename);
+test('a complete dead legacy claimant is crossed without deleting its record', async t => {
+  const filename = await fixture(t), { claim } = await deadLock(t, filename);
   const holder = await hold(t, filename, 'hold-claim');
   const before = await readFile(claim, 'utf8');
   assert.equal(before, `${holder.child.pid}\n`);
   await killHolder(holder);
   let operations = 0;
-  for (let attempt = 0; attempt < 2; attempt++) {
-    await assert.rejects(withFileLock(filename, () => { operations++; }, { waitMs: 0 }), /timed out waiting for the writer lock/);
-  }
-  assert.equal(operations, 0);
+  assert.equal(await withFileLock(filename, () => { operations++; return 42; }, { waitMs: 0 }), 42);
+  assert.equal(operations, 1);
   assert.equal(await readFile(claim, 'utf8'), before);
-  assert.equal(await readFile(`${filename}.lock`, 'utf8'), record);
+  await assert.rejects(readFile(`${filename}.lock`), { code: 'ENOENT' });
 });
 
 test('an existing empty legacy claim is not deleted by an unsuccessful exclusive open', async t => {
