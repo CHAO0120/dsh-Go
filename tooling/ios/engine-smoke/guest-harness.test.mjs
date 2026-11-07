@@ -1,4 +1,6 @@
 // Tests the test-driver's strict oracle/model parser, never replaces production approval.
+// Keep the pure diagnostics suite in the workflow's existing explicit entrypoint.
+import './guest-diagnostics.test.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {startGuestModel} from './guest-model.mjs';
