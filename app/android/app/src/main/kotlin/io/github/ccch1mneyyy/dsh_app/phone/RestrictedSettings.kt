@@ -17,7 +17,7 @@ import android.os.Process
  * - `MODE_IGNORED`: restricted, the dialog was seen: App info's ⋮ now offers
  *   「允许受限制的设置」;
  * - `MODE_DEFAULT` (Android 15+, enhanced confirmation): decided by where the app came from, a
- *   local or downloaded file being restricted.
+ *   local or downloaded file being restricted. Other sources also depend on installer trust.
  *
  * A ROM that answers otherwise, or refuses the read, gives null: the app then guides as if it
  * might be restricted rather than claim it isn't.
@@ -30,8 +30,6 @@ object RestrictedSettings {
     private const val OP = "android:access_restricted_settings"
 
     // PackageInstaller.PACKAGE_SOURCE_* (API 33).
-    private const val SOURCE_OTHER = 1
-    private const val SOURCE_STORE = 2
     private const val SOURCE_LOCAL_FILE = 3
     private const val SOURCE_DOWNLOADED_FILE = 4
 
@@ -44,7 +42,7 @@ object RestrictedSettings {
             AppOpsManager.MODE_IGNORED -> ACKNOWLEDGED
             AppOpsManager.MODE_DEFAULT -> when (packageSource) {
                 SOURCE_LOCAL_FILE, SOURCE_DOWNLOADED_FILE -> GUARDED
-                SOURCE_STORE, SOURCE_OTHER -> CLEAR
+                // Source labels do not establish the installer's ECM trust.
                 else -> null
             }
             else -> null

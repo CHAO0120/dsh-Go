@@ -254,6 +254,39 @@ jobs:
           gradle-version: ${{ env.GRADLE_VERSION }}
       - working-directory: app/android
         run: gradle --stacktrace :app:testArm64DebugUnitTest
+      # reverse temp branch only (request 033): print JUnit XML counts and every RestrictedSettingsTest case (reporting, no effect on the result)
+      - name: JUnit XML summary (reverse temp branch only)
+        if: ${{ !cancelled() }}
+        working-directory: app/android
+        run: |
+          set +e
+          java -version 2>&1 | sed 's/^/JAVA_VERSION /'
+          gradle --version 2>/dev/null | grep -E '^(Gradle|Kotlin|JVM|OS)' | sed 's/^/GRADLE_VERSION /'
+          echo "HEAD=$(git rev-parse HEAD)"
+          sha256sum app/src/main/kotlin/io/github/ccch1mneyyy/dsh_app/phone/RestrictedSettings.kt app/src/test/kotlin/io/github/ccch1mneyyy/dsh_app/phone/RestrictedSettingsTest.kt | sed 's/^/SRC /'
+          echo "=== REQ033 FULL XML"
+
+          python3 -I - <<'PYEOF'
+          import glob, xml.etree.ElementTree as ET
+          files = sorted(set(glob.glob('../build/**/test-results/testArm64DebugUnitTest/*.xml', recursive=True) + glob.glob('**/build/**/test-results/testArm64DebugUnitTest/*.xml', recursive=True)))
+          T = F = E = S = 0
+          for f in files:
+              r = ET.parse(f).getroot()
+              t, fa, er, sk = (int(r.get(k, 0)) for k in ('tests', 'failures', 'errors', 'skipped'))
+              T += t; F += fa; E += er; S += sk
+              name = r.get('name') or f
+              print(f"SUITE {name} tests={t} failures={fa} errors={er} skipped={sk} timestamp={r.get('timestamp')}")
+              for c in r.iter('testcase'):
+                  bad = [k for k in ('failure', 'error', 'skipped') if c.find(k) is not None]
+                  if bad or 'RestrictedSettings' in name:
+                      print(f"  CASE {c.get('name')} time={c.get('time')} status={','.join(bad) or 'pass'}")
+                  for k in ('failure', 'error', 'skipped'):
+                      for x in c.findall(k):
+                          print(f"    {k.upper()} message={(x.get('message') or '')[:2000]}")
+                          print('    ' + (x.text or '')[:30000].replace(chr(10), chr(10) + '    '))
+          print(f"JUNIT_TOTAL files={len(files)} tests={T} failures={F} errors={E} skipped={S}")
+          PYEOF
+          exit 0
 
   ci-ok:
     name: CI OK
