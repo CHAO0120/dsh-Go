@@ -93,7 +93,8 @@ jobs:
       - name: Check guest suspension and cancellation contracts
         run: |
           node="$(ls -d "$DSH_IOS_ENGINE_WORK"/node-v*-darwin-arm64/bin/node)"
-          "$node" --test tooling/ios/guest-tests/*.test.mjs
+          # route/runtime need the patched DSH prefix; the routing job runs them.
+          "$node" --test tooling/ios/guest-tests/channel-cancel.test.mjs tooling/ios/guest-tests/suspended.test.mjs
           python3 tooling/ios/guest-tests/test-crash-marker.py
 
       - name: Install the iSH build tools
