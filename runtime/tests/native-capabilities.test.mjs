@@ -34,8 +34,36 @@ async function fixture(t, declaration = manifest) {
     on(n, fn) { hooks.set(n, fn); }, inject(deps, fn) { fn(ctx); },
     webServer: { register(r) { routes.push(r); return () => {}; }, registerUpgrade(r) { upgrades.push(r); return () => {}; } } };
   apply(ctx, { persist: false, guardRoutes: false });
-  const responses = [];
-  const server = createServer((req, res) => { if (req.url.startsWith('/dsh-go/v1/media/')) responses.push(res); const r = routes.find(r => r.kind === 'prefix' && req.url.startsWith(r.path)); if (r) r.handler(req, res); else { res.writeHead(404); res.end(); } });
+  let nextMediaResponse;
+  const server = createServer((req, res) => {
+    if (req.url.startsWith('/dsh-go/v1/media/')) {
+      const hold = nextMediaResponse; nextMediaResponse = undefined; hold?.(res);
+    }
+    const r = routes.find(r => r.kind === 'prefix' && req.url.startsWith(r.path));
+    if (r) r.handler(req, res); else { res.writeHead(404); res.end(); }
+  });
+  function holdMediaResponse() {
+    assert.equal(nextMediaResponse, undefined, 'only one response hold may be armed');
+    return new Promise((resolve, reject) => {
+      nextMediaResponse = res => {
+        const end = res.end;
+        res.end = function(body, ...args) {
+          res.end = end;
+          try {
+            assert.equal(res.statusCode, 200, 'the held media response must succeed');
+            assert.ok(body instanceof Uint8Array && body.byteLength > 1, 'the held body needs an unfinished suffix');
+            // Hold completion on the real response, without relying on TCP buffer sizes.
+            res.write(body.subarray(0, 1));
+            resolve(res);
+            return res;
+          } catch (error) {
+            reject(error);
+            return end.call(res, body, ...args);
+          }
+        };
+      };
+    });
+  }
   server.on('upgrade', (req, socket, head) => upgrades[0].handler(req, socket, head));
   server.listen(0, '127.0.0.1'); await once(server, 'listening');
   const port = server.address().port;
@@ -70,7 +98,7 @@ async function fixture(t, declaration = manifest) {
     const extra = { options: { name: pathToFileURL(join(folder, 'index.js')).href }, parent: entry.parent, fiber: { uid: entries.length + 10 } }; entries.push(extra); hooks.get('internal/plugin')();
     return Object.assign(Object.create(services.dshGo), { ctx: { fiber: { entry: extra }, effect: ctx.effect } });
   }
-  return { service, ws, request, invoke, mediaPath, entry, hooks, addPlugin, port, responses, guardCalls: () => guardCalls };
+  return { service, ws, request, invoke, mediaPath, entry, hooks, addPlugin, port, holdMediaResponse, guardCalls: () => guardCalls };
 }
 
 test('old manifest/effect semantics and 4Hz budget remain unchanged', () => {
@@ -272,40 +300,49 @@ async function until(predicate, message, timeout = 1500) {
   const end = Date.now() + timeout;
   while (!predicate()) { if (Date.now() > end) throw new Error(message); await delay(10); }
 }
-async function pausedMedia(t, f, effect, producerReady) {
-  const count = f.responses.length;
+async function unfinishedMedia(t, f, effect) {
+  const response = f.holdMediaResponse();
   const socket = connect(f.port, '127.0.0.1'); t.after(() => socket.destroy()); await once(socket, 'connect');
-  socket.pause(); socket.write(`GET /dsh-go/v1/${f.mediaPath(effect)} HTTP/1.1\r\nHost: localhost\r\nAuthorization: Bearer test\r\nConnection: close\r\n\r\n`);
-  if (producerReady) {
-    await producerReady;
-    // Let the actual transfer continuation write its headers and body before checking backpressure.
-    await new Promise(resolve => setImmediate(resolve));
-    assert.ok(f.responses.length > count && f.responses[count].headersSent, 'media headers were not produced');
-  } else await until(() => f.responses.length > count && f.responses[count].headersSent, 'media headers were not produced');
-  const res = f.responses[count]; assert.equal(res.writableFinished, false, 'fixture must hold actual HTTP backpressure');
+  const bodyStarted = new Promise((resolve, reject) => {
+    let received = Buffer.alloc(0);
+    socket.on('data', chunk => {
+      received = Buffer.concat([received, chunk]);
+      const split = received.indexOf('\r\n\r\n');
+      if (split >= 0 && received.length > split + 4)
+        resolve({ headers: received.subarray(0, split).toString(), body: received.subarray(split + 4) });
+    });
+    socket.once('error', reject);
+    socket.once('end', () => reject(new Error('media ended before its first body byte')));
+  });
+  const ready = Promise.all([response, bodyStarted]);
+  socket.write(`GET /dsh-go/v1/${f.mediaPath(effect)} HTTP/1.1\r\nHost: localhost\r\nAuthorization: Bearer test\r\nConnection: close\r\n\r\n`);
+  const [res, received] = await ready;
+  assert.match(received.headers, /^HTTP\/1\.1 200 /);
+  assert.equal(received.body.toString(), 'a', 'the real client must receive the held audio prefix');
+  assert.equal(res.headersSent, true, 'media headers were not produced');
+  assert.equal(res.writableFinished, false, 'fixture must hold response completion');
   return { socket, res };
 }
 
-test('NJS3 slow response keeps plugin slot and stop aborts unfinished HTTP body', async t => {
+test('NJS3 unfinished response keeps plugin slot and stop aborts unfinished HTTP body', { timeout: 5000 }, async t => {
   const f = await fixture(t), w = await f.ws(['audio']); let signal;
-  f.service.media('clip', (scope, event) => { signal = event.signal; return { body: Buffer.alloc(16 * 1024 * 1024), contentType: 'audio/wav' }; });
+  f.service.media('clip', (scope, event) => { signal = event.signal; return { body: Buffer.from('audio'), contentType: 'audio/wav' }; });
   f.service.on('go', () => ({ type: 'audio', op: 'play', instance: 'slow-reader', src: 'media:clip' }));
-  const effect = (await f.invoke(w)).effects[0]; const held = await pausedMedia(t, f, effect);
+  const effect = (await f.invoke(w)).effects[0]; const held = await unfinishedMedia(t, f, effect);
   assert.equal(signal.aborted, false, 'producer signal stays alive through response completion');
   assert.equal((await f.request(f.mediaPath(effect))).status, 429, 'unfinished response keeps the per-plugin slot');
   w.send({ t: 'cap.event', lease: effect.lease, seq: 1, event: 'audio.stopped' });
   await until(() => held.res.destroyed, 'stop did not destroy unfinished response'); assert.equal(signal.aborted, true); assert.equal(held.res.writableFinished, false);
 });
 
-test('NJS3 total media deadline includes the slow response, not only producer', { timeout: 35000 }, async t => {
-  const f = await fixture(t), w = await f.ws(['audio']); let signal, started;
-  const ready = new Promise(resolve => { started = resolve; });
+test('NJS3 total media deadline includes the unfinished response, not only producer', { timeout: 35000 }, async t => {
+  const f = await fixture(t), w = await f.ws(['audio']); let signal;
   f.service.media('clip', (scope, event) => {
     t.mock.timers.enable({ apis: ['setTimeout'] });
-    signal = event.signal; started(); return { body: Buffer.alloc(16 * 1024 * 1024), contentType: 'audio/wav' };
+    signal = event.signal; return { body: Buffer.from('audio'), contentType: 'audio/wav' };
   });
   f.service.on('go', () => ({ type: 'audio', op: 'play', instance: 'deadline-reader', src: 'media:clip' }));
-  const effect = (await f.invoke(w)).effects[0]; const held = await pausedMedia(t, f, effect, ready);
+  const effect = (await f.invoke(w)).effects[0]; const held = await unfinishedMedia(t, f, effect);
   t.mock.timers.tick(29999);
   await new Promise(resolve => setImmediate(resolve));
   assert.equal(held.res.destroyed, false, 'unfinished response keeps its full 30 second budget');

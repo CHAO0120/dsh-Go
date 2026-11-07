@@ -78,6 +78,8 @@ object Proto {
     const val ACCEPTED = "accepted"
     const val READBACK = "readback"
     const val COUNT = "n"
+    // Optional: already-read primary-window elements omitted by the output cap.
+    const val ELEMENT_OVERFLOW = "elementOverflow"
     // parallel element arrays (index i ↔ element id i+1)
     const val A_ROLE = "role"
     const val A_LABEL = "label"

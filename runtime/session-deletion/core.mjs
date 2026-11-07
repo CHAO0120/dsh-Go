@@ -173,7 +173,11 @@ export function createDeletionSeam(storage, { acquire, parseGeneration, notFound
             if (corpus.some(({ header }) => header.origin === 'subagent' && header.parentSession === id)) throw failure('session-related');
             if (await hooks.inspectTasks()) throw failure('session-related');
             const stored = await storage.requireStoredLog(id);
-            if (stored.events.some((event) => event.type === 'team/task' || event.type === 'subagent/catalog')) throw failure('session-related');
+            const inherited = stored.inheritedEventCount ?? 0;
+            if (!Number.isSafeInteger(inherited) || inherited < 0 || inherited > stored.events.length) throw failure('failed');
+            // Fork history does not transfer the source parent's direct-child catalog.
+            if (stored.events.some((event) => event.type === 'team/task'
+              || event.type === 'subagent/catalog' && event.seq >= inherited)) throw failure('session-related');
             const goal = stored.events.filter((event) => event.type === 'goal/change').at(-1)?.data?.goal;
             if (goal?.phase === 'active') throw failure('session-active');
           }

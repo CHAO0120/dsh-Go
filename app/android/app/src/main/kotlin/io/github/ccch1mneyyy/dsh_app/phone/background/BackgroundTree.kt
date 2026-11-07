@@ -97,7 +97,8 @@ object BackgroundTree {
 
     /**
      * Render the screen text. [screenId] e.g. "b1"; background screens carry the 后台屏 marker.
-     * [overflow] is the count dropped past [SCREEN_CAP]; when > 0 a trailing hint is appended.
+     * [overflow] counts already-read elements omitted from this output, not unread tree nodes.
+     * A missing peer count leaves the default zero and makes no completeness claim.
      */
     fun render(
         screenId: String,
@@ -135,7 +136,9 @@ object BackgroundTree {
             lines.add(renderLine(e))
         }
         // l10n:keep model screen format and matchers
-        if (overflow > 0) lines.add("  …另有 $overflow 项，用 collect 或 scroll")
+        if (overflow > 0) lines.add(if (background)
+            "（本次已读取的元素中另有 $overflow 项未列出；未列出的元素没有可用编号）"
+        else "  …另有 $overflow 项，用 collect 或 scroll")
         return lines.joinToString("\n")
     }
 

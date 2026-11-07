@@ -339,6 +339,7 @@ class PrivilegedDisplayCore(private val context: Context) {
         val capped = elements.take(120)
         val n = capped.size
         response.putInt(Proto.COUNT, n)
+        response.putInt(Proto.ELEMENT_OVERFLOW, elements.size - n)
         response.putBoolean(Proto.POOR, elements.count { it.label.isNotEmpty() } < 5)
         val role = arrayOfNulls<String>(n); val label = arrayOfNulls<String>(n)
         val viewIds = arrayOfNulls<String>(n)

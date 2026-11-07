@@ -250,7 +250,11 @@ class BackgroundDisplay(
         val poor = response.getBoolean(Proto.POOR)
         val portrait = response.getBoolean(Proto.PORTRAIT, true)
         val keyboardUp = response.getBoolean(Proto.KEYBOARD_UP, false)
-        var text = BackgroundTree.render(id, appLabel, portrait, keyboardUp, elements, background = true, poorTree = poor)
+        // An older peer omits this field: no hint does not establish a complete tree.
+        val overflow = if (response.containsKey(Proto.ELEMENT_OVERFLOW))
+            response.getInt(Proto.ELEMENT_OVERFLOW).coerceAtLeast(0) else 0
+        var text = BackgroundTree.render(id, appLabel, portrait, keyboardUp, elements,
+            background = true, poorTree = poor, overflow = overflow)
         if (response.getBoolean(Proto.IMAGE_OMITTED)) {
             // l10n:keep agent screen protocol
             text += "\n（本页含敏感输入或控件树未完整读取，已省略截图；可继续使用已脱敏的文字信息）"

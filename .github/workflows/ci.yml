@@ -213,6 +213,21 @@ jobs:
             echo "DSH_TOOLS_DIR=$prefix/node_modules/@deepseek-ai/dsh-tools"
             echo "DSH_FS_LOCAL_ORIGINAL_JS=$prefix/fs-local-original.js"
           } >> "$GITHUB_ENV"
+      # reverse temp branch only (request 031): environment, seam copy and pins evidence (reporting, no effect on the result)
+      - name: Request 031 environment, seam and pins (reverse temp branch only)
+        run: |
+          set +e
+          echo "uid=$(id -u) node=$(node --version) npm=$(npm --version) python=$(python3 --version 2>&1) git=$(git --version)"
+          grep PRETTY_NAME /etc/os-release; uname -srm
+          echo "HEAD=$(git rev-parse HEAD)"
+          seam="$DSH_PREFIX/node_modules/@deepseek-ai/dsh-session-persistence-jsonl/lib/dsh-go-deletion.mjs"
+          sha256sum runtime/session-deletion/core.mjs "$seam" | sed 's/^/SEAM /'
+          cmp runtime/session-deletion/core.mjs "$seam"; echo "SEAM_CMP=$?"
+          sha256sum runtime/patches/pins.json | sed 's/^/PINS /'
+          sha256sum "$DSH_FS_LOCAL_ORIGINAL_JS" "$DSH_PREFIX/node_modules/@deepseek-ai/dsh-fs-local/lib/index.js" | sed 's/^/FSLOCAL /'
+          echo "ENV DSH_PREFIX=$DSH_PREFIX DSH_TEST_PREFIX=$DSH_TEST_PREFIX PNPM_BIN=$PNPM_BIN DSH_INSTALL=$DSH_INSTALL DSH_TOOLS_DIR=$DSH_TOOLS_DIR DSH_FS_LOCAL_ORIGINAL_JS=$DSH_FS_LOCAL_ORIGINAL_JS"
+          ls -la "$PNPM_BIN"
+          exit 0
       - name: Unit tests
         run: |
           node --test runtime/tests/*.test.mjs app/tool/engine_auth/*.test.mjs
@@ -254,6 +269,36 @@ jobs:
           gradle-version: ${{ env.GRADLE_VERSION }}
       - working-directory: app/android
         run: gradle --stacktrace :app:testArm64DebugUnitTest
+      # reverse temp branch only (request 031): print JUnit XML counts, every BackgroundOverflowTest case and compiled-class evidence (reporting, no effect on the result)
+      - name: JUnit XML summary (reverse temp branch only)
+        if: ${{ !cancelled() }}
+        working-directory: app/android
+        run: |
+          set +e
+          java -version 2>&1 | sed 's/^/JAVA_VERSION /'
+          gradle --version 2>/dev/null | grep -E '^(Gradle|Kotlin|JVM|OS)' | sed 's/^/GRADLE_VERSION /'
+          find .. -path '*kotlin-classes*' \( -name 'BackgroundOverflowTest*.class' -o -name 'BackgroundTree.class' -o -name 'Proto.class' -o -name 'BackgroundDisplay.class' -o -name 'PrivilegedDisplayCore.class' \) -printf 'CLASS %TY-%Tm-%TdT%TH:%TM %s %p\n' 2>/dev/null | sort -k4
+          for c in $(find .. -path '*kotlin-classes*' -path '*phone/background/Proto.class' 2>/dev/null); do echo "JAVAP $c"; javap -constants "$c" 2>&1 | grep -i -E 'OVERFLOW|COUNT' | sed 's/^/  /'; done
+          python3 -I - <<'PYEOF2'
+          import glob, xml.etree.ElementTree as ET
+          files = sorted(set(glob.glob('../build/**/test-results/testArm64DebugUnitTest/*.xml', recursive=True) + glob.glob('**/build/**/test-results/testArm64DebugUnitTest/*.xml', recursive=True)))
+          T = F = E = S = 0
+          for f in files:
+              r = ET.parse(f).getroot()
+              t, fa, er, sk = (int(r.get(k, 0)) for k in ('tests', 'failures', 'errors', 'skipped'))
+              T += t; F += fa; E += er; S += sk
+              name = r.get('name') or f
+              print(f"SUITE {name} tests={t} failures={fa} errors={er} skipped={sk}")
+              for c in r.iter('testcase'):
+                  bad = [k for k in ('failure', 'error', 'skipped') if c.find(k) is not None]
+                  if bad or 'BackgroundOverflow' in name:
+                      print(f"  CASE {c.get('name')} time={c.get('time')} status={','.join(bad) or 'pass'}")
+                  for k in ('failure', 'error', 'skipped'):
+                      for x in c.findall(k):
+                          print(f"    {k.upper()} message={(x.get('message') or '')[:800]}")
+                          print('    ' + (x.text or '')[:4000].replace(chr(10), chr(10) + '    '))
+          print(f"JUNIT_TOTAL files={len(files)} tests={T} failures={F} errors={E} skipped={S}")
+          PYEOF2
 
   ci-ok:
     name: CI OK
