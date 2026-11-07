@@ -43,3 +43,15 @@ On systems where helper-side app enumeration is unavailable, upload a local app-
 Normal launches do not run that preflight; actual phone control still requires the in-app user grant.
 
 Pairing records, private keys, signing profiles, developer account details, device identifiers, app inventories, conversations, screenshots, logs, IPAs and build caches are intentionally excluded from this checkpoint.
+
+## Latest branch validation — 2026-11-08
+
+Updated to `edb3bdc128a26b180758c2b431903560c026fa22` and rebuilt the composed runtime, iSH and N-API frameworks with Xcode 26.2.
+
+- Fixed the generated runtime test's temporary-directory handling on macOS: resolve `/var` aliases before passing inherited preload paths to Node. Without this, the exact module-path check disables the Node Worker route and three cases fail. The unchanged production runtime passes all 22 cases with both JIT and jitless after this fixture correction.
+- Extended the real iOS Simulator guest smoke from 9 to 13 scenarios. All 15 approval decisions passed, including independent workspace and Linux-root decisions in the same persisted turn. Real iSH rejects a default root write, does not create a file when root permission is rejected, permits an approved one-call write, then rejects another write while preserving the approved contents.
+- Passed 74 routing/cancellation/root-grant/suspension checks, 10 POSIX crash-marker cases, the production Swift channel/installer contract with the verified Alpine archive, 6 standalone Dart guest contracts, 48 Flutter phone regressions and full Flutter analysis. The smoke driver's 4 oracle/model checks also passed. These targeted checks do not represent the full repository suite.
+- Built, signed, installed and launched version `1.0.12+1` on iPhone 13 / iOS 26.0 without uninstalling the existing app. Local Flutter required Swift Package Manager to be enabled and plugin metadata regenerated before this build.
+- The new device phone preflight launched PhoneRunner but timed out waiting for XCTest readiness (`ERR_PHONE_XCTEST_SESSION`). Cleanup confirmed the launched PID exited. A normal app launch succeeded afterwards. The Mac was locked when the computer-control tool tried to inspect device UI; fresh Settings/Pinduoduo and automatic-return checks remain pending. Simulator results do not establish that phone control works on this device.
+
+The runtime fixture still requires a separately installed, OHOS-patched locked DSH prefix via `IOS_GUEST_TEST_PREFIX`, plus generated process dependencies. The simulator smoke uses the production Swift-installed fixed Alpine fixture and an isolated local scripted model; it does not use account credentials or user conversations. Use a fresh installation copy for each smoke run because the approved root-write scenario intentionally persists a synthetic file.

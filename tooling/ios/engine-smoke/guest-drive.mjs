@@ -229,6 +229,15 @@ async function round(ready, mode, reuse) {
     const decision=mode==='deny'?'rejected':'allowed-once';
     await rpc('$events/result',{clientId,eventId:approval.eventId,outcome:{kind:'result',value:decision}});
     report.approvals++;
+    const decisions=[decision];
+    if(mode==='rootdeny'||mode==='rootallow') {
+      const root=(await waitFrame(f=>f.value?.type==='waterfall'&&f.value.event==='approval/request'&&f.value.eventId!==approval.eventId)).value;
+      verifyApproval(root,sessionId,model.calls.get(mode));
+      assert.match(root.request.reason,/Linux/);
+      const rootDecision=mode==='rootdeny'?'rejected':'allowed-once';
+      await rpc('$events/result',{clientId,eventId:root.eventId,outcome:{kind:'result',value:rootDecision}});
+      decisions.push(rootDecision);report.approvals++;
+    }
     if(mode==='cancel') {
       const until=Date.now()+60000;
       while(!existsSync(join(workspace,'ready'))) {
@@ -251,6 +260,15 @@ async function round(ready, mode, reuse) {
     if(mode==='osrelease'||mode==='pipeline')assert.match(text,/(?:^|\n)ID=alpine(?:\r?\n|$)/);
     if(mode==='apkpath')assert.match(text,/\/sbin\/apk(?:\r?\n|$)/);
     if(mode==='full')assert.match(text,/apk-tools/);
+    if(mode==='rootdeny')assert.ok(/reject|denied|拒绝|未批准/i.test(text),'root denial must report refusal');
+    if(mode==='rootreadonly'||mode==='rootafter') {
+      assert.match(text,/Read-only file system/i);
+      assert.match(text,mode==='rootreadonly'?/root-readonly/:/root-readonly-again/);
+      assert.equal(results[0].data.message.isError,false);
+    }
+    if(mode==='rootallow') {
+      assert.match(text,/approved/);assert.equal(results[0].data.message.isError,false);
+    }
     if(mode==='exit')assert.match(text,/\[exit code: 7\]/);
     if(mode==='after')assert.match(text,/guest-after-cancel/);
     if(mode==='cancel'){
@@ -262,17 +280,17 @@ async function round(ready, mode, reuse) {
     socket.send(JSON.stringify({type:'open',streamId:auditId,endpoint:'session/follow',payload:{args:{request:{address:{kind:'session',sessionId},assistantDeltas:false}}}}));
     const rows=(await waitFrame(f=>f.streamId===auditId&&f.value?.type==='snapshot')).value.records;
     const audit=rows.map(r=>r.event).filter(Boolean);
-    verifyAudit(audit,approval.request.callId,decision);
-    report.scenarios.push({name:mode,sessionId,callId:approval.request.callId,decision,asked:1,decided:1,persistedTurnEnclosed:true});
+    verifyAudit(audit,approval.request.callId,decisions);
+    report.scenarios.push({name:mode,sessionId,callId:approval.request.callId,decision,decisions,asked:decisions.length,decided:decisions.length,persistedTurnEnclosed:true});
     return sessionId;
   } finally {socket.removeAllListeners('close');socket.terminate();for(const w of [...waiters])w.reject(new Error('round closed'));}
 }
 try {
   const ready=await waitReady(0,240000);
   let session;
-  for(const mode of ['deny','identity','osrelease','apkpath','pipeline','full','exit','cancel','after'])session=await round(ready,mode,session);
+  for(const mode of ['deny','identity','osrelease','apkpath','pipeline','full','rootreadonly','rootdeny','rootallow','rootafter','exit','cancel','after'])session=await round(ready,mode,session);
   // Every sensitive call requested a fresh approval. allowed-once did not become a standing grant.
-  assert.equal(report.approvals,9);report.status='PASS';report.stage='complete';
+  assert.equal(report.approvals,15);report.status='PASS';report.stage='complete';
 }catch(error){report.error=String(error.message);}
 if(!exited){writeFileSync(`${guest}/quit`,'');await Promise.race([once(engine,'exit'),delay(20000)]);if(!exited)engine.kill();}
 report.modelRequests=model.requests.map(r=>({scenario:r.scenario,requestedTool:r.requestedTool}));

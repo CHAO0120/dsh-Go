@@ -13,6 +13,10 @@ export async function startGuestModel(workspace) {
     apkpath: 'command -v apk',
     pipeline: "cat /etc/os-release | grep '^ID='",
     full: 'apk --version',
+    rootreadonly: "/bin/sh -c 'if printf forbidden > /etc/dsh-smoke-root; then exit 91; fi; test ! -e /etc/dsh-smoke-root && printf root-readonly'",
+    rootdeny: "/bin/sh -c 'printf forbidden > /etc/dsh-smoke-root'",
+    rootallow: "/bin/sh -c 'test ! -e /etc/dsh-smoke-root && printf approved > /etc/dsh-smoke-root && cat /etc/dsh-smoke-root'",
+    rootafter: "/bin/sh -c 'test \"$(cat /etc/dsh-smoke-root)\" = approved || exit 92; if printf forbidden >> /etc/dsh-smoke-root; then exit 93; fi; test \"$(cat /etc/dsh-smoke-root)\" = approved && printf root-readonly-again'",
     identity: "/bin/sh -c 'uname -a; cat /etc/alpine-release; printf guest-ok > \"/workspace/中文 标记.txt\"; cat \"/workspace/中文 标记.txt\"; if command -v python3 >/dev/null; then printf python3=present:; python3 -c \"print(1+1)\"; else printf \"python3=absent\\n\"; fi'",
     exit: "/bin/sh -c 'printf exit > /workspace/exit-marker; exit 7'",
     cancel: "/bin/sh -c ': > /workspace/heartbeat; printf ready > /workspace/ready; while :; do printf x >> /workspace/heartbeat; sleep 0.1; done'",
@@ -45,11 +49,12 @@ export async function startGuestModel(workspace) {
         JSON.stringify(message.content).includes('[DSH_IOS_SMOKE:'));
       if (tools.length && lastUser < 0) throw new Error('smoke turn marker missing');
       const results = body.messages.slice(lastUser + 1).filter((message) => message.role === 'tool');
-      const scenario = JSON.stringify(body.messages[lastUser]?.content).match(/DSH_IOS_SMOKE:(deny|identity|osrelease|apkpath|pipeline|full|exit|cancel|after)/)?.[1];
+      const scenario = JSON.stringify(body.messages[lastUser]?.content).match(/DSH_IOS_SMOKE:(deny|identity|osrelease|apkpath|pipeline|full|rootreadonly|rootdeny|rootallow|rootafter|exit|cancel|after)/)?.[1];
       if (tools.length && !scenario) throw new Error('unknown guest scenario');
       const step = tools.length && results.length === 0 ? ['bash', {
         description: 'Real guest CI approval fixture', command: scripts[scenario],
-        sandbox_permissions: scenario === 'full' ? 'danger-full-access' : 'workspace-write', justification: 'Approve this one synthetic CI guest task in its isolated workspace.'
+        sandbox_permissions: scenario === 'full' ? 'danger-full-access' : 'workspace-write', justification: 'Approve this one synthetic CI guest task in its isolated workspace.',
+        ...(['rootdeny', 'rootallow'].includes(scenario) ? { linux_root_write: 'Test one-call writes to the isolated CI Linux installation.' } : {}),
       }] : undefined;
       if (step && !tools.includes(step[0])) {
         res.writeHead(422); res.end(JSON.stringify({ error: { message: `required test tool unavailable: ${step[0]}` } })); return;

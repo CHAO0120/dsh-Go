@@ -8,7 +8,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -16,7 +16,9 @@ import { fileURLToPath } from 'node:url';
 const repo = fileURLToPath(new URL('../../../', import.meta.url));
 test('generated iOS overrides preserve real tool approval, tickets and Worker routing', t => {
   assert.ok(process.env.IOS_GUEST_TEST_PREFIX, 'Set IOS_GUEST_TEST_PREFIX to an isolated, OHOS-patched locked DSH prefix');
-  const temporary = mkdtempSync(join(tmpdir(), 'ios-guest-runtime-'));
+  // macOS aliases /var to /private/var. Match the canonical module URLs used
+  // by Node so the inherited product preload passes its exact-path check.
+  const temporary = realpathSync(mkdtempSync(join(tmpdir(), 'ios-guest-runtime-')));
   try {
     const fixture = join(temporary, 'runtime');
     execFileSync('python3', ['-I', '-B', join(repo, 'tooling/ios/tests/guest-runtime-fixture.py'),

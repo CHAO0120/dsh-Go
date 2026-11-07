@@ -20,13 +20,14 @@ test('audit oracle requires one matching pair inside one persisted turn',()=>{
 test('SSE peer emits only deterministic bash tool calls, never approval decisions',async()=>{
  const model=await startGuestModel('/synthetic');
  try {
-  for(const mode of ['deny','identity','osrelease','apkpath','pipeline','full','exit','cancel','after']){
+  for(const mode of ['deny','identity','osrelease','apkpath','pipeline','full','rootreadonly','rootdeny','rootallow','rootafter','exit','cancel','after']){
    const messages=[{role:'user',content:`[DSH_IOS_SMOKE:${mode}]`}];
    const call=async msgs=>{const r=await fetch(model.baseURL+'/chat/completions',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({stream:true,messages:msgs,tools:[{function:{name:'bash'}}]})});assert.equal(r.status,200);return (await r.text()).split('\n').filter(l=>l.startsWith('data: {')).map(l=>JSON.parse(l.slice(6)));};
    const frames=await call(messages),parts=frames.flatMap(f=>f.choices[0].delta.tool_calls??[]);
    assert.equal(parts[0].function.name,'bash');assert.equal(parts[0].id,model.calls.get(mode));
    const args=JSON.parse(parts.map(p=>p.function.arguments??'').join(''));
    assert.equal(args.sandbox_permissions,mode==='full'?'danger-full-access':'workspace-write');
+   assert.equal(Object.hasOwn(args,'linux_root_write'),mode==='rootdeny'||mode==='rootallow');
    const probes={osrelease:'cat /etc/os-release',apkpath:'command -v apk',pipeline:"cat /etc/os-release | grep '^ID='",full:'apk --version'};
    if(Object.hasOwn(probes,mode))assert.equal(args.command,probes[mode]);
    else assert.ok(args.command.startsWith('/bin/sh -c'));
@@ -35,4 +36,17 @@ test('SSE peer emits only deterministic bash tool calls, never approval decision
    assert.equal(done.some(f=>f.choices[0].delta.tool_calls),false);
   }
  }finally{await model.close();}
+});
+test('audit oracle requires independent ordered workspace and root decisions',()=>{
+ const begin={type:'turn/start'},end={type:'turn/end'};
+ const ask=id=>({type:'approval/asked',data:{id,callId:'c'}});
+ const decide=(id,outcome)=>({type:'approval/decided',data:{id,outcome}});
+ const workspace=ask('workspace'),root=ask('root');
+ const workspaceAllowed=decide('workspace','allowed-once'),rootRejected=decide('root','rejected');
+ const rows=[begin,workspace,workspaceAllowed,root,rootRejected,end];
+ verifyAudit(rows,'c',['allowed-once','rejected']);
+ assert.throws(()=>verifyAudit(rows,'c',['allowed-once','allowed-once']));
+ assert.throws(()=>verifyAudit(rows,'c',['allowed-once']));
+ assert.throws(()=>verifyAudit([begin,workspace,root,workspaceAllowed,rootRejected,end],'c',['allowed-once','rejected']));
+ assert.throws(()=>verifyAudit([begin,workspace,workspaceAllowed,end,begin,root,rootRejected,end],'c',['allowed-once','rejected']));
 });
