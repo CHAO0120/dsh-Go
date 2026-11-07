@@ -240,14 +240,14 @@ class L2sMigrationTest {
         assertEquals(L2sMigration.Result.Done(links = 2, removed = 0), migrate())
         assertTrue(regular("root/healthy") && regular("root/healthy2"))
         assertEquals("healthy", text("root/healthy2"))
-        assertEquals("recoverable", Files.readString(renamedBacking))
+        assertEquals("recoverable", String(Files.readAllBytes(renamedBacking), Charsets.UTF_8))
         assertTrue(symlink("root/staged") && symlink("root/published"))
         assertEquals(!removeIntermediate, Files.isSymbolicLink(intermediate))
         assertEquals(DirectLaunch.INCOMPATIBLE, DirectLaunch.compatibilityReason(root))
         val beforeRetry = storeEntries()
         assertEquals(L2sMigration.Result.Done(links = 0, removed = 0), migrate())
         assertEquals(beforeRetry, storeEntries())
-        assertEquals("recoverable", Files.readString(renamedBacking))
+        assertEquals("recoverable", String(Files.readAllBytes(renamedBacking), Charsets.UTF_8))
     }
 
     @Test fun aLinkMadeToAStoredFileItselfNestsAndStillResolves() {
