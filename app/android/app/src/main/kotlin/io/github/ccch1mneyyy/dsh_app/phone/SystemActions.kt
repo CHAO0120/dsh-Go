@@ -18,6 +18,7 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.provider.AlarmClock
 import android.provider.CalendarContract
 import android.provider.Settings
@@ -70,7 +71,7 @@ class SystemActions(private val app: Context) : SystemApi {
     @Volatile private var appsCache: Pair<Long, List<AppEntry>>? = null
 
     override fun apps(): List<AppEntry> {
-        appsCache?.let { (at, list) -> if (System.currentTimeMillis() - at < 30_000) return list }
+        appsCache?.let { (at, list) -> if (SystemClock.elapsedRealtime() - at < 30_000) return list }
         val launcher = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
         val list = pm.queryIntentActivities(launcher, 0)
             .mapNotNull { ri ->
@@ -78,7 +79,7 @@ class SystemActions(private val app: Context) : SystemApi {
                 AppEntry(ri.loadLabel(pm).toString().trim().orEmpty().ifEmpty { pkg }, pkg)
             }
             .distinctBy { it.packageName }
-        appsCache = System.currentTimeMillis() to list
+        appsCache = SystemClock.elapsedRealtime() to list
         return list
     }
 
@@ -373,9 +374,11 @@ class SystemActions(private val app: Context) : SystemApi {
         val visible = AppVisibility.visible
         val text = onMain {
             val cm = app.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-            cm.primaryClip?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.coerceToText(app)?.toString()
+            cm.primaryClip?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.coerceToText(app)?.toString().orEmpty()
         }
-        if (text.isNullOrEmpty()) {
+        // l10n:keep agent tool result
+        if (text == null) return SysResult(false, "读取剪贴板失败。")
+        if (text.isEmpty()) {
             return if (visible || Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
                 // l10n:keep agent tool result
                 SysResult(true, "剪贴板是空的。")

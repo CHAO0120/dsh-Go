@@ -1148,6 +1148,14 @@
         }
       }
     },
+    "zzzzzzzzzz-goal-edited-cap-checkpoint.diff": {
+      "0.2.2-rc.1": {
+        "node_modules/@deepseek-ai/dsh-goal/lib/index.js": {
+          "after": "ad193730333801d539c16296c4087362c515ffb9e948005842d1c635ae0a09a5",
+          "before": "e17dc2886e1bc3c265fa9406ed4a101dd000ed66f8d8cc43f3075346434729cc"
+        }
+      }
+    },
     "zzzzzzzzzz-plugin-manager-log-write-all.diff": {
       "0.2.2-rc.1": {
         "node_modules/@deepseek-ai/dsh-plugin-manager/lib/index.js": {

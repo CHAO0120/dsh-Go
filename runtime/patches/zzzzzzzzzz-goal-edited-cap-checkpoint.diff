@@ -1,0 +1,17 @@
+diff --git a/node_modules/@deepseek-ai/dsh-goal/lib/index.js b/node_modules/@deepseek-ai/dsh-goal/lib/index.js
+index 87cd3a8..f00c725 100644
+--- a/node_modules/@deepseek-ai/dsh-goal/lib/index.js
++++ b/node_modules/@deepseek-ai/dsh-goal/lib/index.js
+@@ -376,10 +376,8 @@ const goalProjectionStateSchema = z$1.object({
+ 		code: "custom",
+ 		message: "current goal update cannot precede its creation"
+ 	});
+-	if (state.current.roundsStarted > state.current.goal.maxGoalRounds) context.addIssue({
+-		code: "custom",
+-		message: "current goal rounds cannot exceed its configured limit"
+-	});
++	// A later cap edit does not undo rounds already admitted under an earlier cap.
++	// New round admission and resume still enforce the current limit.
+ });
+ /** Build strict fold state from one checkpoint-safe projection state. */
+ function goalFoldState(state) {
