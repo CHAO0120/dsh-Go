@@ -660,7 +660,7 @@ final class IOSPhoneClipboardTests: XCTestCase {
     let id = try await begin(f)
     let accesses = f.board.accesses
     f.state.foreground = false
-    f.state.clock = 129.999
+    f.state.clock = 111.999
     try f.clipboard.validateForPaste(id, current: { f.state.current })
     XCTAssertEqual(f.board.accesses, accesses)
     XCTAssertEqual(f.board.backgroundAccesses, 0)
@@ -690,7 +690,7 @@ final class IOSPhoneClipboardTests: XCTestCase {
   }
 
   func testExactExpiryInvalidClockOrBackwardClockRefusesWithoutBackgroundReads() async throws {
-    let samples: [TimeInterval?] = [130, 130.001, 99, nil,
+    let samples: [TimeInterval?] = [112, 112.001, 130, 99, nil,
       TimeInterval.nan, TimeInterval.infinity, -TimeInterval.infinity]
     for sample in samples {
       let f = fixture()
@@ -712,6 +712,35 @@ final class IOSPhoneClipboardTests: XCTestCase {
     await expect(.stale) { _ = try await self.begin(f) }
     XCTAssertTrue(f.board.accesses.isEmpty)
     XCTAssertFalse(f.clipboard.hasPendingRestore)
+  }
+
+  func testClipboardPasteReceiptIsFixedAndRetiresObservationWithoutAnImage() {
+    var retireCount = 0
+    let outcome = IOSPhoneCoreActions.clipboardPasteOutcome(submitRequested: false) {
+      retireCount += 1
+    }
+    XCTAssertEqual(retireCount, 1)
+    XCTAssertFalse(outcome.isError)
+    XCTAssertNil(outcome.image)
+    XCTAssertTrue(outcome.text.contains("可能粘贴了其他内容，请用户核对"))
+    XCTAssertTrue(outcome.text.contains("不回传粘贴后的读屏文字或图片"))
+    XCTAssertTrue(outcome.text.contains("不要自动重试"))
+    XCTAssertFalse(outcome.text.contains("screen="))
+    XCTAssertFalse(outcome.text.contains("OCR 看到了"))
+  }
+
+  func testRequestedSubmitAfterClipboardPasteReturnsIncompleteContentFreeReceipt() {
+    var retired = false
+    let outcome = IOSPhoneCoreActions.clipboardPasteOutcome(submitRequested: true) {
+      retired = true
+    }
+    XCTAssertTrue(retired)
+    XCTAssertTrue(outcome.isError)
+    XCTAssertNil(outcome.image)
+    XCTAssertTrue(outcome.text.contains("本次未派发回车／发送按键"))
+    XCTAssertTrue(outcome.text.contains("目标应用也可能自行处理粘贴"))
+    XCTAssertTrue(outcome.text.contains("handoff"))
+    XCTAssertTrue(outcome.text.contains("可能粘贴了其他内容，请用户核对"))
   }
 
   func testRestoreRequestOrCurrentRevocationDisablesBackgroundLeaseWithoutReads() async throws {

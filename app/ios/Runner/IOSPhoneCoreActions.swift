@@ -199,7 +199,6 @@ final class IOSPhoneCoreActions {
       if clipboard.hasPendingRestore { execution.mayHaveActed = true }
       if let lease = execution.clipboardLease { clipboard.requestRestore(lease) }
     }
-    let evidence: IOSPhoneScreen.InputEvidence
     if plan.usesClipboard {
       let prepared = try await clipboard.prepare(text: plan.text!, preflight: {
         let focus = try await self.focusInput(point: point, frame: frame, execution: execution, current: current)
@@ -220,7 +219,7 @@ final class IOSPhoneCoreActions {
       let returned = try await capture(execution, current: current)
       let checked = try await screen.revalidate(screen: prepared.focus, binding: execution.binding,
         fresh: returned, requiresTextInput: true, current: current)
-      evidence = try await screen.inspectInput(reply: returned, binding: execution.binding, current: current)
+      let evidence = try await screen.inspectInput(reply: returned, binding: execution.binding, current: current)
       guard !evidence.sensitive else { throw IOSPhoneScreenError.sensitive }
       guard evidence.keyboardHint else {
         throw IOSPhoneOperationError(message: "返回后没有核实到原键盘线索；没有派发粘贴，请用 handoff。")
@@ -229,12 +228,19 @@ final class IOSPhoneCoreActions {
       try clipboard.validateForPaste(prepared.id, current: current)
       _ = try await send(["op": "paste", "replace": true, "nativeFrameId": checked.nativeFrameID], execution, current: current)
       clipboard.requestRestore(prepared.id)
-    } else {
-      let focus = try await focusInput(point: point, frame: frame, execution: execution, current: current)
-      evidence = focus.evidence
-      try requireBackground(current)
-      _ = try await send(["op": "ascii", "replace": true, "text": plan.text!, "nativeFrameId": focus.nativeFrameID], execution, current: current)
+      // Background clipboard contents cannot be authenticated. A whole-screen
+      // OCR substring is not evidence of the complete target field or source:
+      // approved text plus an unrelated secret would also satisfy contains().
+      // Never capture, OCR, cache or return the post-paste screen in this call,
+      // and do not send Enter on the basis of that untrusted substring.
+      return Self.clipboardPasteOutcome(submitRequested: plan.submits) {
+        self.screen.invalidate(); self.latestToken = nil
+      }
     }
+    let focus = try await focusInput(point: point, frame: frame, execution: execution, current: current)
+    let evidence = focus.evidence
+    try requireBackground(current)
+    _ = try await send(["op": "ascii", "replace": true, "text": plan.text!, "nativeFrameId": focus.nativeFrameID], execution, current: current)
     var after = try await capture(execution, current: current)
     var readback = try await screen.inspectInput(reply: after, binding: execution.binding, current: current)
     guard !readback.sensitive else { throw IOSPhoneScreenError.sensitive }
@@ -260,8 +266,19 @@ final class IOSPhoneCoreActions {
       after = try await capture(execution, current: current)
     }
     let output = try await observe(after, execution, image: false, detail: false, current: current)
-    if plan.usesClipboard { prefix += "\n请回到 DSH Go 恢复原剪贴板；原内容只保存在本 App 内存，没有发送给模型。" }
     return .success(prefix + "\n" + output.text)
+  }
+
+  /// A content-free result boundary: no clipboard, screen, OCR, approved text or
+  /// native reply is accepted as an argument. The caller retires its observation
+  /// before returning, so a later action needs a separately approved new screen.
+  static func clipboardPasteOutcome(submitRequested: Bool, discardObservation: () -> Void) -> IOSPhoneOutcome {
+    discardObservation()
+    var message = "粘贴请求已派发，但后台不能确认粘贴来源；可能粘贴了其他内容，请用户核对。\n本次不回传粘贴后的读屏文字或图片，也不保留它们作为操作依据。请回到 DSH Go 恢复原剪贴板；不要自动重试。"
+    if submitRequested {
+      message += "\n本次未派发回车／发送按键，请用 handoff 交给用户核对；目标应用也可能自行处理粘贴，不能保证内容尚未提交。"
+    }
+    return IOSPhoneOutcome(text: message, isError: submitRequested, image: nil)
   }
 
   private func focusInput(point: CGPoint, frame: IOSPhoneScreen.FreshFrame, execution: Execution,

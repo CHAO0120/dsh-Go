@@ -49,7 +49,9 @@ private final class IOSPhoneSystemPasteboard: IOSPhonePasteboardClient {
 @MainActor
 final class IOSPhoneClipboard {
   static let shared = IOSPhoneClipboard(client: IOSPhoneSystemPasteboard())
-  static let pasteLifetime: TimeInterval = 30
+  // A short dispatch window reduces exposure but cannot attest which contents
+  // an external target will paste. It is separate from UIKit's item expiry.
+  static let pasteLifetime: TimeInterval = 12
   struct Prepared<Focus> {
     let id: UUID
     let focus: Focus

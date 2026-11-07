@@ -348,6 +348,8 @@ final class IOSPhoneOperationTests: XCTestCase {
     XCTAssertTrue(description.contains("本 App 在恢复前终止"))
     XCTAssertTrue(description.contains("还请求按回车／发送"))
     XCTAssertTrue(description.contains("完整输入文字"))
+    XCTAssertTrue(description.contains("不会自动派发回车／发送按键"))
+    XCTAssertTrue(description.contains("只返回固定状态"))
     XCTAssertTrue(value.usesClipboard)
     XCTAssertTrue(value.submits)
   }
@@ -361,6 +363,15 @@ final class IOSPhoneOperationTests: XCTestCase {
     XCTAssertFalse(description.contains("回车／发送"))
     XCTAssertFalse(value.usesClipboard)
     XCTAssertFalse(value.submits)
+  }
+
+  func testASCIIRequestedSubmitStillDescribesItsReadbackGate() throws {
+    let value = try type("synthetic ASCII", submit: true)
+    let description = value.consentDescription(targetLabel: nil)
+    XCTAssertFalse(value.usesClipboard)
+    XCTAssertTrue(value.submits)
+    XCTAssertTrue(description.contains("只有新的读屏能核对完整输入文字时才继续"))
+    XCTAssertFalse(description.contains("只返回固定状态"))
   }
 
   func testReadAndTapDescriptionsPreserveTheRequestedScope() throws {

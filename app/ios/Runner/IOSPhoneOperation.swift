@@ -112,8 +112,15 @@ struct IOSPhoneOperation {
       var message = "在屏幕 \(Self.quotedDisplay(screen ?? "")) 的编号 \(parameters["id"] as? Int ?? 0) 输入以下全文，并替换原内容：\n\(text ?? "")" + target
       if usesClipboard {
         message += "\n\nCoreDevice 路线输入非 ASCII 文字时会临时使用剪贴板：原内容只在本 App 内存保存，不发送给模型。请在粘贴后回到 DSH Go 恢复原内容；若本 App 在恢复前终止，保存内容会丢失。恢复内容仅在此设备可用。"
+        message += "\nCoreDevice 的后台粘贴无法核实来源，可能粘贴其他内容；这次只返回固定状态，不回传粘贴后的读屏文字或图片，请你核对。"
       }
-      if submits { message += "\n\n还请求按回车／发送。只有新的读屏能核对完整输入文字时才继续；核对不了就交给你。" }
+      if submits {
+        if usesClipboard {
+          message += "\n\n还请求按回车／发送。CoreDevice 的剪贴板路径不能核实完整输入文字的来源，不会自动派发回车／发送按键，请你核对完成；XCTest 路线仍须核对完整焦点值后才可能继续。"
+        } else {
+          message += "\n\n还请求按回车／发送。只有新的读屏能核对完整输入文字时才继续；核对不了就交给你。"
+        }
+      }
       return message
     case .scroll:
       return "按 \(parameters["direction"] as? String ?? "down") 方向滚动一次，再读取新屏幕。CoreDevice 的编号表示 OCR 文字框，不能证明它是一个列表。" + target
