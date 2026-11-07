@@ -2,7 +2,7 @@
 //! never proof that the foreground application has processed an input.
 use std::ffi::{CString, c_char};
 use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Condvar, Mutex};
 use std::time::Duration;
 
 use idevice::{ReadWrite, RsdService};
@@ -16,7 +16,7 @@ use tokio::sync::{mpsc, watch};
 use zeroize::Zeroize;
 
 use crate::{Failure, Owner, Tunnel, cancelled, connect_tunnel_reporting, ddi, media, next_handle,
-    owner, pairing, MAX_CONFIG, STOP_UNCONFIRMED};
+    owner, pairing, ffi, worker_admitted, MAX_CONFIG, STOP_UNCONFIRMED};
 
 const MAX_REQUEST: usize = 16 * 1024;
 const MAX_JSON: usize = 8192;
@@ -191,7 +191,7 @@ pub(crate) struct Control {
     active: AtomicU64,
     last: AtomicU64,
     cancel: watch::Sender<u64>,
-    requests: mpsc::Sender<Request>,
+    requests: mpsc::Sender<PendingRequest>,
 }
 impl Control {
     pub(crate) fn stop_accepting(&self) {
@@ -235,6 +235,37 @@ impl Drop for Responder {
 }
 struct Request { input: Input, response: Responder }
 
+enum RequestState { Pending, Ready(Request), Rejected, Closed }
+struct RequestGate { state: Mutex<RequestState>, changed: Condvar }
+struct PendingRequest { gate: Arc<RequestGate> }
+impl PendingRequest {
+    fn take(self) -> Option<Request> {
+        let mut state = self.gate.state.lock().unwrap_or_else(|error| error.into_inner());
+        while matches!(*state, RequestState::Pending) {
+            state = self.gate.changed.wait(state).unwrap_or_else(|error| error.into_inner());
+        }
+        let request = match std::mem::replace(&mut *state, RequestState::Closed) {
+            RequestState::Ready(request) => Some(request), _ => None,
+        };
+        drop(state);
+        request
+    }
+}
+impl Drop for PendingRequest {
+    fn drop(&mut self) {
+        let previous = {
+            let mut state = self.gate.state.lock().unwrap_or_else(|error| error.into_inner());
+            std::mem::replace(&mut *state, RequestState::Closed)
+        };
+        self.gate.changed.notify_all();
+        // Before admission this contains no Responder, including when try_send
+        // drops its argument on the calling thread. After admission only the
+        // receiver owns this placeholder; its worker drops the unique responder
+        // outside both locks, before it can emit the owner terminal event.
+        drop(previous);
+    }
+}
+
 fn stable_code(error: Failure) -> &'static str { error.0.split(':').next().unwrap_or("ERR_PHONE_INTERNAL") }
 fn variant(error: Failure) -> Option<&'static str> {
     match error.0.split_once(':').map(|(_, value)| value) {
@@ -271,12 +302,17 @@ fn emit_result(callback: ResultCallback, handle: u64, id: u64, status: i32, meta
 pub unsafe extern "C" fn dsh_phone_core_start(
     config_json: *const u8, config_len: usize, callback: Option<EventCallback>, handle_out: *mut u64,
 ) -> i32 {
-    if handle_out.is_null() { return INVALID; }
-    unsafe { *handle_out = 0; }
-    if config_json.is_null() || config_len == 0 || callback.is_none() { return INVALID; }
-    if config_len > MAX_CONFIG { return TOO_LARGE; }
-    let Some(config) = Config::parse(unsafe { std::slice::from_raw_parts(config_json, config_len) }) else { return INVALID; };
-    unsafe { start_core(config, callback.unwrap(), handle_out) }
+    let mut admitted = false;
+    let result = ffi::catch(|| {
+        if handle_out.is_null() { return INVALID; }
+        unsafe { *handle_out = 0; }
+        if config_json.is_null() || config_len == 0 || callback.is_none() { return INVALID; }
+        if config_len > MAX_CONFIG { return TOO_LARGE; }
+        #[cfg(test)] ffi::testing::at("core_parse");
+        let Some(config) = Config::parse(unsafe { std::slice::from_raw_parts(config_json, config_len) }) else { return INVALID; };
+        unsafe { start_core(config, callback.unwrap(), handle_out, &mut admitted) }
+    });
+    if admitted { 0 } else { result.unwrap_or(INTERNAL) }
 }
 
 /// Config contains no pairing fields. Both caller buffers expire at return;
@@ -286,61 +322,80 @@ pub unsafe extern "C" fn dsh_phone_core_start_bytes(
     config_json: *const u8, config_len: usize, pairing_plist: *const u8, pairing_len: usize,
     callback: Option<EventCallback>, handle_out: *mut u64,
 ) -> i32 {
-    if handle_out.is_null() { return INVALID; }
-    unsafe { *handle_out = 0; }
-    if config_json.is_null() || config_len == 0 || pairing_plist.is_null()
-        || pairing_len == 0 || callback.is_none() { return INVALID; }
-    if config_len > MAX_CONFIG || pairing_len > pairing::MAX_PAIRING { return TOO_LARGE; }
-    let Some(config) = Config::parse_bytes(
-        unsafe { std::slice::from_raw_parts(config_json, config_len) },
-        unsafe { std::slice::from_raw_parts(pairing_plist, pairing_len) },
-    ) else { return INVALID; };
-    unsafe { start_core(config, callback.unwrap(), handle_out) }
+    let mut admitted = false;
+    let result = ffi::catch(|| {
+        if handle_out.is_null() { return INVALID; }
+        unsafe { *handle_out = 0; }
+        if config_json.is_null() || config_len == 0 || pairing_plist.is_null()
+            || pairing_len == 0 || callback.is_none() { return INVALID; }
+        if config_len > MAX_CONFIG || pairing_len > pairing::MAX_PAIRING { return TOO_LARGE; }
+        #[cfg(test)] ffi::testing::at("core_parse");
+        let Some(config) = Config::parse_bytes(
+            unsafe { std::slice::from_raw_parts(config_json, config_len) },
+            unsafe { std::slice::from_raw_parts(pairing_plist, pairing_len) },
+        ) else { return INVALID; };
+        unsafe { start_core(config, callback.unwrap(), handle_out, &mut admitted) }
+    });
+    if admitted { 0 } else { result.unwrap_or(INTERNAL) }
 }
 
-unsafe fn start_core(config: Config, callback: EventCallback, handle_out: *mut u64) -> i32 {
+unsafe fn start_core(config: Config, callback: EventCallback, handle_out: *mut u64, admitted: &mut bool) -> i32 {
     let Ok(mut slot) = owner().lock() else { return INTERNAL; };
     if slot.is_some() { return BUSY; }
-    let Some(handle) = next_handle() else { return INTERNAL; };
-    let (stop, stopped) = watch::channel(false);
-    let (cancel, cancelled_request) = watch::channel(0);
-    let (requests, receiver) = mpsc::channel(1);
-    let control = Arc::new(Control { phase: AtomicU8::new(STARTING), active: AtomicU64::new(0),
-        last: AtomicU64::new(0), cancel, requests });
-    *slot = Some(Owner { handle, stop, cancelled: Arc::new(AtomicBool::new(false)), core: Some(control.clone()) });
-    unsafe { *handle_out = handle; }
-    drop(slot);
-    let spawned = std::thread::Builder::new().name("dsh-phone-core".into()).spawn(move || {
+    // This guard outlives the critical catch, including panic-payload disposal.
+    // The spawned worker waits for its matching published owner before any I/O.
+    let result = ffi::catch(|| {
+        let Some(handle) = next_handle() else { return INTERNAL; };
+        let (stop, stopped) = watch::channel(false);
+        let (cancel, cancelled_request) = watch::channel(0);
+        let (requests, receiver) = mpsc::channel(1);
+        let control = Arc::new(Control { phase: AtomicU8::new(STARTING), active: AtomicU64::new(0),
+            last: AtomicU64::new(0), cancel, requests });
+        let entry = Owner { handle, stop, cancelled: Arc::new(AtomicBool::new(false)), core: Some(control.clone()) };
         let run_id = config.run_id.clone();
-        emit_event(callback, handle, &run_id, 0, json!({"stage":"tunnel"}));
-        let mut outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            let runtime = match tokio::runtime::Builder::new_current_thread().enable_all().build() {
-                Ok(runtime) => runtime,
-                Err(_) => return Completion::failed(INTERNAL_FAILURE, true),
-            };
-            // All local transport tasks are dropped before the terminal event.
-            runtime.block_on(run(config, callback, handle, control.clone(), stopped, cancelled_request, receiver))
-        })).unwrap_or_else(|_| Completion::failed(STOP_UNCONFIRMED, false));
-        if outcome.run_id.is_empty() { outcome.run_id = run_id; }
-        finish(handle, callback, &control, outcome);
+        let spawned = std::thread::Builder::new().name("dsh-phone-core".into()).spawn(move || {
+            if !worker_admitted(handle) { return; }
+            let mut outcome = ffi::catch(|| {
+                emit_event(callback, handle, &run_id, 0, json!({"stage":"tunnel"}));
+                let runtime = match tokio::runtime::Builder::new_current_thread().enable_all().build() {
+                    Ok(runtime) => runtime,
+                    Err(_) => return Completion::failed(INTERNAL_FAILURE, true),
+                };
+                // All local transport tasks drop before the terminal event.
+                runtime.block_on(run(config, callback, handle, control.clone(), stopped, cancelled_request, receiver))
+            }).unwrap_or_else(|_| Completion::failed(STOP_UNCONFIRMED, false));
+            if outcome.run_id.is_empty() { outcome.run_id = run_id; }
+            finish(handle, callback, &control, outcome);
+        });
+        if spawned.is_err() { return INTERNAL; }
+        #[cfg(test)] ffi::testing::at("core_spawned");
+        *slot = Some(entry);
+        unsafe { *handle_out = handle; }
+        *admitted = true;
+        #[cfg(test)] ffi::testing::at("core_committed");
+        0
     });
-    if spawned.is_err() {
-        if let Ok(mut slot) = owner().lock() {
-            if slot.as_ref().is_some_and(|owner| owner.handle == handle) { *slot = None; }
-        }
-        unsafe { *handle_out = 0; }
-        return INTERNAL;
-    }
-    0
+    if *admitted { 0 } else { result.unwrap_or(INTERNAL) }
 }
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn dsh_phone_core_request(
     handle: u64, request_id: u64, request_json: *const u8, request_len: usize, callback: Option<ResultCallback>,
 ) -> i32 {
-    if request_id == 0 || request_json.is_null() || request_len == 0 || callback.is_none() { return INVALID; }
-    if request_len > MAX_REQUEST { return TOO_LARGE; }
-    let Some(input) = Input::parse(unsafe { std::slice::from_raw_parts(request_json, request_len) }) else { return INVALID; };
+    let mut admitted = false;
+    let result = ffi::catch(|| {
+        if request_id == 0 || request_json.is_null() || request_len == 0 || callback.is_none() { return INVALID; }
+        if request_len > MAX_REQUEST { return TOO_LARGE; }
+        #[cfg(test)] ffi::testing::at("request_parse");
+        let Some(input) = Input::parse(unsafe { std::slice::from_raw_parts(request_json, request_len) }) else { return INVALID; };
+        admit_request(handle, request_id, input, callback.unwrap(), &mut admitted)
+    });
+    if admitted { 0 } else { result.unwrap_or(INTERNAL) }
+}
+
+fn admit_request(handle: u64, request_id: u64, input: Input, callback: ResultCallback, admitted: &mut bool) -> i32 {
+    let gate = Arc::new(RequestGate { state: Mutex::new(RequestState::Pending), changed: Condvar::new() });
+    let may_have_acted = Arc::new(AtomicBool::new(false));
     let Ok(slot) = owner().lock() else { return INTERNAL; };
     let Some(entry) = slot.as_ref().filter(|entry| entry.handle == handle) else { return STALE; };
     let Some(control) = &entry.core else { return STALE; };
@@ -350,17 +405,47 @@ pub unsafe extern "C" fn dsh_phone_core_request(
     }
     if request_id <= control.last.load(Ordering::Acquire) { return STALE; }
     if control.active.load(Ordering::Acquire) != 0 { return BUSY; }
-    control.last.store(request_id, Ordering::Release);
-    control.active.store(request_id, Ordering::Release);
     let request = Request { input, response: Responder { handle, id: request_id,
-        callback: callback.unwrap(), control: control.clone(), may_have_acted: Arc::new(AtomicBool::new(false)), armed: true } };
-    if let Err(error) = control.requests.try_send(request) {
-        let mut request = error.into_inner();
-        request.response.armed = false;
-        control.active.store(0, Ordering::Release);
-        return INTERNAL;
+        callback, control: control.clone(), may_have_acted, armed: false } };
+    let sent = ffi::catch(|| {
+        #[cfg(test)] ffi::testing::at("request_pre_enqueue");
+        if control.requests.try_send(PendingRequest { gate: gate.clone() }).is_err() { return false; }
+        #[cfg(test)] ffi::testing::at("request_enqueued");
+        true
+    });
+    commit_request(&gate, control, request, matches!(sent, Ok(true)), admitted);
+    drop(slot);
+    gate.changed.notify_all();
+    if *admitted { 0 } else { INTERNAL }
+}
+
+fn commit_request(gate: &RequestGate, control: &Control, mut request: Request, queued: bool, admitted: &mut bool) {
+    // OWNER is held by the caller, and this gate guard stays outside the
+    // critical catch. The receiver cannot act before publication is resolved.
+    let mut state = gate.state.lock().unwrap_or_else(|error| error.into_inner());
+    // A Tokio sender can acquire its permit before receiver close/drain, then
+    // push after that drain. A Pending placeholder alone does not prove that
+    // a receiver can still own it. Do not publish an armed Request into such
+    // an orphaned channel: it would also retain Request -> Control -> Sender.
+    // If close instead races after this check, our already-enqueued placeholder
+    // is owned by the receiver/drain, which waits on this gate before dropping
+    // the unique responder. That accepted completion stays on the worker.
+    if queued && matches!(*state, RequestState::Pending) && !control.requests.is_closed() {
+        let _ = ffi::catch(|| {
+            #[cfg(test)] ffi::testing::at("request_pre_commit");
+            // Only infallible scalar stores and moves in this commit group.
+            let request_id = request.response.id;
+            request.response.armed = true;
+            control.last.store(request_id, Ordering::Release);
+            control.active.store(request_id, Ordering::Release);
+            *state = RequestState::Ready(request);
+            *admitted = true;
+            #[cfg(test)] ffi::testing::at("request_committed");
+        });
     }
-    0
+    if !*admitted && matches!(*state, RequestState::Pending) {
+        *state = RequestState::Rejected;
+    }
 }
 
 #[unsafe(no_mangle)]
@@ -412,12 +497,14 @@ fn stop_accepting(handle: u64, control: &Control) {
         if slot.as_ref().is_some_and(|entry| entry.handle == handle) { control.stop_accepting(); }
     }
 }
-fn drain_cancelled(receiver: &mut mpsc::Receiver<Request>, cleanup: bool) {
-    while let Ok(mut request) = receiver.try_recv() { request.response.failure(CANCELLED, true, cleanup); }
+fn drain_cancelled(receiver: &mut mpsc::Receiver<PendingRequest>, cleanup: bool) {
+    while let Ok(pending) = receiver.try_recv() {
+        if let Some(mut request) = pending.take() { request.response.failure(CANCELLED, true, cleanup); }
+    }
 }
 
 async fn run(mut config: Config, callback: EventCallback, handle: u64, control: Arc<Control>,
-    mut stopped: watch::Receiver<bool>, mut cancel: watch::Receiver<u64>, mut requests: mpsc::Receiver<Request>,
+    mut stopped: watch::Receiver<bool>, mut cancel: watch::Receiver<u64>, mut requests: mpsc::Receiver<PendingRequest>,
 ) -> Completion {
     let mut completion = Completion { run_id: config.run_id.clone(), error: None, stopped: false, cleanup: true };
     let Some(pairing) = config.pairing.take() else { completion.error = Some(crate::PAIRING); return completion; };
@@ -486,7 +573,8 @@ async fn run(mut config: Config, callback: EventCallback, handle: u64, control: 
             _ = cancelled(&mut stopped) => { completion.stopped = true; None },
             request = requests.recv() => request,
         };
-        let Some(mut request) = request else { break; };
+        let Some(pending) = request else { break; };
+        let Some(mut request) = pending.take() else { continue; };
         let mut cancelled_now = false;
         let operation = session.execute(&request.input, &request.response.may_have_acted);
         let result = tokio::select! { biased;
@@ -915,6 +1003,47 @@ mod tests {
         event(handle, run_id, kind, json);
     }
     #[test]
+    fn w31_ffi_core_both_starts_resolve_publication_before_worker_entry() {
+        use base64::Engine as _;
+        let _guard = TEST_LOCK.lock().unwrap();
+        let bytes = byte_config();
+        let pairing = idevice::remote_pairing::RpPairingFile::generate("w31-unwind.invalid").to_bytes();
+        let mut legacy: Value = serde_json::from_slice(&bytes).unwrap();
+        legacy["pairingBase64"] = base64::engine::general_purpose::STANDARD.encode(&pairing).into();
+        let legacy = legacy.to_string();
+        for byte_abi in [false, true] {
+            for point in ["core_parse", "core_spawned", "core_committed"] {
+                assert!(owner().lock().unwrap().is_none());
+                EVENTS.0.lock().unwrap().clear();
+                ffi::testing::clear_gates();
+                let injected = Arc::new(AtomicBool::new(false));
+                let observed = injected.clone();
+                let _hook = ffi::testing::hook(move |actual| {
+                    if actual == point { observed.store(true, Ordering::Release); panic!("synthetic Core admission panic"); }
+                });
+                let mut handle = 999;
+                let status = if byte_abi {
+                    unsafe { dsh_phone_core_start_bytes(bytes.as_ptr(), bytes.len(), pairing.as_ptr(), pairing.len(), Some(stop_byte_start), &mut handle) }
+                } else { unsafe { dsh_phone_core_start(legacy.as_ptr(), legacy.len(), Some(stop_byte_start), &mut handle) } };
+                assert!(injected.load(Ordering::Acquire));
+                if point == "core_committed" {
+                    assert_eq!(status, 0); assert_ne!(handle, 0);
+                    assert_eq!(ffi::testing::wait_gate(), (handle, true));
+                    let events = EVENTS.0.lock().unwrap();
+                    let (events, timeout) = EVENTS.1.wait_timeout_while(events, Duration::from_secs(5), |events| !events.iter().any(|e| e.2 >= 2)).unwrap();
+                    assert!(!timeout.timed_out());
+                    assert_eq!(events.iter().map(|e| e.2).collect::<Vec<_>>(), vec![0, 2]);
+                } else {
+                    assert_eq!(status, INTERNAL); assert_eq!(handle, 0);
+                    if point == "core_spawned" { assert!(!ffi::testing::wait_gate().1); }
+                    assert!(EVENTS.0.lock().unwrap().is_empty());
+                }
+                assert!(!owner().is_poisoned());
+                assert!(owner().lock().unwrap().is_none());
+            }
+        }
+    }
+    #[test]
     fn w31_pairing_bytes_core_strict_json_and_legacy_compatibility() {
         use base64::Engine as _;
         let pairing = idevice::remote_pairing::RpPairingFile::generate("w31-byte-fixture.invalid").to_bytes();
@@ -1039,7 +1168,7 @@ mod tests {
         let bytes = input.to_string();
         unsafe { dsh_phone_core_request(handle, id, bytes.as_ptr(), bytes.len(), Some(callback)) }
     }
-    fn fixture_owner(handle: u64) -> (Arc<Control>, mpsc::Receiver<Request>, watch::Receiver<bool>, watch::Receiver<u64>) {
+    fn fixture_owner(handle: u64) -> (Arc<Control>, mpsc::Receiver<PendingRequest>, watch::Receiver<bool>, watch::Receiver<u64>) {
         let (stop, stopped) = watch::channel(false);
         let (cancel, cancelled) = watch::channel(0);
         let (requests, received) = mpsc::channel(1);
@@ -1047,6 +1176,279 @@ mod tests {
             last: AtomicU64::new(0), cancel, requests });
         *owner().lock().unwrap() = Some(Owner { handle, stop, cancelled: Arc::new(AtomicBool::new(false)), core: Some(control.clone()) });
         (control, received, stopped, cancelled)
+    }
+
+    static FFI_CALLBACKS: Mutex<Vec<(&'static str, std::thread::ThreadId)>> = Mutex::new(Vec::new());
+    extern "C" fn ffi_result(handle: u64, id: u64, status: i32, json: *const c_char, bytes: *const u8, len: usize) {
+        reentrant_stop_result(handle, id, status, json, bytes, len);
+        FFI_CALLBACKS.lock().unwrap().push(("result", std::thread::current().id()));
+    }
+    extern "C" fn ffi_terminal(handle: u64, run: *const c_char, kind: i32, json: *const c_char) {
+        event(handle, run, kind, json);
+        FFI_CALLBACKS.lock().unwrap().push(("terminal", std::thread::current().id()));
+    }
+    fn reset_ffi_records() {
+        RESULTS.lock().unwrap().clear();
+        EVENTS.0.lock().unwrap().clear();
+        FFI_CALLBACKS.lock().unwrap().clear();
+    }
+    fn finish_fixture(handle: u64, control: &Control) {
+        // Synthetic owner only: there has never been a Session or transport.
+        finish(handle, ffi_terminal, control, Completion {
+            run_id: RUN_ID.into(), error: None, stopped: true, cleanup: true,
+        });
+    }
+    fn assert_worker_result_then_terminal(caller: std::thread::ThreadId) {
+        let callbacks = FFI_CALLBACKS.lock().unwrap().clone();
+        assert_eq!(callbacks.iter().map(|entry| entry.0).collect::<Vec<_>>(), vec!["result", "terminal"]);
+        assert!(callbacks.iter().all(|entry| entry.1 != caller));
+        assert_eq!(RESULTS.lock().unwrap().len(), 1);
+        assert!(!owner().is_poisoned());
+        assert!(owner().lock().unwrap().is_none());
+    }
+
+    #[test]
+    fn w31_ffi_request_precommit_panics_are_callback_free() {
+        let _guard = TEST_LOCK.lock().unwrap();
+        for point in ["request_parse", "request_pre_enqueue", "request_enqueued", "request_pre_commit"] {
+            reset_ffi_records();
+            let (control, mut received, _, _) = fixture_owner(700);
+            let injected = Arc::new(AtomicBool::new(false));
+            let observed = injected.clone();
+            let _hook = ffi::testing::hook(move |actual| {
+                if actual == point { observed.store(true, Ordering::Release); panic!("synthetic request precommit panic"); }
+            });
+            assert_eq!(request(700, 1, json!({"op":"screenshot"}), result), INTERNAL);
+            assert!(injected.load(Ordering::Acquire));
+            if let Ok(pending) = received.try_recv() { assert!(pending.take().is_none()); }
+            assert_eq!(control.last.load(Ordering::Acquire), 0);
+            assert_eq!(control.active.load(Ordering::Acquire), 0);
+            assert_eq!(control.phase.load(Ordering::Acquire), READY);
+            assert!(RESULTS.lock().unwrap().is_empty());
+            assert!(!owner().is_poisoned());
+            *owner().lock().unwrap() = None;
+        }
+    }
+
+    #[test]
+    fn w31_ffi_waiting_receiver_observes_rejected_request() {
+        let _guard = TEST_LOCK.lock().unwrap();
+        reset_ffi_records();
+        let (control, mut received, _, _) = fixture_owner(701);
+        let (taken, seen) = std::sync::mpsc::channel();
+        let (finished, done) = std::sync::mpsc::channel();
+        let worker = std::thread::spawn(move || {
+            let pending = received.blocking_recv().unwrap();
+            taken.send(()).unwrap();
+            let request = pending.take();
+            let rejected = request.is_none();
+            drop(request);
+            finished.send(rejected).unwrap();
+        });
+        let _hook = ffi::testing::hook(move |point| {
+            if point == "request_enqueued" {
+                seen.recv_timeout(Duration::from_secs(5)).unwrap();
+                panic!("synthetic panic with waiting receiver");
+            }
+        });
+        assert_eq!(request(701, 1, json!({"op":"apps"}), result), INTERNAL);
+        assert!(done.recv_timeout(Duration::from_secs(5)).unwrap());
+        worker.join().unwrap();
+        assert_eq!(control.last.load(Ordering::Acquire), 0);
+        assert_eq!(control.active.load(Ordering::Acquire), 0);
+        assert!(RESULTS.lock().unwrap().is_empty());
+        assert!(!owner().is_poisoned());
+        *owner().lock().unwrap() = None;
+    }
+
+    #[test]
+    fn w31_ffi_request_postcommit_panic_keeps_one_worker_result() {
+        let _guard = TEST_LOCK.lock().unwrap();
+        reset_ffi_records();
+        let caller = std::thread::current().id();
+        let (control, mut received, _, _) = fixture_owner(702);
+        let worker_control = control.clone();
+        let (taken, seen) = std::sync::mpsc::channel();
+        let (finished, done) = std::sync::mpsc::channel();
+        let worker = std::thread::spawn(move || {
+            let pending = received.blocking_recv().unwrap();
+            taken.send(()).unwrap();
+            let mut request = pending.take().unwrap();
+            request.response.failure(CANCELLED, true, true);
+            drop(request);
+            finish_fixture(702, &worker_control);
+            finished.send(()).unwrap();
+        });
+        struct PanickingDrop;
+        impl Drop for PanickingDrop {
+            fn drop(&mut self) { panic!("synthetic request payload destructor"); }
+        }
+        let _hook = ffi::testing::hook(move |point| {
+            if point == "request_enqueued" { seen.recv_timeout(Duration::from_secs(5)).unwrap(); }
+            if point == "request_committed" { std::panic::panic_any(PanickingDrop); }
+        });
+        assert_eq!(request(702, 1, json!({"op":"apps"}), ffi_result), 0);
+        done.recv_timeout(Duration::from_secs(5)).unwrap();
+        worker.join().unwrap();
+        assert_eq!(control.last.load(Ordering::Acquire), 1);
+        assert_eq!(control.active.load(Ordering::Acquire), 0);
+        assert_worker_result_then_terminal(caller);
+    }
+
+    #[test]
+    fn w31_ffi_receiver_drop_before_commit_rejects_without_result() {
+        let _guard = TEST_LOCK.lock().unwrap();
+        reset_ffi_records();
+        let (control, received, _, _) = fixture_owner(703);
+        let (drop_now, command) = std::sync::mpsc::channel();
+        let (dropped, done) = std::sync::mpsc::channel();
+        let worker = std::thread::spawn(move || {
+            command.recv_timeout(Duration::from_secs(5)).unwrap();
+            drop(received);
+            dropped.send(()).unwrap();
+        });
+        let _hook = ffi::testing::hook(move |point| {
+            if point == "request_enqueued" {
+                drop_now.send(()).unwrap();
+                done.recv_timeout(Duration::from_secs(5)).unwrap();
+            }
+        });
+        assert_eq!(request(703, 1, json!({"op":"apps"}), result), INTERNAL);
+        worker.join().unwrap();
+        assert_eq!(control.last.load(Ordering::Acquire), 0);
+        assert_eq!(control.active.load(Ordering::Acquire), 0);
+        assert!(RESULTS.lock().unwrap().is_empty());
+        assert!(!owner().is_poisoned());
+        *owner().lock().unwrap() = None;
+    }
+
+    #[test]
+    fn w31_ffi_receiver_drop_during_committed_unwind_finishes_on_worker() {
+        let _guard = TEST_LOCK.lock().unwrap();
+        reset_ffi_records();
+        let caller = std::thread::current().id();
+        let (control, received, _, _) = fixture_owner(704);
+        let worker_control = control.clone();
+        let (drop_now, command) = std::sync::mpsc::channel();
+        let (dropping, started) = std::sync::mpsc::channel();
+        let (finished, done) = std::sync::mpsc::channel();
+        let worker = std::thread::spawn(move || {
+            command.recv_timeout(Duration::from_secs(5)).unwrap();
+            dropping.send(()).unwrap();
+            drop(received);
+            finish_fixture(704, &worker_control);
+            finished.send(()).unwrap();
+        });
+        let _hook = ffi::testing::hook(move |point| {
+            if point == "request_committed" {
+                drop_now.send(()).unwrap();
+                started.recv_timeout(Duration::from_secs(5)).unwrap();
+                panic!("synthetic committed panic racing receiver drop");
+            }
+        });
+        assert_eq!(request(704, 1, json!({"op":"apps"}), ffi_result), 0);
+        done.recv_timeout(Duration::from_secs(5)).unwrap();
+        worker.join().unwrap();
+        assert_eq!(control.last.load(Ordering::Acquire), 1);
+        assert_eq!(control.active.load(Ordering::Acquire), 0);
+        assert_worker_result_then_terminal(caller);
+    }
+
+    #[test]
+    fn w31_ffi_full_or_closed_queue_is_unaccepted_without_callback() {
+        let _guard = TEST_LOCK.lock().unwrap();
+        for closed in [false, true] {
+            reset_ffi_records();
+            let (control, received, _, _) = fixture_owner(705);
+            let received = if closed { drop(received); None } else {
+                assert!(control.requests.try_send(PendingRequest { gate: Arc::new(RequestGate {
+                    state: Mutex::new(RequestState::Pending), changed: Condvar::new(),
+                }) }).is_ok());
+                Some(received)
+            };
+            assert_eq!(request(705, 1, json!({"op":"apps"}), result), INTERNAL);
+            assert_eq!(control.last.load(Ordering::Acquire), 0);
+            assert_eq!(control.active.load(Ordering::Acquire), 0);
+            drop(received);
+            assert!(RESULTS.lock().unwrap().is_empty());
+            assert!(!owner().is_poisoned());
+            *owner().lock().unwrap() = None;
+        }
+    }
+
+    #[test]
+    fn w31_ffi_reserved_permit_after_receiver_drop_rejects_without_a_control_cycle() {
+        let _guard = TEST_LOCK.lock().unwrap();
+        reset_ffi_records();
+        let (control, received, _, _) = fixture_owner(706);
+        let weak_control = Arc::downgrade(&control);
+        let gate = Arc::new(RequestGate {
+            state: Mutex::new(RequestState::Pending), changed: Condvar::new(),
+        });
+        let weak_gate = Arc::downgrade(&gate);
+        let slot = owner().lock().unwrap();
+        // Use the locked Tokio API's real legal order. try_send uses the same
+        // acquire-then-push operations, but cannot be paused between them from
+        // a public caller. This is not a fabricated "send failed" return.
+        let permit = control.requests.try_reserve().unwrap();
+        drop(received); // Close and drain before the acquired permit publishes.
+        assert!(control.requests.is_closed());
+        permit.send(PendingRequest { gate: gate.clone() });
+        assert!(matches!(*gate.state.lock().unwrap(), RequestState::Pending));
+        let request = Request { input: Input::Apps, response: Responder {
+            handle: 706, id: 1, callback: result, control: control.clone(),
+            may_have_acted: Arc::new(AtomicBool::new(false)), armed: false,
+        } };
+        let mut admitted = false;
+        commit_request(&gate, &control, request, true, &mut admitted);
+        assert!(!admitted);
+        assert!(matches!(*gate.state.lock().unwrap(), RequestState::Rejected));
+        assert_eq!(control.last.load(Ordering::Acquire), 0);
+        assert_eq!(control.active.load(Ordering::Acquire), 0);
+        assert!(RESULTS.lock().unwrap().is_empty());
+        drop(slot);
+        gate.changed.notify_all();
+        *owner().lock().unwrap() = None;
+        drop(control);
+        drop(gate);
+        assert!(weak_control.upgrade().is_none());
+        assert!(weak_gate.upgrade().is_none());
+        assert!(RESULTS.lock().unwrap().is_empty());
+        assert!(!owner().is_poisoned());
+    }
+
+    #[test]
+    fn w31_ffi_receiver_close_after_commit_check_keeps_one_worker_completion() {
+        let _guard = TEST_LOCK.lock().unwrap();
+        reset_ffi_records();
+        let caller = std::thread::current().id();
+        let (control, mut received, _, _) = fixture_owner(707);
+        let worker_control = control.clone();
+        let (close_now, command) = std::sync::mpsc::channel();
+        let (closed, observed) = std::sync::mpsc::channel();
+        let (finished, done) = std::sync::mpsc::channel();
+        let worker = std::thread::spawn(move || {
+            command.recv_timeout(Duration::from_secs(5)).unwrap();
+            received.close();
+            closed.send(()).unwrap();
+            // The already-pushed placeholder is owned by this drain. Its Drop
+            // waits for the caller's outer gate guard instead of losing Ready.
+            drop(received);
+            finish_fixture(707, &worker_control);
+            finished.send(()).unwrap();
+        });
+        let _hook = ffi::testing::hook(move |point| {
+            if point == "request_pre_commit" {
+                close_now.send(()).unwrap();
+                observed.recv_timeout(Duration::from_secs(5)).unwrap();
+            }
+        });
+        assert_eq!(request(707, 1, json!({"op":"apps"}), ffi_result), 0);
+        done.recv_timeout(Duration::from_secs(5)).unwrap();
+        worker.join().unwrap();
+        assert_eq!(control.last.load(Ordering::Acquire), 1);
+        assert_eq!(control.active.load(Ordering::Acquire), 0);
+        assert_worker_result_then_terminal(caller);
     }
 
     #[test]
@@ -1188,7 +1590,7 @@ mod tests {
         dsh_phone_core_cancel(499, 1); dsh_phone_core_cancel(500, 2); dsh_phone_core_stop(499);
         assert_eq!(*cancelled.borrow(), 0); assert!(!*stopped.borrow());
         dsh_phone_core_cancel(500, 1); assert_eq!(*cancelled.borrow(), 1);
-        let mut accepted = received.try_recv().unwrap();
+        let mut accepted = received.try_recv().unwrap().take().unwrap();
         accepted.response.failure(CANCELLED, true, true);
         assert!(*stopped.borrow()); assert_eq!(control.phase.load(Ordering::Acquire), STOPPING);
         assert_eq!(request(500, 3, json!({"op":"screenshot"}), result), IS_STOPPING);
@@ -1203,7 +1605,7 @@ mod tests {
         RESULTS.lock().unwrap().clear();
         let (control, mut received, _, _) = fixture_owner(501);
         assert_eq!(request(501, 9, json!({"op":"screenshot"}), result), 0);
-        let accepted = received.try_recv().unwrap();
+        let accepted = received.try_recv().unwrap().take().unwrap();
         accepted.response.may_have_acted.store(true, Ordering::Release);
         drop(accepted);
         let records = RESULTS.lock().unwrap();

@@ -1,6 +1,7 @@
 //! Optional on-device phone owner. New CoreDevice paths are not device-verified.
 //! No network work runs until explicitly started.
 //! The pinned idevice library owns RPPairing/DTX; this crate owns one native lifetime.
+mod ffi;
 mod pairing;
 mod ddi;
 mod core_device;
@@ -212,6 +213,14 @@ fn next_handle() -> Option<u64> {
     }
 }
 
+fn worker_admitted(handle: u64) -> bool {
+    // A start keeps this guard outside its critical catch. The new thread
+    // cannot emit or open a transport until that catch resolves publication.
+    let admitted = owner().lock().is_ok_and(|slot| slot.as_ref().is_some_and(|entry| entry.handle == handle));
+    #[cfg(test)] ffi::testing::gate(handle, admitted);
+    admitted
+}
+
 /// Copy the configuration and start one native lifetime. Invalid pointers are a
 /// caller contract violation; null pointers and malformed JSON are rejected.
 #[unsafe(no_mangle)]
@@ -219,16 +228,15 @@ pub unsafe extern "C" fn dsh_phone_xctest_start(
     config_json: *const c_char,
     callback: Option<Callback>,
 ) -> u64 {
-    if config_json.is_null() {
-        return 0;
-    }
-    let Some(callback) = callback else {
-        return 0;
-    };
-    let Some(config) = Config::parse(unsafe { CStr::from_ptr(config_json) }.to_bytes()) else {
-        return 0;
-    };
-    start_xctest(config, callback)
+    let mut admitted = 0;
+    let result = ffi::catch(|| {
+        if config_json.is_null() { return 0; }
+        let Some(callback) = callback else { return 0; };
+        #[cfg(test)] ffi::testing::at("xctest_parse");
+        let Some(config) = Config::parse(unsafe { CStr::from_ptr(config_json) }.to_bytes()) else { return 0; };
+        start_xctest(config, callback, &mut admitted)
+    });
+    result.unwrap_or(admitted)
 }
 
 /// Synchronously borrow two independent buffers. Pairing bytes are validated
@@ -238,68 +246,62 @@ pub unsafe extern "C" fn dsh_phone_xctest_start_bytes(
     config_json: *const u8, config_len: usize, pairing_plist: *const u8, pairing_len: usize,
     callback: Option<Callback>,
 ) -> u64 {
-    if config_json.is_null() || config_len == 0 || config_len > MAX_CONFIG
-        || pairing_plist.is_null() || pairing_len == 0 || pairing_len > pairing::MAX_PAIRING {
-        return 0;
-    }
-    let Some(callback) = callback else { return 0; };
-    let Some(config) = Config::parse_bytes(
-        unsafe { std::slice::from_raw_parts(config_json, config_len) },
-        unsafe { std::slice::from_raw_parts(pairing_plist, pairing_len) },
-    ) else { return 0; };
-    start_xctest(config, callback)
+    let mut admitted = 0;
+    let result = ffi::catch(|| {
+        if config_json.is_null() || config_len == 0 || config_len > MAX_CONFIG
+            || pairing_plist.is_null() || pairing_len == 0 || pairing_len > pairing::MAX_PAIRING { return 0; }
+        let Some(callback) = callback else { return 0; };
+        #[cfg(test)] ffi::testing::at("xctest_parse");
+        let Some(config) = Config::parse_bytes(
+            unsafe { std::slice::from_raw_parts(config_json, config_len) },
+            unsafe { std::slice::from_raw_parts(pairing_plist, pairing_len) },
+        ) else { return 0; };
+        start_xctest(config, callback, &mut admitted)
+    });
+    result.unwrap_or(admitted)
 }
 
-fn start_xctest(config: Config, callback: Callback) -> u64 {
+fn start_xctest(config: Config, callback: Callback, admitted: &mut u64) -> u64 {
     let Ok(mut slot) = owner().lock() else {
         return 0;
     };
     if slot.is_some() {
         return 0;
     }
-    let Some(handle) = next_handle() else {
-        return 0;
-    };
-    let (stop, receiver) = watch::channel(false);
-    let cancelled = Arc::new(AtomicBool::new(false));
-    *slot = Some(Owner {
-        handle,
-        stop,
-        cancelled: cancelled.clone(),
-        core: None,
+    // Keep the mutex guard outside this catch: a worker must never race a
+    // temporarily poisoned OWNER after a caught pre/post-publication panic.
+    let result = ffi::catch(|| {
+        let Some(handle) = next_handle() else { return 0; };
+        let (stop, receiver) = watch::channel(false);
+        let cancelled = Arc::new(AtomicBool::new(false));
+        let entry = Owner { handle, stop, cancelled: cancelled.clone(), core: None };
+        let spawned = std::thread::Builder::new()
+            .name("dsh-phone-xctest".into())
+            .spawn(move || {
+                if !worker_admitted(handle) { return; }
+                let mut config = config;
+                let result = ffi::catch(|| {
+                    emit(callback, &config.run_id, 0, "");
+                    let runtime = tokio::runtime::Builder::new_current_thread()
+                        .enable_all()
+                        .build()
+                        .map_err(|_| SESSION)?;
+                    // Runtime drop closes tunnel tasks before terminal delivery.
+                    runtime.block_on(run_session(&mut config, callback, receiver))
+                }).unwrap_or(Err(STOP_UNCONFIRMED));
+                finish_owner(handle, &config.run_id, callback,
+                    cancelled.load(Ordering::Acquire), result);
+            });
+        if spawned.is_err() { return 0; }
+        #[cfg(test)] ffi::testing::at("xctest_spawned");
+        // Publication contains only moves and scalar writes. No callback or
+        // fallible operation occurs between the owner and admission marker.
+        *slot = Some(entry);
+        *admitted = handle;
+        #[cfg(test)] ffi::testing::at("xctest_committed");
+        handle
     });
-    drop(slot);
-    let spawned = std::thread::Builder::new()
-        .name("dsh-phone-xctest".into())
-        .spawn(move || {
-            let mut config = config;
-            emit(callback, &config.run_id, 0, "");
-            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                let runtime = tokio::runtime::Builder::new_current_thread()
-                    .enable_all()
-                    .build()
-                    .map_err(|_| SESSION)?;
-                // Dropping this runtime closes all tunnel tasks before terminal delivery.
-                runtime.block_on(run_session(&mut config, callback, receiver))
-            }))
-            .unwrap_or(Err(STOP_UNCONFIRMED));
-            finish_owner(
-                handle,
-                &config.run_id,
-                callback,
-                cancelled.load(Ordering::Acquire),
-                result,
-            );
-        });
-    if spawned.is_err() {
-        if let Ok(mut slot) = owner().lock() {
-            if slot.as_ref().is_some_and(|entry| entry.handle == handle) {
-                *slot = None;
-            }
-        }
-        return 0;
-    }
-    handle
+    result.unwrap_or(*admitted)
 }
 
 fn finish_owner(
@@ -641,6 +643,47 @@ mod tests {
             dsh_phone_xctest_stop(handle);
         }
         record(run_id, kind, payload);
+    }
+    #[test]
+    fn w31_ffi_xctest_both_starts_resolve_publication_before_worker_entry() {
+        let _guard = TEST_LOCK.lock().unwrap();
+        let bytes = byte_config();
+        let pairing = idevice::remote_pairing::RpPairingFile::generate("w31-unwind.invalid").to_bytes();
+        let mut legacy: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        legacy["pairingBase64"] = STANDARD.encode(&pairing).into();
+        let legacy = CString::new(legacy.to_string()).unwrap();
+        for byte_abi in [false, true] {
+            for point in ["xctest_parse", "xctest_spawned", "xctest_committed"] {
+                assert!(owner().lock().unwrap().is_none());
+                EVENTS.0.lock().unwrap().clear();
+                ffi::testing::clear_gates();
+                let injected = Arc::new(AtomicBool::new(false));
+                let observed = injected.clone();
+                let _hook = ffi::testing::hook(move |actual| {
+                    if actual == point { observed.store(true, Ordering::Release); panic!("synthetic XCTest admission panic"); }
+                });
+                let handle = if byte_abi {
+                    unsafe { dsh_phone_xctest_start_bytes(bytes.as_ptr(), bytes.len(), pairing.as_ptr(), pairing.len(), Some(stop_byte_start)) }
+                } else { unsafe { dsh_phone_xctest_start(legacy.as_ptr(), Some(stop_byte_start)) } };
+                assert!(injected.load(Ordering::Acquire));
+                if point == "xctest_committed" {
+                    assert_ne!(handle, 0);
+                    assert_eq!(ffi::testing::wait_gate(), (handle, true));
+                    let events = EVENTS.0.lock().unwrap();
+                    let (events, timeout) = EVENTS.1.wait_timeout_while(events, Duration::from_secs(5), |events| !events.iter().any(|e| e.1 >= 2)).unwrap();
+                    assert!(!timeout.timed_out());
+                    assert_eq!(events.iter().map(|e| e.1).collect::<Vec<_>>(), vec![0, 2]);
+                } else {
+                    assert_eq!(handle, 0);
+                    if point == "xctest_spawned" { assert!(!ffi::testing::wait_gate().1); }
+                    assert!(EVENTS.0.lock().unwrap().is_empty());
+                }
+                assert!(!owner().is_poisoned());
+                assert!(owner().lock().unwrap().is_none());
+            }
+        }
+        // The accepted cases stop in the first callback, before the biased
+        // connection branch is polled. No pairing file or transport is opened.
     }
     #[test]
     fn w31_pairing_bytes_xctest_strict_json_and_legacy_compatibility() {

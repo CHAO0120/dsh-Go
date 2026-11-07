@@ -8,6 +8,15 @@
 extern "C" {
 #endif
 
+/* The four start exports and core_request contain Rust panics that unwind.
+ * Before admission: zero XCTest handle / nonzero Core status, no callback or
+ * action. After admission: the accepted return is preserved and the worker
+ * retains terminal ownership. Owner and request locks are never unwound through
+ * during the admission decision. Builds require panic=unwind.
+ * This is not protection from invalid pointers, process/OOM abort, panic hooks
+ * that abort, or foreign exceptions. Foreign callbacks must never unwind.
+ */
+
 /* All callback strings are borrowed and valid only until the callback returns.
  * Callbacks run on the native worker thread. Copy before dispatching elsewhere.
  * No callback contains a plaintext RPC credential or pairing record.
