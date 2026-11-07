@@ -95,6 +95,7 @@ class ApkInstaller(private val context: Context) {
         } catch (e: Exception) {
             return onResult(result("failure", e.message))
         }
+        var receiver: BroadcastReceiver? = null
         try {
             installer.openSession(sessionId).use { session ->
                 apk.inputStream().use { input ->
@@ -104,7 +105,7 @@ class ApkInstaller(private val context: Context) {
                     }
                 }
                 val action = "${context.packageName}.UPDATE_INSTALL_STATUS.$sessionId"
-                register(action, sessionId, confirm, onResult)
+                receiver = register(action, sessionId, confirm, onResult)
                 val flags = PendingIntent.FLAG_UPDATE_CURRENT or
                     // The installer fills in the status extras.
                     (if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) PendingIntent.FLAG_MUTABLE else 0)
@@ -117,13 +118,14 @@ class ApkInstaller(private val context: Context) {
                 session.commit(pending.intentSender)
             }
         } catch (e: Exception) {
+            receiver?.let { runCatching { context.unregisterReceiver(it) } }
             runCatching { installer.abandonSession(sessionId) }
             val storage = e is java.io.IOException && e.message?.contains("ENOSPC") == true
             onResult(result(if (storage) "storage" else "failure", e.message))
         }
     }
 
-    private fun register(action: String, sessionId: Int, confirm: (Intent) -> Boolean, onResult: (Map<String, Any?>) -> Unit) {
+    private fun register(action: String, sessionId: Int, confirm: (Intent) -> Boolean, onResult: (Map<String, Any?>) -> Unit): BroadcastReceiver {
         val receiver = object : BroadcastReceiver() {
             override fun onReceive(ctx: Context, intent: Intent) {
                 val status = intent.getIntExtra(PackageInstaller.EXTRA_STATUS, PackageInstaller.STATUS_FAILURE)
@@ -145,6 +147,7 @@ class ApkInstaller(private val context: Context) {
         } else {
             context.registerReceiver(receiver, filter)
         }
+        return receiver
     }
 
     private fun confirmIntent(intent: Intent): Intent? =
@@ -189,17 +192,20 @@ class ApkInstaller(private val context: Context) {
     }
 
     /**
-     * Whether the system would accept [archive] as an update of [installed]: the same
-     * signer set, or a rotated key whose lineage includes the installed signer.
-     * Null when either side's signers can't be read.
+     * Compares signer identities before handing the APK to the system installer.
+     * Null when signing information is unavailable or rotation capabilities must be
+     * checked by the system; certificate history alone does not grant those capabilities.
      */
     private fun signersMatch(archive: PackageInfo, installed: PackageInfo): Boolean? {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P &&
+            (archive.signingInfo == null || installed.signingInfo == null)) return null
         val (newCurrent, newHistory) = signers(archive) ?: return null
-        val (oldCurrent, _) = signers(installed) ?: return null
+        val (oldCurrent, oldHistory) = signers(installed) ?: return null
         if (newCurrent.isEmpty() || oldCurrent.isEmpty()) return null
+        if (newCurrent == oldCurrent) return true
         // Multiple signers form one identity; only single-signer packages can rotate.
-        return newCurrent == oldCurrent ||
-            (newCurrent.size == 1 && oldCurrent.size == 1 && newHistory.containsAll(oldCurrent))
+        if (newCurrent.size != 1 || oldCurrent.size != 1) return false
+        return if (newHistory.containsAll(oldCurrent) || oldHistory.containsAll(newCurrent)) null else false
     }
 
     private fun fingerprint(signature: android.content.pm.Signature): String =

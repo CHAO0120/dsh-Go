@@ -1,0 +1,109 @@
+--- a/node_modules/@deepseek-ai/dsh-atomic-write/lib/index.js
++++ b/node_modules/@deepseek-ai/dsh-atomic-write/lib/index.js
+@@ -1,5 +1,5 @@
+ import { createHash, randomBytes } from "node:crypto";
+-import { lstat, mkdir, open, readFile, rename, rm, writeFile } from "node:fs/promises";
++import { link, lstat, mkdir, open, readFile, rename, rm, writeFile } from "node:fs/promises";
+ import { dirname } from "node:path";
+ import { setTimeout as setTimeout$1 } from "node:timers/promises";
+ //#region lib/types/index.js
+@@ -90,7 +90,7 @@
+ }
+ /** Whether the holder a `<pid>\n` record names is proven gone: a signal probe finds no such process. */
+ function holderExited(record) {
+-	if (!/^\d+\n$/.test(record)) return false;
++	if (!/^\d+\n$/.test(record) || record.indexOf("\n") !== record.length - 1) return false;
+ 	const pid = Number(record.trim());
+ 	if (pid === 0 || pid > 2147483647) return false;
+ 	if (pid === process.pid) return false;
+@@ -109,47 +109,56 @@
+ 		return;
+ 	}
+ }
+-/**
+-* Remove the lock when its recorded holder exited. Contenders that read the
+-* same record serialize on a claim file named after it. Under the claim, the
+-* claimant re-reads the lock and probes its PID again, and removes it only
+-* when it still holds that record and that PID is still gone: the record's
+-* holder can no longer release it, and no other contender can remove it
+-* without the claim, so a removal never deletes a lock another contender
+-* acquired after the dead holder's, including one whose holder reused the PID.
+-* @returns Whether this call removed the dead holder's lock.
+-*/
++/** Read a claim record; only ENOENT means an unused path. */
++async function readClaimRecord(path) {
++	try { return await readFile(path, "utf8"); }
++	catch (error) { if (error.code === "ENOENT") return void 0; throw error; }
++}
++async function completedSlot(path) {
++	try {
++		if (!(await lstat(path)).isFile()) throw new Error(`invalid takeover completion at ${path}`);
++		return true;
++	} catch (error) { if (error.code === "ENOENT") return false; throw error; }
++}
++/** Permanent slots serialize stale removal; dead/completed slots are crossed, never reused. */
+ async function takeOverExitedLock(lockPath) {
+ 	const record = await readLockRecord(lockPath);
+ 	if (record === void 0 || !holderExited(record)) return false;
+-	const claim = `${lockPath}.takeover-${createHash("sha256").update(record).digest("hex").slice(0, 16)}`;
+-	let handle;
+-	try {
+-		handle = await open(claim, "wx", 384);
+-		try {
+-			await handle.writeFile(`${process.pid}\n`);
+-		} finally {
+-			await handle.close();
++	const legacy = `${lockPath}.takeover-${createHash("sha256").update(record).digest("hex").slice(0, 16)}`;
++	const legacyRecord = await readClaimRecord(legacy);
++	if (legacyRecord !== void 0 && !holderExited(legacyRecord)) return false;
++	const directory = `${legacy}.slots`;
++	await mkdir(directory, { recursive: true, mode: 448 });
++	const temp = `${directory}/.owner-${process.pid}-${randomBytes(12).toString("hex")}.tmp`;
++	let ownTemp = false;
++	let ownedSlot;
++	try {
++		const handle = await open(temp, "wx", 384);
++		ownTemp = true;
++		try { await handle.writeFile(`${process.pid}\n`); }
++		finally { await handle.close(); }
++		let index = 0;
++		for (;;) {
++			if (!Number.isSafeInteger(index)) throw new Error("takeover slot limit exceeded");
++			const slot = `${directory}/${index}`;
++			if (await completedSlot(`${slot}.done`)) { index++; continue; }
++			const owner = await readClaimRecord(slot);
++			if (owner !== void 0) {
++				if (!holderExited(owner)) return false;
++				index++; continue;
++			}
++			try { await link(temp, slot); ownedSlot = slot; break; }
++			catch (error) { if (error.code === "EEXIST") continue; throw error; }
+ 		}
+-	} catch (error) {
+-		if (handle !== void 0) {
+-			await rm(claim, { force: true });
+-			throw error;
+-		}
+-		const code = error.code;
+-		if (code === "EEXIST" || code === "EPERM") return false;
+-		throw error;
+-	}
+-	try {
+ 		if (await readLockRecord(lockPath) !== record || !holderExited(record)) return false;
+-		try {
+-			await rm(lockPath, { force: true });
+-		} catch (error) {
+-			return false;
+-		}
++		try { await rm(lockPath, { force: true }); }
++		catch { return false; }
+ 		return true;
+ 	} finally {
+-		await rm(claim, { force: true }).catch((error) => {});
++		try {
++			// No timeout/abort race: every possible unlink above has settled first.
++			if (ownedSlot !== void 0) await writeFile(`${ownedSlot}.done`, "", { flag: "wx", mode: 384 });
++		} finally { if (ownTemp) await rm(temp, { force: true }); }
+ 	}
+ }
+ /**

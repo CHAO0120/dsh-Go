@@ -870,6 +870,14 @@
         }
       }
     },
+    "zzzzzzzz-atomic-stale-slot-recovery.diff": {
+      "0.2.2-rc.1": {
+        "node_modules/@deepseek-ai/dsh-atomic-write/lib/index.js": {
+          "after": "f1ce304bde9b132c684d65de6ad4725b2c264fa8b73417ff2ccd1c4edd6fca2c",
+          "before": "000b8994abcbec4e01b2b714fe8c2a37e61670c52e7d3acaf40ec8d39f484dc7"
+        }
+      }
+    },
     "zzzzzzzz-model-defaults.diff": {
       "0.2.1-rc.4": {
         "node_modules/@deepseek-ai/dsh-agent-default-model/lib/index.js": {
@@ -911,6 +919,14 @@
         "node_modules/@deepseek-ai/dsh-tool-schedule/lib/index.js": {
           "after": "42988ed17a706b69a190db1117b7acf067a6a0418d778353ce247f874b6e646b",
           "before": "d6c3f9b7a3287b4dd15e8fd9573ba7ceb6ce45851c3a03772a3520b9634674fd"
+        }
+      }
+    },
+    "zzzzzzzzz-atomic-lock-monotonic-wait.diff": {
+      "0.2.2-rc.1": {
+        "node_modules/@deepseek-ai/dsh-atomic-write/lib/index.js": {
+          "after": "e5d3803c96d0028719be57beb990a4f32b845762ed35f28fdae59a58b85d43e0",
+          "before": "f1ce304bde9b132c684d65de6ad4725b2c264fa8b73417ff2ccd1c4edd6fca2c"
         }
       }
     },
