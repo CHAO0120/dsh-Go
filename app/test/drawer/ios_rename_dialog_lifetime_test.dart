@@ -11,6 +11,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../chat/support/harness.dart';
 
 import 'package:dsh_app/state/sessions_state.dart';
+import 'package:dsh_app/state/workspaces_state.dart';
 
 import '../workspace/support.dart';
 
@@ -56,6 +57,7 @@ void main() {
               for (final o in ui.overrides)
                 if (o.origin != activeConnectionProvider && o.origin != sessionsProvider) o,
               activeConnectionProvider.overrideWithValue(AsyncData(connection)),
+              workspacePrefsProvider.overrideWith(() => FixedWorkspacePrefs(const WorkspacePrefs(loaded: true))),
             ],
           ),
         );
