@@ -6,35 +6,91 @@ use base64::{Engine as _, engine::general_purpose::STANDARD};
 use idevice::remote_pairing::RpPairingFile;
 use serde::Deserialize;
 use tokio::io::AsyncReadExt;
-use zeroize::{Zeroize, Zeroizing};
+use zeroize::{Zeroize, ZeroizeOnDrop, Zeroizing};
 
 use crate::{Failure, PAIRING};
 
 pub(crate) const MAX_PAIRING: usize = 64 * 1024;
 pub(crate) const MAX_PAIRING_BASE64: usize = 4 * MAX_PAIRING.div_ceil(3);
 
+/// Each owned field cleans itself even when deserialization fails before the
+/// surrounding ConfigWire/PairingWire has been completely constructed.
+pub(crate) struct SecretString(Zeroizing<String>);
+impl From<String> for SecretString {
+    fn from(value: String) -> Self { Self(Zeroizing::new(value)) }
+}
+impl<'de> Deserialize<'de> for SecretString {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        String::deserialize(deserializer).map(Self::from)
+    }
+}
+impl Drop for SecretString {
+    fn drop(&mut self) {
+        self.0.zeroize();
+        #[cfg(test)] record_clear("string", self.0.is_empty());
+    }
+}
+
+struct SecretData(Zeroizing<Vec<u8>>);
+impl SecretData {
+    fn new(value: Vec<u8>) -> Self { Self(Zeroizing::new(value)) }
+}
+impl<'de> Deserialize<'de> for SecretData {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        plist::Data::deserialize(deserializer).map(|value| Self::new(value.into()))
+    }
+}
+impl Drop for SecretData {
+    fn drop(&mut self) {
+        self.0.zeroize();
+        #[cfg(test)] record_clear("data", self.0.is_empty());
+    }
+}
+
+/// The persistent signing key already implements ZeroizeOnDrop in the pinned
+/// dependency. The constructor below enforces that feature at compile time.
+pub(crate) struct PairingRecord(RpPairingFile);
+impl std::ops::Deref for PairingRecord {
+    type Target = RpPairingFile;
+    fn deref(&self) -> &Self::Target { &self.0 }
+}
+impl std::ops::DerefMut for PairingRecord {
+    fn deref_mut(&mut self) -> &mut Self::Target { &mut self.0 }
+}
+impl Drop for PairingRecord {
+    fn drop(&mut self) {
+        self.0.identifier.zeroize();
+        if let Some(irk) = &mut self.0.alt_irk { irk.zeroize(); }
+        // SigningKey's own ZeroizeOnDrop runs when the inner record is dropped.
+        #[cfg(test)] record_clear("record", self.0.identifier.is_empty()
+            && self.0.alt_irk.as_ref().is_none_or(|irk| irk.is_empty()));
+    }
+}
+
 pub(crate) enum PairingInput {
-    Memory(Zeroizing<Vec<u8>>),
+    Memory(PairingRecord),
     // Compatibility for the old XCTest ABI only. New Swift callers use Memory.
     LegacyFile(String),
 }
 
 impl PairingInput {
-    pub(crate) fn parse(base64: Option<String>, file: Option<String>) -> Option<Self> {
+    pub(crate) fn parse(base64: Option<SecretString>, file: Option<String>) -> Option<Self> {
         match (base64, file) {
             (Some(encoded), None) => {
-                let encoded = Zeroizing::new(encoded);
-                if encoded.is_empty() || encoded.len() > MAX_PAIRING_BASE64 {
+                if encoded.0.is_empty() || encoded.0.len() > MAX_PAIRING_BASE64 {
                     return None;
                 }
-                let bytes = Zeroizing::new(STANDARD.decode(encoded.as_bytes()).ok()?);
-                if bytes.len() > MAX_PAIRING
-                    || Zeroizing::new(STANDARD.encode(bytes.as_slice())).as_str() != encoded.as_str()
-                    || validate(&bytes).is_err()
+                // Decode into our own guarded buffer so a partial decode error
+                // also clears bytes already written by the base64 decoder.
+                let mut bytes = SecretData::new(vec![0; base64::decoded_len_estimate(encoded.0.len())]);
+                let used = STANDARD.decode_slice(encoded.0.as_bytes(), bytes.0.as_mut_slice()).ok()?;
+                bytes.0.truncate(used);
+                if bytes.0.len() > MAX_PAIRING
+                    || Zeroizing::new(STANDARD.encode(bytes.0.as_slice())).as_str() != encoded.0.as_str()
                 {
                     return None;
                 }
-                Some(Self::Memory(bytes))
+                Some(Self::Memory(validate(&bytes.0).ok()?))
             }
             (None, Some(file))
                 if Path::new(&file).is_absolute()
@@ -47,9 +103,9 @@ impl PairingInput {
         }
     }
 
-    pub(crate) async fn load(&self) -> Result<RpPairingFile, Failure> {
+    pub(crate) async fn load(self) -> Result<PairingRecord, Failure> {
         match self {
-            Self::Memory(bytes) => validate(bytes),
+            Self::Memory(record) => Ok(record),
             Self::LegacyFile(path) => {
                 let file = tokio::fs::OpenOptions::new().read(true)
                     .custom_flags(libc::O_NONBLOCK).open(path).await.map_err(|_| PAIRING)?;
@@ -57,12 +113,12 @@ impl PairingInput {
                 if !metadata.is_file() || metadata.len() > MAX_PAIRING as u64 {
                     return Err(PAIRING);
                 }
-                let mut bytes = Zeroizing::new(Vec::new());
+                let mut bytes = SecretData::new(Vec::new());
                 file.take((MAX_PAIRING + 1) as u64)
-                    .read_to_end(&mut bytes)
+                    .read_to_end(&mut bytes.0)
                     .await
                     .map_err(|_| PAIRING)?;
-                validate(&bytes)
+                validate(&bytes.0)
             }
         }
     }
@@ -71,39 +127,52 @@ impl PairingInput {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct PairingWire {
-    public_key: plist::Data,
-    private_key: plist::Data,
-    identifier: String,
-    alt_irk: Option<plist::Data>,
+    public_key: SecretData,
+    private_key: SecretData,
+    identifier: SecretString,
+    alt_irk: Option<SecretData>,
 }
-impl Drop for PairingWire {
-    fn drop(&mut self) {
-        self.private_key.as_mut().zeroize();
-        self.public_key.as_mut().zeroize();
-        self.identifier.zeroize();
-        if let Some(irk) = &mut self.alt_irk { irk.as_mut().zeroize(); }
-    }
-}
-fn validate(bytes: &[u8]) -> Result<RpPairingFile, Failure> {
+fn validate(bytes: &[u8]) -> Result<PairingRecord, Failure> {
+    #[cfg(test)] VALIDATIONS.with(|count| count.set(count.get() + 1));
     if bytes.is_empty() || bytes.len() > MAX_PAIRING {
         return Err(PAIRING);
     }
     // A typed flat record rejects duplicate keys and nested arrays/dictionaries
     // before building a recursive generic Value. The upstream parser alone
     // accepts unbounded identifiers and arbitrary alt_irk lengths.
-    let value: PairingWire = plist::from_bytes(bytes).map_err(|_| PAIRING)?;
-    if value.private_key.as_ref().len() != 32 || value.public_key.as_ref().len() != 32
-        || value.identifier.is_empty() || value.identifier.len() > 128 || value.identifier.contains('\0') {
+    let mut value: PairingWire = plist::from_bytes(bytes).map_err(|_| PAIRING)?;
+    if value.private_key.0.len() != 32 || value.public_key.0.len() != 32
+        || value.identifier.0.is_empty() || value.identifier.0.len() > 128 || value.identifier.0.contains('\0') {
         return Err(PAIRING);
     }
-    if value.alt_irk.as_ref().is_some_and(|value| value.as_ref().len() != 16) {
+    if value.alt_irk.as_ref().is_some_and(|value| value.0.len() != 16) {
         return Err(PAIRING);
     }
-    let record = RpPairingFile::from_bytes(bytes).map_err(|_| PAIRING)?;
+    let private: &[u8; 32] = value.private_key.0.as_slice().try_into().map_err(|_| PAIRING)?;
+    let record = PairingRecord(RpPairingFile {
+        e_private_key: private.into(),
+        e_public_key: value.public_key.0.as_slice().try_into().map_err(|_| PAIRING)?,
+        identifier: std::mem::take(&mut *value.identifier.0),
+        alt_irk: value.alt_irk.as_mut().map(|value| std::mem::take(&mut *value.0)),
+    });
+    fn requires_zeroize_on_drop<T: ZeroizeOnDrop>(_: &T) {}
+    requires_zeroize_on_drop(&record.e_private_key);
     if record.e_private_key.verifying_key().to_bytes() != record.e_public_key.to_bytes() {
         return Err(PAIRING);
     }
     Ok(record)
+}
+
+#[cfg(test)]
+thread_local! {
+    static CLEARS: std::cell::RefCell<Vec<(&'static str, bool)>> = const { std::cell::RefCell::new(Vec::new()) };
+    static VALIDATIONS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+#[cfg(test)]
+fn record_clear(kind: &'static str, cleared: bool) { CLEARS.with(|events| events.borrow_mut().push((kind, cleared))); }
+#[cfg(test)]
+pub(crate) fn take_clear_events() -> Vec<(&'static str, bool)> {
+    CLEARS.with(|events| std::mem::take(&mut *events.borrow_mut()))
 }
 
 #[cfg(test)]
@@ -125,10 +194,10 @@ mod tests {
     #[tokio::test]
     async fn memory_record_roundtrips_without_a_file() {
         let bytes = bytes();
-        let input = PairingInput::parse(Some(STANDARD.encode(&bytes)), None).unwrap();
+        let input = PairingInput::parse(Some(STANDARD.encode(&bytes).into()), None).unwrap();
         let record = input.load().await.unwrap();
         assert_eq!(record.e_private_key.verifying_key(), record.e_public_key);
-        assert!(PairingInput::parse(Some(STANDARD.encode(&bytes)), Some("/tmp/unused".into())).is_none());
+        assert!(PairingInput::parse(Some(STANDARD.encode(&bytes).into()), Some("/tmp/unused".into())).is_none());
     }
 
     #[test]
@@ -143,12 +212,12 @@ mod tests {
             ("private_key", plist::Value::Data(vec![1; 32])),
             ("HostID", "not-a-remote-pairing-record".into()),
         ] {
-            assert!(PairingInput::parse(Some(STANDARD.encode(changed(field, value))), None).is_none(), "{field}");
+            assert!(PairingInput::parse(Some(STANDARD.encode(changed(field, value)).into()), None).is_none(), "{field}");
         }
         assert!(validate(&vec![0; MAX_PAIRING + 1]).is_err());
-        assert!(PairingInput::parse(Some("A".repeat(MAX_PAIRING_BASE64 + 1)), None).is_none());
+        assert!(PairingInput::parse(Some("A".repeat(MAX_PAIRING_BASE64 + 1).into()), None).is_none());
         let encoded = STANDARD.encode(bytes());
-        assert!(PairingInput::parse(Some(encoded + "\n"), None).is_none());
+        assert!(PairingInput::parse(Some((encoded + "\n").into()), None).is_none());
         assert!(PairingInput::parse(None, Some("relative.plist".into())).is_none());
         assert!(PairingInput::parse(None, None).is_none());
     }
@@ -165,4 +234,71 @@ mod tests {
         assert!(nested.len() < MAX_PAIRING);
         assert!(validate(nested.as_bytes()).is_err());
     }
+
+    #[tokio::test]
+    async fn w31_pairing_record_is_validated_once_and_consumed() {
+        VALIDATIONS.with(|count| count.set(0));
+        let input = PairingInput::parse(Some(STANDARD.encode(bytes()).into()), None).unwrap();
+        assert_eq!(VALIDATIONS.with(|count| count.get()), 1);
+        let record = input.load().await.unwrap();
+        assert_eq!(VALIDATIONS.with(|count| count.get()), 1);
+        assert_eq!(record.e_private_key.verifying_key(), record.e_public_key);
+        take_clear_events();
+        drop(record);
+        assert_eq!(take_clear_events(), vec![("record", true)]);
+    }
+
+    #[test]
+    fn w31_pairing_partial_base64_error_clears_owned_buffers() {
+        take_clear_events();
+        let malformed = STANDARD.encode([0u8; 24]) + "!";
+        assert!(PairingInput::parse(Some(malformed.into()), None).is_none());
+        let events = take_clear_events();
+        assert!(events.contains(&("string", true)));
+        assert!(events.contains(&("data", true)));
+        assert!(events.iter().all(|(_, cleared)| *cleared));
+    }
+
+    #[test]
+    fn w31_pairing_partial_plist_error_clears_completed_secret_fields() {
+        for suffix in [
+            "<key>public_key</key><string>wrong-type</string>",
+            "<key>private_key</key><data>AA==</data>",
+            "<key>unknown</key><string>reject</string>",
+        ] {
+            take_clear_events();
+            let xml = format!("<?xml version=\"1.0\"?><plist version=\"1.0\"><dict><key>private_key</key><data>AQIDBA==</data>{suffix}</dict></plist>");
+            assert!(validate(xml.as_bytes()).is_err());
+            let events = take_clear_events();
+            assert!(events.contains(&("data", true)), "{suffix}");
+            assert!(events.iter().all(|(_, cleared)| *cleared));
+        }
+    }
+
+    #[test]
+    fn w31_pairing_mismatch_and_conflicting_inputs_release_secrets() {
+        take_clear_events();
+        let malformed = changed("private_key", plist::Value::Data(vec![1; 32]));
+        assert!(PairingInput::parse(Some(STANDARD.encode(malformed).into()), None).is_none());
+        let events = take_clear_events();
+        assert!(events.contains(&("record", true)));
+        assert!(events.iter().all(|(_, cleared)| *cleared));
+        assert!(PairingInput::parse(Some(STANDARD.encode(bytes()).into()), Some("/unused".into())).is_none());
+        assert_eq!(take_clear_events(), vec![("string", true)]);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn w31_pairing_cancelled_future_releases_its_only_record() {
+        let mut slot = Some(PairingInput::parse(Some(STANDARD.encode(bytes()).into()), None).unwrap());
+        let input = slot.take().unwrap();
+        assert!(slot.is_none());
+        take_clear_events();
+        let result = tokio::time::timeout(std::time::Duration::from_secs(1), async move {
+            let _record = input.load().await.unwrap();
+            std::future::pending::<()>().await;
+        }).await;
+        assert!(result.is_err());
+        assert_eq!(take_clear_events(), vec![("record", true)]);
+    }
+
 }

@@ -47,7 +47,7 @@ type Callback = extern "C" fn(*const c_char, i32, *const c_char);
 struct ConfigWire {
     run_id: String,
     pairing_file: Option<String>,
-    pairing_base64: Option<String>,
+    pairing_base64: Option<pairing::SecretString>,
     host: String,
     port: u16,
     runner_bundle_id: String,
@@ -60,7 +60,7 @@ struct ConfigWire {
 
 struct Config {
     run_id: String,
-    pairing: pairing::PairingInput,
+    pairing: Option<pairing::PairingInput>,
     host: String,
     port: u16,
     runner_bundle_id: String,
@@ -101,7 +101,7 @@ impl Config {
         }
         Some(Self {
             run_id: value.run_id,
-            pairing: pairing::PairingInput::parse(value.pairing_base64, value.pairing_file)?,
+            pairing: Some(pairing::PairingInput::parse(value.pairing_base64, value.pairing_file)?),
             host: value.host,
             port: value.port,
             runner_bundle_id: value.runner_bundle_id,
@@ -201,6 +201,7 @@ pub unsafe extern "C" fn dsh_phone_xctest_start(
     let spawned = std::thread::Builder::new()
         .name("dsh-phone-xctest".into())
         .spawn(move || {
+            let mut config = config;
             emit(callback, &config.run_id, 0, "");
             let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 let runtime = tokio::runtime::Builder::new_current_thread()
@@ -208,7 +209,7 @@ pub unsafe extern "C" fn dsh_phone_xctest_start(
                     .build()
                     .map_err(|_| SESSION)?;
                 // Dropping this runtime closes all tunnel tasks before terminal delivery.
-                runtime.block_on(run_session(&config, callback, receiver))
+                runtime.block_on(run_session(&mut config, callback, receiver))
             }))
             .unwrap_or(Err(STOP_UNCONFIRMED));
             finish_owner(
@@ -290,18 +291,14 @@ struct Tunnel {
     _pairing: RemotePairingClient<RpPairingSocket<TcpStream>>,
 }
 
-async fn tunnel(config: &Config) -> Result<Tunnel, Failure> {
-    connect_tunnel(&config.pairing, &config.host, config.port).await
-}
-
 async fn connect_tunnel(
-    input: &pairing::PairingInput, host: &str, port: u16,
+    input: pairing::PairingInput, host: &str, port: u16,
 ) -> Result<Tunnel, Failure> {
     connect_tunnel_reporting(input, host, port, |_| {}).await
 }
 
 async fn connect_tunnel_reporting(
-    input: &pairing::PairingInput, host: &str, port: u16,
+    input: pairing::PairingInput, host: &str, port: u16,
     report: impl Fn(&'static str),
 ) -> Result<Tunnel, Failure> {
     let mut pairing = input.load().await?;
@@ -314,6 +311,9 @@ async fn connect_tunnel_reporting(
     rpc.validate_pairing(&mut pairing)
         .await
         .map_err(|_| PAIRING)?;
+    // The persistent signing key is no longer needed once pair-verify ends.
+    // The RPC/tunnel retain only their per-session derived key material.
+    drop(pairing);
     report("pairingVerified");
     let port = rpc.create_tcp_listener().await.map_err(|_| TUNNEL)?;
     let stream = TcpStream::connect(SocketAddr::new(address.ip(), port))
@@ -446,14 +446,17 @@ async fn cancelled(receiver: &mut watch::Receiver<bool>) {
 }
 
 async fn run_session(
-    config: &Config,
+    config: &mut Config,
     callback: Callback,
     mut receiver: watch::Receiver<bool>,
 ) -> Result<(), Failure> {
+    // Move the only persistent record into the connection future. Cancellation,
+    // including before its first poll, cannot leave it in the session config.
+    let pairing = config.pairing.take().ok_or(PAIRING)?;
     let mut tunnel = tokio::select! {
         biased;
         _ = cancelled(&mut receiver) => return Ok(()),
-        result = tokio::time::timeout(Duration::from_secs(90), tunnel(config)) => result.map_err(|_| TUNNEL)??,
+        result = tokio::time::timeout(Duration::from_secs(90), connect_tunnel(pairing, &config.host, config.port)) => result.map_err(|_| TUNNEL)??,
     };
     let ddi_submitted = AtomicBool::new(false);
     let preparation = ddi::ensure(&mut tunnel, config.ddi_cache.as_ref(),
@@ -555,6 +558,41 @@ mod tests {
         )
         .unwrap();
         serde_json::json!({"runId":"12345678-1234-4234-8234-123456789abc","pairingFile":"/nonexistent/dsh-remote-pairing.plist","host":"10.7.0.1","port":49152,"runnerBundleId":"example.dsh.PhoneRunner.xctrunner","targetBundleId":"example.dsh","publicKeyBase64":STANDARD.encode(key.to_pkcs1_der().unwrap().as_bytes())})
+    }
+    #[test]
+    fn w31_pairing_xctest_failed_json_clears_parsed_secret() {
+        for bytes in [
+            br#"{"pairingBase64":"synthetic","unknown":true}"#.as_slice(),
+            br#"{"pairingBase64":"synthetic","pairingBase64":"duplicate"}"#.as_slice(),
+            br#"{"pairingBase64":"synthetic","#.as_slice(),
+        ] {
+            pairing::take_clear_events();
+            assert!(Config::parse(bytes).is_none());
+            let events = pairing::take_clear_events();
+            assert!(events.contains(&("string", true)));
+            assert!(events.iter().all(|(_, cleared)| *cleared));
+        }
+        let mut value = config();
+        value.as_object_mut().unwrap().remove("pairingFile");
+        value["pairingBase64"] = "synthetic".into();
+        value["host"] = "invalid-address".into();
+        assert!(Config::parse(&serde_json::to_vec(&value).unwrap()).is_none());
+        assert_eq!(pairing::take_clear_events(), vec![("string", true)]);
+    }
+    #[tokio::test]
+    async fn w31_pairing_xctest_pre_cancel_drops_unpolled_connection_record() {
+        let mut value = config();
+        value.as_object_mut().unwrap().remove("pairingFile");
+        value["pairingBase64"] = STANDARD.encode(
+            idevice::remote_pairing::RpPairingFile::generate("w31-synthetic.invalid").to_bytes()).into();
+        let mut config = Config::parse(&serde_json::to_vec(&value).unwrap()).unwrap();
+        pairing::take_clear_events();
+        // A ready biased cancellation wins before the connection future is
+        // polled: this exercises ownership only, with no transport operation.
+        let (_stop, receiver) = watch::channel(true);
+        assert!(run_session(&mut config, record, receiver).await.is_ok());
+        assert!(config.pairing.is_none());
+        assert_eq!(pairing::take_clear_events(), vec![("record", true)]);
     }
     #[tokio::test(start_paused = true)]
     async fn prelaunch_pending_work_is_cancelled_without_waiting_for_deadline() {

@@ -64,7 +64,7 @@ type ResultCallback = extern "C" fn(u64, u64, i32, *const c_char, *const u8, usi
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct ConfigWire {
     run_id: String,
-    pairing_base64: Option<String>,
+    pairing_base64: Option<pairing::SecretString>,
     pairing_file: Option<String>,
     host: String,
     port: u16,
@@ -74,7 +74,7 @@ struct ConfigWire {
 }
 struct Config {
     run_id: String,
-    pairing: pairing::PairingInput,
+    pairing: Option<pairing::PairingInput>,
     host: String,
     port: u16,
     ddi_cache: Option<ddi::DdiCache>,
@@ -91,7 +91,7 @@ impl Config {
             return None;
         }
         Some(Self { run_id: wire.run_id,
-            pairing: pairing::PairingInput::parse(wire.pairing_base64, wire.pairing_file)?,
+            pairing: Some(pairing::PairingInput::parse(wire.pairing_base64, wire.pairing_file)?),
             host: wire.host, port: wire.port, ddi_cache: wire.ddi_cache,
             allow_ddi_mount: wire.allow_ddi_mount })
     }
@@ -365,14 +365,15 @@ fn drain_cancelled(receiver: &mut mpsc::Receiver<Request>, cleanup: bool) {
     while let Ok(mut request) = receiver.try_recv() { request.response.failure(CANCELLED, true, cleanup); }
 }
 
-async fn run(config: Config, callback: EventCallback, handle: u64, control: Arc<Control>,
+async fn run(mut config: Config, callback: EventCallback, handle: u64, control: Arc<Control>,
     mut stopped: watch::Receiver<bool>, mut cancel: watch::Receiver<u64>, mut requests: mpsc::Receiver<Request>,
 ) -> Completion {
     let mut completion = Completion { run_id: config.run_id.clone(), error: None, stopped: false, cleanup: true };
+    let Some(pairing) = config.pairing.take() else { completion.error = Some(crate::PAIRING); return completion; };
     let connected = tokio::select! {
         biased;
         _ = cancelled(&mut stopped) => { completion.stopped = true; return completion; },
-        result = tokio::time::timeout(Duration::from_secs(90), connect_tunnel_reporting(&config.pairing, &config.host, config.port,
+        result = tokio::time::timeout(Duration::from_secs(90), connect_tunnel_reporting(pairing, &config.host, config.port,
             |field| { let mut event = json!({"stage":"tunnel"}); event[field] = true.into(); emit_event(callback, handle, &config.run_id, 0, event); }
         )) => result.unwrap_or(Err(crate::TUNNEL)),
     };
@@ -854,6 +855,39 @@ mod tests {
     fn config() -> Vec<u8> {
         serde_json::to_vec(&json!({"runId":RUN_ID,"host":"10.7.0.1","port":49152,
             "pairingFile":"/nonexistent/dsh-native-core-pairing.plist"})).unwrap()
+    }
+    #[test]
+    fn w31_pairing_core_failed_json_clears_parsed_secret() {
+        for bytes in [
+            br#"{"pairingBase64":"synthetic","unknown":true}"#.as_slice(),
+            br#"{"pairingBase64":"synthetic","pairingBase64":"duplicate"}"#.as_slice(),
+            br#"{"pairingBase64":"synthetic","#.as_slice(),
+            br#"{"pairingBase64":"synthetic","runId":"12345678-1234-4234-8234-123456789abc","host":"invalid-address","port":1}"#.as_slice(),
+        ] {
+            pairing::take_clear_events();
+            assert!(Config::parse(bytes).is_none());
+            let events = pairing::take_clear_events();
+            assert!(events.contains(&("string", true)));
+            assert!(events.iter().all(|(_, cleared)| *cleared));
+        }
+    }
+    #[tokio::test]
+    async fn w31_pairing_core_pre_cancel_drops_unpolled_connection_record() {
+        use base64::Engine as _;
+        let mut value: Value = serde_json::from_slice(&config()).unwrap();
+        value.as_object_mut().unwrap().remove("pairingFile");
+        value["pairingBase64"] = base64::engine::general_purpose::STANDARD.encode(
+            idevice::remote_pairing::RpPairingFile::generate("w31-synthetic.invalid").to_bytes()).into();
+        let config = Config::parse(&serde_json::to_vec(&value).unwrap()).unwrap();
+        let (_stop, stopped) = watch::channel(true);
+        let (cancel, cancelled_request) = watch::channel(0);
+        let (requests, receiver) = mpsc::channel(1);
+        let control = Arc::new(Control { phase: AtomicU8::new(STARTING), active: AtomicU64::new(0),
+            last: AtomicU64::new(0), cancel, requests });
+        pairing::take_clear_events();
+        let result = run(config, event, 1, control, stopped, cancelled_request, receiver).await;
+        assert!(result.stopped && result.cleanup && result.error.is_none());
+        assert_eq!(pairing::take_clear_events(), vec![("record", true)]);
     }
     fn request(handle: u64, id: u64, input: Value, callback: ResultCallback) -> i32 {
         let bytes = input.to_string();
