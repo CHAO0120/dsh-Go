@@ -5,6 +5,8 @@ import UserNotifications
 
 @main
 @objc class AppDelegate: FlutterAppDelegate, FlutterImplicitEngineDelegate {
+  private var companionVoice: IOSCompanionVoice?
+
   override func application(
     _ application: UIApplication,
     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
@@ -60,6 +62,10 @@ import UserNotifications
       IOSPhoneControl.shared.register(messenger: registrar.messenger())
       IOSPhoneLink.shared.register(messenger: registrar.messenger(), presenter: { topViewController() })
       IOSPetOverlay.shared.register(registrar: registrar)
+      companionVoice?.dispose()
+      companionVoice = IOSCompanionVoice(messenger: registrar.messenger(), pipAudioConfigured: {
+        IOSPetOverlay.shared.statusSnapshot["audioSessionConfigured"] as? Bool == true
+      })
       IOSPetOverlay.shared.onTaskPauseRequested = { IOSPhoneControl.shared.pausePhoneTask(id: $0) }
       IOSPetOverlay.shared.onTaskStopConfirmed = { IOSPhoneControl.shared.stopPhoneTaskConfirmed(id: $0) }
       IOSPetOverlay.shared.onTaskResumeConfirmed = { IOSPhoneControl.shared.resumePhoneTask(id: $0) }

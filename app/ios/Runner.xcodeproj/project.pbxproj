@@ -7,6 +7,8 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		D55000000000000000000501 /* IOSCompanionVoice.swift in Sources */ = {isa = PBXBuildFile; fileRef = D55000000000000000000500 /* IOSCompanionVoice.swift */; };
+		D55000000000000000000503 /* IOSCompanionVoiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D55000000000000000000502 /* IOSCompanionVoiceTests.swift */; };
 		D55000000000000000000411 /* IOSPhoneResultEnvelopeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D55000000000000000000410 /* IOSPhoneResultEnvelopeTests.swift */; };
 		D5500000000000000000040F /* IOSPhoneTaskConsentTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5500000000000000000040E /* IOSPhoneTaskConsentTests.swift */; };
 		D55000000000000000000335 /* IOSPhoneResultEnvelope.swift in Sources */ = {isa = PBXBuildFile; fileRef = D55000000000000000000334 /* IOSPhoneResultEnvelope.swift */; };
@@ -132,6 +134,8 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		D55000000000000000000500 /* IOSCompanionVoice.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IOSCompanionVoice.swift; sourceTree = "<group>"; };
+		D55000000000000000000502 /* IOSCompanionVoiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IOSCompanionVoiceTests.swift; sourceTree = "<group>"; };
 		D55000000000000000000410 /* IOSPhoneResultEnvelopeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IOSPhoneResultEnvelopeTests.swift; sourceTree = "<group>"; };
 		D5500000000000000000040E /* IOSPhoneTaskConsentTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IOSPhoneTaskConsentTests.swift; sourceTree = "<group>"; };
 		D55000000000000000000334 /* IOSPhoneResultEnvelope.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IOSPhoneResultEnvelope.swift; sourceTree = "<group>"; };
@@ -260,6 +264,7 @@
 			isa = PBXGroup;
 			children = (
 				331C807B294A618700263BE5 /* RunnerTests.swift */,
+				D55000000000000000000502 /* IOSCompanionVoiceTests.swift */,
 				D5480000000000000000F106 /* IOSPhoneSelfRunnerTests.swift */,
 				D55000000000000000000402 /* IOSPhoneCoreDeviceTests.swift */,
 				D55000000000000000000410 /* IOSPhoneResultEnvelopeTests.swift */,
@@ -339,6 +344,7 @@
 				D5480000000000000000F00B /* libz.tbd */,
 				D5480000000000000000A002 /* DshPlugin.swift */,
 				D5480000000000000000A004 /* VoiceChannel.swift */,
+				D55000000000000000000500 /* IOSCompanionVoice.swift */,
 				D5480000000000000000C090 /* IOSSystemTools.swift */,
 				D5480000000000000000C080 /* IOSPhoneRunner.swift */,
 				D5480000000000000000F104 /* IOSPhoneSelfRunner.swift */,
@@ -616,6 +622,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				331C808B294A63AB00263BE5 /* RunnerTests.swift in Sources */,
+				D55000000000000000000503 /* IOSCompanionVoiceTests.swift in Sources */,
 				D5480000000000000000F107 /* IOSPhoneSelfRunnerTests.swift in Sources */,
 				D55000000000000000000403 /* IOSPhoneCoreDeviceTests.swift in Sources */,
 				D55000000000000000000411 /* IOSPhoneResultEnvelopeTests.swift in Sources */,
@@ -655,6 +662,7 @@
 				D5480000000000000000F008 /* GuestKernelAccess.swift in Sources */,
 				D5480000000000000000A001 /* DshPlugin.swift in Sources */,
 				D5480000000000000000A003 /* VoiceChannel.swift in Sources */,
+				D55000000000000000000501 /* IOSCompanionVoice.swift in Sources */,
 				D5480000000000000000C091 /* IOSSystemTools.swift in Sources */,
 				D5480000000000000000C081 /* IOSPhoneRunner.swift in Sources */,
 				D5480000000000000000F102 /* PhoneRunnerBootstrap.swift in Sources */,
