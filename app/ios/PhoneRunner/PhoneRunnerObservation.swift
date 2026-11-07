@@ -90,7 +90,9 @@ enum PhoneRunnerOutputBudget {
         throw PhoneRunnerObservationError.output
       }
     }
-    guard let data = try? JSONSerialization.data(withJSONObject: result), data.count <= jsonBytes else {
+    // NaN, infinity or a non-JSON value raises an Objective-C exception that `try?` can't catch.
+    guard JSONSerialization.isValidJSONObject(result),
+      let data = try? JSONSerialization.data(withJSONObject: result), data.count <= jsonBytes else {
       throw PhoneRunnerObservationError.output
     }
   }
@@ -202,6 +204,11 @@ final class PhoneRunnerObservation {
     let scale: Double
     let pointSize: CGSize
     let digest: Data
+    /// Per-pixel luminance, kept to tell a real change from a fading scroll indicator (see [matches]).
+    let luma: [UInt8]
+
+    /// Below this many pixels (test images) only identical pixels match.
+    static let tolerantPixels = 100_000
 
     init(appBundleID: String, orientation: Int, image: UIImage) throws {
       guard PhoneRunnerCallContext.isBundleID(appBundleID), let pixels = image.cgImage,
@@ -229,6 +236,49 @@ final class PhoneRunnerObservation {
       }
       guard drew else { throw PhoneRunnerObservationError.image }
       digest = Data(SHA256.hash(data: rgba))
+      luma = rgba.withUnsafeBytes { raw -> [UInt8] in
+        let bytes = raw.bindMemory(to: UInt8.self)
+        let count = bytes.count / 4
+        return [UInt8](unsafeUninitializedCapacity: count) {
+          (buffer: inout UnsafeMutableBufferPointer<UInt8>, initialized: inout Int) in
+          for i in 0..<count {
+            let base = i * 4
+            let red: Int = 77 * Int(bytes[base])
+            let green: Int = 150 * Int(bytes[base + 1])
+            let blue: Int = 29 * Int(bytes[base + 2])
+            buffer[i] = UInt8((red + green + blue) >> 8)
+          }
+          initialized = count
+        }
+      }
+    }
+
+    /// The same screen to act on: the same app, direction and geometry, and either identical
+    /// pixels or, on a screen-sized image, at most 1% of pixels changed by more than a faint
+    /// shade. That lets a scroll indicator fade, the clock tick or a caret blink; a dialog, a
+    /// banner, the keyboard or anything that moves the layout changes far more.
+    func matches(_ other: Frame) -> Bool {
+      guard appBundleID == other.appBundleID, orientation == other.orientation,
+        pixelWidth == other.pixelWidth, pixelHeight == other.pixelHeight,
+        imageOrientation == other.imageOrientation, scale == other.scale,
+        pointSize == other.pointSize else { return false }
+      if digest == other.digest { return true }
+      let count = luma.count
+      guard count >= Frame.tolerantPixels, other.luma.count == count else { return false }
+      let allowed = count / 100
+      var changed = 0
+      return luma.withUnsafeBufferPointer { (mine: UnsafeBufferPointer<UInt8>) -> Bool in
+        other.luma.withUnsafeBufferPointer { (theirs: UnsafeBufferPointer<UInt8>) -> Bool in
+          for i in 0..<count {
+            let delta = Int(mine[i]) - Int(theirs[i])
+            if delta > 24 || delta < -24 {
+              changed += 1
+              if changed > allowed { return false }
+            }
+          }
+          return true
+        }
+      }
     }
   }
 
@@ -282,7 +332,7 @@ final class PhoneRunnerObservation {
     guard (1...4).contains(fresh.orientation), record.frame.orientation == fresh.orientation else {
       throw PhoneRunnerObservationError.orientation
     }
-    guard record.frame == fresh else { throw PhoneRunnerObservationError.changed }
+    guard record.frame.matches(fresh) else { throw PhoneRunnerObservationError.changed }
     return record
   }
 

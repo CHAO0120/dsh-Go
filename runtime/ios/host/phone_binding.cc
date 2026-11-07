@@ -7,8 +7,10 @@
 #include <string>
 
 namespace {
-std::mutex mutex;
-std::string generation;
+// Never destroyed: an engine thread can still retire its environment (RetireEnvironment) while
+// the process exits and runs static destructors.
+std::mutex& mutex = *new std::mutex();
+std::string& generation = *new std::string();
 std::array<char, 65> secret{};
 bool available = false;
 void Wipe() {

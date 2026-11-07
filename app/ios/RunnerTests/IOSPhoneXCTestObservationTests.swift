@@ -368,6 +368,45 @@ final class IOSPhoneXCTestObservationTests: XCTestCase {
     expect(.output) { try PhoneRunnerOutputBudget.validate(["text": "synthetic", "nonJSON": Double.nan]) }
   }
 
+  private func screenFrame(darkBlock side: (width: Int, height: Int)?) throws -> PhoneRunnerObservation.Frame {
+    let width = 400, height = 300
+    var pixels = Data(repeating: 255, count: width * height * 4)
+    if let side {
+      for y in 0..<side.height {
+        for x in 0..<side.width {
+          let base = (y * width + x) * 4
+          pixels[base] = 0; pixels[base + 1] = 0; pixels[base + 2] = 0
+        }
+      }
+    }
+    let provider = try XCTUnwrap(CGDataProvider(data: pixels as CFData))
+    let space = try XCTUnwrap(CGColorSpace(name: CGColorSpace.sRGB))
+    let cg = try XCTUnwrap(CGImage(width: width, height: height, bitsPerComponent: 8, bitsPerPixel: 32,
+      bytesPerRow: width * 4, space: space,
+      bitmapInfo: CGBitmapInfo(rawValue: CGBitmapInfo.byteOrder32Big.rawValue | CGImageAlphaInfo.premultipliedLast.rawValue),
+      provider: provider, decode: nil, shouldInterpolate: false, intent: .defaultIntent))
+    return try PhoneRunnerObservation.Frame(appBundleID: target, orientation: 3, image: UIImage(cgImage: cg))
+  }
+
+  func testAScreenSizedFrameToleratesAFadingIndicatorButNotALayoutChange() throws {
+    let clock = Clock(), call = try context()
+    let cache = PhoneRunnerObservation(now: { clock.value })
+    let observed = try screenFrame(darkBlock: nil)
+    // 400 of 120,000 pixels: a scroll indicator, a caret, the clock.
+    let faded = try screenFrame(darkBlock: (20, 20))
+    XCTAssertNotEqual(observed.digest, faded.digest)
+    XCTAssertTrue(observed.matches(faded))
+    try cache.remember(screen: "s1", frame: observed, context: call, capturedAt: 100)
+    XCTAssertNoThrow(try cache.validate(screen: "s1", fresh: faded, context: call, consume: true))
+    // 2,400 pixels (2%): something appeared.
+    let covered = try screenFrame(darkBlock: (60, 40))
+    XCTAssertFalse(observed.matches(covered))
+    try cache.remember(screen: "s2", frame: observed, context: call, capturedAt: 100)
+    expect(.changed) { _ = try cache.validate(screen: "s2", fresh: covered, context: call, consume: true) }
+    // Test-sized images stay exact.
+    XCTAssertFalse(try frame().matches(try frame(changedPixel: 0)))
+  }
+
   func testMaximumTrustedRouteListFitsTheBoundedRequestEnvelope() throws {
     let identifiers = (0..<512).map { "test." + String(repeating: "x", count: 246) + String(format: "%04d", $0) }
     XCTAssertTrue(identifiers.allSatisfy { $0.utf8.count == 255 })
