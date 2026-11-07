@@ -10126,6 +10126,21 @@ class L10nZh extends L10n {
   String get phoneDndConnectPortHint => '在系统「无线调试」首页查看「IP 地址和端口」，填写冒号后的端口。请不要使用配对码页面的端口。';
 
   @override
+  String get phoneIosServiceTitle => 'iOS 自动化服务';
+
+  @override
+  String get phoneIosServiceHint => '授权后按需启动。任务结束会停止服务，系统的“Automation Running”提示也会结束。';
+
+  @override
+  String get phoneIosSetupHint => '保持 LocalDevVPN 已连接，首次使用时允许 30 分钟操控。';
+
+  @override
+  String get phoneIosReturnHint => '任务完成后回到当前对话，并停止手机操控服务。';
+
+  @override
+  String get phoneIosNeedsSetup => '运行器尚未就绪，请确认本机引擎和开发者环境已配置。';
+
+  @override
   String get phoneTaskResultReady => '任务完成 · 查看结果';
 
   @override

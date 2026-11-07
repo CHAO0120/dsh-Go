@@ -2,6 +2,19 @@ import Network
 import Security
 import XCTest
 
+private enum PhoneRunnerDiagnostic {
+  static func write(_ stage: String) {
+    #if DSH_PHONE_SELF_RUNNER_DIAGNOSTICS
+    guard let root = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else { return }
+    try? FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+    let url = root.appendingPathComponent("dsh-phone-helper.log")
+    let previous = (try? String(contentsOf: url, encoding: .utf8)) ?? ""
+    try? (String(previous.suffix(24000)) + "\(Date().timeIntervalSince1970) \(stage)\n")
+      .write(to: url, atomically: true, encoding: .utf8)
+    #endif
+  }
+}
+
 /// Structured cross-app phone control for the local engine, served by a long-lived UI test.
 /// The Mac path discovers its loopback endpoint through the existing App Group file.
 /// The opt-in on-device owner receives an encrypted endpoint over testmanagerd instead.
@@ -11,10 +24,12 @@ final class PhoneRunnerUITests: XCTestCase {
   private var serving = false
 
   func testServe() throws {
+    PhoneRunnerDiagnostic.write("testServe entered")
     continueAfterFailure = true
     let tools = PhoneTools()
     let server = try PhoneServer { method, params in tools.call(method, params) }
     try server.start()
+    PhoneRunnerDiagnostic.write("server start returned")
     serving = true
     while true {
       RunLoop.main.run(mode: .default, before: Date(timeIntervalSinceNow: 60))
@@ -67,19 +82,23 @@ final class PhoneServer {
   }
 
   func start() throws {
+    PhoneRunnerDiagnostic.write(bootstrap == nil ? "legacy bootstrap" : "encrypted bootstrap")
     let directory: URL?
     if bootstrap == nil { directory = try Self.directory() } else { directory = nil }
     listener.newConnectionHandler = { [weak self] connection in self?.accept(connection) }
     listener.stateUpdateHandler = { [weak self] state in
       guard let self, case .ready = state, let port = self.listener.port?.rawValue else { return }
+      PhoneRunnerDiagnostic.write("listener ready")
       if let bootstrap = self.bootstrap {
         do {
           let endpoint = PhoneRunnerEndpoint(port: Int(port), token: self.token, runId: bootstrap.runId)
           let encrypted = try PhoneRunnerHandshake.seal(endpoint, publicKeyBase64: bootstrap.publicKey)
+          PhoneRunnerDiagnostic.write("endpoint sealed")
           DispatchQueue.main.async {
             // The paired testmanagerd channel carries this activity to the app's native owner.
             // Its title is encrypted; neither a bearer nor a private key enters the test log.
             XCTContext.runActivity(named: PhoneRunnerHandshake.activityPrefix + encrypted) { _ in }
+            PhoneRunnerDiagnostic.write("readiness activity sent")
           }
         } catch {
           self.listener.cancel()
@@ -271,7 +290,20 @@ final class PhoneTools {
   // MARK: Which app
 
   private func allApps() -> [[String: String]] {
-    if installed.isEmpty { installed = PhoneRunnerSupport.installedApps() }
+    if installed.isEmpty {
+      // iOS can deny LaunchServices enumeration to a development-signed test.
+      // A setup-time inventory remains local to the helper's data container.
+      if let root = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first,
+        let data = try? Data(contentsOf: root.appendingPathComponent("dsh-app-catalog.json")),
+        data.count <= 1024 * 1024,
+        let cached = try? JSONDecoder().decode([[String: String]].self, from: data) {
+        installed = cached.filter { item in
+          guard let id = item["id"], let name = item["name"], !name.isEmpty else { return false }
+          return PhoneRunnerAppCatalog.bundleID(for: id) == id
+        }
+      }
+      if installed.isEmpty { installed = PhoneRunnerSupport.installedApps() }
+    }
     return installed
   }
 
@@ -307,11 +339,15 @@ final class PhoneTools {
 
   private func open(_ params: [String: Any]) throws -> [String: Any] {
     guard let wanted = params["app"] as? String, !wanted.isEmpty else { throw ToolError("要给 app：包名或应用名。") }
-    let lowered = wanted.lowercased()
-    let match = allApps().first { $0["id"]?.lowercased() == lowered || $0["name"]?.lowercased() == lowered }
-    let identifier = match?["id"] ?? wanted
+    guard let identifier = PhoneRunnerAppCatalog.bundleID(for: wanted)
+      ?? PhoneRunnerAppCatalog.bundleID(for: wanted, apps: allApps()) else {
+      throw ToolError("未找到这个应用名称，请用 apps 查询准确包名；这一步没有打开应用。")
+    }
     let app = XCUIApplication(bundleIdentifier: identifier)
     app.activate()
+    guard app.wait(for: .runningForeground, timeout: 4) else {
+      throw ToolError("应用没有进入前台，请核对手机屏幕；不要自动重复这一步。")
+    }
     lastOpened = identifier
     return try screen([:])
   }

@@ -177,6 +177,7 @@ class PhoneTurnEndController extends Notifier<void> {
   _OwnerRead? _reading;
   DshClient? _ownerClient;
   MuxGeneration? _ownerGeneration;
+  String? _nativeOwnerSessionId;
   final _deferred = <String, _DeferredPhoneEnd>{};
 
   static const ownerWait = Duration(seconds: 5);
@@ -239,6 +240,7 @@ class PhoneTurnEndController extends Notifier<void> {
       'task=${status.task.id} event=status active=${status.task.active} stopped=${status.task.stopped} paused=${status.task.paused}',
     );
     if (link.onStatus(status.task)) {
+      _nativeOwnerSessionId = status.task.ownerSessionId;
       final reading = _reading;
       if (reading != null) _retireRead(reading, invalidate: false);
       _ownerClient = null;
@@ -301,12 +303,14 @@ class PhoneTurnEndController extends Notifier<void> {
       }
     });
     try {
-      final sessions = await client.listSessions().timeout(ownerWait);
+      final owner = _nativeOwnerSessionId;
+      final sessions = owner == null ? await client.listSessions().timeout(ownerWait) : null;
       if (!_currentRead(read)) return;
       _ownerClient = client;
       _ownerGeneration = read.generation;
       link.began([
-        for (final s in sessions)
+        ?owner,
+        for (final s in sessions ?? const [])
           if (s.running) s.sessionId,
       ]);
       _trace('task=$taskId event=snapshot candidates=${link.candidates?.length}');

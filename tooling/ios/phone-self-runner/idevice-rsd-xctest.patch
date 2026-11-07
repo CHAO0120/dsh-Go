@@ -1,8 +1,7 @@
 diff --git a/idevice/Cargo.toml b/idevice/Cargo.toml
-index 8389c9b..3094259 100644
 --- a/idevice/Cargo.toml
 +++ b/idevice/Cargo.toml
-@@ -163,6 +163,7 @@ installation_proxy = [
+@@ -163,6 +163,7 @@
  installcoordination_proxy = ["xpc"]
  xctest = [
    "dvt",
@@ -11,39 +10,121 @@ index 8389c9b..3094259 100644
    "afc",
    "dep:uuid",
 diff --git a/idevice/src/remote_pairing/rp_pairing_file.rs b/idevice/src/remote_pairing/rp_pairing_file.rs
-index 1ac87c4..7348b98 100644
 --- a/idevice/src/remote_pairing/rp_pairing_file.rs
 +++ b/idevice/src/remote_pairing/rp_pairing_file.rs
-@@ -89,7 +89,7 @@ impl RpPairingFile {
+@@ -89,7 +89,7 @@
      /// Parse from plist bytes (XML or binary).
      pub fn from_bytes(bytes: &[u8]) -> Result<Self, IdeviceError> {
          let mut p: Dictionary = plist::from_bytes(bytes)?;
 -        debug!("Read dictionary for rppairingfile: {p:#?}");
 +        debug!("Loaded remote pairing record");
- 
+
          let public_key = match p
              .remove("public_key")
 diff --git a/idevice/src/services/dvt/device_info.rs b/idevice/src/services/dvt/device_info.rs
-index de903bf..d95566b 100644
 --- a/idevice/src/services/dvt/device_info.rs
 +++ b/idevice/src/services/dvt/device_info.rs
-@@ -118,7 +118,7 @@ impl<'a, R: ReadWrite> DeviceInfoClient<'a, R> {
-             )
-             .await?;
-         let data = self.read_reply().await?;
+@@ -108,17 +108,15 @@
+
+     /// Returns whether the given PID is currently running
+     pub async fn is_running_pid(&mut self, pid: u32) -> Result<bool, IdeviceError> {
+-        self.channel
+-            .call_method(
+-                Some(Value::String("isRunningPid:".into())),
+-                Some(vec![AuxValue::archived_value(Value::Integer(
+-                    (pid as i64).into(),
+-                ))]),
+-                true,
+-            )
+-            .await?;
+-        let data = self.read_reply().await?;
 -        Ok(data.as_boolean().unwrap_or(false))
-+        data.as_boolean().ok_or_else(|| IdeviceError::UnexpectedResponse("isRunningPid returned a non-boolean response".into()))
++        let reply = self.channel.call_method_with_reply(
++            Some(Value::String("isRunningPid:".into())),
++            Some(vec![AuxValue::archived_value(Value::Integer((pid as i64).into()))]),
++        ).await?;
++        let data = reply.data.ok_or_else(|| IdeviceError::UnexpectedResponse("isRunningPid missing data".into()))?;
++        data.as_boolean().ok_or_else(|| {
++            let kind = match data { Value::Integer(_) => "integer", Value::Dictionary(_) => "dictionary", Value::Array(_) => "array", Value::String(_) => "string", _ => "other" };
++            IdeviceError::UnexpectedResponse(format!("isRunningPid returned {kind}"))
++        })
      }
- 
+
      /// Returns hardware information about the device
+diff --git a/idevice/src/services/dvt/process_control.rs b/idevice/src/services/dvt/process_control.rs
+--- a/idevice/src/services/dvt/process_control.rs
++++ b/idevice/src/services/dvt/process_control.rs
+@@ -295,6 +295,19 @@
+         Ok(())
+     }
+
++    /// Send SIGKILL and wait for the matching DTX reply before closing anything.
++    /// The caller still must independently confirm this exact PID has exited.
++    pub(crate) async fn kill_app_roundtrip(&mut self, pid: u64) -> Result<(), IdeviceError> {
++        self.channel.call_method_with_reply(
++            Some(Value::String("sendSignal:toPid:".into())),
++            Some(vec![
++                AuxValue::archived_value(Value::Integer(9.into())),
++                AuxValue::archived_value(Value::Integer((pid as i64).into())),
++            ]),
++        ).await?;
++        Ok(())
++    }
++
+     /// Disables memory limits for a process
+     ///
+     /// # Arguments
+diff --git a/idevice/src/services/dvt/xctest/listener.rs b/idevice/src/services/dvt/xctest/listener.rs
+--- a/idevice/src/services/dvt/xctest/listener.rs
++++ b/idevice/src/services/dvt/xctest/listener.rs
+@@ -37,6 +37,9 @@
+ /// The default implementation is a no-op for every method.
+ #[allow(async_fn_in_trait)]
+ pub trait XCUITestListener: Send {
++    /// Local RSD bootstrap progress; contains only static phase identifiers.
++    fn bootstrap_stage(&mut self, _stage: &'static str) {}
++
+     // --- test plan ----------------------------------------------------------
+
+     /// Invoked when the runner begins executing the test plan.
 diff --git a/idevice/src/services/dvt/xctest/mod.rs b/idevice/src/services/dvt/xctest/mod.rs
-index 3705645..7444407 100644
 --- a/idevice/src/services/dvt/xctest/mod.rs
 +++ b/idevice/src/services/dvt/xctest/mod.rs
-@@ -1959,6 +1959,112 @@ impl std::fmt::Debug for XCUITestService {
+@@ -1100,8 +1100,28 @@
+
+ fn decode_aux_archive(aux: &AuxValue) -> Result<Value, IdeviceError> {
+     match aux {
+-        AuxValue::Array(bytes) => ns_keyed_archive::decode::from_bytes(bytes)
+-            .map_err(|_| IdeviceError::UnexpectedResponse("unexpected response".into())),
++        AuxValue::Array(bytes) => {
++            let failure = || IdeviceError::UnexpectedResponse("Invalid XCTest archive".into());
++            let mut value = ns_keyed_archive::decode::from_bytes(bytes).map_err(|_| failure())?;
++            // The decoder resolves Foundation collections, but leaves fields of custom
++            // XCTest classes as archive UIDs. Decode each field through the same pool.
++            // In particular XCTTestIdentifier.c and XCActivityRecord.title are UIDs.
++            if let Value::Dictionary(fields) = &mut value {
++                let archive = Value::from_reader(std::io::Cursor::new(bytes)).map_err(|_| failure())?;
++                for (name, field) in fields.iter_mut() {
++                    if name == "$class" || !matches!(field, Value::Uid(_)) { continue; }
++                    let mut referenced = archive.clone();
++                    let top = referenced.as_dictionary_mut()
++                        .and_then(|d| d.get_mut("$top"))
++                        .and_then(Value::as_dictionary_mut).ok_or_else(failure)?;
++                    top.insert("root".into(), field.clone());
++                    let mut encoded = Vec::new();
++                    referenced.to_writer_binary(&mut encoded).map_err(|_| failure())?;
++                    *field = ns_keyed_archive::decode::from_bytes(&encoded).map_err(|_| failure())?;
++                }
++            }
++            Ok(value)
++        },
+         _ => Err(IdeviceError::UnexpectedResponse(
+             "unexpected response".into(),
+         )),
+@@ -1959,6 +1979,139 @@
      }
  }
- 
+
 +/// DSH pre-launch boundary: cancellation is safe before a launch RPC is sent.
 +pub async fn run_rsd_prelaunch<T>(
 +    cancel: &mut tokio::sync::watch::Receiver<bool>,
@@ -87,8 +168,11 @@ index 3705645..7444407 100644
 +        return Err(IdeviceError::ServiceNotFound);
 +    }
 +    let connections = async {
++        listener.bootstrap_stage("CONNECT_DVT");
 +        let dvt = rsd_connect(&mut handle, &handshake, "com.apple.instruments.dtservicehub", "dsh-dvt", true).await?;
++        listener.bootstrap_stage("CONNECT_CONTROL");
 +        let ctrl = rsd_connect(&mut handle, &handshake, TESTMANAGERD_RSD_SERVICE, "dsh-ctrl", false).await?;
++        listener.bootstrap_stage("CONNECT_MAIN");
 +        let main = rsd_connect(&mut handle, &handshake, TESTMANAGERD_RSD_SERVICE, "dsh-main", false).await?;
 +        Ok::<_, IdeviceError>(TestManagerConnections { ctrl, main, dvt, rsd_handles: vec![handle] })
 +    };
@@ -98,16 +182,22 @@ index 3705645..7444407 100644
 +    let xctest_path = format!("/tmp/{}.xctestconfiguration", session_id.to_string().to_uppercase());
 +    let xctest_config = cfg.build_xctest_configuration(session_id, ios_major_version)?;
 +    let initialize = async {
++        listener.bootstrap_stage("OPEN_CONTROL_PROXY");
 +        let mut ctrl = TestManagerProxy::open(&mut conns.ctrl, ios_major_version).await?;
++        listener.bootstrap_stage("OPEN_MAIN_PROXY");
 +        let mut main = TestManagerProxy::open(&mut conns.main, ios_major_version).await?;
++        listener.bootstrap_stage("INITIALIZE_SESSIONS");
 +        initialize_testmanager_sessions(&mut ctrl, &mut main, &xctest_config).await?;
++        listener.bootstrap_stage("REGISTER_DRIVER");
 +        register_early_driver_channel_handler(&mut conns.main, &xctest_config).await;
++        listener.bootstrap_stage("INITIALIZE_DAEMONS");
 +        initialize_testmanager_daemon_sessions(&mut ctrl, &mut main, ios_major_version,
 +                                              &session_id, &xctest_config).await?;
 +        Ok::<_, IdeviceError>((ctrl, main))
 +    };
 +    let Some((mut ctrl_proxy, mut main_proxy)) = run_rsd_prelaunch(&mut cancel,
 +        std::time::Duration::from_secs(90), initialize).await? else { return Ok(()); };
++    listener.bootstrap_stage("OPEN_PROCESS_CONTROL");
 +    let Some(mut process_control) = run_rsd_prelaunch(&mut cancel,
 +        std::time::Duration::from_secs(10), XCTestProcessControlChannel::open(&mut conns.dvt)).await?
 +        else { return Ok(()); };
@@ -117,12 +207,17 @@ index 3705645..7444407 100644
 +        cfg.config_name(), &xctest_path, cfg.runner_env.as_ref(), cfg.runner_args.as_deref());
 +    // Once launch is sent, retain the owner until it yields a PID or an error.
 +    // Do not cancel a partially sent launch then let a new owner race its cleanup.
++    listener.bootstrap_stage("LAUNCH_RUNNER");
 +    let pid = run_rsd_launch(std::time::Duration::from_secs(30),
 +        process_control.launch_suspended_process(&cfg.runner_bundle_id, launch_args,
 +                                                launch_env, launch_options)).await?;
++    listener.bootstrap_stage("RUNNER_LAUNCHED");
 +    let execution = async {
++        listener.bootstrap_stage("AUTHORIZE_RUNNER");
 +        ctrl_proxy.authorize_test(ios_major_version, pid).await?;
++        listener.bootstrap_stage("START_TEST_PLAN");
 +        let driver = start_test_plan_session(&mut conns.main, &mut main_proxy).await?;
++        listener.bootstrap_stage("DISPATCH_TEST_PLAN");
 +        run_dispatch_loop_until_done_or_disconnect(&mut conns.main, driver, &xctest_config,
 +                                                   listener, None).await
 +    };
@@ -133,23 +228,81 @@ index 3705645..7444407 100644
 +    };
 +    // The single native owner is not released until this cleanup and the tunnel
 +    // have completed. Never look up a bundle PID: it could belong to a newer run.
++    listener.bootstrap_stage("STOP_RUNNER");
 +    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(10);
-+    let _ = tokio::time::timeout_at(deadline, process_control.service.kill_app(pid)).await;
++    let _ = tokio::time::timeout_at(deadline, process_control.service.kill_app_roundtrip(pid)).await;
++    listener.bootstrap_stage("KILL_REQUESTED");
 +    drop(process_control);
 +    let cleanup = async {
 +        let pid = u32::try_from(pid).map_err(|_| IdeviceError::TestRunnerTimeout)?;
 +        let mut info = crate::services::dvt::device_info::DeviceInfoClient::new(&mut conns.dvt).await?;
++        listener.bootstrap_stage("PROCESS_STATUS_OPEN");
 +        while info.is_running_pid(pid).await? {
 +            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 +        }
 +        Ok::<_, IdeviceError>(())
 +    };
 +    match tokio::time::timeout_at(deadline, cleanup).await {
-+        Ok(Ok(())) => result,
-+        _ => Err(IdeviceError::UnexpectedResponse("DSH_RUNNER_EXIT_UNCONFIRMED".into())),
++        Ok(Ok(())) => { listener.bootstrap_stage("PROCESS_EXIT_CONFIRMED"); result },
++        Ok(Err(error)) => {
++            let detail = format!("{error:?}");
++            let variant = detail.split(['(', '{']).next().unwrap_or("unknown");
++            let _ = listener.log_debug_message(&format!("PROCESS_STATUS_ERROR {variant}")).await;
++            if let IdeviceError::UnexpectedResponse(message) = &error {
++                if message.starts_with("isRunningPid") { let _ = listener.log_debug_message(message).await; }
++            }
++            listener.bootstrap_stage("PROCESS_STATUS_FAILED");
++            Err(IdeviceError::UnexpectedResponse("DSH_RUNNER_EXIT_UNCONFIRMED".into()))
++        },
++        _ => { listener.bootstrap_stage("PROCESS_STATUS_TIMEOUT"); Err(IdeviceError::UnexpectedResponse("DSH_RUNNER_EXIT_UNCONFIRMED".into())) },
 +    }
 +}
 +
  impl XCUITestService {
      /// Creates a new `XCUITestService` backed by the given provider.
      pub fn new(provider: Arc<dyn IdeviceProvider>) -> Self {
+@@ -2208,3 +2361,44 @@
+         assert!(wda_port_overrides_from_runner_environment(Some(&runner_env)).is_err());
+     }
+ }
++
++#[cfg(test)]
++mod archive_reference_tests {
++    use super::*;
++
++    fn archive(objects: Vec<Value>) -> AuxValue {
++        let mut top = plist::Dictionary::new();
++        top.insert("root".into(), Value::Uid(plist::Uid::new(1)));
++        let mut root = plist::Dictionary::new();
++        root.insert("$archiver".into(), Value::String("NSKeyedArchiver".into()));
++        root.insert("$version".into(), Value::Integer(100000.into()));
++        root.insert("$top".into(), Value::Dictionary(top));
++        root.insert("$objects".into(), Value::Array(objects));
++        let mut bytes = Vec::new();
++        Value::Dictionary(root).to_writer_binary(&mut bytes).unwrap();
++        AuxValue::Array(bytes)
++    }
++
++    #[test]
++    fn resolves_custom_xctest_object_fields() {
++        let mut activity = plist::Dictionary::new();
++        activity.insert("title".into(), Value::Uid(plist::Uid::new(2)));
++        activity.insert("$class".into(), Value::Uid(plist::Uid::new(3)));
++        let mut class = plist::Dictionary::new();
++        class.insert("$classname".into(), Value::String("XCActivityRecord".into()));
++        let value = decode_aux_archive(&archive(vec![Value::String("$null".into()),
++            Value::Dictionary(activity), Value::String("ready-example".into()),
++            Value::Dictionary(class)])).unwrap();
++        assert_eq!(XCActivityRecord::from_plist(&value).unwrap().title, "ready-example");
++
++        let mut identifier = plist::Dictionary::new();
++        identifier.insert("c".into(), Value::Uid(plist::Uid::new(2)));
++        let value = decode_aux_archive(&archive(vec![Value::String("$null".into()),
++            Value::Dictionary(identifier), Value::Array(vec![Value::Uid(plist::Uid::new(3)),
++                Value::Uid(plist::Uid::new(4))]), Value::String("PhoneRunnerUITests".into()),
++            Value::String("testServe".into())])).unwrap();
++        let id = XCTTestIdentifier::from_plist(&value).unwrap();
++        assert_eq!(id.test_class(), "PhoneRunnerUITests");
++        assert_eq!(id.test_method(), Some("testServe"));
++    }
++}

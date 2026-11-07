@@ -18716,6 +18716,36 @@ abstract class L10n {
   /// **'在系统「无线调试」首页查看「IP 地址和端口」，填写冒号后的端口。请不要使用配对码页面的端口。'**
   String get phoneDndConnectPortHint;
 
+  /// No description provided for @phoneIosServiceTitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'iOS 自动化服务'**
+  String get phoneIosServiceTitle;
+
+  /// No description provided for @phoneIosServiceHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'授权后按需启动。任务结束会停止服务，系统的“Automation Running”提示也会结束。'**
+  String get phoneIosServiceHint;
+
+  /// No description provided for @phoneIosSetupHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'保持 LocalDevVPN 已连接，首次使用时允许 30 分钟操控。'**
+  String get phoneIosSetupHint;
+
+  /// No description provided for @phoneIosReturnHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'任务完成后回到当前对话，并停止手机操控服务。'**
+  String get phoneIosReturnHint;
+
+  /// No description provided for @phoneIosNeedsSetup.
+  ///
+  /// In zh, this message translates to:
+  /// **'运行器尚未就绪，请确认本机引擎和开发者环境已配置。'**
+  String get phoneIosNeedsSetup;
+
   /// No description provided for @phoneTaskResultReady.
   ///
   /// In zh, this message translates to:

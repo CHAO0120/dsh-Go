@@ -22,6 +22,7 @@ final class IOSPhoneRunner {
   private let selfRunner: IOSPhoneSelfRunner
   private var selfOwnerID = UUID().uuidString
   private var grantedUntil: Date?
+  private var lastEndpoint: Endpoint?
 
   init(actions: IOSPhoneActions, selfRunner: IOSPhoneSelfRunner? = nil) {
     self.actions = actions
@@ -35,8 +36,36 @@ final class IOSPhoneRunner {
   /// The run is over, and what the user granted was for it.
   func retire() {
     grantedUntil = nil
+    finish()
+  }
+
+  func finish() {
+    lastEndpoint = nil
     selfRunner.stop(ownerID: selfOwnerID)
     selfOwnerID = UUID().uuidString
+  }
+
+  /// Only the already-authorized runner may return to this app; never launch a
+  /// new runner, repeat an unknown action, or choose another destination here.
+  func returnToApp(current: () -> Bool) async -> Bool {
+    guard current(), let endpoint = lastEndpoint,
+      endpoint.runId == nil || selfRunner.owns(endpoint),
+      let bundle = Bundle.main.bundleIdentifier,
+      let url = URL(string: "http://127.0.0.1:\(endpoint.port)/rpc") else { return false }
+    var values: [String: Any] = ["method": "open", "params": ["app": bundle],
+      "expiresAt": Date().addingTimeInterval(8).timeIntervalSince1970 * 1000]
+    if let runId = endpoint.runId { values["runId"] = runId }
+    var http = URLRequest(url: url)
+    http.httpMethod = "POST"
+    http.timeoutInterval = 8
+    http.setValue("Bearer " + endpoint.token, forHTTPHeaderField: "Authorization")
+    http.setValue("application/json", forHTTPHeaderField: "Content-Type")
+    http.httpBody = try? JSONSerialization.data(withJSONObject: values)
+    guard let (data, response) = try? await session.data(for: http), current(),
+      (response as? HTTPURLResponse)?.statusCode == 200,
+      let result = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+      result["ok"] as? Bool == true else { return false }
+    return true
   }
 
   func cancelPreparation() { selfRunner.cancelPreparation(ownerID: selfOwnerID) }
@@ -68,6 +97,7 @@ final class IOSPhoneRunner {
       }
     }
     guard let endpoint else { return .failure(Self.missing) }
+    lastEndpoint = endpoint
     return await call(endpoint, request: request, current: current)
   }
 

@@ -131,6 +131,28 @@ The documented [local source patch](idevice-rsd-xctest.patch):
 2. Confirms shutdown via strict `isRunningPid` boolean responses; a malformed or
    missing reply is not treated as proof of process exit.
 3. Removes an upstream debug statement that printed the full remote pairing plist.
+4. Resolves UID fields of custom XCTest archive objects, including the test
+   identifier components and encrypted readiness activity title.
+5. Uses a correlated SIGKILL request and process-status reply before releasing
+   the owner. A sent kill request alone is never proof that the PID exited.
+
+The RPPairing transport does not require the legacy lockdown Marco/Polo
+heartbeat. On iOS 26, activity identifiers can be `none/none`; those activities
+are accepted only after the selected test starts on this paired session. The
+app must still decrypt the fresh per-run RSA payload and verify its run ID.
+
+The iOS Settings → Phone control page exposes the master switch and the
+existing return-after-completion preference. The authenticated bridge supplies
+the exact conversation owner to the turn-end controller. At completion, only
+the existing authorized endpoint can bring DSH Go forward; no runner is started
+for that return. The owner then stops its runner and confirms process exit.
+
+Some iOS versions deny app enumeration inside the signed helper. After installing
+it, `python3 tooling/ios/install-phone-app-catalog.py --device <device> --runner-bundle-id
+<helper-bundle> --output <private-json-path>` installs a local name-to-bundle
+inventory. Run it again after adding apps that the helper cannot find. Bundle IDs
+and the Settings name do not require that inventory. Unknown names fail before
+activation, rather than being passed to XCTest as invalid bundle IDs.
 
 The preparer rejects archive traversal, unknown links, wrong checksums and changed
 prepared source. The one pinned README symlink is materialized as a regular file;

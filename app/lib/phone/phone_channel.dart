@@ -284,6 +284,7 @@ class PhoneTaskStatus {
     this.paused = false,
     this.stopped = false,
     this.waived = false,
+    this.ownerSessionId,
   });
 
   factory PhoneTaskStatus.fromMap(Map<Object?, Object?> m) => PhoneTaskStatus(
@@ -293,6 +294,7 @@ class PhoneTaskStatus {
     paused: _flag(m['paused']),
     stopped: _flag(m['stopped']),
     waived: _flag(m['waived']),
+    ownerSessionId: _text(m['ownerSessionId']),
   );
 
   /// The current (or last) task's number; a new one means a new task even
@@ -311,6 +313,9 @@ class PhoneTaskStatus {
 
   /// 本任务免确认 was granted: the rest of this task asks nothing.
   final bool waived;
+
+  /// Explicit owner supplied by the authenticated iOS engine bridge.
+  final String? ownerSessionId;
 }
 
 /// Where Android 13+'s 「受限制的设置」 stands for this app (native

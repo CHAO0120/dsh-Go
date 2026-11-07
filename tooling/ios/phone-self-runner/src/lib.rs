@@ -9,7 +9,6 @@ use std::time::Duration;
 
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use idevice::RsdService;
-use idevice::heartbeat::HeartbeatClient;
 use idevice::installation_proxy::InstallationProxyClient;
 use idevice::lockdown::LockdownClient;
 use idevice::remote_pairing::{
@@ -94,8 +93,6 @@ const SESSION: Failure =
     Failure("ERR_PHONE_XCTEST_SESSION: The XCTest session failed or disconnected.");
 const PROTOCOL: Failure =
     Failure("ERR_PHONE_RUNNER_PROTOCOL: The runner did not return a valid encrypted endpoint.");
-const HEARTBEAT: Failure =
-    Failure("ERR_PHONE_HEARTBEAT: The device developer connection was lost.");
 const STOP_UNCONFIRMED: Failure = Failure("ERR_PHONE_STOP_UNCONFIRMED");
 
 fn emit(callback: Callback, run_id: &str, kind: i32, payload: &str) {
@@ -146,7 +143,7 @@ pub unsafe extern "C" fn dsh_phone_xctest_start(
     let cancelled = Arc::new(AtomicBool::new(false));
     *slot = Some(Owner {
         handle,
-        stop: stop.clone(),
+        stop,
         cancelled: cancelled.clone(),
     });
     drop(slot);
@@ -160,7 +157,7 @@ pub unsafe extern "C" fn dsh_phone_xctest_start(
                     .build()
                     .map_err(|_| SESSION)?;
                 // Dropping this runtime closes all tunnel tasks before terminal delivery.
-                runtime.block_on(run_session(&config, callback, stop, receiver))
+                runtime.block_on(run_session(&config, callback, receiver))
             }))
             .unwrap_or(Err(STOP_UNCONFIRMED));
             finish_owner(
@@ -285,6 +282,7 @@ struct ReadyListener<'a> {
     run_id: &'a str,
     callback: Callback,
     seen: bool,
+    test_started: bool,
 }
 fn readiness(title: &str) -> Result<Option<&str>, Failure> {
     let Some(value) = title.strip_prefix(READY_PREFIX) else {
@@ -299,15 +297,61 @@ fn readiness(title: &str) -> Result<Option<&str>, Failure> {
     }
     Ok(Some(value))
 }
+// iOS 26 can report None/None even for activities within the selected test.
+// Only the sole configured test may start this listener, on this paired channel;
+// Swift additionally decrypts the fresh per-run RSA payload and verifies runId.
+fn runner_test(class: &str, method: &str) -> bool {
+    (class.ends_with("PhoneRunnerUITests") && ["testServe", "testServe()"].contains(&method))
+        || (class.eq_ignore_ascii_case("none") && method.eq_ignore_ascii_case("none"))
+}
+impl ReadyListener<'_> {
+    fn report_startup_log(&self, message: &str) {
+        if self.seen { return; }
+        if !["CASE_START", "ACTIVITY class=", "PROCESS_STATUS_ERROR", "isRunningPid", "BOOTSTRAP_FAILURE"].iter().any(|prefix| message.starts_with(prefix)) { return; }
+        let lower = message.to_ascii_lowercase();
+        if ["token", "password", "secret", "authorization", "pairing", "key"].iter().any(|value| lower.contains(value)) { return; }
+        let message = message.split_once("] ").map(|(_, value)| value).unwrap_or(message);
+        let text: String = message.chars().take(80).map(|c| if c.is_ascii_alphanumeric() { c.to_ascii_uppercase() } else { '_' }).collect();
+        emit(self.callback, self.run_id, 0, &format!("XCTLOG_{text}"));
+    }
+}
 impl XCUITestListener for ReadyListener<'_> {
+    async fn did_fail_to_bootstrap(&mut self, message: &str) -> Result<(), idevice::IdeviceError> {
+        self.report_startup_log(&format!("BOOTSTRAP_FAILURE {message}")); Ok(())
+    }
+    async fn log_message(&mut self, message: &str) -> Result<(), idevice::IdeviceError> {
+        self.report_startup_log(message); Ok(())
+    }
+    async fn log_debug_message(&mut self, message: &str) -> Result<(), idevice::IdeviceError> {
+        self.report_startup_log(message); Ok(())
+    }
+    async fn test_bundle_ready(&mut self) -> Result<(), idevice::IdeviceError> {
+        emit(self.callback, self.run_id, 0, "BUNDLE_READY"); Ok(())
+    }
+    async fn test_runner_ready_with_capabilities(&mut self) -> Result<(), idevice::IdeviceError> {
+        emit(self.callback, self.run_id, 0, "RUNNER_CAPABILITIES"); Ok(())
+    }
+    async fn did_begin_executing_test_plan(&mut self) -> Result<(), idevice::IdeviceError> {
+        emit(self.callback, self.run_id, 0, "TEST_PLAN_BEGAN"); Ok(())
+    }
+    async fn test_case_did_start(&mut self, class: &str, method: &str) -> Result<(), idevice::IdeviceError> {
+        self.report_startup_log(&format!("CASE_START class={class} method={method}"));
+        self.test_started = runner_test(class, method);
+        emit(self.callback, self.run_id, 0, "TEST_CASE_BEGAN"); Ok(())
+    }
+
+    fn bootstrap_stage(&mut self, stage: &'static str) {
+        emit(self.callback, self.run_id, 0, stage);
+    }
+
     async fn test_case_will_start_activity(
         &mut self,
         class: &str,
         method: &str,
         title: &str,
     ) -> Result<(), idevice::IdeviceError> {
-        if !class.ends_with("PhoneRunnerUITests") || !["testServe", "testServe()"].contains(&method)
-        {
+        self.report_startup_log(&format!("ACTIVITY class={class} method={method} ready={} length={}", title.starts_with(READY_PREFIX), title.len()));
+        if !self.test_started || !runner_test(class, method) {
             return Ok(());
         }
         match readiness(title) {
@@ -335,7 +379,6 @@ async fn cancelled(receiver: &mut watch::Receiver<bool>) {
 async fn run_session(
     config: &Config,
     callback: Callback,
-    stop: watch::Sender<bool>,
     mut receiver: watch::Receiver<bool>,
 ) -> Result<(), Failure> {
     let mut tunnel = tokio::select! {
@@ -381,12 +424,12 @@ async fn run_session(
         );
         cfg.runner_env = Some(environment);
         cfg.tests_to_run = Some(vec!["PhoneRunnerUITests/testServe".into()]);
-        let heartbeat = HeartbeatClient::connect_rsd(&mut tunnel.adapter, &mut tunnel.handshake)
-            .await
-            .map_err(|_| HEARTBEAT)?;
-        Ok::<_, Failure>((cfg, major, heartbeat))
+        // RPPairing/RSD owns this connection's lifetime. The legacy lockdown
+        // Marco/Polo heartbeat is not part of this transport; requiring it can
+        // abort a healthy authenticated session before XCTest starts.
+        Ok::<_, Failure>((cfg, major))
     };
-    let (cfg, major, mut heartbeat) = tokio::select! {
+    let (cfg, major) = tokio::select! {
         biased;
         _ = cancelled(&mut receiver) => return Ok(()),
         result = tokio::time::timeout(Duration::from_secs(60), prepared) => result.map_err(|_| SESSION)??,
@@ -395,35 +438,16 @@ async fn run_session(
         run_id: &config.run_id,
         callback,
         seen: false,
+        test_started: false,
     };
-    let execution = run_rsd(
+    run_rsd(
         tunnel.adapter,
         tunnel.handshake,
         cfg,
         major,
         &mut listener,
         receiver,
-    );
-    tokio::pin!(execution);
-    let heartbeat = async {
-        let mut interval = 30;
-        loop {
-            interval = heartbeat.get_marco(interval).await.map_err(|_| HEARTBEAT)?;
-            heartbeat.send_polo().await.map_err(|_| HEARTBEAT)?;
-        }
-        #[allow(unreachable_code)]
-        Ok::<(), Failure>(())
-    };
-    tokio::pin!(heartbeat);
-    tokio::select! {
-        result = &mut execution => result.map_err(session_failure),
-        _ = &mut heartbeat => {
-            // Do not drop a live run future before it can clean up its own PID.
-            let _ = stop.send(true);
-            execution.await.map_err(session_failure)?;
-            Err(HEARTBEAT)
-        }
-    }
+    ).await.map_err(session_failure)
 }
 
 #[cfg(test)]
@@ -557,6 +581,33 @@ mod tests {
         let title = format!("{READY_PREFIX}{ciphertext}");
         assert_eq!(readiness(&title).unwrap(), Some(ciphertext.as_str()));
         assert!(readiness(&format!("{READY_PREFIX}{}", STANDARD.encode([1u8; 255]))).is_err());
+    }
+    #[tokio::test]
+    async fn readiness_requires_selected_test_start_and_ignores_duplicates() {
+        let _guard = TEST_LOCK.lock().unwrap();
+        EVENTS.0.lock().unwrap().clear();
+        let mut listener = ReadyListener {
+            run_id: "12345678-1234-4234-8234-123456789abc",
+            callback: record,
+            seen: false,
+            test_started: false,
+        };
+        let title = format!("{READY_PREFIX}{}", STANDARD.encode([42u8; 256]));
+        listener.test_case_will_start_activity("None", "None", &title).await.unwrap();
+        assert!(!listener.seen);
+        listener.test_case_did_start("ForeignTests", "testOther").await.unwrap();
+        listener.test_case_will_start_activity("None", "None", &title).await.unwrap();
+        assert!(!listener.seen);
+        listener.test_case_did_start("PhoneRunnerUITests", "testServe").await.unwrap();
+        listener.test_case_will_start_activity("ForeignTests", "testOther", &title).await.unwrap();
+        assert!(!listener.seen);
+        listener.test_case_will_start_activity("None", "None", &title).await.unwrap();
+        assert!(listener.seen);
+        listener.test_case_will_start_activity("PhoneRunnerUITests", "testServe", &title).await.unwrap();
+        assert_eq!(EVENTS.0.lock().unwrap().iter().filter(|event| event.1 == 1).count(), 1);
+        assert!(runner_test("none", "none"));
+        assert!(!runner_test("None", "testOther"));
+        assert!(!runner_test("PhoneRunnerUITests", "None"));
     }
     #[test]
     fn null_and_malformed_ffi_inputs_are_rejected_synchronously() {

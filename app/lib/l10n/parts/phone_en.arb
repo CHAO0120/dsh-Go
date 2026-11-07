@@ -446,5 +446,10 @@
   },
   "phoneDndManualConnect": "Connect by port",
   "phoneDndConnectPortLabel": "Connection port",
-  "phoneDndConnectPortHint": "On the main Wireless debugging settings page, find “IP address & port” and enter the port after the colon. Do not use the pairing-code dialog’s port."
+  "phoneDndConnectPortHint": "On the main Wireless debugging settings page, find “IP address & port” and enter the port after the colon. Do not use the pairing-code dialog’s port.",
+  "phoneIosServiceTitle": "iOS automation service",
+  "phoneIosServiceHint": "Starts on demand after approval and stops when the task ends, closing the system’s “Automation Running” indicator.",
+  "phoneIosSetupHint": "Keep LocalDevVPN connected. On first use, allow control for 30 minutes.",
+  "phoneIosReturnHint": "Return to this conversation when the task finishes, then stop the phone-control service.",
+  "phoneIosNeedsSetup": "The runner is not ready. Check the local engine and developer setup."
 }

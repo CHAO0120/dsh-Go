@@ -1,6 +1,17 @@
 import Foundation
 import Security
 
+enum PhoneRunnerAppCatalog {
+  static func bundleID(for value: String, apps: [[String: String]] = []) -> String? {
+    let wanted = value.trimmingCharacters(in: .whitespacesAndNewlines)
+    if wanted.range(of: #"^[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+$"#, options: .regularExpression) != nil {
+      return wanted
+    }
+    if ["设置", "settings"].contains(wanted.lowercased()) { return "com.apple.Preferences" }
+    return apps.first { $0["name"]?.caseInsensitiveCompare(wanted) == .orderedSame }?["id"]
+  }
+}
+
 /// Shared by the app and the XCTest runner. Only encrypted readiness crosses DTX.
 struct PhoneRunnerEndpoint: Codable, Equatable {
   let v: Int

@@ -118,6 +118,7 @@ class SettingsPageMeta {
     this.condition,
     this.row = true,
     this.androidOnly = false,
+    this.iosToo = false,
   });
 
   final SettingsPageId id;
@@ -148,6 +149,8 @@ class SettingsPageMeta {
   /// or under it ([SettingsIndex.androidOnly]).
   final bool androidOnly;
 
+  final bool iosToo;
+
   /// The row on [parent] that opens this page.
   late final SettingSpot entry = SettingSpot(
     'page:${id.name}',
@@ -160,6 +163,7 @@ class SettingsPageMeta {
     opens: id,
     condition: condition,
     androidOnly: androidOnly,
+    iosToo: iosToo,
   );
 }
 
@@ -265,9 +269,9 @@ abstract final class SettingsIndex {
   static bool androidOnly(SettingSpot spot) => spot.androidOnly || chain(spot.page).any((p) => page(p).androidOnly);
 
   /// Whether the `dshgo://open/<id>` link [id] leads to something [androidOnly].
-  static bool androidOnlyLink(String id) {
+  static bool androidOnlyLink(String id, {bool ios = false}) {
     final spot = pageForLink(id)?.entry ?? spotForLink(id);
-    return spot != null && androidOnly(spot);
+    return spot != null && androidOnly(spot) && !(ios && spot.iosToo);
   }
 
   /// Pages from the hub down to [id], both included.
@@ -378,6 +382,7 @@ final _pages = <SettingsPageMeta>[
     freq: Freq.medium,
     links: const ['phone'],
     androidOnly: true,
+    iosToo: true,
   ),
   SettingsPageMeta(
     SettingsPageId.phoneAppRules,
@@ -710,6 +715,7 @@ abstract final class Spots {
     title: (l) => l.phoneReturnAfterDone,
     keywords: (l) => l.searchKwPhoneReturn,
     condition: SpotCondition.phoneControlOn,
+    iosToo: true,
   );
   static final phoneBackgroundGuide = SettingSpot(
     'phone-background-guide',

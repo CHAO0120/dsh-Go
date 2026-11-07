@@ -9,6 +9,7 @@ import '../../runtime/local_footprint.dart';
 import '../../runtime/runtime_bridge.dart';
 import '../../runtime/runtime_state.dart';
 import '../../state/connection_state.dart';
+import '../../state/android_features.dart';
 import '../../state/hosts_state.dart';
 import '../../state/phone_overlay_prefs.dart';
 import '../../state/phone_state.dart';
@@ -261,6 +262,7 @@ class _PhoneControlScreenState extends ConsumerState<PhoneControlScreen> {
 
   @override
   Widget build(BuildContext context) {
+    if (ref.watch(operatingSystemProvider) == 'ios') return _buildIOS();
     final l10n = context.l10n;
     final state = ref.watch(phoneProvider);
     final blocker = ref.watch(phoneBlockerProvider);
@@ -357,6 +359,68 @@ class _PhoneControlScreenState extends ConsumerState<PhoneControlScreen> {
           // Said only while it is true: lifted rules are named by the tag above.
           if (state.policies?.unlocks.isEmpty ?? true) PageFootnote(l10n.phoneSensitiveActionsNote),
         ],
+      ],
+    );
+  }
+
+  Widget _buildIOS() {
+    final l10n = context.l10n;
+    final state = ref.watch(phoneProvider);
+    final status = state.status;
+    final returnAfterDone = ref.watch(phoneReturnPrefProvider);
+    Future<void> setEnabled(bool value) async {
+      if (await ref.read(phoneChannelProvider).setEnabled(value))
+        await ref.read(phoneProvider.notifier).refreshStatus();
+    }
+
+    return AppPage.list(
+      title: l10n.phoneControlTitle,
+      children: [
+        OverviewCard(
+          margin: const EdgeInsets.symmetric(horizontal: 16),
+          leading: const FeatureTile(FeatureKind.phone, size: OverviewCard.avatarSize),
+          title: Text(l10n.phoneControlTitle),
+          subtitle: Text(
+            !status.enabled
+                ? l10n.phoneControlNotEnabled
+                : status.bridgeListening
+                ? l10n.phoneControlReady
+                : l10n.phoneIosNeedsSetup,
+          ),
+          trailing: Switch.adaptive(
+            value: status.enabled,
+            onChanged: state.loaded ? (value) => unawaited(setEnabled(value)) : null,
+          ),
+        ),
+        const SizedBox(height: 24),
+        ListPageCard(
+          title: l10n.phoneIosServiceTitle,
+          children: [
+            ListPageRow(
+              icon: AppIcons.phoneControl,
+              title: l10n.phoneIosServiceTitle,
+              subtitle: l10n.phoneIosServiceHint,
+              subtitleMaxLines: 4,
+            ),
+            MergeSemantics(
+              child: ListPageRow(
+                icon: AppIcons.returnToApp,
+                spot: Spots.phoneReturn,
+                subtitle: l10n.phoneIosReturnHint,
+                subtitleMaxLines: 3,
+                onTap: () => unawaited(_setReturn(!returnAfterDone)),
+                trailing: Switch.adaptive(value: returnAfterDone, onChanged: (value) => unawaited(_setReturn(value))),
+              ),
+            ),
+            if (status.task.active)
+              ListPageRow(
+                icon: AppIcons.phoneControl,
+                title: l10n.phoneControlWorking,
+                trailing: FixButton(label: l10n.commonStop, onPressed: _stopTask),
+              ),
+          ],
+        ),
+        PageFootnote(l10n.phoneIosSetupHint),
       ],
     );
   }

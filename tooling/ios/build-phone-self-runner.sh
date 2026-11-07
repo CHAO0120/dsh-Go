@@ -37,7 +37,9 @@ trap cleanup EXIT
 for spec in 'aarch64-apple-ios:iphoneos:arm64' 'aarch64-apple-ios-sim:iphonesimulator:arm64' 'x86_64-apple-ios:iphonesimulator:x86_64'; do
   IFS=: read -r target platform arch <<< "$spec"
   rustup target add "$target"
-  cargo build --release --locked --target "$target" --target-dir "$NATIVE/target"
+  # Emit native objects: the selected Xcode may not understand the pinned
+  # Rust toolchain's newer LLVM bitcode.
+  CARGO_PROFILE_RELEASE_LTO=false cargo build --release --locked --target "$target" --target-dir "$NATIVE/target"
   mkdir -p "$STAGE/$platform/$arch"
   cp "$NATIVE/target/$target/release/libdsh_phone_self_runner.a" "$STAGE/$platform/$arch/"
 done

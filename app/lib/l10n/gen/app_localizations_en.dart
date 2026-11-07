@@ -10668,6 +10668,23 @@ class L10nEn extends L10n {
       'On the main Wireless debugging settings page, find “IP address & port” and enter the port after the colon. Do not use the pairing-code dialog’s port.';
 
   @override
+  String get phoneIosServiceTitle => 'iOS automation service';
+
+  @override
+  String get phoneIosServiceHint =>
+      'Starts on demand after approval and stops when the task ends, closing the system’s “Automation Running” indicator.';
+
+  @override
+  String get phoneIosSetupHint => 'Keep LocalDevVPN connected. On first use, allow control for 30 minutes.';
+
+  @override
+  String get phoneIosReturnHint =>
+      'Return to this conversation when the task finishes, then stop the phone-control service.';
+
+  @override
+  String get phoneIosNeedsSetup => 'The runner is not ready. Check the local engine and developer setup.';
+
+  @override
   String get phoneTaskResultReady => 'Task complete · View result';
 
   @override

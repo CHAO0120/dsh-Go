@@ -52,6 +52,16 @@ final class IOSPhoneSelfRunner {
   static let shared = IOSPhoneSelfRunner()
   private static var nativeCallbacks: [String: EventSink] = [:]
 
+  #if DSH_PHONE_SELF_RUNNER_DIAGNOSTICS
+  static func diagnostic(_ text: String) {
+    guard let directory = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else { return }
+    let url = directory.appendingPathComponent("dsh-phone-preflight.log")
+    let previous = (try? String(contentsOf: url, encoding: .utf8)) ?? ""
+    let line = "\(Date().timeIntervalSince1970) \(text)\n"
+    try? (String(previous.suffix(24000)) + line).write(to: url, atomically: true, encoding: .utf8)
+  }
+  #endif
+
   private final class Run {
     let id: String
     let ownerID: String
@@ -265,6 +275,18 @@ final class IOSPhoneSelfRunner {
 
   private func receive(runId: String, kind: Int32, payload: String) {
     guard let run = active, run.id == runId else { return }
+    #if DSH_PHONE_SELF_RUNNER_DIAGNOSTICS
+    if kind == 1 {
+      print("DSH_SELF_EVENT ready")
+      Self.diagnostic("event ready")
+    } else {
+      let code = String(payload.split(separator: ":", maxSplits: 1).first ?? "")
+      let safe = code.utf8.count <= 96 && code.utf8.allSatisfy { (65...90).contains($0) || (48...57).contains($0) || $0 == 95 }
+      print("DSH_SELF_EVENT kind=\(kind) code=\(safe ? code : "redacted")")
+      Self.diagnostic("event kind=\(kind) code=\(safe ? code : "redacted")")
+    }
+    fflush(stdout)
+    #endif
     switch kind {
     case 1:
       guard !run.stopRequested, !run.terminal, run.endpoint == nil, let handshake = run.handshake else { return }

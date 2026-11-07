@@ -12,6 +12,34 @@ import UserNotifications
     // Before launch finishes, or the tap that launched the app is lost.
     UNUserNotificationCenter.current().delegate = NotifyTaps.shared
     forgetPreviousInstall()
+    #if DSH_PHONE_SELF_RUNNER_DIAGNOSTICS
+    let preflight = ProcessInfo.processInfo.arguments.contains("--dsh-phone-preflight")
+      || ProcessInfo.processInfo.environment["DSH_PHONE_PREFLIGHT"] == "1"
+    IOSPhoneSelfRunner.diagnostic("launch preflight=\(preflight)")
+    if preflight {
+      DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
+        Task { @MainActor in
+          let owner = IOSPhoneSelfRunner.shared
+          print("DSH_SELF_PREFLIGHT configured=\(owner.isConfigured)")
+          IOSPhoneSelfRunner.diagnostic("preflight configured=\(owner.isConfigured)")
+          for cycle in 1...2 {
+            IOSPhoneSelfRunner.diagnostic("preflight cycle=\(cycle)")
+            let result = await owner.prepare(ownerID: "device-preflight", current: { true })
+            switch result {
+            case .success:
+              IOSPhoneSelfRunner.diagnostic("preflight ready cycle=\(cycle)")
+            case .failure(let error):
+              IOSPhoneSelfRunner.diagnostic("preflight failure=\(error)")
+              owner.stop(ownerID: "device-preflight")
+              return
+            }
+            owner.stop(ownerID: "device-preflight")
+          }
+          fflush(stdout)
+        }
+      }
+    }
+    #endif
     return super.application(application, didFinishLaunchingWithOptions: launchOptions)
   }
 
@@ -29,6 +57,7 @@ import UserNotifications
     GeneratedPluginRegistrant.register(with: engineBridge.pluginRegistry)
     if let registrar = engineBridge.pluginRegistry.registrar(forPlugin: "DshPlugin") {
       DshPlugin.register(with: registrar)
+      IOSPhoneControl.shared.register(messenger: registrar.messenger())
     }
   }
 }

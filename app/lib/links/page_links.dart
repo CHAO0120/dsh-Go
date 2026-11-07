@@ -65,7 +65,8 @@ typedef PageResolver = Widget? Function(String id, String? sessionId);
 /// have none ([registerPageLinks] says so).
 final pageLinkResolverProvider = Provider<PageResolver>((ref) {
   if (ref.watch(androidSystemFeaturesProvider)) return pageForId;
-  return (id, sessionId) => SettingsIndex.androidOnlyLink(id) ? null : pageForId(id, sessionId);
+  final ios = ref.watch(operatingSystemProvider) == 'ios';
+  return (id, sessionId) => SettingsIndex.androidOnlyLink(id, ios: ios) ? null : pageForId(id, sessionId);
 });
 
 /// Routes `dshgo://open/…` to its page, pushed over the home route. [session]

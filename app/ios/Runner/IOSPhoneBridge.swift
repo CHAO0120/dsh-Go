@@ -2,6 +2,7 @@ import Foundation
 import UIKit
 import Security
 import Darwin
+import Flutter
 
 @MainActor
 final class IOSPhoneBridge: NSObject, URLSessionTaskDelegate {
@@ -24,6 +25,7 @@ final class IOSPhoneBridge: NSObject, URLSessionTaskDelegate {
   private var poller: Task<Void, Never>?
   private var operation: Task<Void, Never>?
   private var session: URLSession?
+  private var finishingPhoneTask = false
   private func makeSession() -> URLSession {
     let config = URLSessionConfiguration.ephemeral
     config.httpCookieStorage = nil
@@ -46,6 +48,7 @@ final class IOSPhoneBridge: NSObject, URLSessionTaskDelegate {
     self.system = IOSSystemTools(actions: actions, presenter: presenter)
     self.runtimeCurrent = runtimeCurrent
     super.init()
+    IOSPhoneControl.shared.bind(self)
   }
   nonisolated func urlSession(_ session: URLSession, task: URLSessionTask,
     willPerformHTTPRedirection response: HTTPURLResponse, newRequest request: URLRequest,
@@ -71,6 +74,7 @@ final class IOSPhoneBridge: NSObject, URLSessionTaskDelegate {
     }
     self.directory = directory; runId = generation; token = credential
     session = makeSession()
+    IOSPhoneControl.shared.bind(self)
     return (directory, generation)
   }
   // Start once the host has accepted startup. runtimeCurrent must additionally
@@ -97,6 +101,47 @@ final class IOSPhoneBridge: NSObject, URLSessionTaskDelegate {
     active = nil; endpoint = nil; runId = nil; token = nil
     if let directory { try? FileManager.default.removeItem(at: directory) }
     directory = nil
+    IOSPhoneControl.shared.retire(self)
+  }
+
+  func finishPhoneTask(reopen: Bool, current: () -> Bool) async -> [String: Any] {
+    guard current(), runtimeCurrent() else { return ["current": false] }
+    finishingPhoneTask = true
+    defer { finishingPhoneTask = false }
+    // The turn-end event can beat the final result POST's acknowledgement.
+    // Allow that exact operation to retire, without claiming another request.
+    let until = Date().addingTimeInterval(5)
+    while active != nil, current(), runtimeCurrent(), Date() < until {
+      try? await Task.sleep(nanoseconds: 50_000_000)
+    }
+    guard current(), runtimeCurrent() else { return ["current": false] }
+    guard active == nil else { return ["busy": true] }
+    let launched = reopen && UIApplication.shared.applicationState != .active
+      ? await runner.returnToApp(current: current) : false
+    if launched {
+      let activationDeadline = Date().addingTimeInterval(2)
+      while UIApplication.shared.applicationState != .active, current(), Date() < activationDeadline {
+        try? await Task.sleep(nanoseconds: 50_000_000)
+      }
+    }
+    guard current(), runtimeCurrent() else { return ["current": false] }
+    guard active == nil else { return ["busy": true] }
+    runner.finish()
+    return ["closed": true, "opened": UIApplication.shared.applicationState == .active,
+      "launched": launched, "current": true]
+  }
+
+  func stopPhoneTask() {
+    if let request = active, request.action.kind.hasPrefix("runner-") {
+      operation?.cancel(); operation = nil
+      actions.cancel(request.id)
+      active = nil
+      Task { [weak self] in
+        guard let self, self.runId == request.runId else { return }
+        _ = try? await self.post("result", ["id": request.id, "text": "用户停止了手机操控。不要重试。", "isError": true])
+      }
+    }
+    runner.retire()
   }
   // Called directly from didEnterBackground. No pending consent crosses a background hop.
   func enteredBackground() {
@@ -134,6 +179,7 @@ final class IOSPhoneBridge: NSObject, URLSessionTaskDelegate {
     return (http.statusCode, bytes)
   }
   private func poll(_ generation: String) async {
+    guard !finishingPhoneTask || active != nil else { return }
     guard runtimeCurrent(), runId == generation else { return }
     do {
       if endpoint == nil { endpoint = try readEndpoint() }
@@ -145,6 +191,7 @@ final class IOSPhoneBridge: NSObject, URLSessionTaskDelegate {
           active = nil
           operation?.cancel(); operation = nil
           runner.cancelPreparation()
+          if request.action.kind.hasPrefix("runner-") { runner.finish() }
           actions.cancel(request.id)
           browser.enteredBackground()
           system.stopAsking()
@@ -178,6 +225,11 @@ final class IOSPhoneBridge: NSObject, URLSessionTaskDelegate {
           return
         }
         if kind.hasPrefix("browser-") || kind.hasPrefix("runner-") {
+          if kind.hasPrefix("runner-"), !IOSPhoneControl.shared.enabled {
+            _ = try? await self.post("result", ["id": request.id, "text": "手机操控已关闭，请在 DSH Go 设置中开启。", "isError": true])
+            self.active = nil; self.operation = nil
+            return
+          }
           // The tool call has to still be waiting for this, now and after any question to the user.
           let current = { [weak self] in
             self?.current(request) == true && request.expiresAt > Date().timeIntervalSince1970 * 1000
@@ -191,6 +243,7 @@ final class IOSPhoneBridge: NSObject, URLSessionTaskDelegate {
             }
             return
           }
+          if kind.hasPrefix("runner-") { IOSPhoneControl.shared.begin(request, bridge: self) }
           let result = kind.hasPrefix("browser-")
             ? await self.browser.run(request, current: current) : await self.runner.run(request, current: current)
           guard self.current(request) else { return }
@@ -227,4 +280,100 @@ final class IOSPhoneBridge: NSObject, URLSessionTaskDelegate {
       if let request = active, request.expiresAt <= Date().timeIntervalSince1970 * 1000 { actions.cancel(request.id) }
     }
   }
+}
+
+/// Shares the iOS task lifecycle with the existing Flutter turn-end controller.
+/// Task ownership comes from the authenticated engine request, not the visible chat.
+@MainActor
+final class IOSPhoneControl: NSObject, FlutterStreamHandler {
+  static let shared = IOSPhoneControl()
+  private weak var bridge: IOSPhoneBridge?
+  private var methods: FlutterMethodChannel?
+  private var events: FlutterEventChannel?
+  private var sink: FlutterEventSink?
+  private var taskID = 0
+  private var owner: String?
+  private var active = false
+  private var stopped = false
+  private var finishing = false
+  var enabled: Bool { UserDefaults.standard.object(forKey: "dsh.ios.phone.enabled") as? Bool ?? true }
+
+  func register(messenger: any FlutterBinaryMessenger) {
+    methods = FlutterMethodChannel(name: "dsh/phone", binaryMessenger: messenger)
+    events = FlutterEventChannel(name: "dsh/phone/events", binaryMessenger: messenger)
+    methods?.setMethodCallHandler { [weak self] call, result in
+      guard let self else { return result(FlutterMethodNotImplemented) }
+      let args = call.arguments as? [String: Any] ?? [:]
+      switch call.method {
+      case "status": result(self.status())
+      case "setEnabled":
+        guard let value = args["enabled"] as? Bool else { return result(false) }
+        UserDefaults.standard.set(value, forKey: "dsh.ios.phone.enabled")
+        if !value { self.stop() }
+        self.emit(); result(true)
+      case "stopTask": self.stop(); result(true)
+      case "finishTask":
+        guard let id = args["taskId"] as? Int, id == self.taskID, self.active,
+          let owner = self.owner,
+          (args["sessionId"] as? String).map({ $0 == owner }) ?? true,
+          let bridge = self.bridge else { return result(["current": false]) }
+        guard !self.finishing else { return result(["busy": true]) }
+        self.finishing = true
+        #if DSH_PHONE_SELF_RUNNER_DIAGNOSTICS
+        IOSPhoneSelfRunner.diagnostic("phone task finish id=\(id) reopen=\(args["reopen"] as? Bool == true)")
+        #endif
+        Task { @MainActor in
+          let current = { [weak self, weak bridge] in
+            self?.taskID == id && self?.active == true && self?.bridge === bridge
+          }
+          let reply = await bridge.finishPhoneTask(reopen: args["reopen"] as? Bool == true, current: current)
+          #if DSH_PHONE_SELF_RUNNER_DIAGNOSTICS
+          IOSPhoneSelfRunner.diagnostic("phone task finished id=\(id) closed=\(reply["closed"] as? Bool == true) opened=\(reply["opened"] as? Bool == true) launched=\(reply["launched"] as? Bool == true)")
+          #endif
+          if current() {
+            self.finishing = false
+            if reply["closed"] as? Bool == true { self.active = false; self.emit() }
+          }
+          result(reply)
+        }
+      default: result(FlutterMethodNotImplemented)
+      }
+    }
+    events?.setStreamHandler(self)
+  }
+
+  func bind(_ bridge: IOSPhoneBridge) { self.bridge = bridge; emit() }
+  func begin(_ request: IOSPhoneRequest, bridge: IOSPhoneBridge) {
+    guard self.bridge === bridge else { return }
+    if !active || owner != request.owner.sessionId {
+      taskID += 1; owner = request.owner.sessionId
+      active = true; stopped = false; finishing = false
+      #if DSH_PHONE_SELF_RUNNER_DIAGNOSTICS
+      IOSPhoneSelfRunner.diagnostic("phone task begin id=\(taskID)")
+      #endif
+      emit()
+    }
+  }
+  func retire(_ bridge: IOSPhoneBridge) {
+    guard self.bridge === bridge else { return }
+    active = false; stopped = false; finishing = false
+    self.bridge = nil
+    emit()
+  }
+  private func stop() {
+    bridge?.stopPhoneTask()
+    active = false; stopped = true; finishing = false
+    emit()
+  }
+  private func status() -> [String: Any] {
+    var task: [String: Any] = ["id": taskID, "active": active, "stopped": stopped]
+    if let owner { task["ownerSessionId"] = owner }
+    return ["enabled": enabled, "bridgeListening": bridge != nil && IOSPhoneSelfRunner.shared.isConfigured,
+      "task": task]
+  }
+  private func emit() { sink?(status()) }
+  func onListen(withArguments arguments: Any?, eventSink events: @escaping FlutterEventSink) -> FlutterError? {
+    sink = events; emit(); return nil
+  }
+  func onCancel(withArguments arguments: Any?) -> FlutterError? { sink = nil; return nil }
 }

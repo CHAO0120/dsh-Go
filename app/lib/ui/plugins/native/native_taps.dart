@@ -279,10 +279,8 @@ Future<bool> runNativeTap(
 
   // What may travel with this tap, after asking once.
   final wants = switch (surface) {
-    NativeSurface.composerActions || NativeSurface.composerTools => {
-      if (plugin.wantsDraft) 'draft',
-      if (plugin.wantsClipboard) 'clipboard',
-    },
+    NativeSurface.composerActions ||
+    NativeSurface.composerTools => {if (plugin.wantsDraft) 'draft', if (plugin.wantsClipboard) 'clipboard'},
     NativeSurface.messageActions => {if (plugin.wantsMessage && message != null) 'message'},
     _ => const <String>{},
   };
@@ -756,7 +754,8 @@ Future<void> runComposerCommand(BuildContext context, WidgetRef ref, String line
 /// An app page by its ui.json / 全部功能 id, `new-chat` or `settings`.
 Future<void> openNativePage(BuildContext context, WidgetRef ref, String page, {String? sessionId}) async {
   // On HarmonyOS, Android's own pages aren't there: say so.
-  if (!ref.read(androidSystemFeaturesProvider) && SettingsIndex.androidOnlyLink(page)) {
+  if (!ref.read(androidSystemFeaturesProvider) &&
+      SettingsIndex.androidOnlyLink(page, ios: ref.read(operatingSystemProvider) == 'ios')) {
     _toast(context, context.l10n.harmonyPageUnavailable);
     return;
   }

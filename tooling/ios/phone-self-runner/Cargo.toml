@@ -10,7 +10,7 @@ crate-type = ["staticlib", "rlib"]
 
 [dependencies]
 base64 = "0.22"
-idevice = { path = ".upstream/idevice", default-features = false, features = ["ring", "tcp", "remote_pairing", "tunnel_tcp_stack", "xctest", "heartbeat"] }
+idevice = { path = ".upstream/idevice", default-features = false, features = ["ring", "tcp", "remote_pairing", "tunnel_tcp_stack", "xctest"] }
 plist = "1.8"
 rsa = "0.9"
 serde = { version = "1", features = ["derive"] }
