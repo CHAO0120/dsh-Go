@@ -47,10 +47,12 @@ final class IOSPhoneCoreDeviceTests: XCTestCase {
     private(set) var stops: [UInt64] = []
     private(set) var cancellations: [(UInt64, UInt64)] = []
     var returnedStartHandle: UInt64?
+    var inspectStart: ((Data, Data) -> Void)?
     var beforeStartReturns: ((Launch) -> Void)?
     var beforeRequestReturns: ((Invocation) -> Void)?
     var client: IOSPhoneCoreDevice.NativeClient {
-      IOSPhoneCoreDevice.NativeClient(start: { [self] runID, _, callback in
+      IOSPhoneCoreDevice.NativeClient(start: { [self] runID, metadata, pairing, callback in
+        inspectStart?(metadata, pairing)
         let launch = Launch(runID: runID, handle: UInt64(launches.count) + 101, event: callback)
         launches.append(launch)
         beforeStartReturns?(launch)
@@ -66,7 +68,7 @@ final class IOSPhoneCoreDeviceTests: XCTestCase {
       stop: { [self] in stops.append($0) })
     }
     func finishFixture() {
-      beforeStartReturns = nil; beforeRequestReturns = nil
+      beforeStartReturns = nil; beforeRequestReturns = nil; inspectStart = nil
       for launch in launches { launch.stopped() }
     }
   }
@@ -152,6 +154,27 @@ final class IOSPhoneCoreDeviceTests: XCTestCase {
     XCTAssertFalse(value.owner.maySwitchBackend)
     value.native.launches[0].stopped()
     XCTAssertTrue(value.owner.maySwitchBackend)
+  }
+
+  func testStartBorrowsSeparatePairingBytesWithoutClearingTheStoredSessionRecord() async throws {
+    let native = Recorder()
+    let value = try fixture(native)
+    let expected = try value.pairing.load()
+    var inspected = false
+    native.inspectStart = { data, pairing in
+      XCTAssertTrue(pairing == expected, "separate synthetic record changed")
+      let metadata = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+      XCTAssertEqual(Set(metadata?.keys.map { $0 } ?? []), Set([
+        "runId", "host", "port", "allowDDIMount", "ddiCache",
+      ]))
+      inspected = true
+    }
+    native.beforeStartReturns = { $0.ready() }
+    let result = await bounded(Task { await value.owner.prepare(ownerID: "owner-a", current: { true }) })
+    XCTAssertEqual(try result.get(), ["screenshot": true, "tap": true])
+    XCTAssertTrue(inspected)
+    XCTAssertTrue(try value.pairing.load() == expected, "session choice must keep its record")
+    XCTAssertEqual(native.launches.count, 1)
   }
 
   func testInlineCallbackWithDifferentReturnedHandleFaultsWithoutDispatch() async throws {

@@ -45,7 +45,9 @@ enum IOSPhoneSelfRunnerError: Error {
 final class IOSPhoneSelfRunner {
   typealias EventSink = @MainActor (String, Int32, String) -> Void
   struct NativeClient {
-    let start: @MainActor (String, String, @escaping EventSink) -> UInt64
+    // Pairing is a separate synchronous byte input. nil is only the legacy
+    // file-config seam; production supplies the in-memory store's Data.
+    let start: @MainActor (String, Data, Data?, @escaping EventSink) -> UInt64
     let stop: @MainActor (UInt64) -> Void
   }
 
@@ -87,7 +89,6 @@ final class IOSPhoneSelfRunner {
   private struct Configuration: Encodable {
     let runId: String
     let pairingFile: String?
-    let pairingBase64: String?
     let host: String
     let port: UInt16
     let runnerBundleId: String
@@ -98,6 +99,7 @@ final class IOSPhoneSelfRunner {
   private let native: NativeClient?
   private let pairingURL: URL
   private let pairingData: (() throws -> Data)?
+  private let pairingAvailable: (() -> Bool)?
   private let runnerBundleId: String
   private let targetBundleId: String
   private let configuredPort: UInt16?
@@ -122,7 +124,8 @@ final class IOSPhoneSelfRunner {
     self.init(native: Self.makeNativeClient(), pairingURL: documents.appendingPathComponent("pairingFile.plist"),
       runnerBundleId: runner, targetBundleId: target,
       configuredPort: number.flatMap(UInt16.init(exactly:)), configurationValid: validPort,
-      pairingData: { try IOSPhonePairingStore.shared.load() })
+      pairingData: { try IOSPhonePairingStore.shared.load() },
+      pairingAvailable: { IOSPhonePairingStore.shared.hasRecord })
   }
 
   /// Internal test seam: the production client is nil unless the build opted in.
@@ -130,10 +133,12 @@ final class IOSPhoneSelfRunner {
        configuredPort: UInt16? = nil, configurationValid: Bool = true,
        startupTimeout: TimeInterval = 95, stopTimeout: TimeInterval = 12,
        resolvePort: @escaping () async -> UInt16 = { await PhoneRemotePairingPort.resolve() },
-       now: @escaping () -> Date = Date.init, pairingData: (() throws -> Data)? = nil) {
+       now: @escaping () -> Date = Date.init, pairingData: (() throws -> Data)? = nil,
+       pairingAvailable: (() -> Bool)? = nil) {
     self.native = native
     self.pairingURL = pairingURL
     self.pairingData = pairingData
+    self.pairingAvailable = pairingAvailable
     self.runnerBundleId = runnerBundleId
     self.targetBundleId = targetBundleId
     self.configuredPort = configuredPort
@@ -145,9 +150,12 @@ final class IOSPhoneSelfRunner {
   }
 
   var isConfigured: Bool {
-    if let pairingData { return native != nil && (try? pairingData()) != nil }
+    guard native != nil else { return false }
+    // Status must not read/normalize private-key bytes. In-memory providers
+    // supply an independent availability query; only begin() loads the record.
+    if pairingData != nil { return pairingAvailable?() ?? false }
     var directory: ObjCBool = false
-    return native != nil && FileManager.default.fileExists(atPath: pairingURL.path, isDirectory: &directory) && !directory.boolValue
+    return FileManager.default.fileExists(atPath: pairingURL.path, isDirectory: &directory) && !directory.boolValue
   }
 
   var mayUseMacFallback: Bool { active == nil || active?.terminal == true }
@@ -256,16 +264,23 @@ final class IOSPhoneSelfRunner {
         let handshake = run.handshake, let native = self.native else { return }
       guard self.now() < run.deadline else { self.stop(run, reason: .timedOut); return }
       do {
-        let record = try self.pairingData?()
-        let config = Configuration(runId: run.id, pairingFile: record == nil ? self.pairingURL.path : nil,
-          pairingBase64: record?.base64EncodedString(),
+        let config = Configuration(runId: run.id, pairingFile: self.pairingData == nil ? self.pairingURL.path : nil,
           host: "10.7.0.1", port: port, runnerBundleId: self.runnerBundleId,
           targetBundleId: self.targetBundleId, publicKeyBase64: handshake.publicKeyBase64)
         let bytes = try JSONEncoder().encode(config)
-        guard let text = String(data: bytes, encoding: .utf8) else { throw CocoaError(.fileWriteInapplicableStringEncoding) }
-        let handle = native.start(run.id, text) { [weak self] id, kind, payload in
-          self?.receive(runId: id, kind: kind, payload: payload)
-        }
+        guard bytes.count <= 96 * 1024 else { throw IOSPhonePairingError.tooLarge }
+        let handle = try { () throws -> UInt64 in
+          let record = try self.pairingData?()
+          if let count = record?.count, count == 0 || count > IOSPhonePairingRecord.maximumBytes {
+            throw IOSPhonePairingError.tooLarge
+          }
+          // Do not base64/JSON encode the record or reset a possibly shared
+          // Data value (which can allocate another CoW copy). Native borrows it
+          // only until this call returns; store/Keychain retention is separate.
+          return native.start(run.id, bytes, record) { [weak self] id, kind, payload in
+            self?.receive(runId: id, kind: kind, payload: payload)
+          }
+        }()
         run.handle = handle
         if handle == 0 {
           run.failure = .failed
@@ -336,9 +351,25 @@ final class IOSPhoneSelfRunner {
   private static func makeNativeClient() -> NativeClient? {
     #if DSH_PHONE_SELF_RUNNER
     guard #available(iOS 17.0, *) else { return nil }
-    return NativeClient(start: { runId, config, sink in
+    return NativeClient(start: { runId, config, pairing, sink in
       nativeCallbacks[runId] = sink
-      let handle = config.withCString { dsh_phone_xctest_start($0, phoneSelfRunnerNativeCallback) }
+      let handle: UInt64
+      if let pairing {
+        handle = config.withUnsafeBytes { raw in
+          pairing.withUnsafeBytes { record in
+            dsh_phone_xctest_start_bytes(raw.bindMemory(to: UInt8.self).baseAddress, raw.count,
+              record.bindMemory(to: UInt8.self).baseAddress, record.count, phoneSelfRunnerNativeCallback)
+          }
+        }
+      } else {
+        // Existing file-only callers remain compatible. This metadata contains
+        // a path and public launch fields, never the pairing record itself.
+        guard let text = String(data: config, encoding: .utf8) else {
+          nativeCallbacks.removeValue(forKey: runId)
+          return 0
+        }
+        handle = text.withCString { dsh_phone_xctest_start($0, phoneSelfRunnerNativeCallback) }
+      }
       if handle == 0 { nativeCallbacks.removeValue(forKey: runId) }
       return handle
     }, stop: { dsh_phone_xctest_stop($0) })

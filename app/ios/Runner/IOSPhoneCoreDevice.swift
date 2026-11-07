@@ -79,7 +79,8 @@ final class IOSPhoneCoreDevice {
   typealias EventSink = @MainActor (UInt64, String, Int32, String) -> Void
   typealias ResultSink = @MainActor (UInt64, UInt64, Int32, String, Data?) -> Void
   struct NativeClient {
-    let start: @MainActor (String, Data, @escaping EventSink) -> (Int32, UInt64)
+    // Metadata and pairing plist are separate, synchronously borrowed inputs.
+    let start: @MainActor (String, Data, Data, @escaping EventSink) -> (Int32, UInt64)
     let request: @MainActor (UInt64, UInt64, Data, @escaping ResultSink) -> Int32
     let cancel: @MainActor (UInt64, UInt64) -> Void
     let stop: @MainActor (UInt64) -> Void
@@ -266,19 +267,26 @@ final class IOSPhoneCoreDevice {
         self.setState(["phase": "failed", "code": "ERR_PHONE_CONFIGURATION"]); return
       }
       do {
-        let record = try self.pairing.load()
         let configuration: [String: Any] = [
           "runId": run.id, "host": "10.7.0.1", "port": servicePort,
-          "pairingBase64": record.base64EncodedString(), "allowDDIMount": allowDDIMount,
+          "allowDDIMount": allowDDIMount,
           "ddiCache": self.cache.nativeConfiguration(),
         ]
-        var encoded = try JSONSerialization.data(withJSONObject: configuration)
-        defer { let count = encoded.count; encoded.resetBytes(in: 0..<count) }
+        let encoded = try JSONSerialization.data(withJSONObject: configuration)
         guard encoded.count <= 96 * 1024 else { throw IOSPhonePairingError.tooLarge }
-        let (status, handle) = native.start(run.id, encoded) { [weak self, weak run] handle, id, kind, text in
-          guard let self, let run else { return }
-          self.receive(run, handle: handle, runID: id, kind: kind, text: text)
-        }
+        let (status, handle) = try { () throws -> (Int32, UInt64) in
+          let record = try self.pairing.load()
+          guard !record.isEmpty, record.count <= IOSPhonePairingRecord.maximumBytes else {
+            throw IOSPhonePairingError.tooLarge
+          }
+          // End this local hold at synchronous start. The store may deliberately
+          // share Data backing storage; resetBytes could first create a CoW copy
+          // and cannot promise to erase the retained session/Keychain record.
+          return native.start(run.id, encoded, record) { [weak self, weak run] handle, id, kind, text in
+            guard let self, let run else { return }
+            self.receive(run, handle: handle, runID: id, kind: kind, text: text)
+          }
+        }()
         if run.handle != 0, run.handle != handle {
           run.faulted = true; run.failure = .init(code: "ERR_PHONE_CORE_PROTOCOL")
         } else { run.handle = handle }
@@ -396,11 +404,14 @@ final class IOSPhoneCoreDevice {
     #if DSH_PHONE_SELF_RUNNER
     guard let identity = phoneCoreString(dsh_phone_core_build_identity(), limit: 128),
       identity == "dsh-phone-core:1;idevice=3854a5df4a5a6dee71ffce4d8befc2ea356a8065" else { return nil }
-    return NativeClient(start: { runID, data, callback in
+    return NativeClient(start: { runID, data, pairing, callback in
       eventCallbacks[runID] = callback
       var handle: UInt64 = 0
       let status = data.withUnsafeBytes { raw in
-        dsh_phone_core_start(raw.bindMemory(to: UInt8.self).baseAddress, raw.count, phoneCoreEventCallback, &handle)
+        pairing.withUnsafeBytes { record in
+          dsh_phone_core_start_bytes(raw.bindMemory(to: UInt8.self).baseAddress, raw.count,
+            record.bindMemory(to: UInt8.self).baseAddress, record.count, phoneCoreEventCallback, &handle)
+        }
       }
       if status != 0 { eventCallbacks.removeValue(forKey: runID) }
       return (status, handle)

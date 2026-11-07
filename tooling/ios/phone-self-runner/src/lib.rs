@@ -58,6 +58,31 @@ struct ConfigWire {
     allow_ddi_mount: bool,
 }
 
+/// The byte ABI has no inline pairing fields, including explicit null values.
+/// Keeping a separate strict wire type rejects them before parsing a secret
+/// String or accepting an ambiguous second source for the record.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct ByteConfigWire {
+    run_id: String,
+    host: String,
+    port: u16,
+    runner_bundle_id: String,
+    target_bundle_id: String,
+    public_key_base64: String,
+    ddi_cache: Option<ddi::DdiCache>,
+    #[serde(rename = "allowDDIMount", default)]
+    allow_ddi_mount: bool,
+}
+impl From<ByteConfigWire> for ConfigWire {
+    fn from(value: ByteConfigWire) -> Self {
+        Self { run_id: value.run_id, pairing_file: None, pairing_base64: None,
+            host: value.host, port: value.port, runner_bundle_id: value.runner_bundle_id,
+            target_bundle_id: value.target_bundle_id, public_key_base64: value.public_key_base64,
+            ddi_cache: value.ddi_cache, allow_ddi_mount: value.allow_ddi_mount }
+    }
+}
+
 struct Config {
     run_id: String,
     pairing: Option<pairing::PairingInput>,
@@ -76,6 +101,19 @@ impl Config {
             return None;
         }
         let value: ConfigWire = serde_json::from_slice(bytes).ok()?;
+        Self::from_wire(value, None)
+    }
+
+    fn parse_bytes(bytes: &[u8], pairing: &[u8]) -> Option<Self> {
+        if bytes.is_empty() || bytes.len() > MAX_CONFIG
+            || pairing.is_empty() || pairing.len() > pairing::MAX_PAIRING {
+            return None;
+        }
+        let value: ByteConfigWire = serde_json::from_slice(bytes).ok()?;
+        Self::from_wire(value.into(), Some(pairing))
+    }
+
+    fn from_wire(value: ConfigWire, pairing_bytes: Option<&[u8]>) -> Option<Self> {
         let host: IpAddr = value.host.parse().ok()?;
         let self_route = host.is_loopback() || value.host == "10.7.0.1";
         let bundle = |value: &str| {
@@ -101,7 +139,10 @@ impl Config {
         }
         Some(Self {
             run_id: value.run_id,
-            pairing: Some(pairing::PairingInput::parse(value.pairing_base64, value.pairing_file)?),
+            pairing: Some(match pairing_bytes {
+                Some(bytes) => pairing::PairingInput::from_bytes(bytes)?,
+                None => pairing::PairingInput::parse(value.pairing_base64, value.pairing_file)?,
+            }),
             host: value.host,
             port: value.port,
             runner_bundle_id: value.runner_bundle_id,
@@ -180,6 +221,29 @@ pub unsafe extern "C" fn dsh_phone_xctest_start(
     let Some(config) = Config::parse(unsafe { CStr::from_ptr(config_json) }.to_bytes()) else {
         return 0;
     };
+    start_xctest(config, callback)
+}
+
+/// Synchronously borrow two independent buffers. Pairing bytes are validated
+/// into the existing owned record before the original start machinery runs.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn dsh_phone_xctest_start_bytes(
+    config_json: *const u8, config_len: usize, pairing_plist: *const u8, pairing_len: usize,
+    callback: Option<Callback>,
+) -> u64 {
+    if config_json.is_null() || config_len == 0 || config_len > MAX_CONFIG
+        || pairing_plist.is_null() || pairing_len == 0 || pairing_len > pairing::MAX_PAIRING {
+        return 0;
+    }
+    let Some(callback) = callback else { return 0; };
+    let Some(config) = Config::parse_bytes(
+        unsafe { std::slice::from_raw_parts(config_json, config_len) },
+        unsafe { std::slice::from_raw_parts(pairing_plist, pairing_len) },
+    ) else { return 0; };
+    start_xctest(config, callback)
+}
+
+fn start_xctest(config: Config, callback: Callback) -> u64 {
     let Ok(mut slot) = owner().lock() else {
         return 0;
     };
@@ -558,6 +622,99 @@ mod tests {
         )
         .unwrap();
         serde_json::json!({"runId":"12345678-1234-4234-8234-123456789abc","pairingFile":"/nonexistent/dsh-remote-pairing.plist","host":"10.7.0.1","port":49152,"runnerBundleId":"example.dsh.PhoneRunner.xctrunner","targetBundleId":"example.dsh","publicKeyBase64":STANDARD.encode(key.to_pkcs1_der().unwrap().as_bytes())})
+    }
+    fn byte_config() -> Vec<u8> {
+        let mut value = config();
+        value.as_object_mut().unwrap().remove("pairingFile");
+        serde_json::to_vec(&value).unwrap()
+    }
+    extern "C" fn stop_byte_start(run_id: *const c_char, kind: i32, payload: *const c_char) {
+        if kind == 0 {
+            let handle = owner().lock().unwrap().as_ref().unwrap().handle;
+            dsh_phone_xctest_stop(handle);
+        }
+        record(run_id, kind, payload);
+    }
+    #[test]
+    fn w31_pairing_bytes_xctest_strict_json_and_legacy_compatibility() {
+        let pairing = idevice::remote_pairing::RpPairingFile::generate("w31-byte-fixture.invalid").to_bytes();
+        let bytes = byte_config();
+        assert!(Config::parse_bytes(&bytes, &pairing).is_some());
+        assert!(Config::parse(&bytes).is_none());
+        for field in ["pairingBase64", "pairingFile", "private_key", "unknown"] {
+            for value in [serde_json::Value::Null, serde_json::json!("synthetic-inline-value")] {
+                let mut metadata: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+                metadata[field] = value;
+                pairing::take_clear_events();
+                assert!(Config::parse_bytes(&serde_json::to_vec(&metadata).unwrap(), &pairing).is_none());
+                // The forbidden JSON value never becomes a SecretString or key.
+                assert!(pairing::take_clear_events().is_empty());
+            }
+        }
+        let duplicate = format!("{{\"runId\":\"12345678-1234-4234-8234-123456789abc\",{}",
+            std::str::from_utf8(&bytes[1..]).unwrap());
+        assert!(Config::parse_bytes(duplicate.as_bytes(), &pairing).is_none());
+        assert!(Config::parse_bytes(&bytes[..bytes.len() - 1], &pairing).is_none());
+        let mut legacy: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        legacy["pairingBase64"] = STANDARD.encode(&pairing).into();
+        assert!(Config::parse(&serde_json::to_vec(&legacy).unwrap()).is_some());
+        assert!(Config::parse(&serde_json::to_vec(&config()).unwrap()).is_some());
+    }
+    #[test]
+    fn w31_pairing_bytes_xctest_rejections_are_unaccepted_and_callback_free() {
+        let _guard = TEST_LOCK.lock().unwrap();
+        EVENTS.0.lock().unwrap().clear();
+        assert!(owner().lock().unwrap().is_none());
+        let bytes = byte_config();
+        let pairing = idevice::remote_pairing::RpPairingFile::generate("w31-byte-fixture.invalid").to_bytes();
+        let large_config = vec![0; MAX_CONFIG + 1];
+        let large_pairing = vec![0; pairing::MAX_PAIRING + 1];
+        for (config, config_len, plist, plist_len, callback) in [
+            (std::ptr::null(), 1, pairing.as_ptr(), pairing.len(), Some(stop_byte_start as Callback)),
+            (bytes.as_ptr(), 0, pairing.as_ptr(), pairing.len(), Some(stop_byte_start as Callback)),
+            (large_config.as_ptr(), large_config.len(), pairing.as_ptr(), pairing.len(), Some(stop_byte_start as Callback)),
+            (bytes.as_ptr(), bytes.len(), std::ptr::null(), 1, Some(stop_byte_start as Callback)),
+            (bytes.as_ptr(), bytes.len(), pairing.as_ptr(), 0, Some(stop_byte_start as Callback)),
+            (bytes.as_ptr(), bytes.len(), large_pairing.as_ptr(), large_pairing.len(), Some(stop_byte_start as Callback)),
+            (bytes.as_ptr(), bytes.len(), b"invalid".as_ptr(), 7, Some(stop_byte_start as Callback)),
+            (bytes.as_ptr(), bytes.len(), pairing.as_ptr(), pairing.len(), None),
+        ] {
+            assert_eq!(unsafe { dsh_phone_xctest_start_bytes(config, config_len, plist, plist_len, callback) }, 0);
+        }
+        let mut bad_json = vec![b"{}".to_vec(), vec![0xff], bytes[..bytes.len() - 1].to_vec()];
+        for field in ["pairingBase64", "pairingFile", "unknown"] {
+            let mut value: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+            value[field] = serde_json::Value::Null;
+            bad_json.push(serde_json::to_vec(&value).unwrap());
+        }
+        for metadata in bad_json {
+            assert_eq!(unsafe { dsh_phone_xctest_start_bytes(metadata.as_ptr(), metadata.len(), pairing.as_ptr(), pairing.len(), Some(stop_byte_start)) }, 0);
+        }
+        let (stop, _) = watch::channel(false);
+        *owner().lock().unwrap() = Some(Owner { handle: 612, stop,
+            cancelled: Arc::new(AtomicBool::new(false)), core: None });
+        pairing::take_clear_events();
+        assert_eq!(unsafe { dsh_phone_xctest_start_bytes(bytes.as_ptr(), bytes.len(), pairing.as_ptr(), pairing.len(), Some(stop_byte_start)) }, 0);
+        assert!(pairing::take_clear_events().contains(&("record", true)));
+        assert_eq!(owner().lock().unwrap().as_ref().unwrap().handle, 612);
+        *owner().lock().unwrap() = None;
+        assert!(EVENTS.0.lock().unwrap().is_empty());
+    }
+    #[test]
+    fn w31_pairing_bytes_xctest_start_preserves_preconnection_cancel() {
+        let _guard = TEST_LOCK.lock().unwrap();
+        EVENTS.0.lock().unwrap().clear();
+        let bytes = byte_config();
+        let mut pairing = idevice::remote_pairing::RpPairingFile::generate("w31-byte-fixture.invalid").to_bytes();
+        let handle = unsafe { dsh_phone_xctest_start_bytes(bytes.as_ptr(), bytes.len(), pairing.as_ptr(), pairing.len(), Some(stop_byte_start)) };
+        assert_ne!(handle, 0);
+        zeroize::Zeroize::zeroize(&mut pairing);
+        drop(pairing);
+        let events = EVENTS.0.lock().unwrap();
+        let (events, timeout) = EVENTS.1.wait_timeout_while(events, Duration::from_secs(5), |events| !events.iter().any(|event| event.1 >= 2)).unwrap();
+        assert!(!timeout.timed_out());
+        assert_eq!(events.iter().map(|event| event.1).collect::<Vec<_>>(), vec![0, 2]);
+        assert!(owner().lock().unwrap().is_none());
     }
     #[test]
     fn w31_pairing_xctest_failed_json_clears_parsed_secret() {

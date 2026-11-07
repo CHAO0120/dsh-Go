@@ -29,6 +29,18 @@ typedef void (*dsh_phone_xctest_callback)(const char *run_id, int32_t kind,
 uint64_t dsh_phone_xctest_start(const char *config_json,
                                dsh_phone_xctest_callback callback);
 
+/* Preferred in-memory input. Both buffers are borrowed read-only until return,
+ * must describe valid readable memory, and are never retained or mutated.
+ * config_json is UTF-8 JSON of 1..96 KiB without pairingBase64 or pairingFile;
+ * either key, even null, is rejected. pairing_plist is 1..65536 raw plist bytes.
+ * Validation completes synchronously into an owned native record. It is not a
+ * promise to erase caller/Swift/Keychain/parser copies. Return/callback semantics
+ * match dsh_phone_xctest_start; zero means not accepted and no callback.
+ * The original JSON ABI remains available for existing callers.
+ */
+uint64_t dsh_phone_xctest_start_bytes(const uint8_t *config_json, size_t config_len,
+    const uint8_t *pairing_plist, size_t pairing_len, dsh_phone_xctest_callback callback);
+
 /* Idempotent and nonblocking. A stale handle cannot stop a newer session.
  * A stopping session still owns the singleton slot until terminal delivery.
  * A faulted/unconfirmed session keeps the slot poisoned until app restart.
@@ -75,6 +87,14 @@ const char *dsh_phone_core_build_identity(void);
  * handle_out is set to zero on failure; invalid memory remains caller UB.
  */
 int32_t dsh_phone_core_start(const uint8_t *config_json, size_t config_len,
+    dsh_phone_core_event_callback callback, uint64_t *handle_out);
+/* Same independent-buffer contract as dsh_phone_xctest_start_bytes and the
+ * same status/handle/callback contract as dsh_phone_core_start. A length above
+ * either limit returns 7; invalid/null/empty inputs return 1. Rejected starts
+ * leave handle_out zero and have no callback. The old JSON ABI is unchanged.
+ */
+int32_t dsh_phone_core_start_bytes(const uint8_t *config_json, size_t config_len,
+    const uint8_t *pairing_plist, size_t pairing_len,
     dsh_phone_core_event_callback callback, uint64_t *handle_out);
 int32_t dsh_phone_core_request(uint64_t handle, uint64_t request_id,
     const uint8_t *request_json, size_t request_len,

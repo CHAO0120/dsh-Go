@@ -74,6 +74,12 @@ pub(crate) enum PairingInput {
 }
 
 impl PairingInput {
+    /// Borrow only for synchronous validation. The typed record owns the key
+    /// fields; no raw plist, base64 or caller pointer is retained.
+    pub(crate) fn from_bytes(bytes: &[u8]) -> Option<Self> {
+        Some(Self::Memory(validate(bytes).ok()?))
+    }
+
     pub(crate) fn parse(base64: Option<SecretString>, file: Option<String>) -> Option<Self> {
         match (base64, file) {
             (Some(encoded), None) => {
@@ -189,6 +195,45 @@ mod tests {
         let mut result = Vec::new();
         plist::to_writer_binary(&mut result, &dictionary).unwrap();
         result
+    }
+
+    #[tokio::test]
+    async fn w31_pairing_bytes_borrow_ends_after_one_validation() {
+        let generated = RpPairingFile::generate("w31-byte-fixture.invalid");
+        let expected_public = generated.e_public_key.to_bytes();
+        let mut source = generated.to_bytes();
+        VALIDATIONS.with(|count| count.set(0));
+        let input = PairingInput::from_bytes(&source).unwrap();
+        assert_eq!(VALIDATIONS.with(|count| count.get()), 1);
+        source.zeroize();
+        drop(source);
+        let record = input.load().await.unwrap();
+        assert_eq!(VALIDATIONS.with(|count| count.get()), 1);
+        assert_eq!(record.e_public_key.to_bytes(), expected_public);
+        assert_eq!(record.e_private_key.verifying_key(), record.e_public_key);
+        take_clear_events();
+        drop(record);
+        assert_eq!(take_clear_events(), vec![("record", true)]);
+    }
+
+    #[test]
+    fn w31_pairing_bytes_boundaries_and_partial_errors_release_owned_fields() {
+        assert!(PairingInput::from_bytes(&[]).is_none());
+        assert!(PairingInput::from_bytes(&vec![0; MAX_PAIRING + 1]).is_none());
+        take_clear_events();
+        let malformed = b"<?xml version=\"1.0\"?><plist version=\"1.0\"><dict><key>private_key</key><data>AQIDBA==</data><key>unknown</key><true/></dict></plist>";
+        assert!(PairingInput::from_bytes(malformed).is_none());
+        let events = take_clear_events();
+        assert!(events.contains(&("data", true)));
+        assert!(events.iter().all(|(_, cleared)| *cleared));
+
+        let value: plist::Value = plist::from_bytes(&bytes()).unwrap();
+        let mut maximum = Vec::new();
+        plist::to_writer_xml(&mut maximum, &value).unwrap();
+        maximum.resize(MAX_PAIRING, b' ');
+        assert!(PairingInput::from_bytes(&maximum).is_some());
+        maximum.push(b' ');
+        assert!(PairingInput::from_bytes(&maximum).is_none());
     }
 
     #[tokio::test]

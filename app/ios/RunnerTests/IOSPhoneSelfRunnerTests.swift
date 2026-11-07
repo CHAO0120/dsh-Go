@@ -1,4 +1,5 @@
 import Foundation
+import CryptoKit
 import XCTest
 @testable import Runner
 
@@ -21,10 +22,11 @@ final class IOSPhoneSelfRunnerTests: XCTestCase {
     var callbacks: [IOSPhoneSelfRunner.EventSink] = []
     var stops: [UInt64] = []
     var rejectStart = false
+    var inspectStart: ((Data, Data?) -> Void)?
 
     var client: IOSPhoneSelfRunner.NativeClient {
-      IOSPhoneSelfRunner.NativeClient(start: { [self] _, text, callback in
-        let data = Data(text.utf8)
+      IOSPhoneSelfRunner.NativeClient(start: { [self] _, data, pairing, callback in
+        inspectStart?(data, pairing)
         guard let config = try? JSONDecoder().decode(Config.self, from: data),
           let dictionary = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return 0 }
         configurations.append(config)
@@ -50,7 +52,9 @@ final class IOSPhoneSelfRunnerTests: XCTestCase {
   private func fixture(recorder: Recorder, timeout: TimeInterval = 5,
                        resolvePort: @escaping () async -> UInt16 = { 49152 },
                        configuredPort: UInt16? = 49152,
-                       now: @escaping () -> Date = Date.init) throws -> IOSPhoneSelfRunner {
+                       now: @escaping () -> Date = Date.init,
+                       pairingData: (() throws -> Data)? = nil,
+                       pairingAvailable: (() -> Bool)? = nil) throws -> IOSPhoneSelfRunner {
     let directory = FileManager.default.temporaryDirectory.appendingPathComponent("self-runner-" + UUID().uuidString)
     try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false)
     let pairing = directory.appendingPathComponent("pairingFile.plist")
@@ -58,7 +62,8 @@ final class IOSPhoneSelfRunnerTests: XCTestCase {
     addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
     return IOSPhoneSelfRunner(native: recorder.client, pairingURL: pairing,
       runnerBundleId: "test.dsh.PhoneRunner.xctrunner", targetBundleId: "test.dsh",
-      configuredPort: configuredPort, startupTimeout: timeout, stopTimeout: 5, resolvePort: resolvePort, now: now)
+      configuredPort: configuredPort, startupTimeout: timeout, stopTimeout: 5, resolvePort: resolvePort, now: now,
+      pairingData: pairingData, pairingAvailable: pairingAvailable)
   }
 
   private func wait(until predicate: () -> Bool) async throws {
@@ -90,6 +95,67 @@ final class IOSPhoneSelfRunnerTests: XCTestCase {
     XCTAssertEqual(native.stops, [1])
     native.stopped()
     XCTAssertTrue(owner.mayUseMacFallback)
+  }
+
+  func testMemoryStartupBorrowsSeparateBytesAndStatusDoesNotLoadTheRecord() async throws {
+    let key = Curve25519.Signing.PrivateKey()
+    let record = try PropertyListSerialization.data(fromPropertyList: [
+      "private_key": key.rawRepresentation, "public_key": key.publicKey.rawRepresentation,
+      "identifier": "synthetic-byte-abi-only",
+    ], format: .binary, options: 0)
+    let native = Recorder()
+    native.rejectStart = true
+    var inspected = false
+    native.inspectStart = { data, pairing in
+      // Only fresh synthetic bytes are compared; no credential bytes are used
+      // as assertion messages or copied into recorded launch metadata.
+      XCTAssertTrue(pairing == record, "separate byte input changed")
+      let metadata = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+      XCTAssertEqual(Set(metadata?.keys.map { $0 } ?? []), Set([
+        "runId", "host", "port", "runnerBundleId", "targetBundleId", "publicKeyBase64",
+      ]))
+      inspected = true
+    }
+    var loads = 0
+    var available = true
+    let owner = try fixture(recorder: native,
+      pairingData: { loads += 1; return record }, pairingAvailable: { available })
+    for _ in 0..<8 { XCTAssertTrue(owner.isConfigured) }
+    XCTAssertEqual(loads, 0)
+    available = false
+    XCTAssertFalse(owner.isConfigured)
+    XCTAssertEqual(loads, 0)
+    available = true
+    let result = await owner.prepare(current: { true })
+    if case .failure(.failed) = result {} else { XCTFail("recording rejection was ignored") }
+    XCTAssertTrue(inspected)
+    XCTAssertEqual(loads, 1)
+    XCTAssertEqual(native.configurations.count, 1)
+    XCTAssertTrue(owner.isConfigured)
+    XCTAssertEqual(loads, 1)
+  }
+
+  func testMemoryStartupRejectsEmptyOrOversizedBytesBeforeNativeAdmission() async throws {
+    for count in [0, IOSPhonePairingRecord.maximumBytes + 1] {
+      let native = Recorder()
+      let owner = try fixture(recorder: native,
+        pairingData: { Data(repeating: 0, count: count) }, pairingAvailable: { true })
+      let result = await owner.prepare(current: { true })
+      if case .failure(.setup) = result {} else { XCTFail("invalid byte input reached native admission") }
+      XCTAssertTrue(native.configurations.isEmpty)
+      XCTAssertTrue(native.stops.isEmpty)
+    }
+  }
+
+  func testUnavailableMemoryRecordNeverLoadsPrivateBytes() async throws {
+    let native = Recorder()
+    var loads = 0
+    let owner = try fixture(recorder: native,
+      pairingData: { loads += 1; throw IOSPhonePairingError.missing }, pairingAvailable: { false })
+    let result = await owner.prepare(current: { true })
+    if case .failure(.setup) = result {} else { XCTFail("unavailable record started preparation") }
+    XCTAssertEqual(loads, 0)
+    XCTAssertTrue(native.configurations.isEmpty)
   }
 
   func testConcurrentWaitersShareStartupAndOneCancellationDoesNotStopTheOther() async throws {
