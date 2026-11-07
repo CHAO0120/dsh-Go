@@ -230,7 +230,7 @@ jobs:
           import { join, resolve } from 'node:path';
           const root = await mkdtemp(join(tmpdir(), 'workspace-dispose-error-raw-'));
           const temporary = join(root, 'tmp'); await mkdir(temporary);
-          const child = fork(resolve('runtime/tests/fixtures/workspace-dispose-error.mjs'), [], { env: { ...process.env, TMPDIR: temporary, TMP: temporary, TEMP: temporary, WORKSPACE_DISPOSE_FIXTURE: root }, stdio: ['ignore', 'pipe', 'pipe', 'ipc'] });
+          const child = fork(resolve('runtime/tests/fixtures/workspace-dispose-error.mjs'), [], { env: { ...process.env, TMPDIR: temporary, TMP: temporary, TEMP: temporary, WORKSPACE_DISPOSE_FIXTURE: root }, stdio: ['ignore', 'pipe', 'pipe', 'ipc'], execArgv: [] });
           let out = '', err = '', msg;
           child.stdout.on('data', c => { out += c; });
           child.stderr.on('data', c => { err += c; });
