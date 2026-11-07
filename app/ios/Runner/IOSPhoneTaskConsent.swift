@@ -2,6 +2,43 @@ import Foundation
 import UIKit
 import UserNotifications
 
+/// A bounded transition delay, not a claim that screenshot pixels are stable.
+/// It owns no screen observation and never grants or dispatches a phone action.
+struct IOSPhoneTargetWait {
+  enum Decision: Equatable { case waiting, ready, refused }
+  private let deadline: TimeInterval
+  private var lastSample: TimeInterval
+  private var backgroundStarted: TimeInterval?
+  private var keepingAliveSince: TimeInterval?
+
+  init?(start: TimeInterval?, requestRemaining: TimeInterval) {
+    guard let start, start.isFinite, requestRemaining.isFinite, requestRemaining > 0 else { return nil }
+    let deadline = start + min(45, requestRemaining)
+    guard deadline.isFinite, deadline > start else { return nil }
+    self.deadline = deadline; lastSample = start
+  }
+
+  mutating func sample(now: TimeInterval?, background: Bool, protectedDataAvailable: Bool,
+                       eligible: Bool, keepingAlive: Bool) -> Decision {
+    guard let now, now.isFinite, now >= lastSample, now < deadline,
+      protectedDataAvailable, eligible else { return .refused }
+    lastSample = now
+    guard background else {
+      // Once the user has left, returning to this app cancels this admission.
+      return backgroundStarted == nil ? .waiting : .refused
+    }
+    if backgroundStarted == nil { backgroundStarted = now }
+    if let since = keepingAliveSince {
+      guard keepingAlive else { return .refused }
+      return now - since >= 0.75 ? .ready : .waiting
+    }
+    // Preserve the existing three-second opportunity for automatic PiP startup.
+    guard let started = backgroundStarted, now - started < 3 else { return .refused }
+    if keepingAlive { keepingAliveSince = now }
+    return .waiting
+  }
+}
+
 /// A thirty-minute task grant and a new native button tap for every tool call.
 /// Neither a notification, a model result, nor the general approval service can
 /// supply the per-call answer. Only IOSPhoneActions' current native sheet can.
@@ -90,26 +127,25 @@ final class IOSPhoneTaskConsent {
   /// A protected-data lock or an actual loss of PiP stops admission immediately.
   func waitForTarget(_ request: IOSPhoneRequest, current: () -> Bool) async -> Bool {
     let operation = generation
-    let deadline = min(Date().addingTimeInterval(45), Date(timeIntervalSince1970: request.expiresAt / 1000))
-    while !Task.isCancelled, current(), generation == operation, isGranted,
-      Date() < deadline, UIApplication.shared.isProtectedDataAvailable {
-      if UIApplication.shared.applicationState == .background {
-        // Give the system's automatic PiP transition a bounded opportunity to
-        // complete, but never infer keep-alive merely from a configured source.
-        let pipDeadline = min(Date().addingTimeInterval(3), deadline)
-        while Date() < pipDeadline, !IOSPetOverlay.shared.isKeepingAlive,
-          !Task.isCancelled, current(), generation == operation,
-          UIApplication.shared.applicationState == .background,
-          UIApplication.shared.isProtectedDataAvailable {
-          do { try await Task.sleep(nanoseconds: 50_000_000) } catch { return false }
-        }
-        return current() && generation == operation && isGranted && !Task.isCancelled
-          && UIApplication.shared.applicationState == .background
-          && UIApplication.shared.isProtectedDataAvailable && IOSPetOverlay.shared.isKeepingAlive
+    guard var wait = IOSPhoneTargetWait(start: now(),
+      requestRemaining: request.expiresAt / 1000 - Date().timeIntervalSince1970) else { return false }
+    while true {
+      let background = UIApplication.shared.applicationState == .background
+      let eligible = !Task.isCancelled && current() && generation == operation && isGranted
+        && request.expiresAt > Date().timeIntervalSince1970 * 1000
+      let decision = wait.sample(now: now(), background: background,
+        protectedDataAvailable: UIApplication.shared.isProtectedDataAvailable,
+        eligible: eligible, keepingAlive: background && IOSPetOverlay.shared.isKeepingAlive)
+      switch decision {
+      case .refused: return false
+      case .ready:
+        // Core/XCTest must still capture and validate a fresh frame after this
+        // delay. Do not consume or replace the approved observation here.
+        return true
+      case .waiting:
+        do { try await Task.sleep(nanoseconds: 50_000_000) } catch { return false }
       }
-      do { try await Task.sleep(nanoseconds: 100_000_000) } catch { return false }
     }
-    return false
   }
 
   private var foreground: Bool {

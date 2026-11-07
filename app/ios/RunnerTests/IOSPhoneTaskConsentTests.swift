@@ -257,6 +257,97 @@ final class IOSPhoneTaskConsentTests: XCTestCase {
     return operation
   }
 
+  func testTargetWaitDoesNotCountForegroundTimeOrReturnOnTheFirstBackgroundSample() throws {
+    var wait = try XCTUnwrap(Runner.IOSPhoneTargetWait(start: 100, requestRemaining: 60))
+    XCTAssertEqual(wait.sample(now: 100, background: false, protectedDataAvailable: true,
+      eligible: true, keepingAlive: true), .waiting)
+    XCTAssertEqual(wait.sample(now: 120, background: false, protectedDataAvailable: true,
+      eligible: true, keepingAlive: true), .waiting)
+    XCTAssertEqual(wait.sample(now: 130, background: true, protectedDataAvailable: true,
+      eligible: true, keepingAlive: true), .waiting)
+    XCTAssertEqual(wait.sample(now: 130.749, background: true, protectedDataAvailable: true,
+      eligible: true, keepingAlive: true), .waiting)
+    XCTAssertEqual(wait.sample(now: 130.75, background: true, protectedDataAvailable: true,
+      eligible: true, keepingAlive: true), .ready)
+  }
+
+  func testTargetWaitStartsItsDelayOnlyAfterActualPiPKeepAlive() throws {
+    var wait = try XCTUnwrap(Runner.IOSPhoneTargetWait(start: 100, requestRemaining: 60))
+    XCTAssertEqual(wait.sample(now: 100, background: true, protectedDataAvailable: true,
+      eligible: true, keepingAlive: false), .waiting)
+    XCTAssertEqual(wait.sample(now: 102.5, background: true, protectedDataAvailable: true,
+      eligible: true, keepingAlive: true), .waiting)
+    XCTAssertEqual(wait.sample(now: 103.249, background: true, protectedDataAvailable: true,
+      eligible: true, keepingAlive: true), .waiting)
+    XCTAssertEqual(wait.sample(now: 103.25, background: true, protectedDataAvailable: true,
+      eligible: true, keepingAlive: true), .ready)
+  }
+
+  func testTargetWaitRefusesPiPStartupAtItsExactDeadline() throws {
+    for keepingAlive in [false, true] {
+      var wait = try XCTUnwrap(Runner.IOSPhoneTargetWait(start: 100, requestRemaining: 60))
+      XCTAssertEqual(wait.sample(now: 100, background: true, protectedDataAvailable: true,
+        eligible: true, keepingAlive: false), .waiting)
+      XCTAssertEqual(wait.sample(now: 103, background: true, protectedDataAvailable: true,
+        eligible: true, keepingAlive: keepingAlive), .refused)
+    }
+  }
+
+  func testTargetWaitAbortsOnForegroundLockLostPiPOrRetiredEligibility() throws {
+    let conditions = [(false, true, true, true), (true, false, true, true),
+      (true, true, false, true), (true, true, true, false)]
+    for (background, protectedData, eligible, pip) in conditions {
+      var wait = try XCTUnwrap(Runner.IOSPhoneTargetWait(start: 100, requestRemaining: 60))
+      XCTAssertEqual(wait.sample(now: 100, background: true, protectedDataAvailable: true,
+        eligible: true, keepingAlive: true), .waiting)
+      XCTAssertEqual(wait.sample(now: 100.8, background: background,
+        protectedDataAvailable: protectedData, eligible: eligible, keepingAlive: pip), .refused)
+    }
+  }
+
+  func testTargetWaitCannotExtendEitherRequestExpiryOrTheOriginalFortyFiveSeconds() throws {
+    for budget in [0.5, 45.0, 600.0] {
+      var wait = try XCTUnwrap(Runner.IOSPhoneTargetWait(start: 100, requestRemaining: budget))
+      XCTAssertEqual(wait.sample(now: 100, background: true, protectedDataAvailable: true,
+        eligible: true, keepingAlive: true), .waiting)
+      XCTAssertEqual(wait.sample(now: 100 + min(45, budget), background: true,
+        protectedDataAvailable: true, eligible: true, keepingAlive: true), .refused)
+    }
+  }
+
+  func testTargetWaitRejectsUnavailableNonfiniteAndBackwardContinuousTime() throws {
+    let invalid: [TimeInterval?] = [nil, TimeInterval.nan, TimeInterval.infinity,
+      -TimeInterval.infinity, 99]
+    for time in invalid {
+      var wait = try XCTUnwrap(Runner.IOSPhoneTargetWait(start: 100, requestRemaining: 60))
+      XCTAssertEqual(wait.sample(now: 100, background: true, protectedDataAvailable: true,
+        eligible: true, keepingAlive: true), .waiting)
+      XCTAssertEqual(wait.sample(now: time, background: true, protectedDataAvailable: true,
+        eligible: true, keepingAlive: true), .refused)
+    }
+    let invalidStarts: [TimeInterval?] = [nil, TimeInterval.nan, TimeInterval.infinity,
+      -TimeInterval.infinity]
+    for time in invalidStarts {
+      XCTAssertNil(Runner.IOSPhoneTargetWait(start: time, requestRemaining: 60))
+    }
+    for remaining in [0.0, -1, TimeInterval.nan, TimeInterval.infinity] {
+      XCTAssertNil(Runner.IOSPhoneTargetWait(start: 100, requestRemaining: remaining))
+    }
+  }
+
+  func testEachTargetReturnStartsANewDelayIncludingTheClipboardRoundTrip() throws {
+    var first = try XCTUnwrap(Runner.IOSPhoneTargetWait(start: 100, requestRemaining: 60))
+    _ = first.sample(now: 100, background: true, protectedDataAvailable: true,
+      eligible: true, keepingAlive: true)
+    XCTAssertEqual(first.sample(now: 100.75, background: true, protectedDataAvailable: true,
+      eligible: true, keepingAlive: true), .ready)
+    var next = try XCTUnwrap(Runner.IOSPhoneTargetWait(start: 101, requestRemaining: 59))
+    XCTAssertEqual(next.sample(now: 101, background: true, protectedDataAvailable: true,
+      eligible: true, keepingAlive: true), .waiting)
+    XCTAssertEqual(next.sample(now: 101.75, background: true, protectedDataAvailable: true,
+      eligible: true, keepingAlive: true), .ready)
+  }
+
   func testInitialApprovalNeedsTaskGrantThenSeparateCallSheet() async throws {
     try await withFixture { fixture in
       let operation = try self.start(fixture)
