@@ -1,0 +1,15 @@
+{
+  "base_commit": "3a91fab9e80d2a92be071a74b8b208214d7e6277",
+  "base_pins_git_blob": "a22f01d4735512d88ee094545781b4f821c2c8a0",
+  "base_pins_canonical_sha256": "4c1603fedb30379526e66a83dcf2c34016fab0f79e7edd88f3a95d1fbfdeb918",
+  "new_patches": {
+    "zzzzzzzz-glob-null-path-framing.diff": {
+      "0.2.2-rc.1": {
+        "node_modules/@deepseek-ai/dsh-tool-fs-search/lib/index.js": {
+          "before": "0429499bcac92b481d769dbe2164bb48c08bcd215df0dd6195d44699d2d258ce",
+          "after": "8f69f973a0c1f0e0df0b959e5c63760ae5296992fefb01f34b20afca3e2db88c"
+        }
+      }
+    }
+  }
+}
