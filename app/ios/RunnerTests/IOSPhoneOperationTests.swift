@@ -391,4 +391,185 @@ final class IOSPhoneOperationTests: XCTestCase {
     let open = try plan("open", ["app": "test.synthetic.app"])
     XCTAssertTrue(open.consentDescription(targetLabel: nil).contains("不代表应用已到前台"))
   }
+
+  func testListedInvisibleScalarsRefuseTheWholeTextBeforeExecution() throws {
+    var points = [0x00ad, 0xfeff, 0x2800, 0x3164]
+    points += Array(0x200b...0x200d)
+    points += Array(0x2060...0x2064)
+    points += Array(0xfff9...0xfffb)
+    points += Array(0xe0000...0xe007f)
+    for point in points {
+      let scalar = try XCTUnwrap(UnicodeScalar(point))
+      XCTAssertThrowsError(try type("safe" + String(scalar) + "suffix"))
+      // The same invisible character cannot hide a separator inside a code.
+      XCTAssertThrowsError(try type("123" + String(scalar) + "456"))
+    }
+    XCTAssertThrowsError(try type("👩\u{200d}💻"))
+    XCTAssertThrowsError(try type("safe\u{200c}suffix"))
+  }
+
+  func testFormatControlsBeyondTheReportedExamplesAreAlsoRefused() throws {
+    // Representative Cf values include the newer Egyptian format controls.
+    // The fixed table is needed even when a system Unicode database is older.
+    let points = [0x0600, 0x0605, 0x06dd, 0x070f, 0x0890, 0x0891, 0x08e2,
+                  0x180e, 0x206a, 0x206f, 0x110bd, 0x110cd, 0x13430, 0x13439,
+                  0x1343f, 0x1bca0, 0x1bca3, 0x1d173, 0x1d17a]
+    for point in points {
+      let scalar = try XCTUnwrap(UnicodeScalar(point))
+      XCTAssertThrowsError(try type("prefix" + String(scalar) + "suffix"))
+    }
+  }
+
+  func testEveryStringParameterRejectsInvisibleFormattingWithoutRewriting() throws {
+    let fields: [(String, [String: Any], String)] = [
+      ("apps", [:], "query"), ("open", [:], "app"),
+      ("tap", ["id": 1], "screen"), ("tap_xy", ["x": 0, "y": 0], "observation"),
+      ("type", ["id": 1, "text": "synthetic"], "screen"),
+      ("scroll", ["direction": "down"], "screen"),
+      ("collect", ["list": 1], "screen"),
+      ("collect", ["screen": "s1", "list": 1], "until"),
+      ("key", ["key": "home"], "screen"),
+    ]
+    for (method, base, field) in fields {
+      for point in [0x200b, 0x200d, 0x2060, 0xfeff, 0x00ad, 0xfffa,
+                    0xe0000, 0xe007f, 0x3164, 0x2800, 0x1343f] {
+        var parameters = base
+        parameters[field] = "A" + String(try XCTUnwrap(UnicodeScalar(point))) + "B"
+        XCTAssertThrowsError(try plan(method, parameters))
+      }
+    }
+  }
+
+  func testOCRInvisibleLabelsUseVisibleEscapesWithinTheirQuotedField() throws {
+    let cases: [(String, String)] = [
+      ("\u{200b}", "\\u200B"), ("\u{200c}", "\\u200C"), ("\u{200d}", "\\u200D"),
+      ("\u{2060}", "\\u2060"), ("\u{2064}", "\\u2064"),
+      ("\u{feff}", "\\uFEFF"), ("\u{00ad}", "\\u00AD"),
+      ("\u{fff9}", "\\uFFF9"), ("\u{fffb}", "\\uFFFB"),
+      ("\u{3164}", "\\u3164"), ("\u{2800}", "\\u2800"),
+      ("\u{e0000}", "\\u{E0000}"), ("\u{e007f}", "\\u{E007F}"),
+      ("\u{1343f}", "\\u{1343F}"),
+    ]
+    let value = try plan("tap", ["screen": "s1", "id": 1])
+    for (raw, visible) in cases {
+      let description = value.consentDescription(targetLabel: "A" + raw + "B")
+      XCTAssertTrue(description.hasSuffix("上次观察中的目标：\"A" + visible + "B\""))
+      XCTAssertFalse(description.contains(raw))
+      XCTAssertEqual(description.filter { $0 == "\n" }.count, 1)
+    }
+  }
+
+  func testUnicodeQuotationShapesAreEscapedWithoutChangingExecutionBytes() throws {
+    let cases: [(String, String)] = [
+      ("«", "\\u00AB"), ("»", "\\u00BB"),
+      ("‘", "\\u2018"), ("’", "\\u2019"), ("‚", "\\u201A"), ("‛", "\\u201B"),
+      ("“", "\\u201C"), ("”", "\\u201D"), ("„", "\\u201E"), ("‟", "\\u201F"),
+      ("‹", "\\u2039"), ("›", "\\u203A"),
+      ("「", "\\u300C"), ("」", "\\u300D"), ("『", "\\u300E"), ("』", "\\u300F"),
+      ("〝", "\\u301D"), ("〞", "\\u301E"), ("〟", "\\u301F"),
+      ("＂", "\\uFF02"), ("＇", "\\uFF07"), ("｢", "\\uFF62"), ("｣", "\\uFF63"),
+      ("ʹ", "\\u02B9"), ("″", "\\u2033"), ("‷", "\\u2037"), ("〃", "\\u3003"),
+      ("❟", "\\u275F"), ("❠", "\\u2760"), ("❮", "\\u276E"), ("❯", "\\u276F"),
+      ("\u{1f676}", "\\u{1F676}"), ("\u{1f678}", "\\u{1F678}"),
+      ("\u{055b}", "\\u055B"), ("\u{2cff}", "\\u2CFF"),
+      ("\u{a78b}", "\\uA78B"), ("\u{1e94b}", "\\u{1E94B}"),
+      ("\u{0374}", "\\u0374"), ("\u{1fef}", "\\u1FEF"), ("\u{1ffd}", "\\u1FFD"),
+    ]
+    for (quote, escaped) in cases {
+      let raw = "A" + quote + "B"
+      let expected = "\"A" + escaped + "B\""
+      let input = try type(raw)
+      let stored = try XCTUnwrap(input.text)
+      XCTAssertEqual(Array(stored.utf8), Array(raw.utf8))
+      let description = input.consentDescription(targetLabel: raw)
+      XCTAssertTrue(description.contains("\n" + expected))
+      XCTAssertTrue(description.contains("上次观察中的目标：" + expected))
+      XCTAssertFalse(description.contains(quote))
+      let open = try plan("open", ["app": raw])
+      let storedApp = try XCTUnwrap(open.parameters["app"] as? String)
+      XCTAssertEqual(Array(storedApp.utf8), Array(raw.utf8))
+      XCTAssertTrue(open.consentDescription(targetLabel: nil).hasPrefix("打开应用：" + expected + "。"))
+    }
+  }
+
+  func testASCIIQuotesAndLiteralEscapeSequencesHaveDistinctVisibleRepresentations() throws {
+    let raw = "O'Reilly \u{0060}code\u{0060} \"word\" \\u200B"
+    let expected = #""O\'Reilly \`code\` \"word\" \\u200B""#
+    let value = try type(raw)
+    XCTAssertTrue(value.consentDescription(targetLabel: nil).contains("\n" + expected))
+    let stored = try XCTUnwrap(value.text)
+    XCTAssertEqual(Array(stored.utf8), Array(raw.utf8))
+    let tap = try plan("tap", ["screen": "s1", "id": 1])
+    let actualInvisible = tap.consentDescription(targetLabel: "A\u{200b}B")
+    let literalEscape = tap.consentDescription(targetLabel: "A\\u200BB")
+    XCTAssertTrue(actualInvisible.hasSuffix(#""A\u200BB""#))
+    XCTAssertTrue(literalEscape.hasSuffix(#""A\\u200BB""#))
+    XCTAssertNotEqual(actualInvisible, literalEscape)
+  }
+
+  func testConsecutiveUnicodeWhitespaceCollapsesOnlyInTheQuotedDisplay() throws {
+    let whitespace = " \u{00a0}\u{1680}\u{2000}\u{2001}\u{2002}\u{2003}\u{2004}"
+      + "\u{2005}\u{2006}\u{2007}\u{2008}\u{2009}\u{200a}\u{202f}\u{205f}\u{3000}"
+    let raw = "BEGIN" + whitespace + String(repeating: " \u{3000}", count: 400) + "END"
+    let value = try type(raw)
+    let stored = try XCTUnwrap(value.text)
+    XCTAssertEqual(Array(stored.utf8), Array(raw.utf8))
+    let description = value.consentDescription(targetLabel: "A" + whitespace + "B")
+    XCTAssertTrue(description.contains("\n\"BEGIN END\""))
+    XCTAssertTrue(description.contains("上次观察中的目标：\"A B\""))
+    XCTAssertTrue(description.contains("连续空白显示为一个空格"))
+    XCTAssertTrue(description.contains("实际输入保留原文"))
+    XCTAssertFalse(description.contains("\u{3000}"))
+    XCTAssertFalse(description.contains(raw))
+  }
+
+  func testWhitespaceAtBothEndsAndWhitespaceOnlyInputStayInExecution() throws {
+    for raw in ["   A\u{3000}\u{3000}B  ", String(repeating: " ", count: 1024)] {
+      let value = try type(raw)
+      let stored = try XCTUnwrap(value.text)
+      XCTAssertEqual(Array(stored.utf8), Array(raw.utf8))
+      let expected = raw.contains("A") ? "\" A B \"" : "\" \""
+      XCTAssertTrue(value.consentDescription(targetLabel: nil).contains("\n" + expected))
+    }
+  }
+
+  func testNonFormatDefaultIgnorablesAreVisibleButAcceptedTextBytesStayExact() throws {
+    let raw = "A\u{fe0f}B\u{034f}C\u{e0100}D"
+    let value = try type(raw)
+    let stored = try XCTUnwrap(value.text)
+    XCTAssertEqual(Array(stored.utf8), Array(raw.utf8))
+    let description = value.consentDescription(targetLabel: nil)
+    XCTAssertTrue(description.contains(#""A\uFE0FB\u034FC\u{E0100}D""#))
+    XCTAssertFalse(description.contains("\u{fe0f}"))
+    XCTAssertFalse(description.contains("\u{034f}"))
+    XCTAssertFalse(description.contains("\u{e0100}"))
+  }
+
+  func testMaximumEscapedInputRemainsCompleteAndFitsTheExistingConsentBudget() throws {
+    let raw = String(repeating: "«", count: 2048)
+    XCTAssertEqual(raw.utf8.count, 4096)
+    let value = try plan("type", ["screen": String(repeating: "«", count: 48),
+                                 "id": 400, "text": raw, "submit": true])
+    let target = String(repeating: "\u{e0000}", count: 81)
+    let description = value.consentDescription(targetLabel: target)
+    let complete = "\"" + String(repeating: "\\u00AB", count: 2048) + "\""
+    XCTAssertTrue(description.contains("\n" + complete))
+    XCTAssertEqual(complete.utf8.count, 12_290)
+    XCTAssertTrue(description.contains("…\""))
+    // The root bound checks the actual fixed runner/consent suffixes separately.
+    // This assertion leaves at least 1024 bytes for those unchanged suffixes.
+    XCTAssertLessThanOrEqual(description.utf8.count + 1024, 16_384)
+    let stored = try XCTUnwrap(value.text)
+    XCTAssertEqual(Array(stored.utf8), Array(raw.utf8))
+    XCTAssertTrue(value.submits)
+    XCTAssertTrue(value.usesClipboard)
+  }
+
+  func testUnicodeDataLicenseIsPresentInTheActualHostBundle() throws {
+    let location = try XCTUnwrap(Bundle.main.url(forResource: "UnicodeData-LICENSE", withExtension: "txt"))
+    let notice = try String(contentsOf: location, encoding: .utf8)
+    XCTAssertTrue(notice.contains("UNICODE LICENSE V3"))
+    XCTAssertTrue(notice.contains("COPYRIGHT AND PERMISSION NOTICE"))
+    XCTAssertTrue(notice.contains("Permission is hereby granted"))
+  }
 }
