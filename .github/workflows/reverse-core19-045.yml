@@ -1,0 +1,148 @@
+# reverse temp branch only (request 045). Not product; never merged.
+# One Linux job. Prefix preparation copies ci.yml's "Runtime and bridge" job (setup-node, locked npm ci
+# --ignore-scripts into a fresh throwaway prefix, fs-local-original.js, rtbuild patch-dsh). Two fresh prefixes:
+# the first is recorded once, the read-only attachment checker runs, the second is applied strictly.
+# No node tests, no pnpm, no Android/Gradle.
+name: reverse core19 045
+
+on:
+  push:
+    branches: [reverse/core19-045]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  FLUTTER_VERSION: 3.47.7
+  NODE_VERSION: 24.22.1
+  GRADLE_VERSION: 9.3.1
+  TZ: Asia/Shanghai
+
+jobs:
+  runtime:
+    name: Request 045 pins record and fresh strict
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      UV_USE_IO_URING: 0 # same as ci.yml's runtime job
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - name: Toolchain and tree identity (reporting only)
+        run: |
+          set +e
+          mkdir -p "$RUNNER_TEMP/out"
+          echo "HEAD=$(git rev-parse HEAD)"
+          echo "SOURCE_ROOT=$(pwd)"
+          echo "RUNNER_TEMP=$RUNNER_TEMP"
+          for f in runtime/patches/pins.json runtime/locks/dsh-0.2.2-rc.1/package.json runtime/locks/dsh-0.2.2-rc.1/package-lock.json runtime/lib/rtbuild.py runtime/build-runtime.sh runtime/patches/zzzzzzzzzzzzzzz-plugin-tree-wait-monotonic.diff runtime/tests/plugin-tree-wait-clock.test.mjs .github/reverse-045/check-new-pins.py .github/reverse-045/expected-new-pins.json; do
+            [ -f "$f" ] && echo "SRC $(sha256sum "$f" | cut -c1-64) blob=$(git hash-object "$f") bytes=$(wc -c < "$f") $f"
+          done
+          echo "PATCH_DIFFS=$(ls runtime/patches/*.diff | wc -l)"
+          echo "UID=$(id -u) GID=$(id -g) USER=$(id -un)"
+          uname -srm | sed 's/^/KERNEL /'
+          grep PRETTY_NAME /etc/os-release
+          echo "NODE $(node --version) NPM $(npm --version) $(python3 --version 2>&1)"
+          echo "NODE_BIN $(command -v node) PYTHON3_BIN $(command -v python3)"
+          exit 0
+      - name: Base pins read-only original
+        run: |
+          set -e
+          cp runtime/patches/pins.json "$RUNNER_TEMP/base-pins.json"
+          chmod a-w "$RUNNER_TEMP/base-pins.json"
+          cp "$RUNNER_TEMP/base-pins.json" "$RUNNER_TEMP/out/base-pins.json"
+          sha=$(sha256sum "$RUNNER_TEMP/base-pins.json" | cut -c1-64)
+          echo "BASE_PINS sha=$sha bytes=$(wc -c < "$RUNNER_TEMP/base-pins.json") blob=$(git hash-object "$RUNNER_TEMP/base-pins.json") mode=$(stat -c %a "$RUNNER_TEMP/base-pins.json") $RUNNER_TEMP/base-pins.json"
+          test "$sha" = 2a3d04e05708e887f00be0a80338ead13b4ca1e1c72c5bf300be02bd266e53fb
+          test "$(wc -c < "$RUNNER_TEMP/base-pins.json")" = 72096
+          test "$(git hash-object "$RUNNER_TEMP/base-pins.json")" = a22f01d4735512d88ee094545781b4f821c2c8a0
+          echo "BASE_PINS_IDENTITY_OK"
+      - name: Record pins once on the first fresh RECORD_PREFIX
+        id: rec
+        run: |
+          set +e
+          run() { echo "+ $*"; "$@"; rc=$?; echo "  EXIT=$rc"; [ $rc -eq 0 ] || exit $rc; }
+          tgt=node_modules/@deepseek-ai/dsh-plugin-manager/lib/index.js
+          version=$(sed -nE 's/^DSH_VERSION="\$\{DSH_VERSION:-(.+)\}"$/\1/p' runtime/build-runtime.sh)
+          prefix="$RUNNER_TEMP/dsh-record"
+          echo "=== RECORD PREP BEGIN $(date -u +%Y-%m-%dT%H:%M:%SZ) RECORD_PREFIX=$prefix version=$version"
+          [ ! -e "$prefix" ] || { echo "PREFIX_ALREADY_EXISTS"; exit 1; }
+          run mkdir "$prefix"
+          run cp "runtime/locks/dsh-$version/package.json" "runtime/locks/dsh-$version/package-lock.json" "$prefix/"
+          run npm ci --prefix "$prefix" --ignore-scripts --no-audit --no-fund
+          run cp "$prefix/node_modules/@deepseek-ai/dsh-fs-local/lib/index.js" "$prefix/fs-local-original.js"
+          echo "TARGET_BEFORE $(sha256sum "$prefix/$tgt" | cut -c1-64) $tgt"
+          echo "PINS_BEFORE $(sha256sum runtime/patches/pins.json | cut -c1-64)"
+          echo "=== RECORD BEGIN $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          echo "+ python3 -I runtime/lib/rtbuild.py patch-dsh --prefix $prefix --dsh-version 0.2.2-rc.1 --record"
+          python3 -I runtime/lib/rtbuild.py patch-dsh --prefix "$prefix" --dsh-version 0.2.2-rc.1 --record > "$RUNNER_TEMP/out/record.log" 2>&1
+          rc=$?
+          echo "=== RECORD END $(date -u +%Y-%m-%dT%H:%M:%SZ) RECORD_EXIT=$rc"
+          cat "$RUNNER_TEMP/out/record.log"
+          echo "RECORD_SUMMARY lines=$(wc -l < "$RUNNER_TEMP/out/record.log") patched=$(grep -c ': patched ' "$RUNNER_TEMP/out/record.log") already=$(grep -c 'already patched' "$RUNNER_TEMP/out/record.log")"
+          echo "TARGET_AFTER $(sha256sum "$prefix/$tgt" | cut -c1-64) $tgt"
+          cp runtime/patches/pins.json "$RUNNER_TEMP/out/candidate-pins.json"
+          echo "PINS_AFTER $(sha256sum runtime/patches/pins.json | cut -c1-64) bytes=$(wc -c < runtime/patches/pins.json) blob=$(git hash-object runtime/patches/pins.json) cr=$(tr -cd '\r' < runtime/patches/pins.json | wc -c)"
+          git -c core.autocrlf=false diff --stat -- runtime/patches/pins.json | sed 's/^/PINS_DIFFSTAT /'
+          git -c core.autocrlf=false diff -- runtime/patches/pins.json > "$RUNNER_TEMP/out/pins.diff"
+          echo "--- git diff runtime/patches/pins.json ($(wc -l < "$RUNNER_TEMP/out/pins.diff") lines) ---"
+          cat "$RUNNER_TEMP/out/pins.diff"
+          echo "--- END ---"
+          [ $rc -eq 0 ] || exit $rc
+      - name: Read-only pin checker (request 045 attachment)
+        id: chk
+        run: |
+          set +e
+          echo "CHECKER $(sha256sum .github/reverse-045/check-new-pins.py | cut -c1-64) EXPECTED $(sha256sum .github/reverse-045/expected-new-pins.json | cut -c1-64)"
+          [ "$(sha256sum .github/reverse-045/check-new-pins.py | cut -c1-64)" = dc7730f3b2c935658840b173604a8b1a0e4913224c064ac34cc4ea234805148d ] || { echo CHECKER_IDENTITY_MISMATCH; exit 1; }
+          [ "$(sha256sum .github/reverse-045/expected-new-pins.json | cut -c1-64)" = 2a7f80bcf5e99916e1683b8aa69ed1f9c4f2a7aca8fd154f07b56140a742c17b ] || { echo EXPECTED_IDENTITY_MISMATCH; exit 1; }
+          echo "+ python3 -I .github/reverse-045/check-new-pins.py $RUNNER_TEMP/base-pins.json runtime/patches/pins.json"
+          python3 -I .github/reverse-045/check-new-pins.py "$RUNNER_TEMP/base-pins.json" runtime/patches/pins.json > "$RUNNER_TEMP/out/checker.log" 2>&1
+          rc=$?
+          cat "$RUNNER_TEMP/out/checker.log"
+          echo "CHECKER_EXIT=$rc"
+          echo "BASE_PINS_STILL $(sha256sum "$RUNNER_TEMP/base-pins.json" | cut -c1-64) mode=$(stat -c %a "$RUNNER_TEMP/base-pins.json")"
+          exit $rc
+      - name: Strict non-record patch-dsh once on the second fresh STRICT_PREFIX
+        id: strict
+        run: |
+          set +e
+          run() { echo "+ $*"; "$@"; rc=$?; echo "  EXIT=$rc"; [ $rc -eq 0 ] || exit $rc; }
+          tgt=node_modules/@deepseek-ai/dsh-plugin-manager/lib/index.js
+          version=$(sed -nE 's/^DSH_VERSION="\$\{DSH_VERSION:-(.+)\}"$/\1/p' runtime/build-runtime.sh)
+          prefix="$RUNNER_TEMP/dsh-strict"
+          echo "=== STRICT PREP BEGIN $(date -u +%Y-%m-%dT%H:%M:%SZ) STRICT_PREFIX=$prefix version=$version"
+          [ ! -e "$prefix" ] || { echo "PREFIX_ALREADY_EXISTS"; exit 1; }
+          run mkdir "$prefix"
+          run cp "runtime/locks/dsh-$version/package.json" "runtime/locks/dsh-$version/package-lock.json" "$prefix/"
+          run npm ci --prefix "$prefix" --ignore-scripts --no-audit --no-fund
+          run cp "$prefix/node_modules/@deepseek-ai/dsh-fs-local/lib/index.js" "$prefix/fs-local-original.js"
+          echo "TARGET_BEFORE $(sha256sum "$prefix/$tgt" | cut -c1-64) $tgt"
+          echo "PINS_BEFORE $(sha256sum runtime/patches/pins.json | cut -c1-64)"
+          echo "=== STRICT BEGIN $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          echo "+ python3 -I runtime/lib/rtbuild.py patch-dsh --prefix $prefix --dsh-version 0.2.2-rc.1"
+          python3 -I runtime/lib/rtbuild.py patch-dsh --prefix "$prefix" --dsh-version 0.2.2-rc.1 > "$RUNNER_TEMP/out/strict.log" 2>&1
+          rc=$?
+          echo "=== STRICT END $(date -u +%Y-%m-%dT%H:%M:%SZ) STRICT_EXIT=$rc"
+          cat "$RUNNER_TEMP/out/strict.log"
+          echo "STRICT_SUMMARY lines=$(wc -l < "$RUNNER_TEMP/out/strict.log") patched=$(grep -c ': patched ' "$RUNNER_TEMP/out/strict.log") already=$(grep -c 'already patched' "$RUNNER_TEMP/out/strict.log")"
+          echo "TARGET_AFTER $(sha256sum "$prefix/$tgt" | cut -c1-64) $tgt"
+          echo "PINS_AFTER $(sha256sum runtime/patches/pins.json | cut -c1-64) cmp-candidate=$(cmp -s runtime/patches/pins.json "$RUNNER_TEMP/out/candidate-pins.json"; echo $?)"
+          [ $rc -eq 0 ] || exit $rc
+      - name: Output identities (read-only)
+        if: ${{ !cancelled() }}
+        run: |
+          cd "$RUNNER_TEMP/out" && for f in *; do echo "OUT $(sha256sum "$f" | cut -c1-64) $(wc -c < "$f") $f"; done
+      - name: Upload request 045 outputs (reverse temp branch only)
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: reverse-045-outputs
+          path: ${{ runner.temp }}/out
+          if-no-files-found: warn
+          retention-days: 7
