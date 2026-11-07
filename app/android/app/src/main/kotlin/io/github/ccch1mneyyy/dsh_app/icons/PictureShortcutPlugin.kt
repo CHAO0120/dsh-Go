@@ -9,9 +9,9 @@ import android.content.pm.ShortcutInfo
 import android.content.pm.ShortcutManager
 import android.graphics.BitmapFactory
 import android.graphics.drawable.Icon
-import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import androidx.core.content.ContextCompat
 import io.flutter.embedding.engine.plugins.FlutterPlugin
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
@@ -44,11 +44,7 @@ class PictureShortcutPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
             }
         }
         try {
-            if (Build.VERSION.SDK_INT >= 33) {
-                context.registerReceiver(r, IntentFilter(ACTION_PINNED), Context.RECEIVER_NOT_EXPORTED)
-            } else {
-                context.registerReceiver(r, IntentFilter(ACTION_PINNED))
-            }
+            ContextCompat.registerReceiver(context, r, IntentFilter(ACTION_PINNED), ContextCompat.RECEIVER_NOT_EXPORTED)
             receiver = r
         } catch (_: Exception) {
         }
