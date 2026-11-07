@@ -119,7 +119,16 @@ static ssize_t read_link(struct mount *m, const char *p, char *b, size_t n) {
 }
 static int mkdir_path(struct mount *m, const char *p, mode_t_ mode) {
   p = relative(p);
-  int r = dsh_directory_make(context(m)->root, p, strlen(p), mode);
+  // An empty mount-relative path is the existing capability root.
+  if (!*p) return _EEXIST;
+  dsh_root *root = context(m)->root;
+  struct stat existing;
+  // mkdir -p may probe an already existing directory on a readonly mount.
+  // This observation creates nothing; absent/non-directory paths stay readonly.
+  if (dsh_root_readonly(root) &&
+      dsh_root_lstat(root, p, strlen(p), &existing) == 0 && S_ISDIR(existing.st_mode))
+    return _EEXIST;
+  int r = dsh_directory_make(root, p, strlen(p), mode);
   return r < 0 ? errno_map() : r;
 }
 static int rmdir_path(struct mount *m, const char *p) {
@@ -145,6 +154,12 @@ static int link_path(struct mount *m, const char *a, const char *b) {
   dsh_root *r = context(m)->root;
   int v = dsh_file_link(r, a, strlen(a), r, b, strlen(b));
   return v < 0 ? errno_map() : v;
+}
+static int symlink_path(struct mount *m, const char *target, const char *link) {
+  link = relative(link);
+  int result = dsh_file_symlink(context(m)->root, target, strlen(target),
+                                 link, strlen(link));
+  return result < 0 ? errno_map() : result;
 }
 static int get_path(struct fd *f, char *out) {
   dsh_root *r = context(f->mount)->root;
@@ -208,6 +223,7 @@ static const struct fs_ops operations = {.name = "dsh-bound",
                                          .unlink = unlink_path,
                                          .rename = rename_path,
                                          .link = link_path,
+                                         .symlink = symlink_path,
                                          .getpath = get_path,
                                          .setattr = set_path,
                                          .fsetattr = set_fd,

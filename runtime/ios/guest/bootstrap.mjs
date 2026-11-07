@@ -1,6 +1,7 @@
 // Dynamically import ONLY after the trusted App owner confirms installation.
 import { lstatSync, readFileSync } from 'node:fs';
 import { rm } from 'node:fs/promises';
+import { createRootWriteGrants } from './root-grants.mjs';
 import { GuestProvider } from './provider.mjs';
 import { createNativeGuestChannel } from './native-channel.mjs';
 import { deliverGuestOutput } from './delivery.mjs';
@@ -27,14 +28,19 @@ export function installGuestOwner({ native, root, protectedPaths, temporaryRoot,
   if (metadata.installed !== 'present' || !status.available || status.state === 'quarantined') throw new Error('Guest installation or native capability unavailable');
   const identity = lstatSync(temporaryRoot, { bigint: true });
   if (!identity.isDirectory() || identity.isSymbolicLink()) throw new Error("Guest temp must be an owned directory");
+  const rootIdentity = native.rootIdentity(root);
   const budget = createCleanupBudget();
-  const provider = new GuestProvider({ channel: createNativeGuestChannel(native, { root, protectedPaths, readInstallation: () => readGuestInstallation(root) }),
+  let provider, grants;
+  try {
+    provider = new GuestProvider({ channel: createNativeGuestChannel(native, { root, protectedPaths, readInstallation: () => readGuestInstallation(root) }),
     temporaryRoot, readMetadata: () => {
       const cached = readMetadata(), current = native.status(), installation = readGuestInstallation(root);
       const available = installation === 'present' && current.available === true && current.state !== 'quarantined';
       return { ...cached, installed: installation === 'invalid' ? 'unknown' : installation, available: cached.available && available,
         state: installation !== 'present' ? 'unavailable' : !available ? 'faulted' : current.state === 'running' ? 'busy' : cached.state };
     }, forbiddenRoots: protectedPaths, cleanupDeadline: budget.deadline });
+    grants = createRootWriteGrants({ root, identity: rootIdentity, readMetadata: () => provider.metadata });
+  } catch (error) { budget.dispose(); throw error; }
   const disposeProvider = provider.dispose.bind(provider);
   let disposal;
   const disposeOwner = () => disposal ??= (async () => {
@@ -46,9 +52,10 @@ export function installGuestOwner({ native, root, protectedPaths, temporaryRoot,
         if (current.dev !== identity.dev || current.ino !== identity.ino || !current.isDirectory()) throw new Error('Guest temp identity changed');
         await rm(temporaryRoot, { recursive: true });
       }
-    } finally { budget.dispose(); if (globalThis[key] === owner) delete globalThis[key]; }
+    } finally { grants.close(); budget.dispose(); if (globalThis[key] === owner) delete globalThis[key]; }
   })();
-  const owner = Object.freeze({ provider, temporaryRoot, deliverOutput: deliverGuestOutput,
+  const owner = Object.freeze({ provider, temporaryRoot,
+    authorizeRootWrite: grants.authorize, prepareRootGrant: grants.prepare, activateRootGrant: grants.activate, deliverOutput: deliverGuestOutput,
     filePath: (path, options, subprocess, flags) => guestFilePath(path, options, subprocess, flags, temporaryRoot), description: guestDescription,
     dispose: disposeOwner });
   globalThis[key] = owner;

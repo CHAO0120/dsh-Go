@@ -106,3 +106,214 @@ diff --git a/fs/mount.c b/fs/mount.c
      if (sig < SIGRTMIN_ && sigset_has(task->pending, sig))
          return;
  
+
+--- /dev/null
++++ b/fs/dsh-readonly.h
+@@ -0,0 +1,17 @@
++#ifndef DSH_FAKEFS_READONLY_H
++#define DSH_FAKEFS_READONLY_H
++#include "kernel/fs.h"
++#include "kernel/calls.h"
++// Only the confined embedding activates this bit per serialized guest job.
++// No writable job survives the transition; existing FDs are checked as well.
++static inline bool fakefs_mount_readonly(const struct mount *mount) {
++#ifdef DSH_IOS_GUEST_CONFINED
++    return mount && mount->fs == &fakefs && (mount->flags & MS_READONLY_);
++#else
++    (void)mount;
++    return false;
++#endif
++}
++
++
++#endif
+--- a/fs/fake.c
++++ b/fs/fake.c
+@@ -28,6 +28,7 @@
+ #include "fs/real.h"
+ #define ISH_INTERNAL
+ #include "fs/fake.h"
++#include "fs/dsh-readonly.h"
+ 
+ // DSH portability for the Linux build verification target.
+ #if defined(__linux__)
+@@ -396,9 +397,23 @@
+ 
+ // this exists only to override readdir to fix the returned inode numbers
+ static struct fd_ops fakefs_fdops;
++static int fakefs_stat(struct mount *, const char *, struct statbuf *);
+ 
+ static struct fd *fakefs_open(struct mount *mount, const char *path, int flags, int mode) {
+     struct fakefs_db *fs = &mount->fakefs;
++    if (fakefs_mount_readonly(mount) &&
++        (flags & (O_WRONLY_ | O_RDWR_ | O_CREAT_ | O_TRUNC_ | O_APPEND_))) {
++        struct statbuf st;
++        // Existing device nodes use host regular placeholders. Open those
++        // read-only; generic_open retains original guest flags for dev_open.
++        // Never exempt a pathname merely because it starts with /dev.
++        if (fakefs_stat(mount, path, &st) < 0 ||
++            (!S_ISCHR(st.mode) && !S_ISBLK(st.mode))) return ERR_PTR(_EROFS);
++        if ((flags & (O_CREAT_ | O_EXCL_)) == (O_CREAT_ | O_EXCL_))
++            return ERR_PTR(_EEXIST);
++        flags = O_RDONLY_;
++    }
++
+ 
+     /* Reject any write-intent open under a read-only bind mount.
+      * iSH processes run as root and bypass the meta.db mode DAC check,
+@@ -540,7 +555,7 @@
+         return ERR_PTR(_ENOENT);
+     }
+     const char *path = (const char *) sqlite3_column_text(stmt, 0);
+-    struct fd *fd = realfs.open(mount, path, O_RDWR_, 0);
++    struct fd *fd = realfs.open(mount, path, fakefs_mount_readonly(mount) ? O_RDONLY_ : O_RDWR_, 0);
+     if (PTR_ERR(fd) == _EISDIR)
+         fd = realfs.open(mount, path, O_RDONLY_, 0);
+     if (PTR_ERR(fd) == _ENOENT)
+@@ -553,6 +568,7 @@
+ }
+ 
+ static int fakefs_link(struct mount *mount, const char *src, const char *dst) {
++    if (fakefs_mount_readonly(mount)) return _EROFS;
+     struct fakefs_db *fs = &mount->fakefs;
+     if (is_under_readonly_bind_mount(dst))
+         return _EROFS;
+@@ -585,6 +601,7 @@
+ }
+ 
+ static int fakefs_unlink(struct mount *mount, const char *path) {
++    if (fakefs_mount_readonly(mount)) return _EROFS;
+     struct fakefs_db *fs = &mount->fakefs;
+     if (is_under_readonly_bind_mount(path))
+         return _EROFS;
+@@ -628,6 +645,7 @@
+ }
+ 
+ static int fakefs_rmdir(struct mount *mount, const char *path) {
++    if (fakefs_mount_readonly(mount)) return _EROFS;
+     struct fakefs_db *fs = &mount->fakefs;
+     if (is_under_readonly_bind_mount(path))
+         return _EROFS;
+@@ -662,6 +680,7 @@
+ }
+ 
+ static int fakefs_rename(struct mount *mount, const char *src, const char *dst) {
++    if (fakefs_mount_readonly(mount)) return _EROFS;
+     struct fakefs_db *fs = &mount->fakefs;
+     if (is_under_readonly_bind_mount(src) || is_under_readonly_bind_mount(dst))
+         return _EROFS;
+@@ -708,6 +727,7 @@
+ }
+ 
+ static int fakefs_symlink(struct mount *mount, const char *target, const char *link) {
++    if (fakefs_mount_readonly(mount)) return _EROFS;
+     struct fakefs_db *fs = &mount->fakefs;
+     if (is_under_readonly_bind_mount(link))
+         return _EROFS;
+@@ -749,6 +769,7 @@
+ }
+ 
+ static int fakefs_mknod(struct mount *mount, const char *path, mode_t_ mode, dev_t_ dev) {
++    if (fakefs_mount_readonly(mount)) return _EROFS;
+     struct fakefs_db *fs = &mount->fakefs;
+     if (is_under_readonly_bind_mount(path))
+         return _EROFS;
+@@ -936,6 +957,7 @@
+ }
+ 
+ static int fakefs_setattr(struct mount *mount, const char *path, struct attr attr) {
++    if (fakefs_mount_readonly(mount)) return _EROFS;
+     struct fakefs_db *fs = &mount->fakefs;
+     if (is_under_readonly_bind_mount(path))
+         return _EROFS;
+@@ -994,6 +1016,7 @@
+ }
+ 
+ static int fakefs_fsetattr(struct fd *fd, struct attr attr) {
++    if (fakefs_mount_readonly(fd->mount)) return _EROFS;
+     struct fakefs_db *fs = &fd->mount->fakefs;
+     if (attr.type == attr_size)
+         return realfs.fsetattr(fd, attr);
+@@ -1025,6 +1048,13 @@
+ }
+ 
+ static int fakefs_mkdir(struct mount *mount, const char *path, mode_t_ mode) {
++    if (fakefs_mount_readonly(mount)) {
++        struct statbuf existing;
++        // mkdir -p probes existing ancestors before entering writable mounts.
++        if (!fakefs_stat(mount, path, &existing) && S_ISDIR(existing.mode))
++            return _EEXIST;
++        return _EROFS;
++    }
+     struct fakefs_db *fs = &mount->fakefs;
+     if (is_under_readonly_bind_mount(path))
+         return _EROFS;
+--- a/fs/real.c
++++ b/fs/real.c
+@@ -26,6 +26,7 @@
+ #include "fs/real.h"
+ #define ISH_INTERNAL
+ #include "fs/fake.h"
++#include "fs/dsh-readonly.h"
+ #include "fs/tty.h"
+ #include "util/fchdir.h"
+ 
+@@ -188,6 +189,7 @@
+ }
+ 
+ ssize_t realfs_write(struct fd *fd, const void *buf, size_t bufsize) {
++    if (fakefs_mount_readonly(fd->mount)) return _EROFS;
+     ssize_t res;
+     do {
+         res = write(fd->real_fd, buf, bufsize);
+@@ -208,6 +210,7 @@
+ }
+ 
+ ssize_t realfs_pwrite(struct fd *fd, const void *buf, size_t bufsize, off_t off) {
++    if (fakefs_mount_readonly(fd->mount)) return _EROFS;
+     ssize_t res;
+     do {
+         res = pwrite(fd->real_fd, buf, bufsize, off);
+@@ -334,6 +337,8 @@
+ }
+ 
+ int realfs_mmap(struct fd *fd, struct mem *mem, page_t start, pages_t pages, off_t offset, int prot, int flags) {
++    // Reject shared maps entirely: later mprotect must not upgrade one.
++    if (fakefs_mount_readonly(fd->mount) && (flags & MMAP_SHARED)) return _EROFS;
+     int mmap_flags = 0;
+     if (flags & MMAP_PRIVATE) mmap_flags |= MAP_PRIVATE;
+     if (flags & MMAP_SHARED) mmap_flags |= MAP_SHARED;
+@@ -558,6 +563,7 @@
+ }
+ 
+ int realfs_fsetattr(struct fd *fd, struct attr attr) {
++    if (fakefs_mount_readonly(fd->mount)) return _EROFS;
+     int real_fd = fd->real_fd;
+     int err;
+     switch (attr.type) {
+@@ -585,6 +591,7 @@
+ }
+ 
+ int realfs_utime(struct mount *mount, const char *path, struct timespec atime, struct timespec mtime) {
++    if (fakefs_mount_readonly(mount)) return _EROFS;
+     struct timespec times[2] = {atime, mtime};
+     int err = utimensat(mount->root_fd, fix_path(path), times, 0);
+     if (err < 0)
+--- a/kernel/calls.c
++++ b/kernel/calls.c
+@@ -16,6 +16,7 @@
+ #include "fs/fd.h"
+ #include "fs/dev.h"
+ #include "fs/real.h"
++#include "fs/dsh-readonly.h"
+ 
+ dword_t syscall_stub(void) {
+     return _ENOSYS;
+@@ -1416,6 +1417,7 @@
+     struct fd *fd = f_get(fd_no);
+     if (fd == NULL || fd->ops != &realfs_fdops)
+         return -1;
++    if (fakefs_mount_readonly(fd->mount)) return _EROFS;
+ 
+     // Copy from guest memory
+     char buf[4096];

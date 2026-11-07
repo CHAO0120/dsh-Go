@@ -204,6 +204,25 @@ EDITS = {'runtime/ohos/process/index.mjs': (('  get temporaryRoot() { return thi
                                                            " + (ohos ? (guestMetadata ? '' : ohos + '\\n') + "
                                                            "guestDescription(guestMetadata) : "
                                                            "'');"))}
+# Root grants exist only in exact installed-iOS replacements. Default modules stay byte-identical.
+FILES += ('runtime/ios/guest/root-grants.mjs',)
+EDITS['node_modules/@deepseek-ai/dsh-tool-bash/lib/index.js'] += (
+    ('\t\t\t\tworkdir: {', '\t\t\t\tlinux_root_write: { type: "string", description: "Optional nonempty reason requesting one-call permission to modify the installed Linux system disk (packages/configuration). Always asks independently of workspace mode; omit for ordinary reads or workspace/tmp writes." },\n\t\t\t\tworkdir: {'),
+    ('\t\t\t\tconst policy = approvedMode', '\t\t\t\tlet policy = approvedMode'),
+    ('\t\t\t\tconst dshEnv = ctx.shellEnv.collect(exec);',
+     '\t\t\t\tif (args.linux_root_write !== void 0) {\n'
+     '\t\t\t\t\tconst owner = globalThis[Symbol.for("dsh.go.ios.guest.owner")];\n'
+     '\t\t\t\t\tif (!owner) throw new Error("Linux system-disk approval requires the installed iOS owner");\n'
+     '\t\t\t\t\tpolicy = await owner.authorizeRootWrite({ reason: args.linux_root_write, command: args.command, cwd: workdir, policy, approver: ctx.get("approval"), agent: exec.agent, callId: exec.callId, signal: exec.signal });\n'
+     '\t\t\t\t}\n\t\t\t\tconst dshEnv = ctx.shellEnv.collect(exec);'),
+)
+EDITS['runtime/ohos/process/runtime.mjs'] += (
+    ('    const token = randomUUID();', '    const rootGrant = this.#guestOwner?.prepareRootGrant(argv, policy, signal);\n    const token = randomUUID();'),
+    ('{ argv: [...argv], policy: { ...policy, workspaceRoot }, signal, cancel }', '{ argv: [...argv], policy: { ...policy, workspaceRoot }, rootGrant, signal, cancel }'),
+    ('    let policy;', '    let policy;\n    let rootPermission;'),
+    ('      policy = prepared.policy;', '      policy = prepared.policy;\n      rootPermission = this.#guestOwner?.activateRootGrant(prepared.rootGrant, argv, policy, realpathSync(resolve(spec.cwd)), spec.signal);'),
+    ('state.guestContext = { argv: [name, ...argv.slice(1)], cwd, policy, env,', 'state.guestContext = { argv: [name, ...argv.slice(1)], cwd, policy, rootPermission, env,'),
+)
 INPUT_GUARDS = {'runtime/ohos/lifecycle/budget.mjs': ('export class ActiveBudgetClock {', '  constructor(bootId) {'),
  'runtime/ohos/lifecycle/coordinator.mjs': ("import { ActiveBudgetClock } from './budget.mjs';",
                                             '    this.bootId = bootId;\n'

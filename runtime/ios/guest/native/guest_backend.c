@@ -231,9 +231,18 @@ static int unmount_job(void) {
   unlock(&mounts_lock);
   return host_error(e);
 }
-int dsh_guest_start_with_clock(const struct dsh_guest_request *request,
-                    dsh_guest_output output, void *context, uint64_t *job_id, double (*now_ms)(void *), void *clock_context) {
-  if (!request || !output || !job_id || !request->argc || !request->argv ||
+// gate held, with no running guest threads at either transition. The fakefs
+// and real-fd guards enforce this flag, not merely mount metadata reporting.
+static int root_readonly(int readonly) {
+  struct mount *root = supervisor->fs->root->mount;
+  if (!root || root->fs != &fakefs) return EIO;
+  if (readonly) root->flags |= MS_READONLY_;
+  else root->flags &= ~MS_READONLY_;
+  return 0;
+}
+int dsh_guest_start_with_permissions(const struct dsh_guest_request *request,
+                    dsh_guest_output output, void *context, uint64_t *job_id, int root_writable, double (*now_ms)(void *), void *clock_context) {
+  if ((root_writable != 0 && root_writable != 1) || !request || !output || !job_id || !request->argc || !request->argv ||
       !request->argv[0] || request->argv[0][0] != '/' || !cwd_valid(request->cwd) ||
       !request->workspace || !request->temporary ||
       (request->workspace_readonly != 0 && request->workspace_readonly != 1)) return EINVAL;
@@ -285,6 +294,8 @@ int dsh_guest_start_with_clock(const struct dsh_guest_request *request,
     current = supervisor;
     e = dsh_dns_sync();
   }
+  // Trusted DNS maintenance finishes before the guest's readonly epoch.
+  if (!e) e = root_readonly(!root_writable);
   int touched = 0;
   if (!e) {
     touched = 1;
@@ -343,6 +354,12 @@ int dsh_guest_start_with_clock(const struct dsh_guest_request *request,
   pthread_mutex_unlock(&gate);
   free(args); free(env);
   return e;
+}
+int dsh_guest_start_with_clock(const struct dsh_guest_request *request,
+    dsh_guest_output output, void *context, uint64_t *job_id,
+    double (*now_ms)(void *), void *clock_context) {
+  return dsh_guest_start_with_permissions(request, output, context, job_id,
+      0, now_ms, clock_context);
 }
 int dsh_guest_start(const struct dsh_guest_request *request,
     dsh_guest_output output, void *context, uint64_t *job_id) {
@@ -425,6 +442,9 @@ int dsh_guest_wait(uint64_t id, unsigned timeout_ms, struct dsh_guest_result *re
   result->abandoned = dsh_job_bridge_abandoned(job);
   if (!e) e = dsh_job_bridge_destroy(job);
   if (!e) { bridge = NULL; e = unmount_job(); }
+  // Only a fully reaped/settled job may restore maintenance/write admission.
+  // Any quarantine retains its last policy; no new job can enter that kernel.
+  if (!e) e = root_readonly(0);
   if (e) { dsh_job_signal(id, SIGKILL_); state = DSH_GUEST_QUARANTINED; }
   else {
     result->exit_code = (status & 0x7f) ? 128 + (status & 0x7f) : (status >> 8) & 255;

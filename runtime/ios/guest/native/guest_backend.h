@@ -21,7 +21,7 @@ struct dsh_guest_request {
   const char *cwd; // normalized guest path under /workspace
   const char *workspace;
   const char *temporary;
-  int workspace_readonly; // 0 or 1; temporary remains controlled and writable
+  int workspace_readonly; // 0 or 1: workspace only; controlled tmp remains writable
 };
 struct dsh_guest_result {
   int exit_code; // decoded Linux wait status; 128 + signal for signalled task
@@ -53,6 +53,12 @@ int dsh_guest_start(const struct dsh_guest_request *, dsh_guest_output, void *,
 // succeeds (or retained with the quarantined context). NULL selects wall time.
 int dsh_guest_start_with_clock(const struct dsh_guest_request *, dsh_guest_output,
     void *, uint64_t *, double (*now_ms)(void *), void *clock_context);
+// Legacy start entry points always keep the persistent root read-only.
+// Only a trusted caller with a separate per-call system-disk grant may pass 1.
+// root_writable must be 0 or 1; workspace permission remains independent.
+int dsh_guest_start_with_permissions(const struct dsh_guest_request *,
+    dsh_guest_output, void *, uint64_t *, int root_writable,
+    double (*now_ms)(void *), void *clock_context);
 int dsh_guest_stdin_write(uint64_t, const void *, size_t, size_t *written);
 int dsh_guest_stdin_close(uint64_t);
 int dsh_guest_ack(uint64_t, int stream, uint64_t end_offset);

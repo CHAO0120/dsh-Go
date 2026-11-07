@@ -2,6 +2,7 @@
 // recorded, not emulated: these tests prove routing/approval, not iSH readiness.
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { closeSync, constants, fstatSync, openSync } from 'node:fs';
 import { mkdtemp, mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
@@ -22,19 +23,32 @@ import Subprocess from './runtime/ohos/process/index.mjs';
 import Sandbox from './runtime/ohos/process/sandbox.mjs';
 import { GuestProvider } from './runtime/ios/guest/provider.mjs';
 import { guestDescription } from './runtime/ios/guest/metadata.mjs';
+import { createRootWriteGrants } from './runtime/ios/guest/root-grants.mjs';
+import { installSuspendedGuestOwner } from './runtime/ios/guest/suspended.mjs';
 
 const ownerKey = Symbol.for('dsh.go.ios.guest.owner');
 const exists = path => stat(path).then(() => true, () => false);
 let sequence = 0;
-async function setup(t, { mode = 'workspace-write', guest = true } = {}) {
+async function setup(t, { mode = 'workspace-write', guest = true, suspended = false } = {}) {
   // Like an iOS container, host mounts must not overlap the virtual /tmp alias.
   const base = await mkdtemp(join(homedir(), '.ios-tool-policy-'));
-  const [work, temporary, guestTemp] = ['work', 'temp', 'guest-temp'].map(name => join(base, name));
-  await Promise.all([work, temporary, guestTemp].map(path => mkdir(path)));
+  const [work, temporary, guestTemp, guestRoot] = ['work', 'temp', 'guest-temp', 'guest-root'].map(name => join(base, name));
+  await Promise.all([work, temporary, guestTemp, guestRoot].map(path => mkdir(path)));
+  const ctx = new Context();
+  let grants, rootFD, rootIdentity;
+  t.after(async () => {
+    try { await ctx.fiber.dispose(); }
+    finally {
+      grants?.close();
+      if (rootFD !== undefined) closeSync(rootFD);
+      delete globalThis[ownerKey];
+      await rm(base, { recursive: true, force: true });
+    }
+  });
   const requests = [];
   const metadata = { v: 1, source: 'ios-native-owner', state: 'ready', installed: 'present', available: true,
     enforcement: 'partial', python: 'unknown' };
-  const provider = guest && new GuestProvider({ temporaryRoot: guestTemp, readMetadata: () => metadata,
+  const provider = guest && !suspended && new GuestProvider({ temporaryRoot: guestTemp, readMetadata: () => metadata,
     channel: {
       exec(request, output) {
         requests.push(request);
@@ -45,13 +59,18 @@ async function setup(t, { mode = 'workspace-write', guest = true } = {}) {
         }), signal() {}, abandon() {} };
       }, dispose() {},
     } });
-  if (guest) globalThis[ownerKey] = { provider, temporaryRoot: guestTemp,
-    description: guestDescription, dispose: () => provider.dispose() };
-  const ctx = new Context();
-  t.after(async () => {
-    try { await ctx.fiber.dispose(); }
-    finally { delete globalThis[ownerKey]; await rm(base, { recursive: true, force: true }); }
-  });
+  if (guest && suspended) installSuspendedGuestOwner({ readMetadata: () => metadata });
+  else if (guest) {
+    // Test-only identity owner: real native Owner lifetime is checked by its
+    // separate N-API test. These tests use the production grant/approval path.
+    rootFD = openSync(guestRoot, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
+    const held = fstatSync(rootFD, { bigint: true });
+    rootIdentity = Object.freeze({ expectedRootDevice: held.dev.toString(), expectedRootInode: held.ino.toString() });
+    grants = createRootWriteGrants({ root: guestRoot, identity: rootIdentity, readMetadata: () => provider.metadata });
+    globalThis[ownerKey] = { provider, temporaryRoot: guestTemp, description: guestDescription,
+      authorizeRootWrite: grants.authorize, prepareRootGrant: grants.prepare, activateRootGrant: grants.activate,
+      async dispose() { try { await provider.dispose(); } finally { grants.close(); } } };
+  }
   await ctx.plugin(SystemPrompt, {});
   await ctx.plugin(ToolRuntime);
   await ctx.plugin(nativeTools);
@@ -77,7 +96,7 @@ async function setup(t, { mode = 'workspace-write', guest = true } = {}) {
   };
   const spawn = argv => ctx.subprocess.spawn({ argv, cwd: work, env: {}, graceMs: 200,
     stdio: { stdin: 'ignore', stdout: { maxBytes: 65536 }, stderr: { maxBytes: 65536 } } });
-  return { ctx, work, temporary, guestTemp, requests, execute, spawn };
+  return { ctx, work, temporary, guestTemp, rootIdentity, requests, execute, spawn };
 }
 
 for (const mode of ['read-only', 'workspace-write', 'danger-full-access']) {
@@ -93,6 +112,8 @@ for (const mode of ['read-only', 'workspace-write', 'danger-full-access']) {
     assert.deepEqual(requests[0].argv, ['/bin/sh', '-c', 'cat /etc/os-release']);
     assert.equal(requests[0].cwd, '/workspace');
     assert.equal(requests[0].mode, mode === 'read-only' ? 'read-only' : 'workspace-write');
+    assert.equal(requests[0].rootWritable, false);
+    assert.equal(Object.hasOwn(requests[0], 'expectedRootDevice'), false);
     assert.deepEqual(requests[0].mounts, [
       { host: work, guest: '/workspace', readOnly: mode === 'read-only' },
       { host: guestTemp, guest: '/tmp', readOnly: mode === 'read-only' },
@@ -209,3 +230,100 @@ test('without a guest, full-access preserves the existing virtual backend', asyn
   assert.equal(ctx.subprocess.guestMetadata, null);
   assert.match(ctx.tools.get('bash').description, /iOS 本机使用虚拟 shell/);
 });
+
+for (const mode of ['read-only', 'workspace-write', 'danger-full-access']) {
+  test(`real root approval is independent and one-call only in ${mode}`, async t => {
+    const { ctx, rootIdentity, requests, execute } = await setup(t, { mode });
+    const asked = Promise.withResolvers(), answer = Promise.withResolvers();
+    let approvals = 0;
+    const off = ctx.on('approval/request', request => { approvals++; asked.resolve(request); return answer.promise; });
+    t.after(off);
+    const running = execute('echo persistent > /etc/test-root-grant', { linux_root_write: 'Test one persistent Linux change.' });
+    const question = await asked.promise;
+    assert.match(question.reason, /仅本次命令/);
+    assert.equal(requests.length, 0);
+    assert.equal(ctx.subprocess.backend.prepared.size, 0);
+    answer.resolve('allowed-once');
+    const result = await running;
+    assert.equal(result.isError, false, JSON.stringify(result));
+    assert.equal(result.value.exitCode, 0);
+    assert.equal(result.value.sandbox.mode, mode);
+    assert.equal(approvals, 1);
+    assert.equal(requests[0].rootWritable, true);
+    assert.equal(requests[0].expectedRootDevice, rootIdentity.expectedRootDevice);
+    assert.equal(requests[0].expectedRootInode, rootIdentity.expectedRootInode);
+    const next = await execute('cat /etc/test-root-grant');
+    assert.equal(next.value.exitCode, 0);
+    assert.equal(requests[1].rootWritable, false);
+    assert.equal(approvals, 1);
+  });
+}
+
+test('workspace escalation and root write require two ordered real approvals', async t => {
+  const { ctx, requests, execute } = await setup(t, { mode: 'read-only' });
+  const asked = [Promise.withResolvers(), Promise.withResolvers()];
+  const answers = [Promise.withResolvers(), Promise.withResolvers()];
+  let count = 0;
+  const off = ctx.on('approval/request', request => {
+    const index = count++;
+    assert.ok(index < 2);
+    asked[index].resolve(request);
+    return answers[index].promise;
+  });
+  t.after(off);
+  const running = execute('apk add fixture-package', { sandbox_permissions: 'danger-full-access',
+    justification: 'Test workspace escalation.', linux_root_write: 'Test independent Linux package change.' });
+  const workspace = await asked[0].promise;
+  assert.match(workspace.reason, /workspace escalation/);
+  assert.equal(requests.length, 0);
+  answers[0].resolve('allowed-once');
+  const root = await asked[1].promise;
+  assert.match(root.reason, /Linux/);
+  assert.equal(requests.length, 0);
+  answers[1].resolve('allowed-once');
+  const result = await running;
+  assert.equal(result.isError, false, JSON.stringify(result));
+  assert.equal(result.value.sandbox.mode, 'danger-full-access');
+  assert.equal(count, 2);
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0].mode, 'workspace-write');
+  assert.equal(requests[0].rootWritable, true);
+});
+
+test('real root approval rejection cannot publish an execution ticket', async t => {
+  const { ctx, requests, execute } = await setup(t);
+  let approvals = 0;
+  const off = ctx.on('approval/request', () => { approvals++; return Promise.resolve('rejected'); });
+  t.after(off);
+  const result = await execute('apk add fixture-package', { linux_root_write: 'Test root rejection.' });
+  assert.equal(result.isError, true);
+  assert.equal(approvals, 1);
+  assert.equal(requests.length, 0);
+  assert.equal(ctx.subprocess.backend.prepared.size, 0);
+});
+
+for (const mode of ['workspace-write', 'danger-full-access']) {
+test(`paused owner keeps virtual shell/Node Worker and skips root approval in ${mode}`, async t => {
+  const { ctx, work, requests, execute } = await setup(t, { mode, suspended: true });
+  let approvals = 0;
+  const off = ctx.on('approval/request', () => { approvals++; return Promise.resolve('allowed-once'); });
+  t.after(off);
+  await writeFile(join(work, 'paused-node.mjs'), 'process.stdout.write("paused-node-ok\\n");\n');
+  const node = await execute('node paused-node.mjs');
+  assert.equal(node.value.exitCode, 0, JSON.stringify(node));
+  assert.equal(node.value.stdout.text, 'paused-node-ok\n');
+  const shell = await execute('printf virtual-ok > marker; cat marker');
+  assert.equal(shell.value.exitCode, 0, JSON.stringify(shell));
+  assert.equal(shell.value.stdout.text, 'virtual-ok');
+  assert.equal(shell.value.sandbox.mode, mode);
+  assert.equal(await readFile(join(work, 'marker'), 'utf8'), 'virtual-ok');
+  const python = await execute('python3 -V');
+  assert.equal(python.value.exitCode, 127, JSON.stringify(python));
+  const root = await execute('apk add fixture-package', { linux_root_write: 'Test paused root request.' });
+  assert.equal(root.isError, true);
+  assert.match(JSON.stringify(root), /ERR_IOS_GUEST_SUSPENDED/);
+  assert.equal(approvals, 0); // Standing mode already matches; no workspace escalation is requested.
+  assert.equal(requests.length, 0);
+  assert.equal(ctx.subprocess.backend.prepared.size, 0);
+});
+}

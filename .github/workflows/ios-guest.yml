@@ -20,6 +20,7 @@ on:
       - 'tooling/ios/tests/guest-*'
       - 'runtime/tests/ios-guest-policy.test.mjs'
       - 'runtime/tests/fixtures/ios-guest-runtime.mjs'
+      - 'runtime/tests/fixtures/ios-root-grants-channel.mjs'
       - 'tooling/ios/guest-preload.js.txt'
       - 'app/ios/Runner/Guest*'
       - 'app/ios/Runner/EngineChannel.swift'
@@ -45,6 +46,12 @@ jobs:
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: '24.22.1'
+      - name: Check native owner identity and suspension on Linux
+        run: |
+          node_headers="$(node -p 'require("node:path").resolve(require("node:path").dirname(process.execPath), "../include/node")')"
+          test -f "$node_headers/node_api.h"
+          python3 -B tooling/ios/guest-tests/test-root-identity.py "$node_headers"
+          python3 -B tooling/ios/guest-tests/test-crash-addon.py "$node_headers"
       - name: Build the pinned virtual shell and worker dependencies
         run: |
           npm ci --ignore-scripts --no-audit --no-fund --prefix runtime/ohos/process
@@ -61,7 +68,7 @@ jobs:
           echo "IOS_GUEST_TEST_PREFIX=$prefix" >> "$GITHUB_ENV"
       - name: Check routing, approval tickets and descriptor admission without Apple code
         run: |
-          node --test tooling/ios/guest-tests/route.test.mjs tooling/ios/guest-tests/runtime.test.mjs runtime/tests/ios-guest-policy.test.mjs tooling/ios/engine-smoke/guest-harness.test.mjs
+          node --test tooling/ios/guest-tests/route.test.mjs tooling/ios/guest-tests/runtime.test.mjs tooling/ios/guest-tests/root-grants.test.mjs runtime/tests/ios-guest-policy.test.mjs tooling/ios/engine-smoke/guest-harness.test.mjs
           python3 tooling/ios/tests/guest-admission.test.py -v
 
   guest:

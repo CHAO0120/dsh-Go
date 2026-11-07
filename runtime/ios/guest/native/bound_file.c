@@ -295,6 +295,40 @@ int dsh_file_link(dsh_root *a, const char *p, size_t n, dsh_root *b,
                   const char *q, size_t k) {
   return pair(a, p, n, b, q, k, true);
 }
+int dsh_file_symlink(dsh_root *r, const char *target, size_t length,
+                     const char *link, size_t link_length) {
+  if (!r) { errno = EINVAL; return -1; }
+  if (r->readonly) return deny();
+  if (!target || !length || length >= PATH_MAX || memchr(target, '\0', length)) {
+    errno = EINVAL;
+    return -1;
+  }
+  if (target[0] == '/') { errno = EPERM; return -1; }
+  // Deliberately narrow: relative text with no parent component. Do not infer
+  // a permanent target boundary from the link's current directory depth;
+  // links and their parent directories may subsequently be renamed.
+  size_t start = 0;
+  for (size_t i = 0; i <= length; ++i) {
+    if (i != length && target[i] != '/') continue;
+    size_t n = i - start;
+    if (n > NAME_MAX) { errno = ENAMETOOLONG; return -1; }
+    if (n == 2 && target[start] == '.' && target[start + 1] == '.') {
+      errno = EPERM;
+      return -1;
+    }
+    start = i + 1;
+  }
+  int parent;
+  char leaf[NAME_MAX + 1];
+  if (dsh_bound_parent(r->fd, link, link_length, &parent, leaf, sizeof leaf) < 0)
+    return -1;
+  char text[PATH_MAX];
+  memcpy(text, target, length); text[length] = '\0';
+  int result = symlinkat(text, parent, leaf), saved = errno;
+  close(parent);
+  errno = saved;
+  return result;
+}
 int dsh_file_unlink(dsh_root *r, const char *p, size_t n) {
   if (r->readonly)
     return deny();

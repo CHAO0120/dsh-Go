@@ -40,6 +40,12 @@ int dsh_guest_start_with_clock(const struct dsh_guest_request *request,
   (void)request; (void)output; (void)context; (void)id;
   (void)clock; (void)clock_context; abort();
 }
+int dsh_guest_start_with_permissions(const struct dsh_guest_request *request,
+    dsh_guest_output output, void *context, uint64_t *id, int root_writable,
+    double (*clock)(void *), void *clock_context) {
+  (void)root_writable;
+  return dsh_guest_start_with_clock(request, output, context, id, clock, clock_context);
+}
 enum dsh_guest_state dsh_guest_status(void) { return DSH_GUEST_COLD; }
 int dsh_guest_ack(uint64_t id, int stream, uint64_t end) {
   (void)id; (void)stream; (void)end; abort();

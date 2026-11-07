@@ -28,11 +28,12 @@ test('generated iOS overrides preserve real tool approval, tickets and Worker ro
         '--import', join(repo, 'runtime/ohos/sim/marker.mjs'),
         '--import', join(fixture, 'runtime/ios/guest/overrides.mjs'),
         '--import', join(fixture, 'runtime/ohos/process/node-worker-preload.mjs'),
-        '--test', '--test-reporter=tap', join(fixture, 'fixture.test.mjs')], { encoding: 'utf8', timeout: 90000, env });
+        '--test', '--test-reporter=tap', join(fixture, 'fixture.test.mjs'),
+        join(fixture, 'root-grants-channel.test.mjs')], { encoding: 'utf8', timeout: 90000, env });
       t.diagnostic(`${flags.join(' ') || 'JIT'}\n${result.stdout}\n${result.stderr}`);
       assert.equal(result.error, undefined);
       assert.equal(result.status, 0, result.stdout + result.stderr);
-      assert.match(result.stdout, /# tests 13\b/);
+      assert.match(result.stdout, /# tests 22\b/);
       assert.match(result.stdout, /# skipped 0\b/);
     }
   } finally {

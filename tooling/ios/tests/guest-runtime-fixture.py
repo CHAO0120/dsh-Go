@@ -58,6 +58,7 @@ def generate(prefix, out):
         mapping[name] = destination
     (out / 'runtime/ios/guest/overrides.json').write_text(json.dumps(mapping))
     shutil.copyfile(REPO / 'runtime/tests/fixtures/ios-guest-runtime.mjs', out / 'fixture.test.mjs')
+    shutil.copyfile(REPO / 'runtime/tests/fixtures/ios-root-grants-channel.mjs', out / 'root-grants-channel.test.mjs')
 
 
 if __name__ == '__main__':

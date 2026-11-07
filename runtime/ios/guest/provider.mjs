@@ -32,7 +32,7 @@ export class GuestProvider {
       suspended: true, suspendedReason: 'crashed', available: false }) : value;
   }
 
-  async execute({ decision, argv, policy, cwd, temporaryRoot, env, stdin, signal, graceMs, output }) {
+  async execute({ decision, argv, policy, rootPermission, cwd, temporaryRoot, env, stdin, signal, graceMs, output }) {
     const fail = async (text, exitCode) => {
       await output('stderr', Buffer.from(text + '\n'));
       return { exitCode, signal: null };
@@ -66,7 +66,8 @@ export class GuestProvider {
       argv: Object.freeze(['/bin/sh', ...argv.slice(1)]),
       cwd: guestCwd, stdin,
       env: guestEnvironment(env, guestCwd),
-      mode,
+      mode, rootWritable: rootPermission !== undefined,
+      ...(rootPermission === undefined ? {} : { expectedRootDevice: rootPermission.expectedRootDevice, expectedRootInode: rootPermission.expectedRootInode }),
       mounts: Object.freeze(paths.mounts.map(row => Object.freeze({ ...row, readOnly: mode === 'read-only' }))),
     });
     return this.#queue.execute(request, { signal, graceMs, output });

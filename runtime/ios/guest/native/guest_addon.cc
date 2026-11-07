@@ -5,6 +5,10 @@
 #include <uv.h>
 #include <atomic>
 #include <cerrno>
+#include <charconv>
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <unistd.h>
 #include <condition_variable>
 #include <cstring>
 #include <dlfcn.h>
@@ -56,6 +60,12 @@ struct CapturedClock {
   static void locate() {}
 };
 struct Job;
+struct RootIdentity {
+  int fd = -1;
+  std::string path;
+  uint64_t device = 0, inode = 0;
+  ~RootIdentity() { if (fd >= 0) close(fd); }
+};
 struct Owner {
   napi_env env = nullptr;
   uv_async_t async{};
@@ -64,6 +74,10 @@ struct Owner {
   std::mutex mutex;
   std::condition_variable changed;
   bool closed = false;
+  // Pin one installation inode until this Owner really retires. A Job retains
+  // its Owner through initialize/start/wait, even after Env cleanup. JS dispose
+  // or an unjoined cancellation must never release/reassign this identity.
+  std::unique_ptr<RootIdentity> root_identity;
   std::shared_ptr<Job> active;
   std::shared_ptr<Job> finishing; // Kept visible to cleanup during an exit callback.
   std::pair<Owner *, int> methods[6];
@@ -92,7 +106,8 @@ struct Job {
   bool start_ready = false, started = false, start_sent = false;
   bool done = false, exit_sent = false, abandoned = false;
   bool close_stdin = false, cancel = false, kill = false;
-  bool read_only = false;
+  bool read_only = false, root_writable = false;
+  uint64_t root_device = 0, root_inode = 0;
   int delivery_error = 0, error = 0;
   dsh_guest_result result{-1, 0, 0};
 };
@@ -135,6 +150,15 @@ bool property_string(napi_env env, napi_value object, const char *name, std::str
   napi_value value;
   return napi_get_named_property(env, object, name, &value) == napi_ok &&
          string(env, value, out, 4096) && !out.empty();
+}
+bool identity_number(napi_env env, napi_value object, const char *name, uint64_t &out) {
+  napi_value key; bool own = false; std::string value;
+  if (napi_create_string_utf8(env, name, NAPI_AUTO_LENGTH, &key) != napi_ok ||
+      napi_has_own_property(env, object, key, &own) != napi_ok || !own ||
+      !property_string(env, object, name, value) || value.size() > 20) return false;
+  if (value.size() > 1 && value[0] == '0') return false;
+  auto parsed = std::from_chars(value.data(), value.data() + value.size(), out);
+  return parsed.ec == std::errc{} && parsed.ptr == value.data() + value.size();
 }
 bool strings(napi_env env, napi_value object, const char *name,
              std::vector<std::string> &out, size_t &budget) {
@@ -220,11 +244,21 @@ void coordinate(std::shared_ptr<Job> job) {
     bool stopped;
     { std::lock_guard<std::mutex> lock(o->mutex); stopped = job->abandoned || o->closed || job->cancel || job->kill; }
     error = stopped ? ECANCELED : dsh_guest_initialize(&options);
+    // Successful initialize permanently excludes the Swift install-change lease.
+    // Check the approved installation generation after that gate, not before it.
+    if (!error && job->root_writable) {
+      struct stat identity{};
+      if (lstat(job->root.c_str(), &identity) != 0) error = errno;
+      else if (!S_ISDIR(identity.st_mode) ||
+          static_cast<uint64_t>(identity.st_dev) != job->root_device ||
+          static_cast<uint64_t>(identity.st_ino) != job->root_inode) error = ESTALE;
+    }
     if (!error) {
       auto argv = pointers(job->argv), env = pointers(job->env);
       dsh_guest_request request{argv.data(), job->argv.size(), env.data(), job->env.size(),
           job->cwd.c_str(), job->workspace.c_str(), job->temporary.c_str(), job->read_only ? 1 : 0};
-      error = dsh_guest_start_with_clock(&request, output, job.get(), &native_id,
+      error = dsh_guest_start_with_permissions(&request, output, job.get(), &native_id,
+          job->root_writable ? 1 : 0,
           job->clock.value.now_ms, job->clock.value.context);
     }
   } catch (const std::bad_alloc &) { error = ENOMEM; }
@@ -239,7 +273,11 @@ void coordinate(std::shared_ptr<Job> job) {
     o->changed.notify_all();
     wake(o);
   }
-  dsh_guest_result result{-1, dropped ? 1 : 0, error ? 1 : 0};
+  // A failed start borrows no callback context, but may have entered the
+  // backend's permanent quarantine with partially constructed task/mounts.
+  // Do not report those native resources as fully settled.
+  dsh_guest_result result{-1, dropped ? 1 : 0,
+      error && dsh_guest_status() != DSH_GUEST_QUARANTINED ? 1 : 0};
   if (!error) {
     if (dropped) dsh_guest_abandon(native_id);
     else if (killed) dsh_guest_kill(native_id);
@@ -391,9 +429,30 @@ napi_value start(napi_env env, napi_callback_info info) {
         !strings(env, args[0], "env", job->env, budget) ||
         napi_get_named_property(env, args[0], "readOnly", &read_only) != napi_ok ||
         napi_get_value_bool(env, read_only, &job->read_only) != napi_ok) return fail(env, EINVAL, "invalid guest request");
+    // Trusted channel supplies this only after a separate per-call root grant.
+    // Missing means false, including for a writable workspace.
+    bool has_root_writable = false;
+    napi_value root_writable, root_writable_key;
+    if (napi_create_string_utf8(env, "rootWritable", NAPI_AUTO_LENGTH, &root_writable_key) != napi_ok ||
+        napi_has_own_property(env, args[0], root_writable_key, &has_root_writable) != napi_ok ||
+        (has_root_writable &&
+         (napi_get_named_property(env, args[0], "rootWritable", &root_writable) != napi_ok ||
+          napi_get_value_bool(env, root_writable, &job->root_writable) != napi_ok)))
+      return fail(env, EINVAL, "rootWritable must be a boolean when present");
+    if (job->root_writable &&
+        (!identity_number(env, args[0], "expectedRootDevice", job->root_device) ||
+         !identity_number(env, args[0], "expectedRootInode", job->root_inode)))
+      return fail(env, EINVAL, "rootWritable requires the approved installation identity");
     budget = 131072;
     if (!strings(env, args[0], "protectedPaths", job->protected_paths, budget)) return fail(env, EINVAL, "invalid protected paths");
-    { std::lock_guard<std::mutex> lock(o->mutex); if (o->closed || o->active) return fail(env, EBUSY, "this Environment already owns a guest task"); }
+    {
+      std::lock_guard<std::mutex> lock(o->mutex);
+      if (o->closed || o->active) return fail(env, EBUSY, "this Environment already owns a guest task");
+      const auto *identity = o->root_identity.get();
+      if (job->root_writable && (!identity || identity->path != job->root ||
+          identity->device != job->root_device || identity->inode != job->root_inode))
+        return fail(env, ESTALE, "the approved Linux installation has no matching retained identity");
+    }
     const int clock_error = job->clock.acquire();
     if (clock_error) return fail(env, clock_error, "embedded Host activity clock is unavailable; rebuild Host and Guest frameworks together");
     napi_value resource, name;
@@ -495,6 +554,53 @@ napi_value status(napi_env env, napi_callback_info) {
   napi_get_boolean(env, true, &value); set(env, result, "available", value);
   return result;
 }
+napi_value root_identity(napi_env env, napi_callback_info info) {
+  try {
+    size_t argc = 2;
+    napi_value args[2];
+    void *context = nullptr;
+    std::string path;
+    if (napi_get_cb_info(env, info, &argc, args, nullptr, &context) != napi_ok || argc != 1 ||
+        !string(env, args[0], path, 4096) || path.empty() || path[0] != '/')
+      return fail(env, EINVAL, "an installed Linux directory is required");
+    auto *o = static_cast<Owner *>(context);
+    std::lock_guard<std::mutex> lock(o->mutex);
+    if (o->closed) return fail(env, ECANCELED, "guest Environment is closed");
+    std::unique_ptr<RootIdentity> candidate;
+    auto *identity = o->root_identity.get();
+    if (identity && identity->path != path)
+      return fail(env, ESTALE, "the Linux installation identity cannot be replaced");
+    if (!identity) {
+      candidate = std::make_unique<RootIdentity>();
+      candidate->path = path;
+      candidate->fd = open(path.c_str(), O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
+      if (candidate->fd < 0) return fail(env, errno, "cannot retain the Linux installation identity");
+      identity = candidate.get();
+    }
+    struct stat retained{}, current{};
+    if (fstat(identity->fd, &retained) != 0 || lstat(path.c_str(), &current) != 0)
+      return fail(env, errno, "cannot inspect the Linux installation identity");
+    if (!S_ISDIR(retained.st_mode) || !S_ISDIR(current.st_mode) ||
+        retained.st_dev != current.st_dev || retained.st_ino != current.st_ino)
+      return fail(env, ESTALE, "the Linux installation identity changed");
+    if (candidate) {
+      identity->device = static_cast<uint64_t>(retained.st_dev);
+      identity->inode = static_cast<uint64_t>(retained.st_ino);
+    }
+    const auto device = std::to_string(identity->device), inode = std::to_string(identity->inode);
+    napi_value result, value;
+    if (napi_create_object(env, &result) != napi_ok ||
+        napi_create_string_utf8(env, device.c_str(), NAPI_AUTO_LENGTH, &value) != napi_ok ||
+        !set(env, result, "expectedRootDevice", value) ||
+        napi_create_string_utf8(env, inode.c_str(), NAPI_AUTO_LENGTH, &value) != napi_ok ||
+        !set(env, result, "expectedRootInode", value))
+      return fail(env, ENOMEM, "cannot publish the Linux installation identity");
+    if (candidate) o->root_identity = std::move(candidate);
+    return result;
+  } catch (const std::bad_alloc &) {
+    return fail(env, ENOMEM, "cannot retain the Linux installation identity");
+  }
+}
 napi_value init(napi_env env, napi_value exports);
 bool pin_module() {
   static std::once_flag once;
@@ -526,14 +632,15 @@ napi_value init(napi_env env, napi_value exports) {
     return fail(env, EIO, "cannot register guest cleanup");
   }
   const char *names[] = {"ack", "stdinWrite", "stdinClose", "cancel", "kill", "abandon"};
-  napi_property_descriptor properties[8]{};
+  napi_property_descriptor properties[9]{};
   properties[0] = {"start", nullptr, start, nullptr, nullptr, nullptr, napi_default, o};
   properties[1] = {"status", nullptr, status, nullptr, nullptr, nullptr, napi_default, nullptr};
   for (int i = 0; i < 6; ++i) {
     o->methods[i] = {o, i + 1};
     properties[i + 2] = {names[i], nullptr, control, nullptr, nullptr, nullptr, napi_default, &o->methods[i]};
   }
-  if (napi_define_properties(env, exports, 8, properties) != napi_ok) return fail(env, EIO, "cannot expose guest methods");
+  properties[8] = {"rootIdentity", nullptr, root_identity, nullptr, nullptr, nullptr, napi_default, o};
+  if (napi_define_properties(env, exports, 9, properties) != napi_ok) return fail(env, EIO, "cannot expose guest methods");
   return exports;
 }
 } // namespace

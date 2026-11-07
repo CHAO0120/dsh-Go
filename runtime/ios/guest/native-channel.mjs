@@ -81,7 +81,8 @@ export function createNativeGuestChannel(native, { root, protectedPaths = [], re
       };
       id = native.start({ root, cwd: request.cwd, workspace, temporary,
         argv: [...request.argv], env: Object.entries(request.env).map(([k, v]) => `${k}=${v}`),
-        readOnly: request.mode === 'read-only', protectedPaths: [...protectedPaths] }, event);
+        readOnly: request.mode === 'read-only', rootWritable: request.rootWritable === true,
+        ...(request.rootWritable === true ? { expectedRootDevice: request.expectedRootDevice, expectedRootInode: request.expectedRootInode } : {}), protectedPaths: [...protectedPaths] }, event);
       return Object.freeze({ finished: completion.promise, abandon() { fail(new Error('Guest operation abandoned by owner')); }, signal(name) {
         if (ended) return;
         if (name === 'SIGTERM') native.cancel(id);

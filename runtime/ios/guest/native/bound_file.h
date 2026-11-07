@@ -34,6 +34,11 @@ int dsh_file_rename(dsh_root *, const char *, size_t, dsh_root *, const char *,
                     size_t);
 int dsh_file_link(dsh_root *, const char *, size_t, dsh_root *, const char *,
                   size_t);
+// Creates relative link text with no .. component at a bound destination.
+// Existing destinations are never replaced; later resolution belongs to guest
+// VFS (pre-existing links/rename can change its target).
+int dsh_file_symlink(dsh_root *, const char *target, size_t target_length,
+                     const char *link, size_t link_length);
 int dsh_file_unlink(dsh_root *, const char *, size_t);
 typedef struct dsh_directory dsh_directory;
 // Empty relative path denotes this capability root; other paths use
