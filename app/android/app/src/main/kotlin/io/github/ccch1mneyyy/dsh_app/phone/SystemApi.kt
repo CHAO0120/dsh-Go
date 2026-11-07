@@ -1,6 +1,7 @@
 package io.github.ccch1mneyyy.dsh_app.phone
 
 import java.net.URLEncoder
+import java.time.Instant
 import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.OffsetDateTime
@@ -84,7 +85,11 @@ sealed interface IntentSpec {
                     val allDay = a.bool("all_day") ?: begin.dateOnly
                     // l10n:keep agent tool validation
                     val end = a.str("end")?.let { parseTime(it, zone) ?: return Either.Left("end 看不懂：写成 2026-10-24T20:00") }
-                    val endMs = end?.ms ?: (begin.ms + if (allDay) 86_400_000L else 3_600_000L)
+                    val endMs = end?.ms ?: if (allDay && begin.dateOnly) {
+                        // A local calendar day can be shorter or longer than 24 hours.
+                        Instant.ofEpochMilli(begin.ms).atZone(zone).toLocalDate()
+                            .plusDays(1).atStartOfDay(zone).toInstant().toEpochMilli()
+                    } else begin.ms + if (allDay) 86_400_000L else 3_600_000L
                     // l10n:keep agent tool validation
                     if (endMs < begin.ms) return Either.Left("end 早于 begin")
                     Either.Right(Calendar(title, begin.ms, endMs, allDay, a.str("location"), a.str("description")))
