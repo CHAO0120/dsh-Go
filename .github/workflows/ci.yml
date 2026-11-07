@@ -254,6 +254,31 @@ jobs:
           gradle-version: ${{ env.GRADLE_VERSION }}
       - working-directory: app/android
         run: gradle --stacktrace :app:testArm64DebugUnitTest
+      # reverse temp branch only: print JUnit XML counts into the log (reporting, no effect on the result)
+      - name: JUnit XML summary (reverse temp branch only)
+        if: ${{ !cancelled() }}
+        working-directory: app/android
+        run: |
+          python3 -I - <<'PYEOF'
+          import glob, xml.etree.ElementTree as ET
+          files = sorted(glob.glob('app/build/test-results/testArm64DebugUnitTest/*.xml'))
+          T = F = E = S = 0
+          for f in files:
+              r = ET.parse(f).getroot()
+              t, fa, er, sk = (int(r.get(k, 0)) for k in ('tests', 'failures', 'errors', 'skipped'))
+              T += t; F += fa; E += er; S += sk
+              name = r.get('name') or f
+              print(f"SUITE {name} tests={t} failures={fa} errors={er} skipped={sk}")
+              for c in r.iter('testcase'):
+                  bad = [k for k in ('failure', 'error', 'skipped') if c.find(k) is not None]
+                  if bad or 'LegacyDownloads' in name or 'BackgroundDisplay' in name:
+                      print(f"  CASE {c.get('name')} time={c.get('time')} status={','.join(bad) or 'pass'}")
+                  for k in ('failure', 'error'):
+                      for x in c.findall(k):
+                          print(f"    {k.upper()} message={(x.get('message') or '')[:800]}")
+                          print('    ' + (x.text or '')[:4000].replace(chr(10), chr(10) + '    '))
+          print(f"JUNIT_TOTAL files={len(files)} tests={T} failures={F} errors={E} skipped={S}")
+          PYEOF
 
   ci-ok:
     name: CI OK
