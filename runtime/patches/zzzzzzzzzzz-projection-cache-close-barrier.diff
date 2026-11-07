@@ -1,0 +1,22 @@
+--- a/node_modules/@deepseek-ai/dsh-agent-loop/lib/index.js
++++ b/node_modules/@deepseek-ai/dsh-agent-loop/lib/index.js
+@@ -1576,7 +1576,8 @@
+ 				failures.push(error);
+ 			}
+ 			try {
+-				await stored?.handle.close();
++				session.dshGoPersistenceClose = stored?.handle.close();
++				await session.dshGoPersistenceClose;
+ 			} catch (error) {
+ 				failures.push(error);
+ 			}
+--- a/node_modules/@deepseek-ai/dsh-session-projection-cache/lib/index.js
++++ b/node_modules/@deepseek-ai/dsh-session-projection-cache/lib/index.js
+@@ -270,6 +270,7 @@
+ 	* @returns resolution after durability and event emission.
+ 	*/
+ 	async write(session) {
++		if (session.dshGoPersistenceClose !== void 0) await session.dshGoPersistenceClose;
+ 		const rows = this.ctx.sessionProjections.checkpoint(session);
+ 		this.markClean(session);
+ 		if (this.ctx.sessions.get(session.id) === session) await this.ctx.sessions.flush(session);
