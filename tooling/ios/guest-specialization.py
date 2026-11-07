@@ -164,7 +164,10 @@ EDITS = {'runtime/ohos/process/index.mjs': (('  get temporaryRoot() { return thi
                                        '      const observations = await Promise.allSettled([...handles.map(handle => '
                                        'handle.waitForExit()), this.#guest?.dispose()]);'),
                                       ('                roots,\n                env, stdin:',
-                                       '                roots, iosGuestRouting: !!this.#guest, iosGuestTemporaryRoot: '
+                                       # A paused Linux (a run that did not finish) hands ordinary
+                                       # scripts back to the virtual shell, as if it were not installed.
+                                       '                roots, iosGuestRouting: !!this.#guest && '
+                                       'this.#guest.metadata?.suspended !== true, iosGuestTemporaryRoot: '
                                        'this.#guestTemporaryRoot,\n'
                                        '                env, stdin:'),
                                       ('const roots = distinctRoots([policy?.workspaceRoot ?? cwd, '
