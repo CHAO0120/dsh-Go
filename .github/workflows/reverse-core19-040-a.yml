@@ -1,0 +1,117 @@
+# reverse temp branch only (request 040 A). Not product; never merged.
+# Same toolchain preparation as ci.yml's "Android JVM" job (Java 17, Flutter 3.47.7, pub get
+# --enforce-lockfile, local.properties, Gradle 9.3.1), then exactly one requested gradle command,
+# plus read-only reporting of the GuestAgentsModeTest JUnit XML that command produced.
+name: reverse core19 040 A
+
+on:
+  push:
+    branches: [reverse/core19-040-a]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  FLUTTER_VERSION: 3.47.7
+  NODE_VERSION: 24.22.1
+  GRADLE_VERSION: 9.3.1
+  TZ: Asia/Shanghai
+
+jobs:
+  android:
+    name: Request 040 A GuestAgentsModeTest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    env:
+      DSH_MAVEN_MIRRORS: 0 # same as ci.yml's Android JVM job
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+      - name: Flutter plugins and local.properties
+        working-directory: app
+        run: |
+          flutter pub get --enforce-lockfile
+          printf 'sdk.dir=%s\nflutter.sdk=%s\n' "$ANDROID_HOME" "$FLUTTER_ROOT" > android/local.properties
+      - uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
+        with:
+          gradle-version: ${{ env.GRADLE_VERSION }}
+      - name: Toolchain and tree identity (reporting only)
+        run: |
+          set +e
+          echo "HEAD=$(git rev-parse HEAD)"
+          echo "PUBSPEC_LOCK_UNCHANGED=$(git diff --quiet -- app/pubspec.lock && echo yes || echo no)"
+          sha256sum app/pubspec.lock | sed 's/^/PUBSPEC_LOCK /'
+          sha256sum app/android/app/src/main/kotlin/io/github/ccch1mneyyy/dsh_app/runtime/GuestSetup.kt app/android/app/src/test/kotlin/io/github/ccch1mneyyy/dsh_app/runtime/GuestAgentsModeTest.kt | sed 's/^/SRC /'
+          echo "UID=$(id -u) GID=$(id -g) USER=$(id -un)"
+          uname -srm | sed 's/^/KERNEL /'
+          grep PRETTY_NAME /etc/os-release
+          findmnt -no TARGET,FSTYPE,OPTIONS -T /tmp | sed 's/^/TMP_MOUNT /'
+          java -version 2>&1 | sed 's/^/JAVA_VERSION /'
+          flutter --version 2>&1 | sed 's/^/FLUTTER_VERSION /'
+          command -v gradle | sed 's/^/GRADLE_BIN /'
+          exit 0
+      - name: Command gradle --stacktrace :app:testArm64DebugUnitTest --tests io.github.ccch1mneyyy.dsh_app.runtime.GuestAgentsModeTest.aManagedUpdateLeavesAnAlreadyOpenFileComplete
+        id: cmd
+        working-directory: app/android
+        run: |
+          set +e
+          echo "=== CMD BEGIN $(date -u +%Y-%m-%dT%H:%M:%SZ) cwd=$(pwd)"
+          gradle --stacktrace :app:testArm64DebugUnitTest --tests 'io.github.ccch1mneyyy.dsh_app.runtime.GuestAgentsModeTest.aManagedUpdateLeavesAnAlreadyOpenFileComplete'
+          rc=$?
+          echo "=== CMD END $(date -u +%Y-%m-%dT%H:%M:%SZ) CMD_EXIT=$rc"
+          echo "rc=$rc" >> "$GITHUB_OUTPUT"
+          exit 0
+      - name: GuestAgentsModeTest JUnit XML (read-only)
+        if: ${{ !cancelled() }}
+        working-directory: app/android
+        run: |
+          set +e
+          mkdir -p "$RUNNER_TEMP/junit"
+          files=$(find .. -path '*test-results/testArm64DebugUnitTest/*.xml' 2>/dev/null | sort)
+          echo "XML_FILES_ALL=$(echo "$files" | grep -c .)"
+          for f in $files; do echo "XML $(sha256sum "$f" | cut -c1-64) $(stat -c '%s %y' "$f") $f"; done
+          for f in $(echo "$files" | grep 'GuestAgentsModeTest'); do cp "$f" "$RUNNER_TEMP/junit/"; done
+          python3 -I - $files <<'PYEOF'
+          import sys, xml.etree.ElementTree as ET
+          T = F = E = S = 0
+          for f in sys.argv[1:]:
+              r = ET.parse(f).getroot()
+              t, fa, er, sk = (int(r.get(k, 0)) for k in ('tests', 'failures', 'errors', 'skipped'))
+              T += t; F += fa; E += er; S += sk
+              print(f"SUITE {r.get('name')} tests={t} failures={fa} errors={er} skipped={sk} time={r.get('time')} timestamp={r.get('timestamp')}")
+              for c in r.iter('testcase'):
+                  bad = [k for k in ('failure', 'error', 'skipped') if c.find(k) is not None]
+                  print(f"  CASE {c.get('name')} time={c.get('time')} status={','.join(bad) or 'pass'}")
+                  for k in ('failure', 'error', 'skipped'):
+                      for x in c.findall(k):
+                          print(f"    {k.upper()} type={x.get('type')} message={(x.get('message') or '')[:4000]}")
+                          print('    ' + (x.text or '')[:30000].replace(chr(10), chr(10) + '    '))
+              for k in ('system-out', 'system-err'):
+                  for x in r.findall(k):
+                      if (x.text or '').strip():
+                          print(f"  {k.upper()}<<<"); print((x.text or '')[:8000]); print('  >>>')
+          print(f"JUNIT_TOTAL files={len(sys.argv) - 1} tests={T} failures={F} errors={E} skipped={S}")
+          PYEOF
+          exit 0
+      - name: Upload GuestAgentsModeTest JUnit XML (reverse temp branch only)
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: reverse-040-A-GuestAgentsModeTest-junit
+          path: ${{ runner.temp }}/junit
+          if-no-files-found: warn
+          retention-days: 7
+      - name: Keep the gradle command's real result as the job result
+        if: ${{ !cancelled() && steps.cmd.outputs.rc != '0' }}
+        run: exit 1
