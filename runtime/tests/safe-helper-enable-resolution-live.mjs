@@ -39,12 +39,11 @@ function fixture(t) {
     const exit = {};
     let lockEntered = false;
     const trackedFs = { ...fs,
-      writeFileSync(file, ...args) {
-        if (file === manifest + '.lock') {
-          beforeLock?.();
-          lockEntered = true;
-        }
-        return fs.writeFileSync(file, ...args);
+      openSync(file, ...args) {
+        if (file === manifest + '.lock') beforeLock?.();
+        const fd = fs.openSync(file, ...args);
+        if (file === manifest + '.lock') lockEntered = true;
+        return fd;
       },
       readFileSync(file, ...args) {
         if (ioError && file === ioError) {

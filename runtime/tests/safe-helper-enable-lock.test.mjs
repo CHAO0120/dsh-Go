@@ -33,7 +33,7 @@ function run(t, { uninstall = false, names = ['local-plugin'] } = {}) {
   const exit = {};
   // Schedule an existing writer's commit immediately before the helper acquires
   // the real file lock. All manifest reads/writes use the actual filesystem.
-  const scheduledFs = { ...fs, writeFileSync(path, ...args) {
+  const scheduledFs = { ...fs, openSync(path, ...args) {
     if (uninstall && path === file + '.lock' && !completed) {
       assert.ok(fs.existsSync(file + '.lock'));
       delete manifest.dependencies['local-plugin'];
@@ -41,7 +41,7 @@ function run(t, { uninstall = false, names = ['local-plugin'] } = {}) {
       fs.unlinkSync(file + '.lock');
       completed = true;
     }
-    return fs.writeFileSync(path, ...args);
+    return fs.openSync(path, ...args);
   } };
   try {
     runInNewContext(script, {

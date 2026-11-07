@@ -1,0 +1,30 @@
+diff --git a/node_modules/@deepseek-ai/dsh-atomic-write/lib/index.js b/node_modules/@deepseek-ai/dsh-atomic-write/lib/index.js
+index 09a572c..c7055f9 100644
+--- a/node_modules/@deepseek-ai/dsh-atomic-write/lib/index.js
++++ b/node_modules/@deepseek-ai/dsh-atomic-write/lib/index.js
+@@ -1,6 +1,7 @@
+ import { createHash, randomBytes } from "node:crypto";
+ import { link, lstat, mkdir, open, readFile, rename, rm, writeFile } from "node:fs/promises";
+ import { dirname } from "node:path";
++import { performance } from "node:perf_hooks";
+ import { setTimeout as setTimeout$1 } from "node:timers/promises";
+ //#region lib/types/index.js
+ /**
+@@ -204,7 +205,7 @@ const DEFAULT_LOCK_WAIT_MS = 2e3;
+ */
+ async function withFileLock(filename, operation, options) {
+ 	const lockPath = `${filename}.lock`;
+-	const deadline = Date.now() + (options?.waitMs ?? DEFAULT_LOCK_WAIT_MS);
++	const deadline = performance.now() + (options?.waitMs ?? DEFAULT_LOCK_WAIT_MS);
+ 	let delay = LOCK_RETRY_INITIAL_MS;
+ 	let retriedUnconfirmedPermissionError = false;
+ 	for (;;) {
+@@ -228,7 +229,7 @@ async function withFileLock(filename, operation, options) {
+ 				retriedUnconfirmedPermissionError = true;
+ 			} else if (await takeOverExitedLock(lockPath)) continue;
+ 		}
+-		if (Date.now() >= deadline) throw new Error(`atomic-write: timed out waiting for the writer lock at ${lockPath}`);
++		if (performance.now() >= deadline) throw new Error(`atomic-write: timed out waiting for the writer lock at ${lockPath}`);
+ 		await setTimeout$1(delay, void 0, { signal: options?.signal });
+ 		delay = Math.min(delay * 2, LOCK_RETRY_MAX_MS);
+ 	}

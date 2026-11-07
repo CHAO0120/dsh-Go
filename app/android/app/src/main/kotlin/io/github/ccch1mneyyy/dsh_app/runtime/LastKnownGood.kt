@@ -1,8 +1,14 @@
 package io.github.ccch1mneyyy.dsh_app.runtime
 
+import android.system.ErrnoException
+import android.system.Os
+import android.system.OsConstants
+import android.os.SystemClock
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
+import java.io.FileOutputStream
+import java.security.MessageDigest
 
 /** Enabled bundles, installed packages and settings layer of the main profile at one moment. */
 data class ProfileSnapshot(
@@ -203,21 +209,13 @@ object LastKnownGood {
      */
     private fun <T> withLock(file: File, busyConfig: String, block: () -> T): T {
         val lock = File(file.path + ".lock")
-        val deadline = System.currentTimeMillis() + 3000
+        val deadline = SystemClock.elapsedRealtime() + 3000
         while (true) {
             if (lock.createNewFile()) {
                 break
             }
-            val holder = try {
-                lock.readText().trim().toIntOrNull()
-            } catch (_: Exception) {
-                null
-            }
-            if (holder != null && !File("/proc/$holder").exists()) {
-                lock.delete()
-                continue
-            }
-            if (System.currentTimeMillis() > deadline) throw IllegalStateException(busyConfig)
+            if (takeOverExitedLock(lock)) continue
+            if (SystemClock.elapsedRealtime() > deadline) throw IllegalStateException(busyConfig)
             Thread.sleep(50)
         }
         try {
@@ -225,6 +223,106 @@ object LastKnownGood {
             return block()
         } finally {
             lock.delete()
+        }
+    }
+
+    private fun readLockRecord(lock: File): String? = try {
+        lock.readText(Charsets.UTF_8)
+    } catch (_: Exception) {
+        null
+    }
+
+    private fun holderExited(record: String): Boolean {
+        if (!Regex("[0-9]+\\n").matches(record)) return false
+        val pid = record.dropLast(1).toIntOrNull() ?: return false
+        if (pid <= 0 || pid == android.os.Process.myPid()) return false
+        return try {
+            Os.kill(pid, 0)
+            false
+        } catch (error: ErrnoException) {
+            error.errno == OsConstants.ESRCH
+        }
+    }
+
+    private fun readClaimRecord(file: File): String? {
+        return try {
+            file.readText(Charsets.UTF_8)
+        } catch (error: java.io.FileNotFoundException) {
+            try { Os.lstat(file.path) } catch (missing: ErrnoException) {
+                if (missing.errno == OsConstants.ENOENT) return null
+                throw missing
+            }
+            throw error
+        }
+    }
+
+    private fun completedSlot(file: File): Boolean = try {
+        if (!OsConstants.S_ISREG(Os.lstat(file.path).st_mode)) throw java.io.IOException("Invalid takeover completion: $file")
+        true
+    } catch (error: ErrnoException) {
+        if (error.errno == OsConstants.ENOENT) false else throw error
+    }
+
+    // All peers use permanent slots. Neither completed nor dead slots are removed.
+    private fun takeOverExitedLock(lock: File): Boolean {
+        val record = readLockRecord(lock) ?: return false
+        if (!holderExited(record)) return false
+        val hash = MessageDigest.getInstance("SHA-256")
+            .digest(record.toByteArray(Charsets.UTF_8))
+            .take(8).joinToString("") { "%02x".format(it.toInt() and 0xff) }
+        val legacy = File(lock.path + ".takeover-" + hash)
+        val legacyRecord = readClaimRecord(legacy)
+        if (legacyRecord != null && !holderExited(legacyRecord)) return false
+        val directory = File(legacy.path + ".slots")
+        if (!directory.mkdirs() && !directory.isDirectory) throw java.io.IOException("Cannot create $directory")
+        val temp = File(directory, ".owner-${android.os.Process.myPid()}-${java.util.UUID.randomUUID()}.tmp")
+        var ownTemp = false
+        var ownedSlot: File? = null
+        try {
+            val fd = Os.open(temp.path, OsConstants.O_CREAT or OsConstants.O_EXCL or OsConstants.O_WRONLY, 384)
+            ownTemp = true
+            var writeFailure: Throwable? = null
+            try {
+                FileOutputStream(fd).use { it.write("${android.os.Process.myPid()}\n".toByteArray(Charsets.UTF_8)) }
+            } catch (error: Throwable) {
+                writeFailure = error
+                throw error
+            } finally {
+                try { Os.close(fd) } catch (closeError: Throwable) {
+                    if (writeFailure == null) throw closeError
+                    writeFailure.addSuppressed(closeError)
+                }
+            }
+            var index = 0L
+            while (true) {
+                if (index > 9007199254740991L) throw java.io.IOException("Takeover slot limit exceeded")
+                val slot = File(directory, index.toString())
+                if (completedSlot(File(slot.path + ".done"))) { index++; continue }
+                val owner = readClaimRecord(slot)
+                if (owner != null) {
+                    if (!holderExited(owner)) return false
+                    index++
+                    continue
+                }
+                try {
+                    Os.link(temp.path, slot.path)
+                    ownedSlot = slot
+                    break
+                } catch (error: ErrnoException) {
+                    if (error.errno != OsConstants.EEXIST) throw error
+                }
+            }
+            if (readLockRecord(lock) != record || !holderExited(record)) return false
+            return lock.delete()
+        } finally {
+            try {
+                ownedSlot?.let { slot ->
+                    val fd = Os.open(slot.path + ".done", OsConstants.O_CREAT or OsConstants.O_EXCL or OsConstants.O_WRONLY, 384)
+                    Os.close(fd)
+                }
+            } finally {
+                if (ownTemp && !temp.delete() && temp.exists()) throw java.io.IOException("Cannot remove $temp")
+            }
         }
     }
 
