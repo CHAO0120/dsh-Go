@@ -52,7 +52,13 @@ object LaunchStart {
         }
     }
 
-    private fun startIfAllowed(context: Context, profile: DeviceProfile) {
+    /** An explicit engine stop retires only this process's still-pending launch intent. */
+    @Synchronized fun cancelPending() {
+        if (decided == null) decided = false
+    }
+
+    @Synchronized private fun startIfAllowed(context: Context, profile: DeviceProfile) {
+        if (decided != null) return
         try {
             val prefs = context.getSharedPreferences(FLUTTER_PREFS, Context.MODE_PRIVATE)
             val controller = RuntimeController.get(context)

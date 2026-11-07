@@ -81,6 +81,7 @@ class DshService : Service() {
                 if (controller.phase == RuntimeController.Phase.INSTALLING) return START_NOT_STICKY
                 val expected = if (intent.hasExtra(EXTRA_STOP_GENERATION))
                     intent.getIntExtra(EXTRA_STOP_GENERATION, -1) else null
+                if (expected == null) LaunchStart.cancelPending()
                 if (!controller.stopProcess(expected)) return START_NOT_STICKY
                 running = false
                 stopForegroundCompat()

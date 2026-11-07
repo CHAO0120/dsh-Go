@@ -51,6 +51,12 @@ class RuntimeController private constructor(private val app: Context) : DshProce
 
     val manifest: RuntimeManifest by lazy { RuntimeManifest.load(app) }
     private val installer by lazy { RuntimeInstaller(app, manifest, ::note) }
+    // Outside runtime/ and runtime.reset/: reset must not erase its reboot witness.
+    // All access is on worker, including the synchronous pre-spawn callback below.
+    private val resetWitness by lazy {
+        val directory = checkNotNull(app.noBackupFilesDir) { "reset witness directory unavailable" }
+        RuntimeResetWitness(File(directory, "runtime-reset-boot"), SystemClock::elapsedRealtime)
+    }
     @Volatile private var process: DshProcess? = null
     @Volatile private var lastLaunch: LaunchDiagnostics? = null
     /** The start in progress is turning PRoot's fake hard links into real files (see [L2sMigration]). */
@@ -272,6 +278,7 @@ class RuntimeController private constructor(private val app: Context) : DshProce
     }
 
     fun stop() {
+        LaunchStart.cancelPending()
         managedSkillGate.stop(runGen)
         val intent = Intent(app, DshService::class.java).setAction(DshService.ACTION_STOP)
         app.startService(intent)
@@ -385,6 +392,8 @@ class RuntimeController private constructor(private val app: Context) : DshProce
                 p.start(env, if (storage) PhoneStorage.binds() else emptyList(), safe, phone, direct.requested, direct.failed, searchOverlay, authOverlay, speechOverlay) { actualDirect ->
                     // SafeMode.prepare writes its own briefing; leave the original home untouched.
                     if (!safe) GuestSetup.writeAgentsMd(installer.rootfs, storage, phone, pendingVisualReplies, actualDirect)
+                    // DshProcess invokes this synchronously, before builder.start().
+                    resetWitness.admitLaunch()
                 }
                 if (phone) PhoneControl.get(app).launched(p.phoneMounted)
             } catch (e: Throwable) {
@@ -486,7 +495,9 @@ class RuntimeController private constructor(private val app: Context) : DshProce
                 // A finished waiter may have reported incomplete cleanup. Captured identities
                 // outlive its launcher; do not retire their rootfs while any still remain.
                 val cleanup = DshProcess(app, manifest, installer.rootfs, this).reapStrays()
-                check(cleanup.complete) { "runtime stop incomplete; retry reset after cleanup" }
+                check(cleanup.complete || resetWitness.allowsIncompleteReset(cleanup.ownedRemaining)) {
+                    "runtime stop incomplete; retry reset after cleanup"
+                }
                 lastLaunch = null
                 try {
                     check(runtimeLogs.pauseDisk()) { "log reset pause timed out" }
@@ -521,6 +532,12 @@ class RuntimeController private constructor(private val app: Context) : DshProce
                 }
                 main.post { onDone(null) }
             } catch (e: Throwable) {
+                // Record only after the old witness was checked. A later explicit reset may
+                // use a real reboot; there is no deferred delete or preference change.
+                runCatching { resetWitness.recordFailedReset() }.onFailure {
+                    e.addSuppressed(it)
+                    log("[dsh-app] reset reboot witness not recorded: ${it.javaClass.simpleName}", "system")
+                }
                 log("[dsh-app] reset failed: ${e.message}", "system")
                 // Still stopping while the old process hasn't exited (its exit report moves the
                 // phase on); otherwise the runtime is either still whole or gone.
