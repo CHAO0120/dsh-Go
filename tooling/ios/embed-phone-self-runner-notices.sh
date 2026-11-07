@@ -8,10 +8,10 @@ set -euo pipefail
 : "${UNLOCALIZED_RESOURCES_FOLDER_PATH:?Xcode resource path required}"
 SOURCE="$SRCROOT/PhoneSelfRunnerNative"
 DESTINATION="$TARGET_BUILD_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH/PhoneSelfRunnerNotices"
-for name in LICENSE.idevice.txt THIRD_PARTY_CRATES.json SOURCE.json; do
-  [[ -f "$SOURCE/$name" ]] || { printf 'Missing phone native notice: %s; rerun build-phone-self-runner.sh.\n' "$name" >&2; exit 1; }
+for name in LICENSE.idevice.txt THIRD_PARTY_CRATES.json NOTICES.txt SOURCE.json; do
+  [[ -s "$SOURCE/$name" ]] || { printf 'Missing phone native notice: %s; rerun build-phone-self-runner.sh.\n' "$name" >&2; exit 1; }
 done
 mkdir -p "$DESTINATION"
-for name in LICENSE.idevice.txt THIRD_PARTY_CRATES.json SOURCE.json; do
+for name in LICENSE.idevice.txt THIRD_PARTY_CRATES.json NOTICES.txt SOURCE.json; do
   cp "$SOURCE/$name" "$DESTINATION/$name"
 done

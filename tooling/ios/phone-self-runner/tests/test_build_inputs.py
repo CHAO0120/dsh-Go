@@ -1,5 +1,6 @@
 """Portable preparation and attribution tests; no device or network required."""
 import hashlib
+import copy
 import importlib.util
 import io
 import json
@@ -7,6 +8,7 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 import tarfile
 import tempfile
 import unittest
@@ -112,11 +114,15 @@ class BuildScript(unittest.TestCase):
         native.mkdir(parents=True)
         self.script = native.parent / 'build-phone-self-runner.sh'
         shutil.copyfile(ROOT.parent / 'build-phone-self-runner.sh', self.script)
-        for name in ['license_inventory.py', 'source-pins.json']:
+        for name in ['license_inventory.py', 'source-pins.json', 'notice-supplements.json']:
             shutil.copyfile(ROOT / name, native / name)
         (native / 'prepare_upstream.py').write_text('print("fixture upstream only")\n')
         (native / '.upstream').mkdir()
         (native / '.upstream/LICENSE.txt').write_text('fixture upstream MIT license\n')
+        (native / '.upstream/idevice').mkdir()
+        (native / '.upstream/idevice/Cargo.toml').write_text('fixture manifest\n')
+        (native / 'Cargo.toml').write_text('fixture manifest\n')
+        (self.repo / 'LICENSE').write_text('fixture application license\n')
         self.tools = self.repo / 'tools'
         self.tools.mkdir()
         for name, body in {
@@ -126,7 +132,11 @@ class BuildScript(unittest.TestCase):
             'cargo': '''#!/usr/bin/env python3
 import json,os,pathlib,sys
 if 'metadata' in sys.argv:
- print(json.dumps({'packages':[{'name':'idevice','version':'0.1.68','license':'MIT','source':None,'manifest_path':'/private/host/secret'}]}))
+ native=pathlib.Path.cwd()
+ if os.environ.get('FAIL_NOTICE'): (native/'.upstream/LICENSE.txt').unlink()
+ packages=[{'id':'native','name':'dsh-phone-self-runner','version':'0.1.0','license':'AGPL-3.0-only','source':None,'manifest_path':str(native/'Cargo.toml')},
+           {'id':'upstream','name':'idevice','version':'0.1.68','license':'MIT','source':None,'manifest_path':str(native/'.upstream/idevice/Cargo.toml')}]
+ print(json.dumps({'packages':packages,'resolve':{'root':'native','nodes':[{'id':p['id']} for p in packages]}}))
 else:
  target=sys.argv[sys.argv.index('--target')+1]
  if os.environ.get('FAIL_SLICE')==target: sys.exit(23)
@@ -140,10 +150,12 @@ else:
             path.chmod(0o755)
         self.out = self.repo / 'app/ios/PhoneSelfRunnerNative'
 
-    def run_build(self, fail=None):
+    def run_build(self, fail=None, missing_notice=False):
         env = {**os.environ, 'PATH': str(self.tools) + os.pathsep + os.environ['PATH']}
         if fail:
             env['FAIL_SLICE'] = fail
+        if missing_notice:
+            env['FAIL_NOTICE'] = '1'
         return subprocess.run(['bash', str(self.script)], env=env, capture_output=True, text=True, timeout=20)
 
     def test_success_publishes_three_slices_and_sanitized_attribution(self):
@@ -156,8 +168,14 @@ else:
         self.assertIn('$(PLATFORM_NAME)/$(CURRENT_ARCH)', config)
         report = (self.out / 'THIRD_PARTY_CRATES.json').read_text()
         self.assertNotIn('/private', report)
-        self.assertEqual(json.loads(report)['packages'][0]['license'], 'MIT')
+        package = next(p for p in json.loads(report)['packages'] if p['name'] == 'idevice')
+        self.assertEqual(package['license'], 'MIT')
         self.assertTrue((self.out / 'LICENSE.idevice.txt').is_file())
+        notices = (self.out / 'NOTICES.txt').read_bytes()
+        self.assertIn(b'fixture upstream MIT license\n', notices)
+        self.assertIn(b'fixture application license\n', notices)
+        self.assertNotIn(str(self.repo).encode(), notices)
+        self.assertEqual(json.loads(report)['notices']['sha256'], hashlib.sha256(notices).hexdigest())
         self.assertEqual(list(self.out.glob('.build.*')), [])
 
     def test_failed_slice_cannot_enable_a_first_build(self):
@@ -166,6 +184,192 @@ else:
         self.assertFalse((self.out / 'PhoneSelfRunner.xcconfig').exists())
         self.assertFalse((self.out / 'iphoneos').exists())
         self.assertEqual(list(self.out.glob('.build.*')), [])
+
+    def test_missing_original_notice_cannot_publish_completed_slices(self):
+        result = self.run_build(missing_notice=True)
+        self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn('Notice must be a regular', result.stderr)
+        self.assertFalse((self.out / 'PhoneSelfRunner.xcconfig').exists())
+        self.assertFalse((self.out / 'iphoneos').exists())
+        self.assertEqual(list(self.out.glob('.build.*')), [])
+
+
+class NoticeCollection(unittest.TestCase):
+    """Use real collection, publication and verification with synthetic sources."""
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory(prefix='dsh-notice-texts-')
+        self.addCleanup(self.temporary.cleanup)
+        self.root = Path(self.temporary.name)
+        self.native = self.root / 'repo/tooling/ios/phone-self-runner'
+        self.native.mkdir(parents=True)
+        self.exporter = module('notice_collection_test', ROOT / 'license_inventory.py')
+        self.exporter.HERE = self.native
+        shutil.copyfile(ROOT / 'source-pins.json', self.native / 'source-pins.json')
+        (self.native / 'notice-supplements.json').write_text('{}\n')
+        (self.native / 'Cargo.toml').write_text('synthetic native manifest\n')
+        (self.root / 'repo/LICENSE').write_bytes(b'application original\r\n')
+        upstream = self.native / '.upstream/idevice'
+        upstream.mkdir(parents=True)
+        (upstream / 'Cargo.toml').write_text('synthetic upstream manifest\n')
+        (upstream.parent / 'LICENSE.txt').write_text('upstream original\n')
+        self.crate = self.root / 'registry/fixture-1.0.0'
+        self.crate.mkdir(parents=True)
+        (self.crate / 'Cargo.toml').write_text('synthetic registry manifest\n')
+        (self.crate / 'LICENSE-MIT').write_bytes(b'fixture MIT original\r\nCopyright fixture\n')
+        (self.crate / 'third_party').mkdir()
+        (self.crate / 'third_party/NOTICE').write_bytes(b'nested original attribution\n')
+        packages = [
+            {'id': 'native', 'name': 'dsh-phone-self-runner', 'version': '0.1.0', 'license': 'AGPL-3.0-only',
+             'source': None, 'manifest_path': str(self.native / 'Cargo.toml')},
+            {'id': 'upstream', 'name': 'idevice', 'version': '0.1.68', 'license': 'MIT',
+             'source': None, 'manifest_path': str(upstream / 'Cargo.toml')},
+            {'id': 'fixture', 'name': 'fixture', 'version': '1.0.0', 'license': 'MIT',
+             'source': 'registry+https://github.com/rust-lang/crates.io-index',
+             'manifest_path': str(self.crate / 'Cargo.toml')},
+        ]
+        self.metadata = {'packages': packages,
+                         'resolve': {'root': 'native', 'nodes': [{'id': p['id']} for p in packages]}}
+
+    def test_all_originals_and_nested_attributions_are_kept_byte_for_byte(self):
+        report, notices = self.exporter.generate(self.metadata)
+        self.exporter.verify(report, notices)
+        fixture = next(p for p in report['notices']['packages'] if p['name'] == 'fixture')
+        self.assertEqual({p['path'] for p in fixture['files']}, {'LICENSE-MIT', 'third_party/NOTICE'})
+        for item in fixture['files']:
+            original = (self.crate / item['path']).read_bytes()
+            self.assertEqual(notices[item['offset']:item['offset'] + item['bytes']], original)
+        self.assertIn(b'application original\r\n', notices)
+        self.assertNotIn(str(self.root).encode(), notices)
+        self.assertNotIn(str(self.root), json.dumps(report))
+
+    def test_order_of_cargo_metadata_does_not_change_the_notice_artifact(self):
+        expected = self.exporter.generate(self.metadata)
+        self.metadata['packages'].reverse()
+        self.assertEqual(self.exporter.generate(self.metadata), expected)
+
+    def test_missing_empty_and_binary_license_text_cannot_generate_a_bundle(self):
+        (self.crate / 'third_party/NOTICE').unlink()
+        license_file = self.crate / 'LICENSE-MIT'
+        license_file.unlink()
+        with self.assertRaisesRegex(ValueError, 'No license'):
+            self.exporter.generate(self.metadata)
+        for invalid in [b'', b' \n\t', b'license\0suffix']:
+            license_file.write_bytes(invalid)
+            with self.assertRaisesRegex(ValueError, 'Empty, binary'):
+                self.exporter.generate(self.metadata)
+
+    def test_license_links_and_declared_paths_outside_the_crate_are_rejected(self):
+        (self.crate / 'LICENSE-MIT').unlink()
+        outside = self.root / 'outside-license'
+        outside.write_text('must not read this into a package\n')
+        (self.crate / 'LICENSE-MIT').symlink_to(outside)
+        with self.assertRaisesRegex(ValueError, 'non-symlink'):
+            self.exporter.generate(self.metadata)
+        (self.crate / 'LICENSE-MIT').unlink()
+        self.metadata['packages'][2]['license_file'] = str(outside)
+        with self.assertRaisesRegex(ValueError, 'escapes package'):
+            self.exporter.generate(self.metadata)
+
+    def test_no_deps_metadata_cannot_silently_produce_partial_coverage(self):
+        self.metadata['resolve'] = None
+        with self.assertRaisesRegex(ValueError, 'Full resolved'):
+            self.exporter.generate(self.metadata)
+
+    def test_tampered_notice_bytes_and_missing_package_entries_fail_verification(self):
+        report, notices = self.exporter.generate(self.metadata)
+        with self.assertRaisesRegex(ValueError, 'identity mismatch'):
+            self.exporter.verify(report, notices + b'changed')
+        missing = copy.deepcopy(report)
+        missing['notices']['packages'].pop()
+        with self.assertRaisesRegex(ValueError, 'coverage'):
+            self.exporter.verify(missing, notices)
+        missing = copy.deepcopy(report)
+        missing['notices']['packages'][0]['files'] = []
+        with self.assertRaisesRegex(ValueError, 'no notice'):
+            self.exporter.verify(missing, notices)
+
+    def test_rehashed_document_still_checks_each_original_byte_range(self):
+        report, notices = self.exporter.generate(self.metadata)
+        first = report['notices']['packages'][0]['files'][0]
+        changed = bytearray(notices)
+        changed[first['offset']] ^= 1
+        report['notices']['sha256'] = hashlib.sha256(changed).hexdigest()
+        with self.assertRaisesRegex(ValueError, 'source text identity'):
+            self.exporter.verify(report, bytes(changed))
+
+    def test_source_pins_and_native_package_coverage_are_checked_in_the_bundle(self):
+        report, notices = self.exporter.generate(self.metadata)
+        bundle = self.root / 'bundle'
+        bundle.mkdir()
+        (bundle / 'THIRD_PARTY_CRATES.json').write_text(json.dumps(report))
+        (bundle / 'NOTICES.txt').write_bytes(notices)
+        shutil.copyfile(self.native / 'source-pins.json', bundle / 'SOURCE.json')
+        self.exporter.verify_bundle(bundle)
+        (bundle / 'SOURCE.json').write_text('{"commit":"wrong"}')
+        with self.assertRaisesRegex(ValueError, 'source pin mismatch'):
+            self.exporter.verify_bundle(bundle)
+
+    def test_every_package_retains_archive_identity_type_checks(self):
+        report, notices = self.exporter.generate(self.metadata)
+        for field in ['name', 'version', 'source']:
+            for invalid in [None, 3, {}, '']:
+                changed = copy.deepcopy(report)
+                next(p for p in changed['packages'] if p['name'] == 'fixture')[field] = invalid
+                with self.subTest(field=field, invalid=invalid):
+                    with self.assertRaisesRegex(ValueError, 'Invalid package'):
+                        self.exporter.verify(changed, notices)
+
+    def test_oversized_original_is_rejected_before_collecting_its_payload(self):
+        original = self.crate / 'LICENSE-MIT'
+        with original.open('wb') as output:
+            output.truncate(self.exporter.MAX_NOTICE_BYTES + 1)
+        with self.assertRaisesRegex(ValueError, 'oversized'):
+            self.exporter.read_notice(original)
+
+    def test_curated_text_is_bound_to_manifest_vcs_license_and_exact_bytes(self):
+        original = b'synthetic published manifest\n'
+        (self.crate / 'Cargo.toml.orig').write_bytes(original)
+        (self.crate / '.cargo_vcs_info.json').write_text(json.dumps({'git': {'sha1': 'fixture-commit'}}))
+        texts = self.native / 'notice-texts'
+        texts.mkdir()
+        document = b'synthetic upstream original terms\r\n'
+        (texts / 'fixture.txt').write_bytes(document)
+        supplement = {'fixture@1.0.0': {'manifest_sha256': hashlib.sha256(original).hexdigest(),
+                      'commit': 'fixture-commit', 'license': 'MIT', 'originals': ['Cargo.toml.orig'],
+                      'documents': [{'file': 'fixture.txt', 'sha256': hashlib.sha256(document).hexdigest(),
+                                     'provenance': 'synthetic test source'}]}}
+        config = self.native / 'notice-supplements.json'
+        config.write_text(json.dumps(supplement))
+        _, notices = self.exporter.generate(self.metadata)
+        self.assertIn(document, notices)
+        for field in ['manifest_sha256', 'commit', 'license']:
+            changed = copy.deepcopy(supplement)
+            changed['fixture@1.0.0'][field] = 'different'
+            config.write_text(json.dumps(changed))
+            with self.subTest(field=field):
+                with self.assertRaisesRegex(ValueError, 'does not match'):
+                    self.exporter.generate(self.metadata)
+        config.write_text(json.dumps(supplement))
+        (texts / 'fixture.txt').write_bytes(document + b'changed')
+        with self.assertRaisesRegex(ValueError, 'SHA256 mismatch'):
+            self.exporter.generate(self.metadata)
+
+    def test_real_verify_cli_rejects_removed_notice_sources(self):
+        report, notices = self.exporter.generate(self.metadata)
+        bundle = self.root / 'cli-bundle'
+        bundle.mkdir()
+        inventory = bundle / 'THIRD_PARTY_CRATES.json'
+        inventory.write_text(json.dumps(report))
+        (bundle / 'NOTICES.txt').write_bytes(notices)
+        shutil.copyfile(ROOT / 'source-pins.json', bundle / 'SOURCE.json')
+        command = [sys.executable, '-I', '-B', str(ROOT / 'license_inventory.py'), '--verify', str(bundle)]
+        good = subprocess.run(command, capture_output=True, timeout=10)
+        self.assertEqual(good.returncode, 0, good.stderr)
+        report['notices']['packages'].pop()
+        inventory.write_text(json.dumps(report))
+        bad = subprocess.run(command, capture_output=True, timeout=10)
+        self.assertNotEqual(bad.returncode, 0)
+        self.assertIn(b'coverage', bad.stderr)
 
 
 if __name__ == '__main__':

@@ -53,9 +53,13 @@ The script builds device arm64 and simulator arm64/x86_64 libraries in the ignor
 condition and selects the platform/architecture library. The app must still obtain explicit opt-in to its sensitive capabilities. A
 failed native build must not be represented as an enabled but missing archive.
 
-`LICENSE.idevice.txt`, `SOURCE.json` and `THIRD_PARTY_CRATES.json` are emitted for
-the app resource phase. The last file is a sanitized inventory of the
-actual locked Cargo graph, not a complete distribution/license audit.
+`LICENSE.idevice.txt`, `SOURCE.json`, `THIRD_PARTY_CRATES.json` and `NOTICES.txt`
+are emitted for the app resource phase. The inventory covers the actual locked
+Cargo metadata graph; NOTICES reproduces its available license and attribution
+texts, including separately identified pinned supplements. The build and archive
+gates verify whole-document and per-source byte identities and package coverage.
+See [README-NOTICES.md](README-NOTICES.md) for source gaps and verification limits;
+the collection is not a legal compatibility or complete distribution audit.
 
 ## Pairing and checked status
 

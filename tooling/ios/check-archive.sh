@@ -56,23 +56,11 @@ note 'archive size' "$(du -sh "$app" | cut -f1), top level: $(ls "$app" | grep -
 phone_identity='dsh-phone-core:1;idevice=3854a5df4a5a6dee71ffce4d8befc2ea356a8065'
 strings "$app/Runner" >"$log"
 grep -Fxq "$phone_identity" "$log" || fail 'Runner is missing the pinned CoreDevice native build identity'
-for name in LICENSE.idevice.txt THIRD_PARTY_CRATES.json SOURCE.json; do
+for name in LICENSE.idevice.txt THIRD_PARTY_CRATES.json NOTICES.txt SOURCE.json; do
   [ -s "$app/PhoneSelfRunnerNotices/$name" ] || fail "phone native source/license notice missing: $name"
 done
-python3 -I - "$app/PhoneSelfRunnerNotices" <<'PY' || fail 'phone native source/license inventory is invalid'
-import json, pathlib, sys
-root = pathlib.Path(sys.argv[1])
-source = json.loads((root / 'SOURCE.json').read_text())
-assert source['commit'] == '3854a5df4a5a6dee71ffce4d8befc2ea356a8065'
-inventory = json.loads((root / 'THIRD_PARTY_CRATES.json').read_text())
-assert inventory.get('schema') == 1
-packages = inventory.get('packages')
-assert isinstance(packages, list) and packages, 'empty crate inventory'
-assert any(item.get('name') == 'dsh-phone-self-runner' for item in packages)
-assert any(item.get('name') == 'idevice' and source['commit'] in item.get('source', '') for item in packages)
-assert all(isinstance(item.get('name'), str) and isinstance(item.get('version'), str)
-           and isinstance(item.get('source'), str) for item in packages)
-PY
+python3 -I -B tooling/ios/phone-self-runner/license_inventory.py --verify "$app/PhoneSelfRunnerNotices" \
+  || fail 'phone native source/license texts or complete inventory coverage are invalid'
 note 'archive phone native' 'checked linked build identity and packaged source/license notices; no pairing or clipboard data is packaged'
 
 # Dart's compiled code, and the snapshot symbols the engine looks for in it.

@@ -3,6 +3,7 @@
 This does not run testmanagerd or prove on-device XCTest launch.
 """
 import os
+import importlib.util
 import json
 from pathlib import Path
 import plistlib
@@ -128,14 +129,29 @@ class PhoneNoticeEmbedding(unittest.TestCase):
             base = Path(temporary)
             source = base / 'ios/PhoneSelfRunnerNative'
             source.mkdir(parents=True)
-            for name in ['LICENSE.idevice.txt', 'THIRD_PARTY_CRATES.json', 'SOURCE.json']:
+            for name in ['LICENSE.idevice.txt', 'THIRD_PARTY_CRATES.json', 'NOTICES.txt', 'SOURCE.json']:
                 (source / name).write_text('synthetic notice')
             (source / 'pairingFile.plist').write_text('not-a-real-pairing-record')
             env = {**os.environ, 'DSH_PHONE_SELF_RUNNER_ENABLED': 'YES', 'SRCROOT': str(base / 'ios'),
                    'TARGET_BUILD_DIR': str(base / 'products'), 'UNLOCALIZED_RESOURCES_FOLDER_PATH': 'Runner.app'}
             subprocess.run(['bash', str(ROOT / 'tooling/ios/embed-phone-self-runner-notices.sh')], env=env, check=True)
             output = base / 'products/Runner.app/PhoneSelfRunnerNotices'
-            self.assertEqual({path.name for path in output.iterdir()}, {'LICENSE.idevice.txt', 'THIRD_PARTY_CRATES.json', 'SOURCE.json'})
+            self.assertEqual({path.name for path in output.iterdir()}, {'LICENSE.idevice.txt', 'THIRD_PARTY_CRATES.json', 'NOTICES.txt', 'SOURCE.json'})
+            self.assertEqual((output / 'NOTICES.txt').read_bytes(), (source / 'NOTICES.txt').read_bytes())
+
+    def test_old_inventory_only_inputs_cannot_publish_a_new_bundle(self):
+        with tempfile.TemporaryDirectory(prefix='phone-notices-') as temporary:
+            base = Path(temporary)
+            source = base / 'ios/PhoneSelfRunnerNative'
+            source.mkdir(parents=True)
+            for name in ['LICENSE.idevice.txt', 'THIRD_PARTY_CRATES.json', 'SOURCE.json']:
+                (source / name).write_text('old synthetic notice')
+            env = {**os.environ, 'DSH_PHONE_SELF_RUNNER_ENABLED': 'YES', 'SRCROOT': str(base / 'ios'),
+                   'TARGET_BUILD_DIR': str(base / 'products'), 'UNLOCALIZED_RESOURCES_FOLDER_PATH': 'Runner.app'}
+            result = subprocess.run(['bash', str(ROOT / 'tooling/ios/embed-phone-self-runner-notices.sh')], env=env, capture_output=True)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(b'NOTICES.txt', result.stderr)
+            self.assertFalse((base / 'products').exists())
 
     def test_enabled_build_missing_notices_fails_before_publishing(self):
         with tempfile.TemporaryDirectory(prefix='phone-notices-') as temporary:
@@ -157,6 +173,17 @@ class PhoneAppleHandshake(unittest.TestCase):
                             str(ROOT / 'tooling/ios/tests/phone-bootstrap.swift'),
                             '-framework', 'Security', '-o', str(executable)], check=True)
             subprocess.run([str(executable)], check=True)
+
+
+def load_tests(loader, tests, pattern):
+    # This is the existing macOS CI entry point. Include the real portable
+    # collector/build-input suite so notice publication is an automatic gate.
+    path = ROOT / 'tooling/ios/phone-self-runner/tests/test_build_inputs.py'
+    spec = importlib.util.spec_from_file_location('phone_native_build_inputs', path)
+    inputs = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(inputs)
+    tests.addTests(loader.loadTestsFromModule(inputs))
+    return tests
 
 
 if __name__ == '__main__':
