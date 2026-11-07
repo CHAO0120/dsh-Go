@@ -23,11 +23,11 @@ class RestrictedSettingsTest {
         assertEquals(ACKNOWLEDGED, RestrictedSettings.state(34, AppOpsManager.MODE_IGNORED, 4))
     }
 
-    @Test fun android15DefaultsByWhereTheAppCameFrom() {
+    @Test fun android15DefaultSourceDoesNotProveInstallerTrust() {
         assertEquals(GUARDED, RestrictedSettings.state(35, AppOpsManager.MODE_DEFAULT, 3))
         assertEquals(GUARDED, RestrictedSettings.state(35, AppOpsManager.MODE_DEFAULT, 4))
-        assertEquals(CLEAR, RestrictedSettings.state(35, AppOpsManager.MODE_DEFAULT, 2))
-        assertEquals(CLEAR, RestrictedSettings.state(35, AppOpsManager.MODE_DEFAULT, 1))
+        assertNull(RestrictedSettings.state(35, AppOpsManager.MODE_DEFAULT, 2))
+        assertNull(RestrictedSettings.state(35, AppOpsManager.MODE_DEFAULT, 1))
         // Unspecified source: can't be told.
         assertNull(RestrictedSettings.state(35, AppOpsManager.MODE_DEFAULT, 0))
         assertNull(RestrictedSettings.state(35, AppOpsManager.MODE_DEFAULT, null))
