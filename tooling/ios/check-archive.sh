@@ -10,6 +10,10 @@ note() { printf '::notice title=%s::%s\n' "$1" "$(printf '%s' "$2" | tr '\n' ' '
 fail() { printf '::error title=archive::%s\n' "$(printf '%s' "$1" | tr '\n' ' ' | cut -c1-900)"; failed=1; }
 failed=0
 
+# Archive can also be run independently of the Flutter build wrapper. Prepare
+# the pinned native inputs before Xcode reads its conditional xcconfig.
+bash tooling/ios/build-phone-self-runner.sh || { fail 'phone native library preparation failed'; exit 1; }
+
 archive="$RUNNER_TEMP/Runner.xcarchive"
 log="$(mktemp)"
 (cd app && flutter build ios --release --no-codesign --config-only) >"$log" 2>&1 || {
@@ -46,6 +50,30 @@ for name in LICENSE.txt SOURCE.txt iSH-LICENSE.md iSH-LICENSE.IOS iSH-build.patc
   [ -s "$guest/$name" ] || fail "DshGuest is missing its source/license notice: $name"
 done
 note 'archive size' "$(du -sh "$app" | cut -f1), top level: $(ls "$app" | grep -vE '\.(png|car|nib|storyboardc|lproj)$' | head -30 | tr '\n' ' ')"
+
+# The Rust library is linked into Runner, not a loose executable or dylib. The
+# read-only C ABI identity is referenced by Swift and survives Release stripping.
+phone_identity='dsh-phone-core:1;idevice=3854a5df4a5a6dee71ffce4d8befc2ea356a8065'
+strings "$app/Runner" >"$log"
+grep -Fxq "$phone_identity" "$log" || fail 'Runner is missing the pinned CoreDevice native build identity'
+for name in LICENSE.idevice.txt THIRD_PARTY_CRATES.json SOURCE.json; do
+  [ -s "$app/PhoneSelfRunnerNotices/$name" ] || fail "phone native source/license notice missing: $name"
+done
+python3 -I - "$app/PhoneSelfRunnerNotices" <<'PY' || fail 'phone native source/license inventory is invalid'
+import json, pathlib, sys
+root = pathlib.Path(sys.argv[1])
+source = json.loads((root / 'SOURCE.json').read_text())
+assert source['commit'] == '3854a5df4a5a6dee71ffce4d8befc2ea356a8065'
+inventory = json.loads((root / 'THIRD_PARTY_CRATES.json').read_text())
+assert inventory.get('schema') == 1
+packages = inventory.get('packages')
+assert isinstance(packages, list) and packages, 'empty crate inventory'
+assert any(item.get('name') == 'dsh-phone-self-runner' for item in packages)
+assert any(item.get('name') == 'idevice' and source['commit'] in item.get('source', '') for item in packages)
+assert all(isinstance(item.get('name'), str) and isinstance(item.get('version'), str)
+           and isinstance(item.get('source'), str) for item in packages)
+PY
+note 'archive phone native' 'checked linked build identity and packaged source/license notices; no pairing or clipboard data is packaged'
 
 # Dart's compiled code, and the snapshot symbols the engine looks for in it.
 binary="$frameworks/App.framework/App"

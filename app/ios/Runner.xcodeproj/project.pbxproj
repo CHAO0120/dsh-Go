@@ -7,6 +7,33 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		D55000000000000000000411 /* IOSPhoneResultEnvelopeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D55000000000000000000410 /* IOSPhoneResultEnvelopeTests.swift */; };
+		D5500000000000000000040F /* IOSPhoneTaskConsentTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5500000000000000000040E /* IOSPhoneTaskConsentTests.swift */; };
+		D55000000000000000000335 /* IOSPhoneResultEnvelope.swift in Sources */ = {isa = PBXBuildFile; fileRef = D55000000000000000000334 /* IOSPhoneResultEnvelope.swift */; };
+		D55000000000000000000332 /* PhoneRunnerObservation.swift in Sources */ = {isa = PBXBuildFile; fileRef = D55000000000000000000330 /* PhoneRunnerObservation.swift */; };
+		D5500000000000000000040D /* IOSPhoneRPCDispatchTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5500000000000000000040C /* IOSPhoneRPCDispatchTests.swift */; };
+		D5500000000000000000040B /* IOSPhoneXCTestObservationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5500000000000000000040A /* IOSPhoneXCTestObservationTests.swift */; };
+		D55000000000000000000409 /* IOSPhoneClipboardTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D55000000000000000000408 /* IOSPhoneClipboardTests.swift */; };
+		D55000000000000000000407 /* IOSPhoneOperationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D55000000000000000000406 /* IOSPhoneOperationTests.swift */; };
+		D55000000000000000000405 /* IOSPhoneScreenTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D55000000000000000000404 /* IOSPhoneScreenTests.swift */; };
+		D55000000000000000000331 /* PhoneRunnerObservation.swift in Sources */ = {isa = PBXBuildFile; fileRef = D55000000000000000000330 /* PhoneRunnerObservation.swift */; };
+		D5500000000000000000032B /* IOSPhoneRPCDispatch.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5500000000000000000032A /* IOSPhoneRPCDispatch.swift */; };
+		D55000000000000000000329 /* IOSPhoneOperation.swift in Sources */ = {isa = PBXBuildFile; fileRef = D55000000000000000000328 /* IOSPhoneOperation.swift */; };
+		D55000000000000000000327 /* IOSPhoneClipboard.swift in Sources */ = {isa = PBXBuildFile; fileRef = D55000000000000000000326 /* IOSPhoneClipboard.swift */; };
+		D55000000000000000000325 /* IOSPhoneCoreActions.swift in Sources */ = {isa = PBXBuildFile; fileRef = D55000000000000000000324 /* IOSPhoneCoreActions.swift */; };
+		D55000000000000000000323 /* IOSPhoneScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = D55000000000000000000322 /* IOSPhoneScreen.swift */; };
+		D55000000000000000000403 /* IOSPhoneCoreDeviceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D55000000000000000000402 /* IOSPhoneCoreDeviceTests.swift */; };
+		D55000000000000000000401 /* IOSPhonePairingStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D55000000000000000000400 /* IOSPhonePairingStoreTests.swift */; };
+		D55000000000000000000321 /* IOSPhoneTaskConsent.swift in Sources */ = {isa = PBXBuildFile; fileRef = D55000000000000000000320 /* IOSPhoneTaskConsent.swift */; };
+		D55000000000000000000301 /* IOSPhonePairingStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = D55000000000000000000300 /* IOSPhonePairingStore.swift */; };
+		D55000000000000000000303 /* IOSPhoneDDI.swift in Sources */ = {isa = PBXBuildFile; fileRef = D55000000000000000000302 /* IOSPhoneDDI.swift */; };
+		D55000000000000000000305 /* IOSPhoneCoreDevice.swift in Sources */ = {isa = PBXBuildFile; fileRef = D55000000000000000000304 /* IOSPhoneCoreDevice.swift */; };
+		D55000000000000000000307 /* IOSPhoneLink.swift in Sources */ = {isa = PBXBuildFile; fileRef = D55000000000000000000306 /* IOSPhoneLink.swift */; };
+		D55000000000000000000309 /* IOSPetOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = D55000000000000000000308 /* IOSPetOverlay.swift */; };
+		D5500000000000000000030B /* PetOverlayState.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5500000000000000000030A /* PetOverlayState.swift */; };
+		D5500000000000000000030D /* PetOverlayPack.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5500000000000000000030C /* PetOverlayPack.swift */; };
+		D5500000000000000000030F /* PetOverlayFrameRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5500000000000000000030E /* PetOverlayFrameRenderer.swift */; };
+		D55000000000000000000311 /* PetOverlayPictureInPicture.swift in Sources */ = {isa = PBXBuildFile; fileRef = D55000000000000000000310 /* PetOverlayPictureInPicture.swift */; };
 		D5480000000000000000F102 /* PhoneRunnerBootstrap.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5480000000000000000F101 /* PhoneRunnerBootstrap.swift */; };
 		D5480000000000000000F103 /* PhoneRunnerBootstrap.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5480000000000000000F101 /* PhoneRunnerBootstrap.swift */; };
 		D5480000000000000000F105 /* IOSPhoneSelfRunner.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5480000000000000000F104 /* IOSPhoneSelfRunner.swift */; };
@@ -105,6 +132,32 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		D55000000000000000000410 /* IOSPhoneResultEnvelopeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IOSPhoneResultEnvelopeTests.swift; sourceTree = "<group>"; };
+		D5500000000000000000040E /* IOSPhoneTaskConsentTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IOSPhoneTaskConsentTests.swift; sourceTree = "<group>"; };
+		D55000000000000000000334 /* IOSPhoneResultEnvelope.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IOSPhoneResultEnvelope.swift; sourceTree = "<group>"; };
+		D5500000000000000000040C /* IOSPhoneRPCDispatchTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IOSPhoneRPCDispatchTests.swift; sourceTree = "<group>"; };
+		D5500000000000000000040A /* IOSPhoneXCTestObservationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IOSPhoneXCTestObservationTests.swift; sourceTree = "<group>"; };
+		D55000000000000000000408 /* IOSPhoneClipboardTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IOSPhoneClipboardTests.swift; sourceTree = "<group>"; };
+		D55000000000000000000406 /* IOSPhoneOperationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IOSPhoneOperationTests.swift; sourceTree = "<group>"; };
+		D55000000000000000000404 /* IOSPhoneScreenTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IOSPhoneScreenTests.swift; sourceTree = "<group>"; };
+		D55000000000000000000330 /* PhoneRunnerObservation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhoneRunnerObservation.swift; sourceTree = "<group>"; };
+		D5500000000000000000032A /* IOSPhoneRPCDispatch.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IOSPhoneRPCDispatch.swift; sourceTree = "<group>"; };
+		D55000000000000000000328 /* IOSPhoneOperation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IOSPhoneOperation.swift; sourceTree = "<group>"; };
+		D55000000000000000000326 /* IOSPhoneClipboard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IOSPhoneClipboard.swift; sourceTree = "<group>"; };
+		D55000000000000000000324 /* IOSPhoneCoreActions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IOSPhoneCoreActions.swift; sourceTree = "<group>"; };
+		D55000000000000000000322 /* IOSPhoneScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IOSPhoneScreen.swift; sourceTree = "<group>"; };
+		D55000000000000000000402 /* IOSPhoneCoreDeviceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IOSPhoneCoreDeviceTests.swift; sourceTree = "<group>"; };
+		D55000000000000000000400 /* IOSPhonePairingStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IOSPhonePairingStoreTests.swift; sourceTree = "<group>"; };
+		D55000000000000000000320 /* IOSPhoneTaskConsent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IOSPhoneTaskConsent.swift; sourceTree = "<group>"; };
+		D55000000000000000000300 /* IOSPhonePairingStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "IOSPhonePairingStore.swift"; sourceTree = "<group>"; };
+		D55000000000000000000302 /* IOSPhoneDDI.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "IOSPhoneDDI.swift"; sourceTree = "<group>"; };
+		D55000000000000000000304 /* IOSPhoneCoreDevice.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "IOSPhoneCoreDevice.swift"; sourceTree = "<group>"; };
+		D55000000000000000000306 /* IOSPhoneLink.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "IOSPhoneLink.swift"; sourceTree = "<group>"; };
+		D55000000000000000000308 /* IOSPetOverlay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "PetOverlay/IOSPetOverlay.swift"; sourceTree = "<group>"; };
+		D5500000000000000000030A /* PetOverlayState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "PetOverlay/PetOverlayState.swift"; sourceTree = "<group>"; };
+		D5500000000000000000030C /* PetOverlayPack.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "PetOverlay/PetOverlayPack.swift"; sourceTree = "<group>"; };
+		D5500000000000000000030E /* PetOverlayFrameRenderer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "PetOverlay/PetOverlayFrameRenderer.swift"; sourceTree = "<group>"; };
+		D55000000000000000000310 /* PetOverlayPictureInPicture.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "PetOverlay/PetOverlayPictureInPicture.swift"; sourceTree = "<group>"; };
 		D5480000000000000000F101 /* PhoneRunnerBootstrap.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhoneRunnerBootstrap.swift; sourceTree = "<group>"; };
 		D5480000000000000000F104 /* IOSPhoneSelfRunner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IOSPhoneSelfRunner.swift; sourceTree = "<group>"; };
 		D5480000000000000000F106 /* IOSPhoneSelfRunnerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IOSPhoneSelfRunnerTests.swift; sourceTree = "<group>"; };
@@ -194,6 +247,7 @@
 			children = (
 				D5480000000000000000E009 /* PhoneRunnerUITests.swift */,
 				D5480000000000000000F101 /* PhoneRunnerBootstrap.swift */,
+				D55000000000000000000330 /* PhoneRunnerObservation.swift */,
 				D5480000000000000000E00D /* PhoneRunnerSupport.h */,
 				D5480000000000000000E00B /* PhoneRunnerSupport.m */,
 				D5480000000000000000E00E /* PhoneRunner-Bridging-Header.h */,
@@ -207,6 +261,15 @@
 			children = (
 				331C807B294A618700263BE5 /* RunnerTests.swift */,
 				D5480000000000000000F106 /* IOSPhoneSelfRunnerTests.swift */,
+				D55000000000000000000402 /* IOSPhoneCoreDeviceTests.swift */,
+				D55000000000000000000410 /* IOSPhoneResultEnvelopeTests.swift */,
+				D5500000000000000000040E /* IOSPhoneTaskConsentTests.swift */,
+				D5500000000000000000040C /* IOSPhoneRPCDispatchTests.swift */,
+				D5500000000000000000040A /* IOSPhoneXCTestObservationTests.swift */,
+				D55000000000000000000408 /* IOSPhoneClipboardTests.swift */,
+				D55000000000000000000406 /* IOSPhoneOperationTests.swift */,
+				D55000000000000000000404 /* IOSPhoneScreenTests.swift */,
+				D55000000000000000000400 /* IOSPhonePairingStoreTests.swift */,
 			);
 			path = RunnerTests;
 			sourceTree = "<group>";
@@ -249,6 +312,15 @@
 		97C146F01CF9000F007C117D /* Runner */ = {
 			isa = PBXGroup;
 			children = (
+				D55000000000000000000300 /* IOSPhonePairingStore.swift */,
+				D55000000000000000000302 /* IOSPhoneDDI.swift */,
+				D55000000000000000000304 /* IOSPhoneCoreDevice.swift */,
+				D55000000000000000000306 /* IOSPhoneLink.swift */,
+				D55000000000000000000308 /* IOSPetOverlay.swift */,
+				D5500000000000000000030A /* PetOverlayState.swift */,
+				D5500000000000000000030C /* PetOverlayPack.swift */,
+				D5500000000000000000030E /* PetOverlayFrameRenderer.swift */,
+				D55000000000000000000310 /* PetOverlayPictureInPicture.swift */,
 				97C146FA1CF9000F007C117D /* Main.storyboard */,
 				97C146FD1CF9000F007C117D /* Assets.xcassets */,
 				97C146FF1CF9000F007C117D /* LaunchScreen.storyboard */,
@@ -270,6 +342,13 @@
 				D5480000000000000000C090 /* IOSSystemTools.swift */,
 				D5480000000000000000C080 /* IOSPhoneRunner.swift */,
 				D5480000000000000000F104 /* IOSPhoneSelfRunner.swift */,
+				D55000000000000000000320 /* IOSPhoneTaskConsent.swift */,
+				D55000000000000000000334 /* IOSPhoneResultEnvelope.swift */,
+				D5500000000000000000032A /* IOSPhoneRPCDispatch.swift */,
+				D55000000000000000000328 /* IOSPhoneOperation.swift */,
+				D55000000000000000000326 /* IOSPhoneClipboard.swift */,
+				D55000000000000000000324 /* IOSPhoneCoreActions.swift */,
+				D55000000000000000000322 /* IOSPhoneScreen.swift */,
 				D5480000000000000000C070 /* IOSBrowser.swift */,
 				D5480000000000000000C060 /* ContinuedRun.swift */,
 				D5480000000000000000C050 /* SiriIntents.swift */,
@@ -527,6 +606,7 @@
 			files = (
 				D5480000000000000000E00A /* PhoneRunnerUITests.swift in Sources */,
 				D5480000000000000000F103 /* PhoneRunnerBootstrap.swift in Sources */,
+				D55000000000000000000332 /* PhoneRunnerObservation.swift in Sources */,
 				D5480000000000000000E00C /* PhoneRunnerSupport.m in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -537,6 +617,15 @@
 			files = (
 				331C808B294A63AB00263BE5 /* RunnerTests.swift in Sources */,
 				D5480000000000000000F107 /* IOSPhoneSelfRunnerTests.swift in Sources */,
+				D55000000000000000000403 /* IOSPhoneCoreDeviceTests.swift in Sources */,
+				D55000000000000000000411 /* IOSPhoneResultEnvelopeTests.swift in Sources */,
+				D5500000000000000000040F /* IOSPhoneTaskConsentTests.swift in Sources */,
+				D5500000000000000000040D /* IOSPhoneRPCDispatchTests.swift in Sources */,
+				D5500000000000000000040B /* IOSPhoneXCTestObservationTests.swift in Sources */,
+				D55000000000000000000409 /* IOSPhoneClipboardTests.swift in Sources */,
+				D55000000000000000000407 /* IOSPhoneOperationTests.swift in Sources */,
+				D55000000000000000000405 /* IOSPhoneScreenTests.swift in Sources */,
+				D55000000000000000000401 /* IOSPhonePairingStoreTests.swift in Sources */,
 				D5480000000000000000B101 /* ShareViewController.swift in Sources */,
 				D5480000000000000000B103 /* ShareInbox.swift in Sources */,
 				D5480000000000000000C0A4 /* SiriIntents.swift in Sources */,
@@ -550,6 +639,15 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				D55000000000000000000301 /* IOSPhonePairingStore.swift in Sources */,
+				D55000000000000000000303 /* IOSPhoneDDI.swift in Sources */,
+				D55000000000000000000305 /* IOSPhoneCoreDevice.swift in Sources */,
+				D55000000000000000000307 /* IOSPhoneLink.swift in Sources */,
+				D55000000000000000000309 /* IOSPetOverlay.swift in Sources */,
+				D5500000000000000000030B /* PetOverlayState.swift in Sources */,
+				D5500000000000000000030D /* PetOverlayPack.swift in Sources */,
+				D5500000000000000000030F /* PetOverlayFrameRenderer.swift in Sources */,
+				D55000000000000000000311 /* PetOverlayPictureInPicture.swift in Sources */,
 				74858FAF1ED2DC5600515810 /* AppDelegate.swift in Sources */,
 				D5480000000000000000F002 /* GuestRootfsArchive.swift in Sources */,
 				D5480000000000000000F004 /* GuestRootfsInstaller.swift in Sources */,
@@ -560,7 +658,15 @@
 				D5480000000000000000C091 /* IOSSystemTools.swift in Sources */,
 				D5480000000000000000C081 /* IOSPhoneRunner.swift in Sources */,
 				D5480000000000000000F102 /* PhoneRunnerBootstrap.swift in Sources */,
+				D55000000000000000000331 /* PhoneRunnerObservation.swift in Sources */,
 				D5480000000000000000F105 /* IOSPhoneSelfRunner.swift in Sources */,
+				D55000000000000000000321 /* IOSPhoneTaskConsent.swift in Sources */,
+				D55000000000000000000335 /* IOSPhoneResultEnvelope.swift in Sources */,
+				D5500000000000000000032B /* IOSPhoneRPCDispatch.swift in Sources */,
+				D55000000000000000000329 /* IOSPhoneOperation.swift in Sources */,
+				D55000000000000000000327 /* IOSPhoneClipboard.swift in Sources */,
+				D55000000000000000000325 /* IOSPhoneCoreActions.swift in Sources */,
+				D55000000000000000000323 /* IOSPhoneScreen.swift in Sources */,
 				D5480000000000000000C071 /* IOSBrowser.swift in Sources */,
 				D5480000000000000000C061 /* ContinuedRun.swift in Sources */,
 				D5480000000000000000C051 /* SiriIntents.swift in Sources */,

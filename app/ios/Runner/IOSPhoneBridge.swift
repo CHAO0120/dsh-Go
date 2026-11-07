@@ -143,6 +143,18 @@ final class IOSPhoneBridge: NSObject, URLSessionTaskDelegate {
     }
     runner.retire()
   }
+  func pausePhoneTask() {
+    if let request = active, request.action.kind.hasPrefix("runner-") {
+      operation?.cancel(); operation = nil
+      actions.cancel(request.id); active = nil
+      Task { [weak self] in
+        guard let self, self.runId == request.runId else { return }
+        _ = try? await self.post("result", ["id": request.id,
+          "text": "用户已暂停手机操控；已经派发的动作结果可能尚未确认，请核对屏幕，不要自动重试。", "isError": true])
+      }
+    }
+    runner.finish()
+  }
   // Called directly from didEnterBackground. No pending consent crosses a background hop.
   func enteredBackground() {
     browser.enteredBackground()
@@ -225,8 +237,9 @@ final class IOSPhoneBridge: NSObject, URLSessionTaskDelegate {
           return
         }
         if kind.hasPrefix("browser-") || kind.hasPrefix("runner-") {
-          if kind.hasPrefix("runner-"), !IOSPhoneControl.shared.enabled {
-            _ = try? await self.post("result", ["id": request.id, "text": "手机操控已关闭，请在 DSH Go 设置中开启。", "isError": true])
+          if kind.hasPrefix("runner-"), !IOSPhoneControl.shared.enabled || IOSPhoneControl.shared.isPaused {
+            _ = try? await self.post("result", ["id": request.id,
+              "text": IOSPhoneControl.shared.isPaused ? "手机操控已暂停；请回到 App，由用户确认继续。" : "手机操控已关闭，请在 DSH Go 设置中开启。", "isError": true])
             self.active = nil; self.operation = nil
             return
           }
@@ -234,21 +247,41 @@ final class IOSPhoneBridge: NSObject, URLSessionTaskDelegate {
           let current = { [weak self] in
             self?.current(request) == true && request.expiresAt > Date().timeIntervalSince1970 * 1000
           }
-          let begun = (try? await self.post("begin", ["id": request.id]))?.0 == 200
-          guard begun, current() else {
-            if self.current(request) {
-              _ = try? await self.post("result", ["id": request.id, "text": "这个工具调用已经结束，没有执行。", "isError": true])
-              guard self.active?.id == request.id else { return }
-              self.active = nil; self.operation = nil
+          let result: IOSPhoneOutcome
+          if kind.hasPrefix("runner-") {
+            IOSPhoneControl.shared.begin(request, bridge: self)
+            // Claiming and a cached thirty-minute grant are not per-call
+            // approval. The runner invokes this only AFTER the native button.
+            result = await self.runner.run(request, authorize: { [weak self] in
+              guard let self, self.current(request) else { return false }
+              let begun = (try? await self.post("begin", ["id": request.id]))?.0 == 200
+              return begun && self.current(request)
+                && request.expiresAt > Date().timeIntervalSince1970 * 1000
+            }, progress: { [weak self] phase in
+              guard let self, self.current(request) else { return }
+              IOSPhoneControl.shared.update(phase, request: request, bridge: self)
+            }, current: current)
+          } else {
+            let begun = (try? await self.post("begin", ["id": request.id]))?.0 == 200
+            guard begun, current() else {
+              if self.current(request) {
+                _ = try? await self.post("result", ["id": request.id, "text": "这个工具调用已经结束，没有执行。", "isError": true])
+                guard self.active?.id == request.id else { return }
+                self.active = nil; self.operation = nil
+              }
+              return
             }
-            return
+            result = await self.browser.run(request, current: current)
           }
-          if kind.hasPrefix("runner-") { IOSPhoneControl.shared.begin(request, bridge: self) }
-          let result = kind.hasPrefix("browser-")
-            ? await self.browser.run(request, current: current) : await self.runner.run(request, current: current)
           guard self.current(request) else { return }
-          var values: [String: Any] = ["id": request.id, "text": result.text, "isError": result.isError]
-          if let image = result.image { values["image"] = image.base64EncodedString() }
+          var values: [String: Any]
+          if kind.hasPrefix("runner-") {
+            IOSPhoneControl.shared.update(.reviewResult, request: request, bridge: self)
+            values = IOSPhoneResultEnvelope.values(requestID: request.id, runID: request.runId, outcome: result)
+          } else {
+            values = ["id": request.id, "text": result.text, "isError": result.isError]
+            if let image = result.image { values["image"] = image.base64EncodedString() }
+          }
           _ = try? await self.post("result", values)
           guard self.active?.id == request.id else { return }
           self.active = nil; self.operation = nil
@@ -286,6 +319,17 @@ final class IOSPhoneBridge: NSObject, URLSessionTaskDelegate {
 /// Task ownership comes from the authenticated engine request, not the visible chat.
 @MainActor
 final class IOSPhoneControl: NSObject, FlutterStreamHandler {
+  enum Phase {
+    case awaitingConfirmation, connecting, executing, reviewResult
+    var line: String {
+      switch self {
+      case .awaitingConfirmation: return "等待本次确认"
+      case .connecting: return "正在准备连接"
+      case .executing: return "正在处理本次调用"
+      case .reviewResult: return "请核对手机结果"
+      }
+    }
+  }
   static let shared = IOSPhoneControl()
   private weak var bridge: IOSPhoneBridge?
   private var methods: FlutterMethodChannel?
@@ -293,10 +337,30 @@ final class IOSPhoneControl: NSObject, FlutterStreamHandler {
   private var sink: FlutterEventSink?
   private var taskID = 0
   private var owner: String?
+  private var ownerRunID: String?
+  private var requestID: String?
   private var active = false
   private var stopped = false
   private var finishing = false
+  private var paused = false
   var enabled: Bool { UserDefaults.standard.object(forKey: "dsh.ios.phone.enabled") as? Bool ?? true }
+  var hasActivePhoneTask: Bool { active }
+  var isPaused: Bool { paused }
+  func revokePhoneTask() { stop() }
+  func pausePhoneTask(id: Int) {
+    guard id == taskID, active, !paused else { return }
+    paused = true; requestID = nil
+    IOSPetOverlay.shared.updatePhoneTask(id: id, line: "已暂停，回 App 继续")
+    bridge?.pausePhoneTask(); emit()
+  }
+  func resumePhoneTask(id: Int) {
+    guard id == taskID, active, paused, UIApplication.shared.applicationState == .active,
+      UIApplication.shared.isProtectedDataAvailable else { return }
+    paused = false
+    IOSPetOverlay.shared.updatePhoneTask(id: id, line: "等待下一次确认")
+    emit()
+  }
+  func stopPhoneTaskConfirmed(id: Int) { if id == taskID, active { stop() } }
 
   func register(messenger: any FlutterBinaryMessenger) {
     methods = FlutterMethodChannel(name: "dsh/phone", binaryMessenger: messenger)
@@ -332,7 +396,11 @@ final class IOSPhoneControl: NSObject, FlutterStreamHandler {
           #endif
           if current() {
             self.finishing = false
-            if reply["closed"] as? Bool == true { self.active = false; self.emit() }
+            if reply["closed"] as? Bool == true {
+              self.active = false; self.paused = false; self.requestID = nil
+              IOSPetOverlay.shared.endPhoneTask(id: id)
+              self.emit()
+            }
           }
           result(reply)
         }
@@ -345,28 +413,42 @@ final class IOSPhoneControl: NSObject, FlutterStreamHandler {
   func bind(_ bridge: IOSPhoneBridge) { self.bridge = bridge; emit() }
   func begin(_ request: IOSPhoneRequest, bridge: IOSPhoneBridge) {
     guard self.bridge === bridge else { return }
-    if !active || owner != request.owner.sessionId {
-      taskID += 1; owner = request.owner.sessionId
-      active = true; stopped = false; finishing = false
+    if !active || owner != request.owner.sessionId || ownerRunID != request.runId {
+      taskID += 1; owner = request.owner.sessionId; ownerRunID = request.runId
+      active = true; stopped = false; finishing = false; paused = false
+      IOSPetOverlay.shared.beginPhoneTask(id: taskID, sessionID: request.owner.sessionId,
+        line: Phase.awaitingConfirmation.line)
       #if DSH_PHONE_SELF_RUNNER_DIAGNOSTICS
       IOSPhoneSelfRunner.diagnostic("phone task begin id=\(taskID)")
       #endif
       emit()
     }
+    requestID = request.id
+    update(.awaitingConfirmation, request: request, bridge: bridge)
+  }
+  /// Only native fixed phases enter PiP; never tool arguments or clipboard data.
+  /// A late callback cannot update a newer request, task, or runtime owner.
+  func update(_ phase: Phase, request: IOSPhoneRequest, bridge: IOSPhoneBridge) {
+    guard self.bridge === bridge, active, !paused,
+      owner == request.owner.sessionId, ownerRunID == request.runId,
+      requestID == request.id else { return }
+    IOSPetOverlay.shared.updatePhoneTask(id: taskID, line: phase.line)
   }
   func retire(_ bridge: IOSPhoneBridge) {
     guard self.bridge === bridge else { return }
-    active = false; stopped = false; finishing = false
+    active = false; stopped = false; finishing = false; paused = false; requestID = nil
+    IOSPetOverlay.shared.endPhoneTask(id: taskID)
     self.bridge = nil
     emit()
   }
   private func stop() {
     bridge?.stopPhoneTask()
-    active = false; stopped = true; finishing = false
+    active = false; stopped = true; finishing = false; paused = false; requestID = nil
+    IOSPetOverlay.shared.endPhoneTask(id: taskID)
     emit()
   }
   private func status() -> [String: Any] {
-    var task: [String: Any] = ["id": taskID, "active": active, "stopped": stopped]
+    var task: [String: Any] = ["id": taskID, "active": active, "stopped": stopped, "paused": paused]
     if let owner { task["ownerSessionId"] = owner }
     return ["enabled": enabled, "bridgeListening": bridge != nil && IOSPhoneSelfRunner.shared.isConfigured,
       "task": task]

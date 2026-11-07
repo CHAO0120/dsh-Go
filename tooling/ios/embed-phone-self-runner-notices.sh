@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# The normal app build has no optional Rust owner or associated resources.
+# The standard build prepares this shared CoreDevice/XCTest library. Direct
+# Xcode/config-only callers without generated native inputs retain a clean skip.
 set -euo pipefail
 [[ "${DSH_PHONE_SELF_RUNNER_ENABLED:-NO}" == YES ]] || exit 0
 : "${SRCROOT:?Xcode SRCROOT required}"
@@ -8,7 +9,7 @@ set -euo pipefail
 SOURCE="$SRCROOT/PhoneSelfRunnerNative"
 DESTINATION="$TARGET_BUILD_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH/PhoneSelfRunnerNotices"
 for name in LICENSE.idevice.txt THIRD_PARTY_CRATES.json SOURCE.json; do
-  [[ -f "$SOURCE/$name" ]] || { printf 'Missing optional native notice: %s; rerun build-phone-self-runner.sh.\n' "$name" >&2; exit 1; }
+  [[ -f "$SOURCE/$name" ]] || { printf 'Missing phone native notice: %s; rerun build-phone-self-runner.sh.\n' "$name" >&2; exit 1; }
 done
 mkdir -p "$DESTINATION"
 for name in LICENSE.idevice.txt THIRD_PARTY_CRATES.json SOURCE.json; do

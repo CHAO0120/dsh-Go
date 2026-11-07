@@ -4,6 +4,14 @@
 # as well (at most ten: GitHub's limit for one step).
 set -uo pipefail
 
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)"
+# The library ships with the iOS app; sensitive capabilities are disabled until
+# the user enables them in the app. This does not install an XCTest runner.
+if ! bash "$ROOT/tooling/ios/build-phone-self-runner.sh"; then
+  printf '::error::The pinned iOS phone native library did not build.\n' >&2
+  exit 1
+fi
+
 log="$(mktemp)"
 flutter build ios "$@" 2>&1 | tee "$log"
 status=${PIPESTATUS[0]}

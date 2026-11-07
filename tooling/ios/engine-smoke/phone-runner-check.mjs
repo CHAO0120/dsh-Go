@@ -1,5 +1,8 @@
 // Runs the phone runner on the Simulator and drives Settings with it, through the same RPC the app
 // uses. A Simulator build has no signing and so no App Group; it's told where to publish instead.
+// This exercises the authenticated helper and observation contract. The app's
+// separate native approval/PiP admission is covered by its own tests; this
+// fixture does not claim to reproduce a human granting a real phone task.
 //
 //   node phone-runner-check.mjs --simulator <udid> --work <new dir>
 import { spawn } from 'node:child_process';
@@ -56,7 +59,8 @@ async function rpc(method, params = {}, headers = { authorization: `Bearer ${end
   const at = Date.now();
   const response = await fetch(url, {
     method: 'POST', headers: { 'content-type': 'application/json', ...headers },
-    body: JSON.stringify({ method, params, ...metadata }),
+    body: JSON.stringify({ method, params, expiresAt: Date.now() + 110_000,
+      controllerBundleID: 'io.github.ccch1mneyyy.dshgo', xctestDeniedBundleIDs: [], ...metadata }),
   });
   const body = await response.json();
   steps.push(`${method} ${JSON.stringify(params)} ${response.status} ${Date.now() - at}ms ${body.ok ? 'ok' : `error: ${body.error}`}`);
@@ -89,20 +93,26 @@ try {
   notice('settings on screen', screen.text.slice(0, 1500));
   must(!(await rpc('tap_xy', { observation: 's0', x: 0, y: 0 })).ok, 'accepted an expired screenshot');
   must(!(await rpc('tap_xy', { observation: screen.screen, x: -1, y: 0 })).ok, 'accepted out-of-bounds screenshot coordinates');
+  screen = await rpc('screen', { image: true });
+  must(screen.ok, 'could not observe after rejected coordinates');
   const list = idOf(screen.text, /\] (列表|滚动区)(?: |$)/);
   must(list !== undefined, 'Settings exposes no scroll container in the element tree');
   const collected = await rpc('collect', { screen: screen.screen, list, max_pages: 1 });
   must(collected.ok && /General|通用/.test(collected.text), 'could not collect the selected Settings list');
   screen = await rpc('screen', { image: true });
-  const general = idOf(screen.text, /General|通用/);
+  let general = idOf(screen.text, /General|通用/);
   must(general !== undefined, 'Settings has no General row in the tree');
   must(!(await rpc('tap', { screen: 's0', id: general })).ok, 'a stale screen number was accepted');
+  screen = await rpc('screen', { image: true });
+  must(screen.ok, 'could not observe after stale input refusal');
+  general = idOf(screen.text, /General|通用/);
+  must(general !== undefined, 'fresh Settings screen has no General row');
   const tapped = await rpc('tap', { screen: screen.screen, id: general });
   must(tapped.ok && /About|关于/.test(tapped.text), `tapping General didn't open it: ${tapped.text?.slice(0, 400)}`);
 
-  const scrolled = await rpc('scroll', { direction: 'down' });
+  const scrolled = await rpc('scroll', { screen: tapped.screen, direction: 'down' });
   must(scrolled.ok, 'could not scroll');
-  const back = await rpc('key', { key: 'back' });
+  const back = await rpc('key', { screen: scrolled.screen, key: 'back' });
   must(back.ok && /General|通用/.test(back.text), `back didn't return: ${back.text?.slice(0, 400)}`);
 
   // Something that takes no text says so, promptly, rather than claiming it worked.
@@ -111,7 +121,9 @@ try {
   must(row !== undefined, 'nothing to try typing into');
   const refused = await rpc('type', { screen: screen.screen, id: row, text: 'x' });
   must(!refused.ok, 'typing into a button claimed to work');
-  must((await rpc('key', { key: 'home' })).ok, 'home failed');
+  screen = await rpc('screen');
+  must(screen.ok, 'could not observe after rejected text target');
+  must((await rpc('key', { screen: screen.screen, key: 'home' })).ok, 'home failed');
 
   // Typing, wherever a built-in app has a field on screen.
   let typed = null;
@@ -129,7 +141,9 @@ try {
   must(typed.ok && /wifi/i.test(typed.text), `typing didn't reach the field: ${typed.error ?? typed.text?.slice(0, 400)}`);
 
   // Tools that have no real target here still have to answer.
-  must((await rpc('key', { key: 'home' })).ok, 'home failed');
+  screen = await rpc('screen');
+  must(screen.ok, 'could not observe before home');
+  must((await rpc('key', { screen: screen.screen, key: 'home' })).ok, 'home failed');
   must((await rpc('apps')).ok, 'apps failed');
   must(!(await rpc('nonsense')).ok, 'an unknown tool succeeded');
   steps.push(`done in ${Date.now() - started} ms`);

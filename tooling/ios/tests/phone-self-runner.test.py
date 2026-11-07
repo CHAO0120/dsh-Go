@@ -37,7 +37,7 @@ class PhoneBuildContracts(unittest.TestCase):
         ]:
             self.assertTrue((ROOT / relative).is_file(), relative)
 
-    def test_native_feature_is_optional_in_default_configs(self):
+    def test_xcode_configs_allow_a_missing_generated_native_config(self):
         for filename in ['Debug.xcconfig', 'Release.xcconfig']:
             data = (ROOT / 'app/ios/Flutter' / filename).read_text()
             self.assertIn('#include? "../PhoneSelfRunnerNative/PhoneSelfRunner.xcconfig"', data)
@@ -101,13 +101,13 @@ if pathlib.Path(sys.argv[0]).name == 'xcodebuild':
     def test_explicit_setup_builds_and_installs_without_issuing_phone_actions(self):
         result, calls = self.run_setup(valid=True)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertEqual(len(calls), 3)
+        self.assertEqual(len(calls), 2)
         self.assertEqual(calls[0][0:2], ['xcodebuild', 'build-for-testing'])
         self.assertIn('CODE_SIGN_ENTITLEMENTS=PhoneRunner/PhoneRunnerSelf.entitlements', calls[0])
         self.assertIn('PRODUCT_BUNDLE_IDENTIFIER=example.dsh.PhoneRunner', calls[0])
         self.assertEqual(calls[1][0:5], ['xcrun', 'devicectl', 'device', 'install', 'app'])
-        self.assertEqual(calls[2][0:5], ['xcrun', 'devicectl', 'device', 'copy', 'to'])
-        self.assertIn('Documents/pairingFile.plist', calls[2])
+        self.assertFalse(any('copy' in call for call in calls))
+        self.assertIn('choose how to store it', result.stdout)
         self.assertNotIn('private_key', result.stdout + result.stderr)
 
     def test_lockdown_record_is_rejected_before_any_device_command(self):
@@ -118,7 +118,7 @@ if pathlib.Path(sys.argv[0]).name == 'xcodebuild':
 
 
 class PhoneNoticeEmbedding(unittest.TestCase):
-    def test_default_build_has_no_optional_resource_dependency(self):
+    def test_unconfigured_notice_phase_skips_unused_inputs(self):
         result = subprocess.run(['bash', str(ROOT / 'tooling/ios/embed-phone-self-runner-notices.sh')],
                                 env={**os.environ, 'DSH_PHONE_SELF_RUNNER_ENABLED': 'NO'}, capture_output=True)
         self.assertEqual(result.returncode, 0, result.stderr)

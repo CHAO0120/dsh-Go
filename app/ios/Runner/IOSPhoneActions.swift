@@ -47,15 +47,18 @@ struct IOSPhoneOutcome {
 }
 
 @MainActor
-final class IOSPhoneApproval: UIViewController {
+final class IOSPhoneApproval: UIViewController, UIScrollViewDelegate {
   private let heading: String
   private let detail: String
   private let allowTitle: String
   private let denyTitle: String
   private let answer: (Bool) -> Void
+  private let preview: Data?
+  private var previewImageView: UIImageView?
   init(heading: String = "允许这一次手机动作？", detail: String, allow: String = "允许一次", deny: String = "拒绝",
-       answer: @escaping (Bool) -> Void) {
+       preview: Data? = nil, answer: @escaping (Bool) -> Void) {
     self.heading = heading; self.detail = detail; self.allowTitle = allow; self.denyTitle = deny; self.answer = answer
+    self.preview = preview
     super.init(nibName: nil, bundle: nil)
     modalPresentationStyle = .pageSheet
     isModalInPresentation = true
@@ -66,6 +69,7 @@ final class IOSPhoneApproval: UIViewController {
     view.backgroundColor = .systemBackground
     let title = UILabel()
     title.text = heading
+    title.numberOfLines = 0
     title.font = .preferredFont(forTextStyle: .headline)
     let text = UITextView()
     text.isEditable = false
@@ -80,7 +84,20 @@ final class IOSPhoneApproval: UIViewController {
     allow.addAction(UIAction { [weak self] _ in self?.answer(true) }, for: .touchUpInside)
     let buttons = UIStackView(arrangedSubviews: [deny, allow])
     buttons.distribution = .fillEqually
-    let stack = UIStackView(arrangedSubviews: [title, text, buttons])
+    var rows: [UIView] = [title]
+    if let preview, preview.count <= 880 * 1024, let image = UIImage(data: preview) {
+      let zoom = UIScrollView()
+      let picture = UIImageView(image: image)
+      picture.contentMode = .scaleAspectFit
+      picture.frame = CGRect(x: 0, y: 0, width: max(1, view.bounds.width - 40), height: 220)
+      zoom.addSubview(picture); zoom.contentSize = picture.bounds.size
+      zoom.minimumZoomScale = 1; zoom.maximumZoomScale = 8; zoom.delegate = self
+      zoom.heightAnchor.constraint(equalToConstant: 220).isActive = true
+      zoom.accessibilityLabel = "上次观察的标号截图，可缩放核对；不是实时画面"
+      previewImageView = picture; rows.append(zoom)
+    }
+    rows += [text, buttons]
+    let stack = UIStackView(arrangedSubviews: rows)
     stack.axis = .vertical; stack.spacing = 16
     stack.translatesAutoresizingMaskIntoConstraints = false
     view.addSubview(stack)
@@ -92,12 +109,15 @@ final class IOSPhoneApproval: UIViewController {
       buttons.heightAnchor.constraint(equalToConstant: 48),
     ])
   }
+  func viewForZooming(in scrollView: UIScrollView) -> UIView? { previewImageView }
 }
 
 @MainActor
 final class IOSPhoneActions: NSObject, EKEventEditViewDelegate, MFMessageComposeViewControllerDelegate {
   private let presenter: () -> UIViewController?
   private var requestId: String?
+  private var confirmationID: UUID?
+  private var confirmationAnswered = false
   private var modal: UIViewController?
   private var answer: ((IOSPhoneOutcome) -> Void)?
   private var calendarStore: EKEventStore?
@@ -106,6 +126,8 @@ final class IOSPhoneActions: NSObject, EKEventEditViewDelegate, MFMessageCompose
   func cancel(_ id: String) {
     guard requestId == id else { return }
     requestId = nil
+    confirmationID = nil
+    confirmationAnswered = true
     calendarStore = nil
     finish(.failure("原任务已取消或引擎已更换，旧确认不能再执行。"))
   }
@@ -136,11 +158,14 @@ final class IOSPhoneActions: NSObject, EKEventEditViewDelegate, MFMessageCompose
       return .failure("请先解锁并打开 DSH Go；后台或已过期的动作不执行。")
     }
     requestId = request.id
-    defer { if requestId == request.id { requestId = nil; calendarStore = nil } }
+    let confirmation = UUID(); confirmationID = confirmation; confirmationAnswered = false
+    defer { if confirmationID == confirmation { confirmationID = nil; requestId = nil; calendarStore = nil } }
     let detail: String
     do { detail = try describe(request.action) } catch { return .failure("手机动作参数无效或 iOS 不支持。") }
     let controller = IOSPhoneApproval(detail: detail) { [weak self] allowed in
-      guard let self, self.requestId == request.id else { return }
+      guard let self, self.requestId == request.id, self.confirmationID == confirmation,
+        !self.confirmationAnswered else { return }
+      self.confirmationAnswered = true
       self.finish(allowed ? .success("allowed-once") : .failure("用户拒绝了这一步；不要自动重试同一个动作。"))
     }
     let expiry = Task { [weak self] in
@@ -152,8 +177,8 @@ final class IOSPhoneActions: NSObject, EKEventEditViewDelegate, MFMessageCompose
     expiry.cancel()
     guard !choice.isError else { return choice }
     // The Node-side invocation must still own this exact request AFTER the real tap.
-    guard requestId == request.id, current(), foreground, await authorize(),
-      requestId == request.id, current(), foreground else {
+    guard requestId == request.id, confirmationID == confirmation, current(), foreground, await authorize(),
+      requestId == request.id, confirmationID == confirmation, current(), foreground else {
       return .failure("确认对应的原任务已经结束，未执行动作。")
     }
     return await perform(request.action, id: request.id, validate: validate)
@@ -161,13 +186,16 @@ final class IOSPhoneActions: NSObject, EKEventEditViewDelegate, MFMessageCompose
   /// The same real sheet, for a tool that decides what happens after the answer itself.
   func confirm(
     _ request: IOSPhoneRequest, title: String, detail: String, allow: String = "允许一次", deny: String = "拒绝",
-    waitsForever: Bool = false
+    waitsForever: Bool = false, preview: Data? = nil
   ) async -> Bool {
     guard foreground else { return false }
     requestId = request.id
-    defer { if requestId == request.id { requestId = nil } }
-    let controller = IOSPhoneApproval(heading: title, detail: detail, allow: allow, deny: deny) { [weak self] allowed in
-      guard let self, self.requestId == request.id else { return }
+    let confirmation = UUID(); confirmationID = confirmation; confirmationAnswered = false
+    defer { if confirmationID == confirmation { confirmationID = nil; requestId = nil } }
+    let controller = IOSPhoneApproval(heading: title, detail: detail, allow: allow, deny: deny, preview: preview) { [weak self] allowed in
+      guard let self, self.requestId == request.id, self.confirmationID == confirmation,
+        !self.confirmationAnswered else { return }
+      self.confirmationAnswered = true
       self.finish(allowed ? .success("allowed-once") : .failure("declined"))
     }
     let expiry = Task { [weak self] in
@@ -178,7 +206,7 @@ final class IOSPhoneActions: NSObject, EKEventEditViewDelegate, MFMessageCompose
     }
     let choice = await present(controller)
     expiry.cancel()
-    return !choice.isError && requestId == request.id && foreground
+    return !choice.isError && requestId == request.id && confirmationID == confirmation && foreground
   }
   private func required(_ value: String?, max: Int = 8192) throws -> String {
     guard let value, !value.isEmpty, value.utf8.count <= max, !value.contains("\0") else { throw CocoaError(.coderInvalidValue) }

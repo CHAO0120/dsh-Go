@@ -1,0 +1,275 @@
+import Foundation
+import XCTest
+@testable import Runner
+
+/// Decode the actual IOSPhoneRequest envelope before constructing the immutable
+/// production plan. All text is synthetic; this suite performs no phone action
+/// and never reads a pasteboard, pairing record or other personal data.
+@MainActor
+final class IOSPhoneOperationTests: XCTestCase {
+  private func request(method: String? = "screen", raw: String? = "{}", kind: String = "runner-call") throws -> Runner.IOSPhoneRequest {
+    var action: [String: Any] = ["kind": kind]
+    if let method { action["method"] = method }
+    if let raw { action["params"] = raw }
+    let envelope: [String: Any] = [
+      "v": 1, "runId": "synthetic-engine", "id": UUID().uuidString,
+      "owner": ["sessionId": "synthetic-session", "callId": "synthetic-call"],
+      "action": action, "expiresAt": Date().addingTimeInterval(120).timeIntervalSince1970 * 1000,
+    ]
+    return try JSONDecoder().decode(Runner.IOSPhoneRequest.self, from: JSONSerialization.data(withJSONObject: envelope))
+  }
+
+  private func plan(_ method: String, _ parameters: [String: Any]) throws -> IOSPhoneOperation {
+    let raw = String(decoding: try JSONSerialization.data(withJSONObject: parameters), as: UTF8.self)
+    return try IOSPhoneOperation(request(method: method, raw: raw))
+  }
+
+  private func type(_ text: String, submit: Bool = false) throws -> IOSPhoneOperation {
+    try plan("type", ["screen": "s1", "id": 1, "text": text, "submit": submit])
+  }
+
+  func testAllSupportedMethodsDecodeThroughTheRealRequestType() throws {
+    let cases: [(String, [String: Any], Bool, Bool)] = [
+      ("apps", [:], false, false), ("open", ["app": "test.synthetic.app"], false, false),
+      ("screen", [:], true, false), ("tap", ["screen": "s1", "id": 1], true, true),
+      ("tap_xy", ["observation": "s1", "x": 0, "y": 0], true, true),
+      ("type", ["screen": "s1", "id": 1, "text": "synthetic"], true, true),
+      ("scroll", ["screen": "s1", "direction": "down"], true, true),
+      ("collect", ["screen": "s1", "list": 1], true, true),
+      ("key", ["key": "home"], true, true),
+    ]
+    for (name, fields, target, observation) in cases {
+      let value = try plan(name, fields)
+      XCTAssertEqual(value.method.rawValue, name)
+      XCTAssertEqual(value.needsTarget, target)
+      XCTAssertEqual(value.requiresObservation, observation)
+    }
+  }
+
+  func testOnlyRunnerCallWithAnExactSupportedMethodAndJSONObjectIsAccepted() throws {
+    for kind in ["runner_call", "screen", "intent", ""] {
+      XCTAssertThrowsError(try IOSPhoneOperation(request(kind: kind)))
+    }
+    for method in ["Screen", "screen ", "native", "prepareInput", "paste", "ascii", "handoff", ""] {
+      XCTAssertThrowsError(try IOSPhoneOperation(request(method: method)))
+    }
+    XCTAssertThrowsError(try IOSPhoneOperation(request(method: nil)))
+    XCTAssertThrowsError(try IOSPhoneOperation(request(raw: nil)))
+    for raw in ["[]", "null", "true", "1", "\"screen\"", "{", "{\"image\":NaN}"] {
+      XCTAssertThrowsError(try IOSPhoneOperation(request(raw: raw)))
+    }
+  }
+
+  func testUnknownAndBackendSelectionArgumentsAreRejected() throws {
+    for key in ["route", "backend", "provider", "nativeFrameId", "runId", "owner", "rawHid", "unknown"] {
+      XCTAssertThrowsError(try plan("screen", [key: "synthetic"]))
+      XCTAssertThrowsError(try plan("tap", ["screen": "s1", "id": 1, key: "synthetic"]))
+    }
+    XCTAssertThrowsError(try plan("open", ["app": "test.synthetic.app", "url": "https://example.invalid"]))
+    XCTAssertThrowsError(try plan("type", ["screen": "s1", "id": 1, "text": "synthetic", "replace": false]))
+  }
+
+  func testBooleanFlagsRejectNumbersStringsAndNull() throws {
+    let fields: [(String, [String: Any], String)] = [
+      ("screen", [:], "image"), ("screen", [:], "detail"), ("screen", [:], "background"),
+      ("open", ["app": "test.synthetic.app"], "background"),
+      ("tap", ["screen": "s1", "id": 1], "long"),
+      ("type", ["screen": "s1", "id": 1, "text": "synthetic"], "submit"),
+    ]
+    let invalidValues: [Any] = [NSNumber(value: 0), NSNumber(value: 1), NSNumber(value: 1.0), "true", NSNull()]
+    for (method, base, key) in fields {
+      for invalid in invalidValues {
+        var input = base; input[key] = invalid
+        XCTAssertThrowsError(try plan(method, input))
+      }
+      var input = base; input[key] = false
+      XCTAssertNoThrow(try plan(method, input))
+    }
+    XCTAssertTrue(try plan("screen", ["image": true, "detail": true]).wantsImage)
+    XCTAssertTrue(try plan("screen", ["image": true, "detail": true]).detail)
+    XCTAssertThrowsError(try plan("screen", ["background": true]))
+    XCTAssertThrowsError(try plan("open", ["app": "test.synthetic.app", "background": true]))
+  }
+
+  func testIntegerArgumentsRejectBooleanFractionalAndNonNumericValues() throws {
+    let fields: [(String, [String: Any], String)] = [
+      ("tap", ["screen": "s1"], "id"), ("type", ["screen": "s1", "text": "synthetic"], "id"),
+      ("scroll", ["screen": "s1", "direction": "down"], "id"),
+      ("collect", ["screen": "s1"], "list"),
+      ("collect", ["screen": "s1", "list": 1], "max_pages"),
+      ("tap_xy", ["observation": "s1", "y": 0], "x"),
+      ("tap_xy", ["observation": "s1", "x": 0], "y"),
+    ]
+    let invalidValues: [Any] = [true, false, 1.5, -0.5, "1", NSNull()]
+    for (method, base, key) in fields {
+      for invalid in invalidValues {
+        var input = base; input[key] = invalid
+        XCTAssertThrowsError(try plan(method, input))
+      }
+    }
+    for number in ["1e309", "1e308", "-1", "32768", "1.25"] {
+      let raw = "{\"observation\":\"s1\",\"x\":\(number),\"y\":0}"
+      XCTAssertThrowsError(try IOSPhoneOperation(request(method: "tap_xy", raw: raw)))
+    }
+  }
+
+  func testIntegralJSONNumbersKeepTheirValidatedValueInThePlanAndDescription() throws {
+    let tap = try IOSPhoneOperation(request(method: "tap", raw: "{\"screen\":\"s1\",\"id\":1.0}"))
+    XCTAssertEqual(tap.parameters["id"] as? Int, 1)
+    XCTAssertTrue(tap.consentDescription(targetLabel: nil).contains("编号 1"))
+    let collect = try IOSPhoneOperation(request(method: "collect", raw: "{\"screen\":\"s1\",\"list\":1,\"max_pages\":30.0}"))
+    XCTAssertEqual(collect.pages, 30)
+    XCTAssertTrue(collect.consentDescription(targetLabel: nil).contains("30 页"))
+    XCTAssertTrue(collect.consentDescription(targetLabel: nil).contains("29 次"))
+  }
+
+  func testIntegerRangesAcceptBothBoundariesAndRejectOutsideValues() throws {
+    for id in [1, 400] { XCTAssertNoThrow(try plan("tap", ["screen": "s1", "id": id])) }
+    for id in [0, 401, -1] { XCTAssertThrowsError(try plan("tap", ["screen": "s1", "id": id])) }
+    for coordinate in [0, 32767] {
+      XCTAssertNoThrow(try plan("tap_xy", ["observation": "s1", "x": coordinate, "y": coordinate]))
+    }
+    for coordinate in [-1, 32768] {
+      XCTAssertThrowsError(try plan("tap_xy", ["observation": "s1", "x": coordinate, "y": 0]))
+    }
+    XCTAssertEqual(try plan("collect", ["screen": "s1", "list": 1]).pages, 10)
+    for pages in [1, 30] {
+      XCTAssertEqual(try plan("collect", ["screen": "s1", "list": 400, "max_pages": pages]).pages, pages)
+    }
+    for pages in [0, 31] {
+      XCTAssertThrowsError(try plan("collect", ["screen": "s1", "list": 1, "max_pages": pages]))
+    }
+    for list in [0, 401] { XCTAssertThrowsError(try plan("collect", ["screen": "s1", "list": list])) }
+  }
+
+  func testRequiredAndOptionalStringsHaveByteLimitsAndRejectNull() throws {
+    XCTAssertNoThrow(try plan("tap", ["screen": String(repeating: "s", count: 96), "id": 1]))
+    XCTAssertThrowsError(try plan("tap", ["screen": String(repeating: "s", count: 97), "id": 1]))
+    let invalidFields: [[String: Any]] = [["id": 1], ["screen": "", "id": 1], ["screen": NSNull(), "id": 1], ["screen": "s\0x", "id": 1]]
+    for missing in invalidFields {
+      XCTAssertThrowsError(try plan("tap", missing))
+    }
+    XCTAssertNoThrow(try plan("apps", ["query": String(repeating: "a", count: 256)]))
+    XCTAssertThrowsError(try plan("apps", ["query": String(repeating: "a", count: 257)]))
+    XCTAssertThrowsError(try plan("apps", ["query": NSNull()]))
+    XCTAssertNoThrow(try plan("collect", ["screen": "s1", "list": 1, "until": String(repeating: "a", count: 1024)]))
+    XCTAssertThrowsError(try plan("collect", ["screen": "s1", "list": 1, "until": String(repeating: "a", count: 1025)]))
+    XCTAssertThrowsError(try plan("collect", ["screen": "s1", "list": 1, "until": ""]))
+  }
+
+  func testDirectionAndSystemKeyAllowlistsDoNotExposeRawHID() throws {
+    for direction in ["up", "down", "left", "right"] {
+      XCTAssertNoThrow(try plan("scroll", ["screen": "s1", "direction": direction]))
+    }
+    for direction in ["Down", "diagonal", "", "home"] {
+      XCTAssertThrowsError(try plan("scroll", ["screen": "s1", "direction": direction]))
+    }
+    for key in ["home", "back", "notifications"] { XCTAssertNoThrow(try plan("key", ["key": key])) }
+    for key in ["recents", "0xe3", "enter", "command+v", ""] {
+      XCTAssertThrowsError(try plan("key", ["key": key]))
+    }
+  }
+
+  func testASCIIIsValidatedAsACompleteBoundedString() throws {
+    let maximum = String(repeating: "a", count: 1024)
+    let accepted = try type(maximum)
+    XCTAssertTrue(accepted.text == maximum)
+    XCTAssertFalse(accepted.usesClipboard)
+    XCTAssertThrowsError(try type(maximum + "b"))
+    XCTAssertThrowsError(try type(""))
+    XCTAssertThrowsError(try type("first line\nsecond line"))
+    XCTAssertThrowsError(try type("first\tcolumn"))
+    XCTAssertThrowsError(try type("中文\n下一行"))
+    XCTAssertThrowsError(try type("中文\t下一列"))
+  }
+
+  func testUnicodeLimitCountsUTF8BytesAndNeverTruncatesOrSplits() throws {
+    let maximum = String(repeating: "中", count: 1365) + "A"
+    XCTAssertEqual(maximum.utf8.count, 4096)
+    let accepted = try type(maximum)
+    XCTAssertTrue(accepted.text == maximum)
+    XCTAssertTrue(accepted.usesClipboard)
+    XCTAssertThrowsError(try type(maximum + "B"))
+    let mixed = String(repeating: "a", count: 4094) + "é"
+    XCTAssertEqual(mixed.utf8.count, 4096)
+    XCTAssertTrue(try type(mixed).usesClipboard)
+    // An otherwise long ASCII string takes the separately bounded Unicode path
+    // only when the FULL approved value actually contains a non-ASCII scalar.
+    XCTAssertTrue(try type(String(repeating: "a", count: 1024) + "中").usesClipboard)
+  }
+
+  func testUnsupportedControlScalarsRefuseTheWholeInput() throws {
+    for scalar in [0x00, 0x01, 0x08, 0x09, 0x0a, 0x0b, 0x0d, 0x1b, 0x1f, 0x7f, 0x80, 0x85, 0x9f,
+                   0x061c, 0x200e, 0x200f, 0x202a, 0x202b, 0x202c, 0x202d, 0x202e,
+                   0x2066, 0x2067, 0x2068, 0x2069] {
+      let character = try XCTUnwrap(UnicodeScalar(scalar))
+      let input = "safe prefix" + String(character) + "safe suffix"
+      XCTAssertThrowsError(try type(input))
+    }
+    XCTAssertThrowsError(try type("safe prefix\u{1b}中safe suffix"))
+  }
+
+  func testShortAllDigitInputsAreHandedToTheUser() throws {
+    for input in ["123", "1234", "12345", "123456", "1234567", "12345678",
+                  " 123456 ", "12-34-56", "1 2 3 4 5 6", "１２３４５６", "١٢٣٤٥٦"] {
+      XCTAssertThrowsError(try type(input)) { error in
+        XCTAssertTrue((error as? IOSPhoneOperationError)?.message.contains("handoff") == true)
+      }
+    }
+  }
+
+  func testRawParameterJSONHasItsOwnLimitBeforeAnyPlanCanBeUsed() throws {
+    let base = "{\"query\":\"synthetic\"}"
+    let maximum = base + String(repeating: " ", count: 16_384 - base.utf8.count)
+    XCTAssertEqual(maximum.utf8.count, 16_384)
+    XCTAssertNoThrow(try IOSPhoneOperation(request(method: "apps", raw: maximum)))
+    XCTAssertThrowsError(try IOSPhoneOperation(request(method: "apps", raw: maximum + " ")))
+  }
+
+  func testConsentDisplaysTheCompleteUnicodeValueAndBothExtraBehaviors() throws {
+    let input = "SYNTHETIC-BEGIN " + String(repeating: "中", count: 1000) + " SYNTHETIC-END"
+    let value = try type(input, submit: true)
+    let description = value.consentDescription(targetLabel: "Synthetic destination")
+    XCTAssertTrue(description.contains(input), "approval omitted part of the validated input")
+    XCTAssertTrue(description.contains("替换原内容"))
+    XCTAssertTrue(description.contains("Synthetic destination"))
+    XCTAssertTrue(description.contains("临时使用剪贴板"))
+    XCTAssertTrue(description.contains("CoreDevice 路线"))
+    XCTAssertTrue(description.contains("不发送给模型"))
+    XCTAssertTrue(description.contains("回到 DSH Go 恢复原内容"))
+    XCTAssertTrue(description.contains("本 App 在恢复前终止"))
+    XCTAssertTrue(description.contains("还请求按回车／发送"))
+    XCTAssertTrue(description.contains("完整输入文字"))
+    XCTAssertTrue(value.usesClipboard)
+    XCTAssertTrue(value.submits)
+  }
+
+  func testASCIIConsentDoesNotClaimClipboardOrAnUnrequestedSubmit() throws {
+    let value = try type("synthetic ASCII")
+    let description = value.consentDescription(targetLabel: nil)
+    XCTAssertTrue(description.contains("synthetic ASCII"))
+    XCTAssertTrue(description.contains("替换原内容"))
+    XCTAssertFalse(description.contains("剪贴板"))
+    XCTAssertFalse(description.contains("回车／发送"))
+    XCTAssertFalse(value.usesClipboard)
+    XCTAssertFalse(value.submits)
+  }
+
+  func testReadAndTapDescriptionsPreserveTheRequestedScope() throws {
+    let textOnly = try plan("screen", ["image": false])
+    let withImage = try plan("screen", ["image": true])
+    XCTAssertFalse(textOnly.consentDescription(targetLabel: nil).contains("标号截图"))
+    XCTAssertTrue(withImage.consentDescription(targetLabel: nil).contains("标号截图"))
+    let tap = try plan("tap", ["screen": "s7", "id": 12, "long": true])
+    let tapDescription = tap.consentDescription(targetLabel: "Synthetic label")
+    XCTAssertTrue(tapDescription.hasPrefix("长按"))
+    XCTAssertTrue(tapDescription.contains("s7"))
+    XCTAssertTrue(tapDescription.contains("编号 12"))
+    XCTAssertTrue(tapDescription.contains("Synthetic label"))
+    let coordinates = try plan("tap_xy", ["observation": "s9", "x": 123, "y": 456])
+    XCTAssertTrue(coordinates.consentDescription(targetLabel: nil).contains("s9"))
+    XCTAssertTrue(coordinates.consentDescription(targetLabel: nil).contains("(123, 456)"))
+    let open = try plan("open", ["app": "test.synthetic.app"])
+    XCTAssertTrue(open.consentDescription(targetLabel: nil).contains("不代表应用已到前台"))
+  }
+}

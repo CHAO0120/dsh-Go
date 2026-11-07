@@ -32,14 +32,14 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - name: Check the optional native owner without Apple services
+      - name: Check the shared phone native owner without Apple services
         run: |
           bash tooling/ios/build-phone-self-runner.sh --check
           python3 tooling/ios/tests/phone-self-runner.test.py -v
 
   compile:
     runs-on: macos-26
-    timeout-minutes: 60
+    timeout-minutes: 90
     env:
       DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
       FLUTTER_VERSION: 3.47.7
@@ -62,7 +62,10 @@ jobs:
             -sdk "$(xcrun --sdk iphonesimulator --show-sdk-path)" \
             -target arm64-apple-ios17.0-simulator \
             -import-objc-header tooling/ios/phone-self-runner/include/dsh_phone_self_runner.h \
-            app/ios/PhoneRunner/PhoneRunnerBootstrap.swift app/ios/Runner/IOSPhoneSelfRunner.swift
+            app/ios/PhoneRunner/PhoneRunnerBootstrap.swift app/ios/Runner/IOSPhoneSelfRunner.swift \
+            app/ios/Runner/IOSPhonePairingStore.swift app/ios/Runner/IOSPhoneDDI.swift \
+            app/ios/Runner/IOSPhoneCoreDevice.swift app/ios/Runner/IOSPhoneScreen.swift \
+            app/ios/Runner/IOSPhoneRPCDispatch.swift app/ios/PhoneRunner/PhoneRunnerObservation.swift
 
       - name: Install Flutter
         run: |
@@ -362,13 +365,34 @@ jobs:
           node="$(ls -d "$DSH_IOS_ENGINE_WORK"/node-v*-darwin-arm64/bin/node)"
           "$node" tooling/ios/engine-smoke/tools-check.mjs --simulator "$DSH_SIMULATOR" --app app/build/ios/iphonesimulator/Runner.app --work "$RUNNER_TEMP/tools-check"
 
-      - name: Exercise the Swift on-device owner state machine
+      - name: Exercise Swift phone ownership, observations, consent plans and clipboard
         if: ${{ !cancelled() && steps.prepare.outcome == 'success' }}
         working-directory: app
         run: |
           xcodebuild test -workspace ios/Runner.xcworkspace -scheme Runner \
             -destination "id=$DSH_SIMULATOR" -only-testing:RunnerTests/IOSPhoneSelfRunnerTests \
+            -only-testing:RunnerTests/IOSPhonePairingStoreTests \
+            -only-testing:RunnerTests/IOSPhoneCoreDeviceTests \
+            -only-testing:RunnerTests/IOSPhoneScreenTests \
+            -only-testing:RunnerTests/IOSPhoneOperationTests \
+            -only-testing:RunnerTests/IOSPhoneClipboardTests \
+            -only-testing:RunnerTests/IOSPhoneXCTestObservationTests \
+            -only-testing:RunnerTests/IOSPhoneRPCDispatchTests \
+            -only-testing:RunnerTests/IOSPhoneTaskConsentTests \
+            -only-testing:RunnerTests/IOSPhoneResultEnvelopeTests \
             -parallel-testing-enabled NO CODE_SIGNING_ALLOWED=NO
+
+      - name: Capture the native pet renderer in the simulator
+        if: ${{ !cancelled() && steps.prepare.outcome == 'success' }}
+        run: bash tooling/ios/pet-overlay-tests/capture-simulator.sh "$DSH_SIMULATOR" "$RUNNER_TEMP/pet-overlay"
+
+      - name: Keep the native pet frames and capture receipt
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: ios-pet-overlay
+          path: ${{ runner.temp }}/pet-overlay/
+          if-no-files-found: ignore
 
       - name: Keep what the tools answered
         if: always()

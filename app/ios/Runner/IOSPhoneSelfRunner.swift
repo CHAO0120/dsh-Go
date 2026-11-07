@@ -18,7 +18,7 @@ enum IOSPhoneSelfRunnerError: Error {
   var message: String {
     switch self {
     case .unavailable:
-      return "此构建没有启用端上 XCTest。可使用 Mac PhoneRunner；实验构建需先运行 tooling/ios/build-phone-self-runner.sh。"
+      return "此构建的手机原生组件不可用。请使用包含共享原生库的新构建；XCTest 增强还需在设置里明确启用并安装 PhoneRunner。"
     case .cancelled:
       return "这个手机操控调用已经结束，没有执行动作。"
     case .timedOut:
@@ -28,9 +28,9 @@ enum IOSPhoneSelfRunnerError: Error {
     case .faulted:
       return "无法确认旧 PhoneRunner 已退出，本次不会继续操控或切换后端。请先结束旧运行器，再完全退出并重新打开 DSH Go。"
     case .developerImageRequired:
-      return "这份实验后端需要预先挂载与手机系统匹配的开发者镜像（DDI）。请先用 Mac/Xcode 准备开发者服务，再断开 Mac 重试；本版不会自动下载或挂载镜像。"
+      return "本机开发者镜像（DDI）尚未就绪。请回到手机连接设置，由用户选择下载并挂载；这一步不会自动安装镜像或重试操控。"
     case .setup:
-      return "端上 XCTest 配置不完整。需要有效的 pairingFile.plist、运行器包名和本机开发者服务端口。"
+      return "端上 XCTest 配置不完整。请导入有效的远程配对凭据，检查运行器包名和本机开发者服务端口。"
     case .failed:
       return "端上 XCTest 没有连接成功，没有执行动作。请检查配对、LocalDevVPN、开发者模式、匹配的开发者镜像和已签名安装的 PhoneRunner。"
     case .invalidHandshake:
@@ -86,7 +86,8 @@ final class IOSPhoneSelfRunner {
 
   private struct Configuration: Encodable {
     let runId: String
-    let pairingFile: String
+    let pairingFile: String?
+    let pairingBase64: String?
     let host: String
     let port: UInt16
     let runnerBundleId: String
@@ -96,6 +97,7 @@ final class IOSPhoneSelfRunner {
 
   private let native: NativeClient?
   private let pairingURL: URL
+  private let pairingData: (() throws -> Data)?
   private let runnerBundleId: String
   private let targetBundleId: String
   private let configuredPort: UInt16?
@@ -119,7 +121,8 @@ final class IOSPhoneSelfRunner {
       ?? FileManager.default.temporaryDirectory
     self.init(native: Self.makeNativeClient(), pairingURL: documents.appendingPathComponent("pairingFile.plist"),
       runnerBundleId: runner, targetBundleId: target,
-      configuredPort: number.flatMap(UInt16.init(exactly:)), configurationValid: validPort)
+      configuredPort: number.flatMap(UInt16.init(exactly:)), configurationValid: validPort,
+      pairingData: { try IOSPhonePairingStore.shared.load() })
   }
 
   /// Internal test seam: the production client is nil unless the build opted in.
@@ -127,9 +130,10 @@ final class IOSPhoneSelfRunner {
        configuredPort: UInt16? = nil, configurationValid: Bool = true,
        startupTimeout: TimeInterval = 95, stopTimeout: TimeInterval = 12,
        resolvePort: @escaping () async -> UInt16 = { await PhoneRemotePairingPort.resolve() },
-       now: @escaping () -> Date = Date.init) {
+       now: @escaping () -> Date = Date.init, pairingData: (() throws -> Data)? = nil) {
     self.native = native
     self.pairingURL = pairingURL
+    self.pairingData = pairingData
     self.runnerBundleId = runnerBundleId
     self.targetBundleId = targetBundleId
     self.configuredPort = configuredPort
@@ -141,6 +145,7 @@ final class IOSPhoneSelfRunner {
   }
 
   var isConfigured: Bool {
+    if let pairingData { return native != nil && (try? pairingData()) != nil }
     var directory: ObjCBool = false
     return native != nil && FileManager.default.fileExists(atPath: pairingURL.path, isDirectory: &directory) && !directory.boolValue
   }
@@ -251,7 +256,9 @@ final class IOSPhoneSelfRunner {
         let handshake = run.handshake, let native = self.native else { return }
       guard self.now() < run.deadline else { self.stop(run, reason: .timedOut); return }
       do {
-        let config = Configuration(runId: run.id, pairingFile: self.pairingURL.path,
+        let record = try self.pairingData?()
+        let config = Configuration(runId: run.id, pairingFile: record == nil ? self.pairingURL.path : nil,
+          pairingBase64: record?.base64EncodedString(),
           host: "10.7.0.1", port: port, runnerBundleId: self.runnerBundleId,
           targetBundleId: self.targetBundleId, publicKeyBase64: handshake.publicKeyBase64)
         let bytes = try JSONEncoder().encode(config)
@@ -352,7 +359,7 @@ final class IOSPhoneSelfRunner {
 /// Resolves the developer-service advertisement on the main run loop. The
 /// address remains the device's LocalDevVPN loopback; only the port is discovered.
 @MainActor
-private final class PhoneRemotePairingPort: NSObject, @preconcurrency NetServiceBrowserDelegate, @preconcurrency NetServiceDelegate {
+final class PhoneRemotePairingPort: NSObject, @preconcurrency NetServiceBrowserDelegate, @preconcurrency NetServiceDelegate {
   private let browser = NetServiceBrowser()
   private var services: [NetService] = []
   private var continuation: CheckedContinuation<UInt16, Never>?

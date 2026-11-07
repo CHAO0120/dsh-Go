@@ -58,6 +58,11 @@ import UserNotifications
     if let registrar = engineBridge.pluginRegistry.registrar(forPlugin: "DshPlugin") {
       DshPlugin.register(with: registrar)
       IOSPhoneControl.shared.register(messenger: registrar.messenger())
+      IOSPhoneLink.shared.register(messenger: registrar.messenger(), presenter: { topViewController() })
+      IOSPetOverlay.shared.register(registrar: registrar)
+      IOSPetOverlay.shared.onTaskPauseRequested = { IOSPhoneControl.shared.pausePhoneTask(id: $0) }
+      IOSPetOverlay.shared.onTaskStopConfirmed = { IOSPhoneControl.shared.stopPhoneTaskConfirmed(id: $0) }
+      IOSPetOverlay.shared.onTaskResumeConfirmed = { IOSPhoneControl.shared.resumePhoneTask(id: $0) }
     }
   }
 }

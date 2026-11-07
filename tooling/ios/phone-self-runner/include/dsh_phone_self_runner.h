@@ -2,6 +2,7 @@
 #define DSH_PHONE_SELF_RUNNER_H
 
 #include <stdint.h>
+#include <stddef.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -21,8 +22,9 @@ typedef void (*dsh_phone_xctest_callback)(const char *run_id, int32_t kind,
 
 /* The JSON string is copied during this call. Returns zero for invalid input,
  * another live/stopping owner, or failure to create the native worker thread.
- * Accepted keys: runId, pairingFile, host, port, runnerBundleId,
- * targetBundleId, publicKeyBase64. Public key is 2048-bit RSA PKCS#1 DER.
+ * Accepted keys: runId, pairingBase64 (or legacy pairingFile), host, port,
+ * runnerBundleId, targetBundleId, publicKeyBase64, ddiCache, allowDDIMount.
+ * Public key is 2048-bit RSA PKCS#1 DER. New callers keep pairing in memory.
  */
 uint64_t dsh_phone_xctest_start(const char *config_json,
                                dsh_phone_xctest_callback callback);
@@ -32,6 +34,58 @@ uint64_t dsh_phone_xctest_start(const char *config_json,
  * A faulted/unconfirmed session keeps the slot poisoned until app restart.
  */
 void dsh_phone_xctest_stop(uint64_t handle);
+
+/* CoreDevice shares the SAME singleton owner with XCTest. Configuration and
+ * requests are length-delimited UTF-8 JSON, copied/parsed before return.
+ * Configuration <= 96 KiB; request <= 16 KiB; callback JSON <= 8192 bytes.
+ * Callback strings/bytes are borrowed only until callback return and must be
+ * copied before dispatching to another thread. Callbacks use the worker thread,
+ * outside the owner mutex, and may precede start's return.
+ *
+ * Event kinds: 0 starting; 1 ready; 2 stopped and released; 3 failed and
+ * released; 4 cleanup unconfirmed, owner poisoned until process restart;
+ * 5 DDI progress. Only terminal kinds 2/3 confirm complete owner release.
+ * Request status: 0 success/read or DISPATCHED; 1 failed before any side effect;
+ * 2 cancelled before any side effect; 3 uncertain after a possible side effect.
+ * Media start and virtual-keyboard registration already count as side effects.
+ * HID is one-way: DISPATCHED never proves that an app consumed input/paste.
+ * result.cleanupConfirmed applies to that request; terminal 2/3 confirms owner
+ * cleanup. Uncertain actions must never be automatically retried/fallen back.
+ * Screenshot PNG <= 16 MiB; apps JSON bytes <= 1 MiB; error bytes are null/zero.
+ */
+typedef void (*dsh_phone_core_event_callback)(uint64_t handle,
+    const char *run_id, int32_t kind, const char *event_json);
+typedef void (*dsh_phone_core_result_callback)(uint64_t handle,
+    uint64_t request_id, int32_t status, const char *result_json,
+    const uint8_t *bytes, size_t bytes_len);
+
+/* Permanent read-only NUL string. Does not acquire an owner or perform I/O.
+ * Caller must not modify/free it. Exact v1 value:
+ * dsh-phone-core:1;idevice=3854a5df4a5a6dee71ffce4d8befc2ea356a8065
+ */
+const char *dsh_phone_core_build_identity(void);
+
+/* Synchronous code: 0 accepted; 1 invalid; 2 busy; 3 stale; 4 not ready;
+ * 5 stopping; 6 faulted; 7 size limit; 8 internal failure.
+ * A nonzero request return guarantees no callback or action for that request.
+ * A nonzero start return guarantees no callbacks and no live owner handle.
+ * Accepted request IDs are nonzero and strictly increase within one owner.
+ * Only one request is in flight. Every accepted request gets exactly one result
+ * before the owner terminal event (except process termination).
+ * handle_out is set to zero on failure; invalid memory remains caller UB.
+ */
+int32_t dsh_phone_core_start(const uint8_t *config_json, size_t config_len,
+    dsh_phone_core_event_callback callback, uint64_t *handle_out);
+int32_t dsh_phone_core_request(uint64_t handle, uint64_t request_id,
+    const uint8_t *request_json, size_t request_len,
+    dsh_phone_core_result_callback callback);
+
+/* Idempotent, nonblocking, and confined to the matching owner/request.
+ * A stale handle or request ID cannot cancel a newer operation.
+ * stop atomically rejects further requests before signalling the worker.
+ */
+void dsh_phone_core_cancel(uint64_t handle, uint64_t request_id);
+void dsh_phone_core_stop(uint64_t handle);
 
 #ifdef __cplusplus
 }

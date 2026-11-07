@@ -1,25 +1,45 @@
-# Optional on-device XCTest owner
+# Shared on-device CoreDevice and XCTest owner
 
-This is an **opt-in experiment**, not a replacement for the default Mac-started
-PhoneRunner. The native library connects to this device's developer services and
-starts an already installed, signed PhoneRunner xctrunner. Screen elements,
-clicks, scrolling and typing still use the existing XCTest tools; there is no
-image-only/CoreDevice HID fallback here.
+This native component provides two routes through the **same singleton owner,
+remote pairing input, and RSD tunnel implementation**. CoreDevice supplies PNG
+screenshots, app names/IDs, app launch, and bounded HID operations. The existing
+optional XCTest route still launches the installed, signed PhoneRunner helper and
+returns its encrypted endpoint. The app chooses the route and handles user
+consent; this library does not make that choice or automatically retry an action
+through another route.
+
+The new CoreDevice/DDI implementation has portable compilation, parser,
+ownership, wire-format and C ABI checks. **Apple cross-builds, actual device DDI
+mounting/TSS, screen sharing, HID effects, orientation mapping and remote cleanup
+remain device-validation gates.** Static inspection of Apple's fixed DDI supports
+the media protocol fields below; it is not a successful device execution.
 
 ## Build and verification
 
-Install rustup. The local [toolchain file](rust-toolchain.toml) pins Rust 1.99.1.
-No Rust tools or network downloads are needed by a normal, non-opted-in app build.
-
-Portable checks (Rust, a C compiler, Python 3 and Git required):
+The local [toolchain file](rust-toolchain.toml) pins Rust 1.99.1. The repository
+iOS build integration supplies the native archive and generated config. Merely
+linking the component grants no pairing, network, media or input authority; all
+such work requires the app to explicitly start the owner after its user gates.
 
 ```sh
 bash tooling/ios/build-phone-self-runner.sh --check
 ```
 
-This verifies the upstream archive, applies the local patch, runs the Rust tests,
-builds the actual static library, links/runs a C ABI smoke executable, and runs
-preparation/attribution tests. It does **not** run XCTest, iOS code or an iPhone.
+This verifies the upstream archive and prepared tree, runs the Rust tests, builds
+the actual host static library, links/runs a C ABI smoke executable, and runs the
+preparation/attribution tests. The C executable starts real native workers using
+a nonexistent legacy pairing file: it tests bounded rejection, busy/stale
+handles, startup cancellation, callbacks and owner release before any TCP
+connection. It does not emulate a successful phone.
+
+A separate ignored test can read the eight real pinned DDI files using the
+production native cache loader. It never mounts an image or contacts a device:
+
+```sh
+cd tooling/ios/phone-self-runner
+DSH_TEST_DDI_CACHE=/absolute/fixed-layout/catalog \
+  cargo test --locked real_pinned_catalog_files_pass_independent_native_validation -- --ignored
+```
 
 On a Mac with Xcode selected:
 
@@ -27,134 +47,344 @@ On a Mac with Xcode selected:
 bash tooling/ios/build-phone-self-runner.sh
 ```
 
-The script builds device arm64 plus simulator arm64/x86_64 libraries under the
-ignored `app/ios/PhoneSelfRunnerNative/` directory and publishes
-`PhoneSelfRunner.xcconfig` **last**. The generated config sets
-`DSH_PHONE_SELF_RUNNER_ENABLED = YES`, adds the Swift compilation condition and
-selects the library by platform/architecture. Removing that generated config
-before rebuilding disables the optional path again; a normal checkout contains
-only the output directory's gitignore.
+The script builds device arm64 and simulator arm64/x86_64 libraries in the ignored
+`app/ios/PhoneSelfRunnerNative/` directory. It publishes
+`PhoneSelfRunner.xcconfig` last; that file enables the optional Swift compilation
+condition and selects the platform/architecture library. The app must still obtain explicit opt-in to its sensitive capabilities. A
+failed native build must not be represented as an enabled but missing archive.
 
-The script also emits `LICENSE.idevice.txt`, `SOURCE.json`, and
-`THIRD_PARTY_CRATES.json` for the app's optional resource phase. The latter is a
-sanitized inventory of the actual locked Cargo metadata, not a complete license
-audit. Transitive license texts, notices and distribution obligations still need
-release review; this experiment does not claim that work is complete.
+`LICENSE.idevice.txt`, `SOURCE.json` and `THIRD_PARTY_CRATES.json` are emitted for
+the app resource phase. The last file is a sanitized inventory of the
+actual locked Cargo graph, not a complete distribution/license audit.
 
-The Mac cross-build, XCTest signing, installation, real device launch, encrypted
-activity delivery and process-exit confirmation have **not** been verified from
-the Linux development environment. Follow the overall setup guide in
-[phone-self-runner.md](../phone-self-runner.md) before trying a device.
+## Pairing and checked status
 
-## Required device state
+Both routes accept `pairingBase64`: canonical base64 of a remote pairing plist,
+maximum 87,384 encoded bytes / 65,536 decoded bytes. The native layer independently
+requires exactly the flat fields `public_key`, `private_key`, `identifier`, and
+optional `alt_irk`. Public/private keys must each have 32 bytes; deriving the
+public key from the private key must agree. The identifier is nonempty, at most
+128 UTF-8 bytes, with no NUL; alt_irk must have 16 bytes. Duplicate fields,
+unknown fields, nested containers and malformed types are rejected. This is not
+a traditional lockdown HostID/HostCertificate record.
 
-- iOS 17 or newer, Developer Mode enabled and device unlocked.
-- LocalDevVPN (or an equivalent supported self-loopback route) enabled.
-- A valid **remote pairing** plist imported by the user. This is idevice's
-  `RpPairingFile`: `public_key` and `private_key` are 32-byte data fields,
-  `identifier` is a string, and `alt_irk` is optional. A traditional lockdown
-  HostID/HostCertificate pairing plist is not interchangeable.
-- A compatible developer disk image **already mounted**. This version checks for
-  `com.apple.dt.testmanagerd.remote` and `com.apple.instruments.dtservicehub` and
-  returns `ERR_PHONE_DDI_REQUIRED` if unavailable. It does not download, personalize
-  or mount a DDI; do not promise permanent Mac independence after a reboot.
-- The matching signed PhoneRunner xctrunner and target app already installed.
+New Swift callers use in-memory pairing; the native layer writes no pairing
+file. A mutually exclusive absolute `pairingFile` remains for old callers and
+portable compatibility tests. Self-owned base64/decoded buffers and the typed
+validation copy are zeroized when released. This does not claim that every
+allocation inside serde or the upstream library is zeroized.
 
-The fixed upstream CLI defines the compatible creation command in
-[tools/src/rppairing.rs](https://github.com/jkcoxson/idevice/blob/3854a5df4a5a6dee71ffce4d8befc2ea356a8065/tools/src/rppairing.rs):
+Only loopback IPs or the established self route `10.7.0.1` are accepted, with a
+nonzero port. Startup verifies existing pairing; it never begins PIN pairing,
+silently repairs the record, or persists credentials. The fixed upstream CLI's
+creation command is:
 
 ```sh
 idevice-tools --udid DEVICE_UDID rppairing pair HOSTNAME OUTPUT.plist
 ```
 
-That command uses USB/CoreDeviceProxy and may require an on-device trust action.
-It has not been run against a real device here. Runtime startup only verifies an
-existing record; it never requests a PIN, silently repairs pairing or rewrites the
-record. Treat the pairing file as a sensitive host identity: do not log it, attach
-it to an issue or include it in diagnostic exports.
+That USB/CoreDeviceProxy command may require an on-device trust action and has
+not been run on a device in this environment. Treat its output as sensitive.
 
-## ABI and ownership
+Core event fields distinguish actual checks:
 
-The stable declarations are in
-[dsh_phone_self_runner.h](include/dsh_phone_self_runner.h). `start` copies a bounded
-JSON configuration and returns a nonzero handle only after claiming a singleton
-owner. Another live/stopping/faulted owner returns zero. `stop(handle)` only
-signals that exact owner and never blocks the calling thread.
-
-Configuration keys are `runId`, `pairingFile`, `host`, `port`, `runnerBundleId`,
-`targetBundleId`, and `publicKeyBase64`. Only a self-loopback IP route is accepted.
-The public key must be 2048-bit RSA PKCS#1 DER, base64 encoded. No custom runner
-environment, RPC token or private RSA key can be supplied through configuration.
-
-The only app-specific runner environment values are the nonsecret
-`DSH_PHONE_RUN_ID` and `DSH_PHONE_PUBLIC_KEY`. The runner generates its own RPC
-token in memory, seals the endpoint using RSA-OAEP-SHA256, and sends
-`DSH_PHONE_READY_V1:<ciphertext>` as an XCTest activity title. The listener consumes
-that activity through the authenticated testmanagerd session, strips the prefix
-and delivers only ciphertext to Swift. It never prints readiness or pairing data.
-
-Callbacks execute on the native worker thread; both strings are borrowed for the
-call's duration and must be copied before dispatching elsewhere. Callback kinds:
-
-| Kind | Meaning |
+| Optional boolean | When it is emitted as true |
 | --- | --- |
-| 0 | Native worker starting; not ready for actions |
-| 1 | Encrypted endpoint from the expected serving test; Swift must decrypt/validate |
-| 2 | Stopped; native resources released and launched device PID confirmed absent |
-| 3 | Failed; no runner launched, or launched PID cleanup was confirmed |
-| 4 | `ERR_PHONE_STOP_UNCONFIRMED`; native resources released, device exit unknown |
+| `vpnReachable` | The configured self-route TCP connection succeeded; this alone does not identify the VPN implementation |
+| `pairingVerified` | RPPairing validation succeeded using the provided record |
+| `lockdownReady` | A real Lockdown ProductVersion query over the same RSD adapter succeeded |
+| `ddiMounted` | This owner completed a requested mount, refreshed RSD and found the required services |
 
-A fresh native lifetime gets a fresh handle. Pre-launch connection and initialization
-waits are bounded and cancellable. A submitted launch instead waits up to 30 seconds
-for its PID reply; cancellation cannot pretend the RPC was undone. Missing/error
-launch replies fault the owner rather than allowing an overlapping start.
-Once a valid nonzero 32-bit PID is known, cleanup only
-kills/queries that exact PID, never a process newly found by bundle ID. A `kind 4`
-fault retains the small singleton slot until the app restarts, so a subsequent
-start cannot overlap an unconfirmed old runner. Swift must not treat it as normal
-stopped/failed state or replay an uncertain phone action through another backend.
+An omitted field means it was not established. Existing developer service
+availability is reported as `capabilities.servicesReady`; it is not relabeled as
+proof that this owner mounted an image.
 
-## Dependency provenance
+## CoreDevice C ABI
 
-The sole upstream source is
+The declarations are in [dsh_phone_self_runner.h](include/dsh_phone_self_runner.h).
+`dsh_phone_core_build_identity()` returns the permanent read-only NUL string
+`dsh-phone-core:1;idevice=3854a5df4a5a6dee71ffce4d8befc2ea356a8065`
+without touching an owner, pairing material or I/O. Swift checks the actually
+linked component, and an archive can inspect this marker even after symbols are
+stripped; it does not replace source provenance or runtime validation.
+The new `dsh_phone_core_start` / `dsh_phone_core_request` inputs have explicit
+lengths. Config is at most 96 KiB and a request at most 16 KiB. Config keys are
+`runId`, `host`, `port`, `pairingBase64` (or legacy `pairingFile`), optional
+`ddiCache`, and `allowDDIMount` (default false). `runId` must be a UUID.
+
+Synchronous code 0 means accepted, not performed. Codes 1–8 mean invalid input,
+busy, stale handle/ID, not ready, stopping, faulted, size limit, and internal
+failure. A rejected request has no callback and sends no action. One owner has
+one in-flight request; IDs must be nonzero and strictly increasing. Owner handles
+increase without wrapping into a reused generation. A stale stop/cancel cannot
+affect a newer owner/request.
+
+Callbacks run outside the global owner mutex, on the native worker thread.
+Strings and binary data are borrowed until callback return. Copy them before
+MainActor dispatch. Callback JSON is at most 8192 bytes, PNG at most 16 MiB, and
+app-list JSON bytes at most 1 MiB. Error callbacks have null/zero binary data.
+Callbacks may precede start's return, after `handle_out` has been populated. An
+accepted request gets one result before its owner's terminal callback, except
+when the process terminates.
+
+| Event kind | Meaning |
+| --- | --- |
+| 0 | Starting/progress stage; no actions ready |
+| 1 | Ready, with a boolean capabilities map |
+| 2 | Stopped, all owned local resources released and remote cleanup confirmed |
+| 3 | Failed, with cleanup confirmed and owner released |
+| 4 | Cleanup unconfirmed; local resources released, small owner remains poisoned until app restart |
+| 5 | Actual DDI stage/byte progress |
+
+Event JSON uses `code`, `stage`, `variant`, `completedBytes`, `totalBytes`,
+`capabilities`, `cleanupConfirmed`, and the checked-status booleans above. Codes
+are stable bounded identifiers; arbitrary device error text, pairing material,
+clipboard text, TSS payloads and screenshots are never diagnostic fields.
+
+Request status 0 is a successful read or transport dispatch, 1 is failure before
+dispatch, 2 cancellation before dispatch, and 3 uncertainty after dispatch.
+Result JSON uses `outcome` (`read`, `dispatched`, `notSent`, `uncertain`), `code`,
+`mayHaveActed`, `cleanupConfirmed`, `contentType`, `kind`, `width`, `height`,
+`interfaceOrientation`, `nativeFrameId`, `pid`, and `foregroundVerified` as
+applicable. Result `cleanupConfirmed` is about that request. Complete owner
+release is established only by terminal event 2/3.
+
+### Explicit preparation, frame binding and operations
+
+After a real native confirmation that includes establishing screen/control
+sharing, Swift privately requests `prepareInput`. This operation is not exposed
+as a model/MCP tool. Settings checks and DDI mount probes never request it.
+Preparation invalidates any earlier native frame. Swift then obtains a screenshot,
+collects the per-action native approval, and recaptures/compares the screen under
+the same prepared owner before dispatching the approved input.
+
+```json
+{"op":"prepareInput"}
+{"op":"screenshot"}
+{"op":"apps"}
+{"op":"launch","bundleId":"com.example.app"}
+{"op":"tap","x":0.5,"y":0.5,"durationMs":50,"nativeFrameId":"UUID"}
+{"op":"swipe","fromX":0.5,"fromY":0.8,"toX":0.5,"toY":0.2,"durationMs":300,"nativeFrameId":"UUID"}
+{"op":"key","key":"home","nativeFrameId":"UUID"}
+{"op":"ascii","text":"Hello","replace":false,"nativeFrameId":"UUID"}
+{"op":"paste","replace":false,"nativeFrameId":"UUID"}
+```
+
+Inputs require the latest owner-local frame UUID, at most 30 seconds old. They
+consume the frame, require already active owned media, and recheck SpringBoard
+orientation immediately before sending. They never start media implicitly.
+Frame age uses Apple `mach_continuous_time` (available since iOS 10) with checked
+integer timebase conversion, or Linux `CLOCK_BOOTTIME` for portable checks. Both
+include system sleep. Missing/invalid samples, overflow and backwards samples
+reject the frame; there is no wall-clock or awake-only fallback. Rust 1.99.1's
+Apple `Instant` uses `CLOCK_UPTIME_RAW`, so it is deliberately not used for this
+age check. Other request/transport scheduling retains its existing clocks.
+The source contracts are the fixed
+[Apple Mach time header](https://github.com/apple-oss-distributions/xnu/blob/f6217f891ac0bb64f3d375211650a4c1ff8ca1ea/osfmk/mach/mach_time.h)
+and [Rust 1.99.1 clock implementation](https://github.com/rust-lang/rust/blob/58cf8f9c35b355199727627d07ae34a4e2846d67/library/std/src/sys/time/unix.rs).
+The injected sleep-spanning boundary test is not an actual iPhone suspend test.
+Cancellation invalidates the current frame. A new capture is required after each
+input, launch or preparation. The native gate supplements the app's approval and
+screen matching; the native C ABI by itself is not an end-user permission UI.
+
+Screenshot orientation is queried before and after capture using the read-only
+SpringBoard service. A change or unknown value fails the capture. Raw orientation
+values are 1 portrait, 2 upside down, 3 landscape right and 4 landscape left.
+Dimensions come from the actual PNG IHDR, whose signature, length and CRC are
+checked, and are bounded to 8192 per axis / 33,554,432 pixels. Swift must decode
+the complete PNG and compare its dimensions before use; the native IHDR check is
+not a full PNG decoder. Service reply allocations occur in the upstream client
+before these application output limits; no stronger network-allocation bound is
+claimed here.
+
+Tap/swipe coordinates are finite normalized values in [0,1], translated to the
+fixed upstream mainTouchscreen range 0..65535. Tap duration defaults to 50 ms and
+is bounded to 50..1500 ms for long press; swipe duration is 50..2000 ms.
+Tap/swipe require orientation 1 (portrait); other orientations fail before any
+touch report with `ERR_PHONE_TOUCH_ORIENTATION_UNVERIFIED` and capabilities
+include `touchPortraitOnly: true`. The pinned screenshot source returns PNG
+bytes without a PNG-to-HID rotation contract. This conservative gate does not
+prove even portrait mapping: corner/center grid tests on a device remain a
+release gate. Screenshot, ASCII and keyboard requests are not disabled by this
+touch-specific check. Keys are
+limited to home, enter, backspace, tab, escape, arrowUp/Down/Left/Right. ASCII is
+printable US-layout ASCII plus LF/TAB, 1..1024 bytes, validated in full before the
+first report. Other scripts go through the app's explicit clipboard/paste flow.
+Native paste only emits Command+V and never receives the clipboard content.
+ASCII/paste accept an optional `replace` boolean (default false); true prepends
+Command+A inside that same approved/frame-bound request. The first Command+A
+already sets mayHaveActed, so a failure after selection is uncertain, never an
+automatic retry. Native does not append an implicit Enter/submit; any later
+submit needs a fresh screenshot and the app's separate verification/approval.
+
+The app list binary body is `{"apps":[{"name":"Display name","id":"com.example.app"}]}`
+with `kind=apps`, `contentType=application/json`. No executable paths or audit
+payloads are returned. Launch sends only the bundle ID, no arbitrary argv/env,
+kill-existing, suspension or stdio options. It returns the real nonzero PID and
+`foregroundVerified=false`. AppService list/launch is not proof of the current
+foreground app. Screenshots likewise say `foregroundVerified=false`; the app
+must not infer an OS-verified bundle identity from them.
+
+HID sends are one-way. `dispatched` means that the requested report sequence was
+written and its release/keyboard-removal handling completed; it does **not** prove
+that an app consumed a click, text or paste. No fixed delay is an application ACK.
+After an action may have been sent, error/cancellation returns uncertainty and
+retires the owner. It cannot authorize automatic retry or fallback through
+XCTest. If remote cleanup cannot be confirmed, the singleton remains poisoned.
+
+## Media ownership and cleanup
+
+Fixed idevice source requires an active display-service media session for HID
+input. Explicit preparation negotiates audio then video using one fresh session
+UUID and two UDP sockets on the existing RSD adapter. RTP payloads are drained
+and discarded. Bounded header counters and RTCP receiver reports maintain the
+session; media payloads are not decoded, logged, stored or delivered to the model.
+Registering a virtual keyboard also sets mayHaveActed before its create RPC.
+The mainKeyboard uses the pinned create/identity-confirm/reset/remove/confirm-
+absence API; arbitrary service IDs and arbitrary HID reports are not exported.
+
+An initial status query rejects an existing session. After start and before
+cleanup, native checks the UUID, media kind, expected receiver endpoint, peer
+endpoint, and returned numeric identifier. Stop sends **`stopAll=false` with
+only the verified current owner's UInt32 identifiers**, with unsigned XPC wire
+encoding. It validates `stoppedStreams`, the stop result's server state, and a
+fresh independent status query. Unknown schemas, missing identities, duplicate
+identifiers or foreign reuse are not treated as idle/safe cleanup.
+
+The fixed Apple DDI's `SessionWrapper.identifier` is the returned
+`connection.streamConfig.RemoteSSRC`; its internal AVC `streamToken` is separate.
+This mapping was independently established from actual ARM64 getter/store/stop-
+matching instructions, supported by Swift field/CodingKeys reflection. Both
+fixed DDI variants contain the same relevant binaries:
+
+| Binary | SHA256 |
+| --- | --- |
+| dtremotedisplayd | `5ac94652b4f7cfc076dd5867c6d957e988e526aa78576f6deb7f2ab7deae85ca` |
+| CoreDeviceUtilities | `78d978f2d69fa0239550d87947c26b3bccaf4b11b52093910b8da981f14fc5af` |
+| CoreDeviceMediaStreamSupport | `9025f543066da266df512beee72792c85d6d20e2e4fbeb7005d17c1b64487c7f` |
+
+DeviceServerInfo has running/runDurationSeconds/sessions; each SessionInfo has
+optional connection and a status object. Portable fixtures are constructed from
+this static schema, not captured device traffic. A dropped media-start future
+may still commit remotely; an empty status snapshot alone does not clear that
+uncertainty. Local socket closure and ConnectionInfo.timeout are not assumed to
+prove remote cleanup.
+
+The daemon's start path can remove a duplicate existing stream by type,
+direction and source. Therefore `mayHaveActed` is set **before the first media
+start**, even before any HID report. A preflight status query is not an atomic
+cross-controller lock; this implementation does not prove global SSRC uniqueness
+or eliminate a different controller's concurrent status/start/stop race. It does
+not invoke a global stop to hide those limitations. Screen sharing may also
+conflict with camera/microphone use in foreground apps; this code does not bypass
+platform restrictions.
+
+## DDI cache and foreground mount authorization
+
+`allowDDIMount` defaults to false. Having cached bytes is never mounting authority.
+Only the app's foreground mount confirmation supplies true. Existing required
+developer services cause no mount. An already present image with missing services
+is not automatically unmounted, replaced, or nonce-rolled.
+
+The only catalog is
+`ddi-e2aaeac89ca8fa56c2fa1f144d182994e07a525b-v1`, from the pinned
+[DeveloperDiskImage distribution](https://github.com/doronz88/DeveloperDiskImage/tree/e2aaeac89ca8fa56c2fa1f144d182994e07a525b).
+This is a third-party mirror of Apple's DDI assets, not an Apple download host.
+The app downloader verifies the fixed hashes and publishes its cache atomically;
+native independently checks the same eight built-in SHA256 pins. No arbitrary
+URL, caller-selected hash or manifest-directed path is accepted.
+
+```text
+catalog/
+  personalized/BuildManifest.plist
+  personalized/Image.dmg
+  personalized/Image.dmg.trustcache
+  cryptex/BuildManifest.plist
+  cryptex/Image.dmg
+  cryptex/Image.dmg.trustcache
+  cryptex/Image.dmg.cryptex_info
+  cryptex/Image.dmg.root_hash
+```
+
+`ddiCache` has `catalogId`, absolute `directory`, and optional `personalized`
+(manifest/image/trustCache hashes) and `cryptex`
+(manifest/image/trustCache/info/rootHash hashes) objects. The missing required
+variant is returned as `ERR_PHONE_DDI_CACHE_REQUIRED` plus `variant`, so the app
+can request the bounded download. Files are opened relative to anchored directory
+FDs; bundle/file symlinks, nonregular files, changed hashes and wrong lengths are
+rejected. Nonblocking open prevents a FIFO fixture from hanging before its file
+kind can be rejected. Each of the eight pins includes an exact byte length,
+checked on the opened FD before allocation and again after the bounded read.
+Personalized manifest/image/trustcache are 801,505 / 15,733,248 / 1,895 bytes;
+Cryptex manifest/image/trustcache/info/rootHash are
+804,946 / 15,895,040 / 1,895 / 430 / 229 bytes. A larger invalid cache file is
+rejected from metadata before reading its payload.
+
+Selection follows the conservative policy in fixed
+[pymobiledevice3 776d601](https://github.com/doronz88/pymobiledevice3/blob/776d601cec83b894c3ad0eeee8ab4db375a46e4a/pymobiledevice3/services/mobile_image_mounter.py):
+iOS major >=27 plus explicit CryptexInstall capability selects Cryptex1;
+otherwise Personalized requires a matching chip/board identity. Capability alone
+is not used to claim support on older versions. Personalized uses the pinned
+ImageMounter/TSS operations and performs the documented Lockdown query after
+opening/reopening its service. Cryptex uses the pinned Cryptex1 asset/request
+APIs. Both stay on the same adapter and refresh RSD before reporting success.
+
+Progress stages are verifyingAssets, personalizing, uploading, mounting and
+refreshingServices. Personalized upload uses actual byte progress; Cryptex's
+upstream install helper has no byte callback, so its progress is indeterminate.
+Cancellation or failure after upload/install submission preserves unconfirmed
+cleanup poison. Portable validation of the real catalog only establishes local
+file hashes/parsing; Apple TSS and a device mount still require real execution.
+
+## Preserved XCTest path
+
+The legacy `dsh_phone_xctest_start/stop` symbols, callback kinds and exact-PID
+cleanup semantics remain. Its config additionally needs runnerBundleId,
+targetBundleId and a 2048-bit RSA PKCS#1 DER publicKeyBase64. The matching signed
+helper must already be installed. No custom runner environment, RPC token or
+private RSA key is accepted.
+
+The only injected runner environment fields are nonsecret DSH_PHONE_RUN_ID and
+DSH_PHONE_PUBLIC_KEY. The helper creates its credential in memory, seals its
+endpoint with RSA-OAEP-SHA256 and returns an encrypted XCTest activity. The
+listener accepts readiness only from the selected serving test; the app must
+still decrypt and verify the fresh run ID. Existing iOS 26 none/none activity
+handling, UID resolution and the absence of a legacy Marco/Polo requirement are
+retained.
+
+Submitted XCTest launch waits for a valid nonzero 32-bit PID or faults. Cleanup
+only kills/queries that exact PID, never a newly discovered process by bundle ID.
+Missing/malformed process-status replies do not prove absence. Faulted/unconfirmed
+sessions retain the shared singleton so another route cannot overlap them.
+
+## Dependency provenance and known transport findings
+
+The sole protocol-library source is
 [jkcoxson/idevice](https://github.com/jkcoxson/idevice), MIT, fixed at
-`3854a5df4a5a6dee71ffce4d8befc2ea356a8065` (0.1.68). The full source archive SHA256
-is `bb3c171161476dac94c190a4867bf4a670663643d5dfa5b8b38086948fbc3042`.
-[pins](source-pins.json) and [Cargo.lock](Cargo.lock) are checked in; generated
-upstream source and build outputs are ignored. No external dsh-Go PR was merged
-or copied.
+`3854a5df4a5a6dee71ffce4d8befc2ea356a8065` (0.1.68), archive SHA256
+`bb3c171161476dac94c190a4867bf4a670663643d5dfa5b8b38086948fbc3042`.
+[source-pins.json](source-pins.json) and [Cargo.lock](Cargo.lock) are checked in.
+Generated upstream source and build outputs are ignored. No external dsh-Go PR
+was merged or copied.
 
-The documented [local source patch](idevice-rsd-xctest.patch):
+The existing [upstream source patch](idevice-rsd-xctest.patch) retains its RSD
+XCTest entry point, strict PID-exit confirmation, encrypted readiness support,
+UID fixes and removal of a pairing-record debug statement. The crate additionally
+disables all upstream tracing in development and release: other upstream debug
+paths can contain pairing or TSS data. Explicit bounded ABI events remain.
 
-1. Adds a provider-free RSD XCTest entry point using the upstream session/launch/
-   dispatch helpers, so an already authenticated RPPairing tunnel can be used.
-2. Confirms shutdown via strict `isRunningPid` boolean responses; a malformed or
-   missing reply is not treated as proof of process exit.
-3. Removes an upstream debug statement that printed the full remote pairing plist.
-4. Resolves UID fields of custom XCTest archive objects, including the test
-   identifier components and encrypted readiness activity title.
-5. Uses a correlated SIGKILL request and process-status reply before releasing
-   the owner. A sent kill request alone is never proof that the PID exited.
+Two pre-existing issues in the fixed shared transport were observed and recorded
+separately; this native change does not silently claim to fix them:
 
-The RPPairing transport does not require the legacy lockdown Marco/Polo
-heartbeat. On iOS 26, activity identifiers can be `none/none`; those activities
-are accepted only after the selected test starts on this paired session. The
-app must still decrypt the fresh per-run RSA payload and verify its run ID.
+- `remote_pairing/tls_psk.rs` accepts a decrypted server Finished whose verify_data
+  mismatches the computed value: it logs and continues. Record MAC validation
+  exists, but is not a substitute for transcript-bound Finished verification.
+- `remote_pairing/tunnel.rs` checks the CDTunnel header but slices the declared
+  body length without checking that the complete body is present. A truncated
+  authenticated body can panic. Native catch_unwind/poison contains some fallout;
+  it does not make this a correct parser rejection.
 
-The iOS Settings → Phone control page exposes the master switch and the
-existing return-after-completion preference. The authenticated bridge supplies
-the exact conversation owner to the turn-end controller. At completion, only
-the existing authorized endpoint can bring DSH Go forward; no runner is started
-for that return. The owner then stops its runner and confirms process exit.
-
-Some iOS versions deny app enumeration inside the signed helper. After installing
-it, `python3 tooling/ios/install-phone-app-catalog.py --device <device> --runner-bundle-id
-<helper-bundle> --output <private-json-path>` installs a local name-to-bundle
-inventory. Run it again after adding apps that the helper cannot find. Bundle IDs
-and the Settings name do not require that inventory. Unknown names fail before
-activation, rather than being passed to XCTest as invalid bundle IDs.
-
-The preparer rejects archive traversal, unknown links, wrong checksums and changed
-prepared source. The one pinned README symlink is materialized as a regular file;
-no archive-controlled filesystem links are created. The upstream MIT license and
-attribution remain in the prepared source and are copied into build output.
+Both routes use those functions. A separately reviewed hardening change needs
+negative crypto/frame tests and the existing Apple/device regression gate.
+Neither static analysis nor portable tests establish the complete production
+safety/compatibility of this new phone path.

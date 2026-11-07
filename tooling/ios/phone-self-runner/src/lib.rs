@@ -1,8 +1,13 @@
-//! Optional on-device XCTest owner. No network work runs until explicitly started.
+//! Optional on-device phone owner. New CoreDevice paths are not device-verified.
+//! No network work runs until explicitly started.
 //! The pinned idevice library owns RPPairing/DTX; this crate owns one native lifetime.
+mod pairing;
+mod ddi;
+mod core_device;
+mod media;
+
 use std::ffi::{CStr, CString, c_char};
 use std::net::{IpAddr, SocketAddr};
-use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
@@ -12,7 +17,7 @@ use idevice::RsdService;
 use idevice::installation_proxy::InstallationProxyClient;
 use idevice::lockdown::LockdownClient;
 use idevice::remote_pairing::{
-    RemotePairingClient, RpPairingFile, RpPairingSocket, connect_tls_psk_tunnel_native,
+    RemotePairingClient, RpPairingSocket, connect_tls_psk_tunnel_native,
 };
 use idevice::rsd::RsdHandshake;
 use idevice::services::dvt::xctest::{TestConfig, listener::XCUITestListener, run_rsd};
@@ -25,20 +30,44 @@ use tokio::sync::watch;
 const READY_PREFIX: &str = "DSH_PHONE_READY_V1:";
 const DVT_SERVICE: &str = "com.apple.instruments.dtservicehub";
 const TEST_SERVICE: &str = "com.apple.dt.testmanagerd.remote";
-const MAX_CONFIG: usize = 16 * 1024;
+const MAX_CONFIG: usize = 96 * 1024;
+static CORE_BUILD_IDENTITY: &[u8] = b"dsh-phone-core:1;idevice=3854a5df4a5a6dee71ffce4d8befc2ea356a8065\0";
+
+/// Permanent read-only identity for the linked component. No owner, key or
+/// network operation is touched; callers must neither mutate nor free it.
+#[unsafe(no_mangle)]
+pub extern "C" fn dsh_phone_core_build_identity() -> *const c_char {
+    CORE_BUILD_IDENTITY.as_ptr().cast()
+}
 
 type Callback = extern "C" fn(*const c_char, i32, *const c_char);
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct Config {
+struct ConfigWire {
     run_id: String,
-    pairing_file: String,
+    pairing_file: Option<String>,
+    pairing_base64: Option<String>,
     host: String,
     port: u16,
     runner_bundle_id: String,
     target_bundle_id: String,
     public_key_base64: String,
+    ddi_cache: Option<ddi::DdiCache>,
+    #[serde(rename = "allowDDIMount", default)]
+    allow_ddi_mount: bool,
+}
+
+struct Config {
+    run_id: String,
+    pairing: pairing::PairingInput,
+    host: String,
+    port: u16,
+    runner_bundle_id: String,
+    target_bundle_id: String,
+    public_key_base64: String,
+    ddi_cache: Option<ddi::DdiCache>,
+    allow_ddi_mount: bool,
 }
 
 impl Config {
@@ -46,7 +75,7 @@ impl Config {
         if bytes.len() > MAX_CONFIG {
             return None;
         }
-        let value: Self = serde_json::from_slice(bytes).ok()?;
+        let value: ConfigWire = serde_json::from_slice(bytes).ok()?;
         let host: IpAddr = value.host.parse().ok()?;
         let self_route = host.is_loopback() || value.host == "10.7.0.1";
         let bundle = |value: &str| {
@@ -63,16 +92,24 @@ impl Config {
             || value.run_id.contains('\0')
             || !self_route
             || value.port == 0
-            || !Path::new(&value.pairing_file).is_absolute()
-            || value.pairing_file.len() > 4096
-            || value.pairing_file.contains('\0')
             || !bundle(&value.runner_bundle_id)
             || !bundle(&value.target_bundle_id)
             || key.n().bits() != 2048
+            || value.ddi_cache.as_ref().is_some_and(|cache| !cache.valid())
         {
             return None;
         }
-        Some(value)
+        Some(Self {
+            run_id: value.run_id,
+            pairing: pairing::PairingInput::parse(value.pairing_base64, value.pairing_file)?,
+            host: value.host,
+            port: value.port,
+            runner_bundle_id: value.runner_bundle_id,
+            target_bundle_id: value.target_bundle_id,
+            public_key_base64: value.public_key_base64,
+            ddi_cache: value.ddi_cache,
+            allow_ddi_mount: value.allow_ddi_mount,
+        })
     }
 }
 
@@ -106,11 +143,25 @@ struct Owner {
     handle: u64,
     stop: watch::Sender<bool>,
     cancelled: Arc<AtomicBool>,
+    core: Option<Arc<core_device::Control>>,
 }
 static OWNER: OnceLock<Mutex<Option<Owner>>> = OnceLock::new();
 static NEXT_HANDLE: AtomicU64 = AtomicU64::new(1);
+#[cfg(test)]
+static TEST_LOCK: Mutex<()> = Mutex::new(());
 fn owner() -> &'static Mutex<Option<Owner>> {
     OWNER.get_or_init(|| Mutex::new(None))
+}
+
+fn next_handle() -> Option<u64> {
+    // Never wrap into an earlier generation: a stale handle must stay stale.
+    let mut current = NEXT_HANDLE.load(Ordering::Relaxed);
+    loop {
+        let next = current.checked_add(1)?;
+        match NEXT_HANDLE.compare_exchange_weak(current, next, Ordering::Relaxed, Ordering::Relaxed) {
+            Ok(_) => return Some(current), Err(actual) => current = actual,
+        }
+    }
 }
 
 /// Copy the configuration and start one native lifetime. Invalid pointers are a
@@ -135,16 +186,16 @@ pub unsafe extern "C" fn dsh_phone_xctest_start(
     if slot.is_some() {
         return 0;
     }
-    let handle = NEXT_HANDLE.fetch_add(1, Ordering::Relaxed);
-    if handle == 0 {
+    let Some(handle) = next_handle() else {
         return 0;
-    }
+    };
     let (stop, receiver) = watch::channel(false);
     let cancelled = Arc::new(AtomicBool::new(false));
     *slot = Some(Owner {
         handle,
         stop,
         cancelled: cancelled.clone(),
+        core: None,
     });
     drop(slot);
     let spawned = std::thread::Builder::new()
@@ -225,6 +276,7 @@ fn session_failure(error: idevice::IdeviceError) -> Failure {
 pub extern "C" fn dsh_phone_xctest_stop(handle: u64) {
     if let Ok(slot) = owner().lock() {
         if let Some(entry) = slot.as_ref().filter(|entry| entry.handle == handle) {
+            if let Some(core) = &entry.core { core.stop_accepting(); }
             entry.cancelled.store(true, Ordering::Release);
             let _ = entry.stop.send(true);
         }
@@ -234,27 +286,35 @@ pub extern "C" fn dsh_phone_xctest_stop(handle: u64) {
 struct Tunnel {
     adapter: AdapterHandle,
     handshake: RsdHandshake,
+    rsd_port: u16,
     _pairing: RemotePairingClient<RpPairingSocket<TcpStream>>,
 }
 
 async fn tunnel(config: &Config) -> Result<Tunnel, Failure> {
-    let metadata = tokio::fs::metadata(&config.pairing_file)
-        .await
-        .map_err(|_| PAIRING)?;
-    if !metadata.is_file() || metadata.len() > 64 * 1024 {
-        return Err(PAIRING);
-    }
-    let mut pairing = RpPairingFile::read_from_file(&config.pairing_file)
-        .await
-        .map_err(|_| PAIRING)?;
-    let address = SocketAddr::new(config.host.parse().map_err(|_| TUNNEL)?, config.port);
+    connect_tunnel(&config.pairing, &config.host, config.port).await
+}
+
+async fn connect_tunnel(
+    input: &pairing::PairingInput, host: &str, port: u16,
+) -> Result<Tunnel, Failure> {
+    connect_tunnel_reporting(input, host, port, |_| {}).await
+}
+
+async fn connect_tunnel_reporting(
+    input: &pairing::PairingInput, host: &str, port: u16,
+    report: impl Fn(&'static str),
+) -> Result<Tunnel, Failure> {
+    let mut pairing = input.load().await?;
+    let address = SocketAddr::new(host.parse().map_err(|_| TUNNEL)?, port);
     let stream = TcpStream::connect(address).await.map_err(|_| TUNNEL)?;
+    report("vpnReachable");
     let mut rpc = RemotePairingClient::new(RpPairingSocket::new(stream), "dsh-go-self-runner");
     // This is a use-existing-pairing path, never a background PIN/pairing prompt.
     rpc.attempt_pair_verify().await.map_err(|_| PAIRING)?;
     rpc.validate_pairing(&mut pairing)
         .await
         .map_err(|_| PAIRING)?;
+    report("pairingVerified");
     let port = rpc.create_tcp_listener().await.map_err(|_| TUNNEL)?;
     let stream = TcpStream::connect(SocketAddr::new(address.ip(), port))
         .await
@@ -274,8 +334,17 @@ async fn tunnel(config: &Config) -> Result<Tunnel, Failure> {
     Ok(Tunnel {
         adapter,
         handshake,
+        rsd_port,
         _pairing: rpc,
     })
+}
+
+impl Tunnel {
+    async fn refresh_services(&mut self) -> Result<(), Failure> {
+        let stream = self.adapter.connect(self.rsd_port).await.map_err(|_| TUNNEL)?;
+        self.handshake = RsdHandshake::new(stream).await.map_err(|_| TUNNEL)?;
+        Ok(())
+    }
 }
 
 struct ReadyListener<'a> {
@@ -386,10 +455,20 @@ async fn run_session(
         _ = cancelled(&mut receiver) => return Ok(()),
         result = tokio::time::timeout(Duration::from_secs(90), tunnel(config)) => result.map_err(|_| TUNNEL)??,
     };
-    if !tunnel.handshake.services.contains_key(TEST_SERVICE)
-        || !tunnel.handshake.services.contains_key(DVT_SERVICE)
-    {
-        return Err(DDI);
+    let ddi_submitted = AtomicBool::new(false);
+    let preparation = ddi::ensure(&mut tunnel, config.ddi_cache.as_ref(),
+        config.allow_ddi_mount, &[TEST_SERVICE, DVT_SERVICE],
+        |progress| emit(callback, &config.run_id, 0, &format!("DDI_{}", progress.stage)),
+        &ddi_submitted);
+    let prepared_image = tokio::select! {
+        biased;
+        _ = cancelled(&mut receiver) => {
+            return if ddi_submitted.load(Ordering::Acquire) { Err(STOP_UNCONFIRMED) } else { Ok(()) };
+        },
+        result = tokio::time::timeout(Duration::from_secs(300), preparation) => result.unwrap_or(Err(DDI)),
+    };
+    if let Err(error) = prepared_image {
+        return Err(if ddi_submitted.load(Ordering::Acquire) { STOP_UNCONFIRMED } else { error });
     }
     let prepared = async {
         let mut lockdown = LockdownClient::connect_rsd(&mut tunnel.adapter, &mut tunnel.handshake)
@@ -456,7 +535,6 @@ mod tests {
     use rsa::pkcs1::EncodeRsaPublicKey;
     use std::sync::{Condvar, Mutex};
 
-    static TEST_LOCK: Mutex<()> = Mutex::new(());
     static EVENTS: (Mutex<Vec<(String, i32, String)>>, Condvar) =
         (Mutex::new(Vec::new()), Condvar::new());
     extern "C" fn record(run_id: *const c_char, kind: i32, payload: *const c_char) {
@@ -631,6 +709,7 @@ mod tests {
             handle: 123,
             stop: sender,
             cancelled: cancelled.clone(),
+            core: None,
         });
         let input = CString::new(config().to_string()).unwrap();
         assert_eq!(
@@ -653,6 +732,7 @@ mod tests {
             handle: 456,
             stop,
             cancelled: Arc::new(AtomicBool::new(true)),
+            core: None,
         });
         finish_owner(
             456,

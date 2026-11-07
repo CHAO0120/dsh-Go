@@ -347,12 +347,16 @@ version = "0.1.0"
 dependencies = [
  "base64 0.22.1",
  "idevice",
+ "libc",
  "plist",
  "rsa",
  "serde",
  "serde_json",
+ "sha2",
  "tokio",
+ "tracing",
  "uuid",
+ "zeroize",
 ]
 
 [[package]]
@@ -599,6 +603,7 @@ dependencies = [
  "chacha20poly1305",
  "chrono",
  "ed25519-dalek",
+ "flate2",
  "futures",
  "hkdf",
  "hmac",
@@ -622,6 +627,8 @@ dependencies = [
  "tokio-rustls",
  "tracing",
  "uuid",
+ "web-time",
+ "webpki-roots",
  "x25519-dalek",
 ]
 
@@ -1623,6 +1630,25 @@ dependencies = [
  "parking_lot",
  "pin-project-lite",
  "wasm-bindgen",
+]
+
+[[package]]
+name = "web-time"
+version = "1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5a6580f308b1fad9207618087a65c04e7a10bc77e02c8e84e9b00dd4b12fa0bb"
+dependencies = [
+ "js-sys",
+ "wasm-bindgen",
+]
+
+[[package]]
+name = "webpki-roots"
+version = "1.0.11"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f5f280bbb2b287bc8e7de7e3852945a0ff50d1bbcb5ed42b6c7a568c546df171"
+dependencies = [
+ "rustls-pki-types",
 ]
 
 [[package]]
