@@ -200,7 +200,7 @@ final class IOSPhoneOperationTests: XCTestCase {
 
   func testUnsupportedControlScalarsRefuseTheWholeInput() throws {
     for scalar in [0x00, 0x01, 0x08, 0x09, 0x0a, 0x0b, 0x0d, 0x1b, 0x1f, 0x7f, 0x80, 0x85, 0x9f,
-                   0x061c, 0x200e, 0x200f, 0x202a, 0x202b, 0x202c, 0x202d, 0x202e,
+                   0x061c, 0x200e, 0x200f, 0x2028, 0x2029, 0x202a, 0x202b, 0x202c, 0x202d, 0x202e,
                    0x2066, 0x2067, 0x2068, 0x2069] {
       let character = try XCTUnwrap(UnicodeScalar(scalar))
       let input = "safe prefix" + String(character) + "safe suffix"
@@ -216,6 +216,75 @@ final class IOSPhoneOperationTests: XCTestCase {
         XCTAssertTrue((error as? IOSPhoneOperationError)?.message.contains("handoff") == true)
       }
     }
+  }
+
+  func testEveryConsentIdentifierRejectsControlsBeforeAPlanExists() throws {
+    let fields: [(String, [String: Any], String)] = [
+      ("apps", [:], "query"), ("open", [:], "app"),
+      ("tap", ["id": 1], "screen"), ("tap_xy", ["x": 0, "y": 0], "observation"),
+      ("type", ["id": 1, "text": "synthetic"], "screen"),
+      ("scroll", ["direction": "down"], "screen"),
+      ("collect", ["list": 1], "screen"),
+      ("collect", ["screen": "s1", "list": 1], "until"),
+      ("key", ["key": "home"], "screen"),
+    ]
+    let controls = Array(0x00...0x1f) + Array(0x7f...0x9f)
+      + [0x061c, 0x200e, 0x200f, 0x2028, 0x2029]
+      + Array(0x202a...0x202e) + Array(0x2066...0x2069)
+    for (method, base, field) in fields {
+      for codePoint in controls {
+        var input = base
+        input[field] = "safe" + String(try XCTUnwrap(UnicodeScalar(codePoint))) + "suffix"
+        XCTAssertThrowsError(try plan(method, input), "accepted \(method).\(field), U+\(String(codePoint, radix: 16))")
+      }
+    }
+  }
+
+  func testConsentFieldsAreQuotedAndEscapedWithoutChangingExecutionArguments() throws {
+    let raw = "Synthetic \"name\"\\suffix"
+    let quoted = "\"Synthetic \\\"name\\\"\\\\suffix\""
+    let open = try plan("open", ["app": raw])
+    XCTAssertTrue(open.consentDescription(targetLabel: nil).hasPrefix("打开应用：" + quoted + "。"))
+    XCTAssertEqual(open.parameters["app"] as? String, raw)
+    let apps = try plan("apps", ["query": raw])
+    XCTAssertTrue(apps.consentDescription(targetLabel: nil).hasSuffix("筛选：" + quoted))
+    XCTAssertEqual(apps.parameters["query"] as? String, raw)
+    let tap = try plan("tap", ["screen": raw, "id": 1])
+    XCTAssertTrue(tap.consentDescription(targetLabel: nil).contains("屏幕 " + quoted + " 的编号"))
+    XCTAssertEqual(tap.screen, raw)
+    let xy = try plan("tap_xy", ["observation": raw, "x": 1, "y": 2])
+    XCTAssertTrue(xy.consentDescription(targetLabel: nil).contains("截图 " + quoted + " 中的像素"))
+    let input = try plan("type", ["screen": raw, "id": 1, "text": "full approved text"])
+    XCTAssertTrue(input.consentDescription(targetLabel: nil).contains("屏幕 " + quoted + " 的编号"))
+  }
+
+  func testDisplayIsBoundedButApprovedTextAndIdentifiersAreNeverTruncated() throws {
+    let app = String(repeating: "a", count: 256)
+    let open = try plan("open", ["app": app])
+    XCTAssertTrue(open.consentDescription(targetLabel: nil).hasPrefix("打开应用：\"" + String(repeating: "a", count: 80) + "…\"。"))
+    XCTAssertFalse(open.consentDescription(targetLabel: nil).contains(String(repeating: "a", count: 81)))
+    XCTAssertEqual(open.parameters["app"] as? String, app)
+    let exact = try plan("apps", ["query": String(repeating: "中", count: 80)])
+    XCTAssertTrue(exact.consentDescription(targetLabel: nil).hasSuffix("\"" + String(repeating: "中", count: 80) + "\""))
+    let combined = "A" + String(repeating: "\u{0301}", count: 90)
+    let query = try plan("apps", ["query": combined])
+    XCTAssertTrue(query.consentDescription(targetLabel: nil).hasSuffix("\"A" + String(repeating: "\u{0301}", count: 79) + "…\""))
+    XCTAssertEqual(query.parameters["query"] as? String, combined)
+    let text = String(repeating: "中", count: 1000)
+    let input = try type(text)
+    XCTAssertTrue(input.consentDescription(targetLabel: nil).contains(text))
+    XCTAssertEqual(input.text, text)
+  }
+
+  func testOCRTargetLabelsCannotAddLinesOrDirectionControlsToConsent() throws {
+    let value = try plan("tap", ["screen": "s1", "id": 1])
+    let label = "first\nsecond\t\u{202e}\u{2028}\u{2029}\"\\"
+    let description = value.consentDescription(targetLabel: label)
+    XCTAssertTrue(description.hasSuffix("上次观察中的目标：\"first\\u000Asecond\\u0009\\u202E\\u2028\\u2029\\\"\\\\\""))
+    XCTAssertEqual(description.filter { $0 == "\n" }.count, 1)
+    XCTAssertFalse(description.contains("\u{202e}"))
+    XCTAssertFalse(description.contains("\u{2028}"))
+    XCTAssertFalse(description.contains("\u{2029}"))
   }
 
   func testRawParameterJSONHasItsOwnLimitBeforeAnyPlanCanBeUsed() throws {
