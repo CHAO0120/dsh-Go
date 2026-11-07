@@ -58,10 +58,19 @@ final class IOSPetOverlay: NSObject {
   }
 
   var statusSnapshot: [String: Any] {
-    let reason = lastError
-      ?? (policy.enabled && !UIApplication.shared.isProtectedDataAvailable ? "overlay_device_locked" : nil)
-      ?? (policy.enabled ? picture.audioPreparationBlocker : nil)
-      ?? (policy.enabled && state.packID == nil ? "overlay_pet_not_selected" : nil)
+    // An if chain rather than nested `??` with ternaries, which may not type-check in time.
+    let reason: String?
+    if let lastError {
+      reason = lastError
+    } else if policy.enabled && !UIApplication.shared.isProtectedDataAvailable {
+      reason = "overlay_device_locked"
+    } else if policy.enabled, let blocker = picture.audioPreparationBlocker {
+      reason = blocker
+    } else if policy.enabled && state.packID == nil {
+      reason = "overlay_pet_not_selected"
+    } else {
+      reason = nil
+    }
     return [
       "enabled": policy.enabled, "alwaysShow": policy.alwaysShow,
       // iOS has no Android overlay permission. Supported is not the same as
