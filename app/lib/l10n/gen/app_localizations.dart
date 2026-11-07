@@ -15734,6 +15734,18 @@ abstract class L10n {
   /// **'之后又复制过别的内容，所以没有恢复。'**
   String get iosPhoneLinkErrorClipboardChanged;
 
+  /// No description provided for @iosPhoneLinkFaulted.
+  ///
+  /// In zh, this message translates to:
+  /// **'上一次连接没能确认已经关掉'**
+  String get iosPhoneLinkFaulted;
+
+  /// No description provided for @iosPhoneLinkFaultedHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'为了不让两条连接同时操作手机，App 这次打开期间不会再连。在后台彻底关掉 App，再重新打开就好。'**
+  String get iosPhoneLinkFaultedHint;
+
   /// No description provided for @iosPhoneLinkErrorOther.
   ///
   /// In zh, this message translates to:

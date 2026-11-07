@@ -101,6 +101,8 @@
   "iosPhoneLinkErrorDdiUnsupported": "没有适合这台手机型号或系统版本的镜像。",
   "iosPhoneLinkErrorDdiMount": "挂载没成功。已经在用的其他镜像不会被替换。",
   "iosPhoneLinkErrorClipboardChanged": "之后又复制过别的内容，所以没有恢复。",
+  "iosPhoneLinkFaulted": "上一次连接没能确认已经关掉",
+  "iosPhoneLinkFaultedHint": "为了不让两条连接同时操作手机，App 这次打开期间不会再连。在后台彻底关掉 App，再重新打开就好。",
   "iosPhoneLinkErrorOther": "没有完成（{code}）。",
   "@iosPhoneLinkErrorOther": {
     "placeholders": {

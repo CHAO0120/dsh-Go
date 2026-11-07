@@ -71,6 +71,7 @@ PhoneLinkStatus _status({
   int total = 0,
   bool clipboard = false,
   String? lastCheckCode,
+  PhoneLinkPhase phase = PhoneLinkPhase.idle,
 }) => PhoneLinkStatus(
   buildAvailable: available,
   pairingPresent: paired,
@@ -83,6 +84,7 @@ PhoneLinkStatus _status({
   clipboardPending: clipboard,
   lastCheck: lastCheckCode == null ? null : DateTime(2026, 11, 8),
   lastCheckCode: lastCheckCode,
+  phase: phase,
 );
 
 void main() {
@@ -170,6 +172,16 @@ void main() {
 
     await tapAndSettle(tester, find.text('准备'));
     expect(link.calls.last, 'mountDDI');
+  }, variant: ios);
+
+  testWidgets('a connection that never confirmed it closed: check waits, and restarting is the way back', (tester) async {
+    link = _Link(_status(paired: true, enabled: true, lastCheckCode: 'OK', phase: PhoneLinkPhase.faulted));
+    await show(tester);
+    expect(find.text('上一次连接没能确认已经关掉'), findsOneWidget);
+    expect(find.textContaining('在后台彻底关掉 App'), findsOneWidget);
+    expect(find.text('连接正常'), findsNothing);
+    expect(tester.widget<FilledButton>(find.widgetWithText(FilledButton, '检查')).onPressed, isNull);
+    expect(tester.widget<Switch>(find.byType(Switch).first).onChanged, isNotNull, reason: 'turning it off still works');
   }, variant: ios);
 
   testWidgets('a step under way: buttons wait, the download shows, and it can be cancelled', (tester) async {

@@ -2607,6 +2607,8 @@
   "iosPhoneLinkErrorDdiUnsupported": "There's no image for this phone's model or iOS version.",
   "iosPhoneLinkErrorDdiMount": "Mounting didn't work. An image already in use isn't replaced.",
   "iosPhoneLinkErrorClipboardChanged": "Something else was copied since, so it wasn't restored.",
+  "iosPhoneLinkFaulted": "The last connection didn't confirm it closed",
+  "iosPhoneLinkFaultedHint": "So two connections never drive the phone at once, the app won't connect again until it restarts. Close it from the app switcher and open it again.",
   "iosPhoneLinkErrorOther": "Didn't finish ({code}).",
   "iosPetPipTitle": "Pet picture-in-picture",
   "iosPetPipHint": "While the phone is operated, your pet stays on screen in picture-in-picture so the app can keep working in the background. It's the system's picture-in-picture: no recording, no location.",

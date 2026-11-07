@@ -8996,6 +8996,13 @@ class L10nEn extends L10n {
   String get iosPhoneLinkErrorClipboardChanged => 'Something else was copied since, so it wasn\'t restored.';
 
   @override
+  String get iosPhoneLinkFaulted => 'The last connection didn\'t confirm it closed';
+
+  @override
+  String get iosPhoneLinkFaultedHint =>
+      'So two connections never drive the phone at once, the app won\'t connect again until it restarts. Close it from the app switcher and open it again.';
+
+  @override
   String iosPhoneLinkErrorOther(String code) {
     return 'Didn\'t finish ($code).';
   }

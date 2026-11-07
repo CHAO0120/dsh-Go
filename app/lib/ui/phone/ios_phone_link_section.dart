@@ -38,6 +38,7 @@ String phoneLinkFailureText(L10n l10n, String code) => switch (code) {
   'ERR_PHONE_DDI_PERSONALIZATION' ||
   'ERR_PHONE_FOREIGN_MEDIA_SESSION' => l10n.iosPhoneLinkErrorDdiMount,
   'ERR_PHONE_CLIPBOARD_CHANGED' => l10n.iosPhoneLinkErrorClipboardChanged,
+  'ERR_PHONE_STOP_UNCONFIRMED' => l10n.iosPhoneLinkFaultedHint,
   _ => l10n.iosPhoneLinkErrorOther(code.replaceFirst('ERR_PHONE_', '')),
 };
 
@@ -108,7 +109,9 @@ class PhoneLinkSection extends ConsumerWidget {
     }
 
     final paired = status.pairingPresent;
-    final checked = view.checked || (status.lastCheck != null && status.lastCheckCode == 'OK');
+    // The last connection never confirmed it closed: nothing connects again until the app restarts.
+    final faulted = status.phase == PhoneLinkPhase.faulted;
+    final checked = !faulted && (view.checked || (status.lastCheck != null && status.lastCheckCode == 'OK'));
     String failureFor(Set<PhoneLinkStep> steps) =>
         view.failure != null && steps.contains(view.failedStep) ? phoneLinkFailureText(l10n, view.failure!) : '';
     String pick(String failure, String fallback) => failure.isNotEmpty ? failure : fallback;
@@ -133,7 +136,7 @@ class PhoneLinkSection extends ConsumerWidget {
       failureFor({PhoneLinkStep.check, PhoneLinkStep.mount}),
       checked ? l10n.iosPhoneLinkChecked : l10n.iosPhoneLinkCheckHint,
     );
-    final canCheck = status.enabled && paired && !busy;
+    final canCheck = status.enabled && paired && !busy && !faulted;
     final mounted = status.lastCheckChecks['ddiMounted'] ?? false;
 
     return ListPageCard(
@@ -195,6 +198,13 @@ class PhoneLinkSection extends ConsumerWidget {
                     label: l10n.iosPhoneLinkDdiPrepare,
                     onPressed: canCheck ? () => run(PhoneLinkStep.mount) : null,
                   ),
+          ),
+        if (faulted)
+          ListPageRow(
+            icon: AppIcons.warning,
+            title: l10n.iosPhoneLinkFaulted,
+            subtitle: l10n.iosPhoneLinkFaultedHint,
+            subtitleMaxLines: 4,
           ),
         if (busy)
           ListPageRow(

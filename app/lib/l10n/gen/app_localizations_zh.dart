@@ -8525,6 +8525,12 @@ class L10nZh extends L10n {
   String get iosPhoneLinkErrorClipboardChanged => '之后又复制过别的内容，所以没有恢复。';
 
   @override
+  String get iosPhoneLinkFaulted => '上一次连接没能确认已经关掉';
+
+  @override
+  String get iosPhoneLinkFaultedHint => '为了不让两条连接同时操作手机，App 这次打开期间不会再连。在后台彻底关掉 App，再重新打开就好。';
+
+  @override
   String iosPhoneLinkErrorOther(String code) {
     return '没有完成（$code）。';
   }
