@@ -1,6 +1,7 @@
 package io.github.ccch1mneyyy.dsh_app.runtime
 
 import android.content.Context
+import android.os.SystemClock
 import android.os.Process as AndroidProcess
 import android.system.ErrnoException
 import android.system.Os
@@ -355,8 +356,8 @@ class DshProcess(
         startupSignal.countDown()
         val base = "http://127.0.0.1:$port"
         thread(name = "dsh-ready", isDaemon = true) {
-            val deadline = System.currentTimeMillis() + 90_000
-            while (System.currentTimeMillis() < deadline && !stopping && process?.isAlive == true) {
+            val deadline = SystemClock.elapsedRealtime() + 90_000
+            while (SystemClock.elapsedRealtime() < deadline && !stopping && process?.isAlive == true) {
                 if (canConnect(port)) {
                     listener.onReady(this, base, token)
                     return@thread
