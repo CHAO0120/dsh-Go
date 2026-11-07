@@ -138,7 +138,7 @@ final class IOSPhoneCoreActions {
       }
       guard let token else { throw IOSPhoneScreenError.stale }
       let checked = try await screen.revalidate(screen: token, binding: binding, fresh: fresh,
-        requiresTextInput: plan.method == .type, current: live)
+        requiresTextInput: plan.method == .type, target: point, current: live)
       latestToken = nil
       try requireBackground(live)
       switch plan.method {
@@ -218,7 +218,7 @@ final class IOSPhoneCoreActions {
       try requireBackground(current)
       let returned = try await capture(execution, current: current)
       let checked = try await screen.revalidate(screen: prepared.focus, binding: execution.binding,
-        fresh: returned, requiresTextInput: true, current: current)
+        fresh: returned, requiresTextInput: true, target: point, current: current)
       let evidence = try await screen.inspectInput(reply: returned, binding: execution.binding, current: current)
       guard !evidence.sensitive else { throw IOSPhoneScreenError.sensitive }
       guard evidence.keyboardHint else {

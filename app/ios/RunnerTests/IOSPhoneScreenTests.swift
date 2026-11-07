@@ -86,6 +86,31 @@ final class IOSPhoneScreenTests: XCTestCase {
     throw CancellationError()
   }
 
+  private func keyboardTexts() -> [IOSPhoneScreen.Text] {
+    [text("QWERTYUIOP", x: 0.05, y: 0.30, width: 0.90, height: 0.04),
+      text("ASDFGHJKL", x: 0.05, y: 0.22, width: 0.90, height: 0.04)]
+  }
+
+  /// Runs the production PNG decoder, canonical pixel comparison and geometry
+  /// rules. Only the OCR candidates and pixels are synthetic, not the matcher.
+  private func compare(_ before: Picture, _ after: Picture,
+                       oldTexts: [IOSPhoneScreen.Text], newTexts: [IOSPhoneScreen.Text],
+                       input: Bool = false, target: CGPoint? = nil) async throws -> IOSPhoneScreen.FreshFrame {
+    let script = ScriptedRecognition([oldTexts, newTexts])
+    let screen = IOSPhoneScreen(recognize: { script.next($0) })
+    let output = try await screen.observe(reply: reply(before), binding: binding,
+      image: false, detail: false, current: { true })
+    let fresh = try reply(after)
+    let result = try await screen.revalidate(screen: output.screen, binding: binding,
+      fresh: fresh, requiresTextInput: input, target: target, current: { true })
+    XCTAssertEqual(result.nativeFrameID, fresh.metadata.nativeFrameId)
+    await expect(.stale) {
+      _ = try await screen.revalidate(screen: output.screen, binding: self.binding,
+        fresh: self.reply(after), requiresTextInput: input, target: target, current: { true })
+    }
+    return result
+  }
+
   func testVisionCoordinatesConvertToTopLeftAndRejectInvalidRectangles() throws {
     let box = try XCTUnwrap(IOSPhoneScreen.topLeft(CGRect(x: 0.1, y: 0.7, width: 0.2, height: 0.1)))
     XCTAssertEqual(box.minX, 0.1, accuracy: 0.000001)
@@ -407,6 +432,202 @@ final class IOSPhoneScreenTests: XCTestCase {
     let noText = IOSPhoneScreen(recognize: { _ in [] })
     let absent = try await noText.inspectInput(reply: reply(picture()), binding: binding, current: { true })
     XCTAssertFalse(absent.keyboardHint, "no OCR result is not evidence of an input focus")
+  }
+
+  func testFadingEdgeIndicatorMatchesOnlyWithStableTextAndUntouchedTarget() async throws {
+    let before = try picture(width: 400, height: 300) { context in
+      context.setFillColor(UIColor.gray.cgColor)
+      context.fill(CGRect(x: 397, y: 30, width: 2, height: 120))
+    }
+    let after = try picture(width: 400, height: 300)
+    let labels = [text("Search articles")]
+    _ = try await compare(before, after, oldTexts: labels, newTexts: labels,
+      target: CGPoint(x: 0.2, y: 0.25))
+    await expect(.changed) {
+      _ = try await self.compare(before, after, oldTexts: labels, newTexts: labels,
+        target: CGPoint(x: 0.995, y: 0.25))
+    }
+  }
+
+  func testCaretBlinkNeedsStableKeyboardAndBoundedApprovedAnchor() async throws {
+    let before = try picture(width: 400, height: 300) { context in
+      context.setFillColor(UIColor.blue.cgColor)
+      context.fill(CGRect(x: 124, y: 70, width: 2, height: 10))
+    }
+    let after = try picture(width: 400, height: 300)
+    let labels = [text("Search articles")] + keyboardTexts()
+    _ = try await compare(before, after, oldTexts: labels, newTexts: labels,
+      input: true, target: CGPoint(x: 0.2, y: 0.25))
+    for target in [nil, CGPoint(x: 0.8, y: 0.25)] as [CGPoint?] {
+      await expect(.changed) {
+        _ = try await self.compare(before, after, oldTexts: labels, newTexts: labels,
+          input: true, target: target)
+      }
+    }
+    await expect(.changed) {
+      _ = try await self.compare(before, after, oldTexts: [self.text("Search articles")],
+        newTexts: [self.text("Search articles")], input: true, target: CGPoint(x: 0.2, y: 0.25))
+    }
+  }
+
+  func testUniformFaintTintCannotDisappearBelowALuminanceThreshold() async throws {
+    let before = try picture(width: 400, height: 300)
+    let after = try picture(width: 400, height: 300) { context in
+      context.setFillColor(UIColor(white: 240.0 / 255.0, alpha: 1).cgColor)
+      context.fill(CGRect(x: 0, y: 0, width: 400, height: 300))
+    }
+    await expect(.changed) {
+      _ = try await self.compare(before, after, oldTexts: [], newTexts: [])
+    }
+  }
+
+  func testEqualLuminanceRecolouringStillCountsEveryChangedPixel() async throws {
+    // These encoded sRGB values have the same 77R+150G+29B numerator.
+    // Production compares canonical RGBA, not this synthetic luma assertion.
+    XCTAssertEqual(77 * 150 + 150 * 77, 150 * 154)
+    let before = try picture(width: 400, height: 300) { context in
+      let colour = UIColor(red: 150.0 / 255.0, green: 77.0 / 255.0, blue: 0, alpha: 1)
+      context.setFillColor(colour.cgColor)
+      context.fill(CGRect(x: 0, y: 0, width: 400, height: 300))
+    }
+    let after = try picture(width: 400, height: 300) { context in
+      let colour = UIColor(red: 0, green: 154.0 / 255.0, blue: 0, alpha: 1)
+      context.setFillColor(colour.cgColor)
+      context.fill(CGRect(x: 0, y: 0, width: 400, height: 300))
+    }
+    await expect(.changed) {
+      _ = try await self.compare(before, after, oldTexts: [], newTexts: [])
+    }
+  }
+
+  func testCompactTargetChangeBelowOnePercentIsNotWaived() async throws {
+    let before = try picture(width: 400, height: 300)
+    let after = try picture(width: 400, height: 300) { context in
+      context.setFillColor(UIColor.red.cgColor)
+      context.fill(CGRect(x: 75, y: 70, width: 10, height: 10))
+    }
+    await expect(.changed) {
+      _ = try await self.compare(before, after, oldTexts: [], newTexts: [],
+        target: CGPoint(x: 0.2, y: 0.25))
+    }
+  }
+
+  func testThinChangeInsideRecognizedTextOrTappedTargetStillRefuses() async throws {
+    let before = try picture(width: 400, height: 300)
+    let after = try picture(width: 400, height: 300) { context in
+      context.setFillColor(UIColor.blue.cgColor)
+      context.fill(CGRect(x: 80, y: 70, width: 2, height: 10))
+    }
+    let keyboard = keyboardTexts()
+    await expect(.changed) {
+      _ = try await self.compare(before, after, oldTexts: [self.text("Search")] + keyboard,
+        newTexts: [self.text("Search")] + keyboard, input: true, target: CGPoint(x: 0.2, y: 0.25))
+    }
+    await expect(.changed) {
+      _ = try await self.compare(before, after, oldTexts: keyboard, newTexts: keyboard,
+        input: false, target: CGPoint(x: 0.2, y: 0.25))
+    }
+  }
+
+  func testSameAreaBudgetCannotHideChangedLabelOrMovedGeometry() async throws {
+    let before = try picture(width: 400, height: 300)
+    let after = try picture(width: 400, height: 300) { context in
+      context.setFillColor(UIColor.gray.cgColor)
+      context.fill(CGRect(x: 397, y: 30, width: 2, height: 120))
+    }
+    let old = [text("Amount 10")]
+    for labels in [[text("Amount 100")], [text("Amount 10", x: 0.11)]] {
+      await expect(.changed) {
+        _ = try await self.compare(before, after, oldTexts: old, newTexts: labels,
+          target: CGPoint(x: 0.2, y: 0.25))
+      }
+    }
+  }
+
+  func testCaretMovingBetweenLocationsIsNotOneBlink() async throws {
+    let before = try picture(width: 400, height: 300) { context in
+      context.setFillColor(UIColor.blue.cgColor)
+      context.fill(CGRect(x: 124, y: 70, width: 2, height: 10))
+    }
+    let after = try picture(width: 400, height: 300) { context in
+      context.setFillColor(UIColor.blue.cgColor)
+      context.fill(CGRect(x: 130, y: 70, width: 2, height: 10))
+    }
+    let keyboard = keyboardTexts()
+    await expect(.changed) {
+      _ = try await self.compare(before, after, oldTexts: keyboard, newTexts: keyboard,
+        input: true, target: CGPoint(x: 0.3, y: 0.25))
+    }
+  }
+
+  func testKeyboardReappearanceMustSettleToTheSameLayout() async throws {
+    let plain = try picture(width: 400, height: 300)
+    let transitioning = try picture(width: 400, height: 300) { context in
+      context.setFillColor(UIColor.lightGray.cgColor)
+      context.fill(CGRect(x: 0, y: 180, width: 400, height: 120))
+    }
+    let keyboard = keyboardTexts()
+    await expect(.changed) {
+      _ = try await self.compare(plain, transitioning, oldTexts: keyboard, newTexts: keyboard,
+        input: true, target: CGPoint(x: 0.2, y: 0.25))
+    }
+    let caret = try picture(width: 400, height: 300) { context in
+      context.setFillColor(UIColor.blue.cgColor)
+      context.fill(CGRect(x: 124, y: 70, width: 2, height: 10))
+    }
+    await expect(.changed) {
+      _ = try await self.compare(caret, plain, oldTexts: keyboard, newTexts: [],
+        input: true, target: CGPoint(x: 0.2, y: 0.25))
+    }
+    let changedLayout = [text("QWERTYUIOP", x: 0.05, y: 0.34, width: 0.9, height: 0.04),
+      text("ASDFGHJKL", x: 0.05, y: 0.26, width: 0.9, height: 0.04)]
+    await expect(.changed) {
+      _ = try await self.compare(caret, plain, oldTexts: keyboard, newTexts: changedLayout,
+        input: true, target: CGPoint(x: 0.2, y: 0.25))
+    }
+  }
+
+  func testFreshSensitiveAlternativeStillRefusesBeforeTolerantAdmission() async throws {
+    let before = try picture(width: 400, height: 300)
+    let after = try picture(width: 400, height: 300) { context in
+      context.setFillColor(UIColor.gray.cgColor)
+      context.fill(CGRect(x: 397, y: 30, width: 2, height: 120))
+    }
+    let label = text("Search articles")
+    var alternative = label
+    alternative.alternatives = ["ordinary", "Password"]
+    await expect(.sensitive) {
+      _ = try await self.compare(before, after, oldTexts: [label], newTexts: [alternative],
+        input: true, target: CGPoint(x: 0.2, y: 0.25))
+    }
+  }
+
+  func testTooManyThinRegionsAndExcessAreaRefuse() async throws {
+    let before = try picture(width: 400, height: 300)
+    let tooMany = try picture(width: 400, height: 300) { context in
+      context.setFillColor(UIColor.gray.cgColor)
+      for y in [20, 60, 100, 140, 180] {
+        context.fill(CGRect(x: 397, y: y, width: 2, height: 10))
+      }
+    }
+    let tooLarge = try picture(width: 400, height: 300) { context in
+      context.setFillColor(UIColor.gray.cgColor)
+      for x in [0, 4, 393, 397] {
+        context.fill(CGRect(x: x, y: 20, width: 3, height: 150))
+      }
+    }
+    for after in [tooMany, tooLarge] {
+      await expect(.changed) { _ = try await self.compare(before, after, oldTexts: [], newTexts: []) }
+    }
+  }
+
+  func testInvalidTargetNeverReceivesEvenExactPixelAuthority() async throws {
+    let image = try picture(width: 400, height: 300)
+    for point in [CGPoint(x: CGFloat.nan, y: 0.5), CGPoint(x: 1.01, y: 0.5), CGPoint(x: 0.5, y: -0.01)] {
+      await expect(.invalid) {
+        _ = try await self.compare(image, image, oldTexts: [], newTexts: [], target: point)
+      }
+    }
   }
 
   func testDefaultVisionRecognizesGeneratedTextWithTheRealFramework() async throws {
