@@ -1,3 +1,235 @@
+diff --git a/idevice/src/xpc/bounds.rs b/idevice/src/xpc/bounds.rs
+new file mode 100644
+--- /dev/null
++++ b/idevice/src/xpc/bounds.rs
+@@ -0,0 +1,81 @@
++//! Local control-message limits. File-transfer data is a separate stream path.
++use crate::IdeviceError;
++
++pub(super) const XPC_WRAPPER_LEN: usize = 24;
++pub(super) const MAX_XPC_BODY: usize = 16 * 1024 * 1024;
++pub(super) const MAX_BUFFERED_XPC: usize = XPC_WRAPPER_LEN + MAX_XPC_BODY;
++
++fn limit_error() -> IdeviceError {
++    IdeviceError::UnexpectedResponse("RemoteXPC control message exceeds limit".into())
++}
++
++/// Check the u64 declaration as soon as bytes 8..16 exist. No allocation or
++/// unchecked integer conversion/addition is based on a peer's declaration.
++pub(super) fn frame_len(bytes: &[u8]) -> Result<Option<usize>, IdeviceError> {
++    if bytes.len() < 16 { return Ok(None); }
++    let body = u64::from_le_bytes([
++        bytes[8], bytes[9], bytes[10], bytes[11], bytes[12], bytes[13], bytes[14], bytes[15],
++    ]);
++    if body > MAX_XPC_BODY as u64 { return Err(limit_error()); }
++    let body = usize::try_from(body).map_err(|_| limit_error())?;
++    body.checked_add(XPC_WRAPPER_LEN).map(Some).ok_or_else(limit_error)
++}
++
++/// A channel's whole pending buffer also has a cap, including coalesced messages
++/// and incomplete headers. Reject before extending the Vec.
++pub(super) fn append(buffer: &mut Vec<u8>, chunk: &[u8]) -> Result<(), IdeviceError> {
++    if buffer.len().checked_add(chunk.len()).is_none_or(|size| size > MAX_BUFFERED_XPC) {
++        return Err(limit_error());
++    }
++    let existing = buffer.len().min(16);
++    let added = chunk.len().min(16 - existing);
++    if existing + added == 16 {
++        let mut prefix = [0u8; 16];
++        prefix[..existing].copy_from_slice(&buffer[..existing]);
++        prefix[existing..existing + added].copy_from_slice(&chunk[..added]);
++        frame_len(&prefix)?;
++    }
++    buffer.extend_from_slice(chunk);
++    Ok(())
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++
++    fn header(body: u64) -> Vec<u8> {
++        let mut bytes = vec![0; XPC_WRAPPER_LEN];
++        bytes[..4].copy_from_slice(&0x29b00b92u32.to_le_bytes());
++        bytes[8..16].copy_from_slice(&body.to_le_bytes());
++        bytes
++    }
++
++    #[test]
++    fn declaration_accepts_exact_limit_and_rejects_overflow() {
++        assert_eq!(frame_len(&header(0)).unwrap(), Some(XPC_WRAPPER_LEN));
++        assert_eq!(frame_len(&header(MAX_XPC_BODY as u64)).unwrap(), Some(MAX_BUFFERED_XPC));
++        assert!(frame_len(&header(MAX_XPC_BODY as u64 + 1)).is_err());
++        assert!(frame_len(&header(u64::MAX)).is_err());
++    }
++
++    #[test]
++    fn split_length_is_rejected_before_the_buffer_grows() {
++        let bytes = header(u64::MAX);
++        let mut buffer = bytes[..15].to_vec();
++        let before = buffer.clone();
++        assert!(append(&mut buffer, &bytes[15..]).is_err());
++        assert_eq!(buffer, before);
++        assert_eq!(frame_len(&bytes[..15]).unwrap(), None);
++    }
++
++    #[test]
++    fn pending_buffer_exact_cap_is_accepted_then_one_more_byte_is_rejected() {
++        let mut buffer = vec![0; MAX_BUFFERED_XPC];
++        buffer[..XPC_WRAPPER_LEN].copy_from_slice(&header(MAX_XPC_BODY as u64));
++        assert!(append(&mut buffer, &[]).is_ok());
++        let capacity = buffer.capacity();
++        assert!(append(&mut buffer, &[0]).is_err());
++        assert_eq!(buffer.len(), MAX_BUFFERED_XPC);
++        assert_eq!(buffer.capacity(), capacity);
++    }
++}
+diff --git a/idevice/src/xpc/mod.rs b/idevice/src/xpc/mod.rs
+--- a/idevice/src/xpc/mod.rs
++++ b/idevice/src/xpc/mod.rs
+@@ -5,8 +5,9 @@
+ use http2::Setting;
+ use tracing::debug;
+
+-use crate::{CdTunnelError, IdeviceError, ReadWrite, xpc};
+-
++use crate::{IdeviceError, ReadWrite, xpc};
++
++mod bounds;
+ pub mod errors;
+ mod format;
+ mod http2;
+@@ -21,8 +22,6 @@
+ /// streams must be odd, and 1/3 are taken by the root and reply channels.
+ const FIRST_OUTBOUND_FILE_STREAM: u32 = 5;
+
+-/// Fixed XPC message-wrapper header: magic + flags + body length + message id.
+-const XPC_WRAPPER_LEN: usize = 24;
+
+ #[derive(Debug)]
+ pub struct RemoteXpcClient<R: ReadWrite> {
+@@ -125,7 +124,7 @@
+                 }
+             }
+             let (channel, chunk) = self.h2_client.read_any(&CHANNELS).await?;
+-            self.partial.entry(channel).or_default().extend(chunk);
++            bounds::append(self.partial.entry(channel).or_default(), &chunk)?;
+         }
+     }
+
+@@ -135,17 +134,13 @@
+     /// message yet.
+     fn take_buffered(&mut self, channel: u32) -> Result<Option<XPCMessage>, IdeviceError> {
+         let buf = self.partial.entry(channel).or_default();
+-        match XPCMessage::decode(buf) {
+-            Ok(msg) => {
+-                let consumed = (XPC_WRAPPER_LEN + xpc_body_len(buf)).min(buf.len());
+-                buf.drain(..consumed);
+-                Ok(Some(msg))
+-            }
+-            // Not enough bytes yet.
+-            Err(IdeviceError::CdTunnel(CdTunnelError::SizeMismatch))
+-            | Err(IdeviceError::NotEnoughBytes(..)) => Ok(None),
+-            Err(e) => Err(e),
+-        }
++        let Some(total) = bounds::frame_len(buf)? else { return Ok(None); };
++        if buf.len() < total { return Ok(None); }
++        // Decode only the declared complete frame. A malformed complete body is
++        // an error, never a reason to keep accumulating unrelated later bytes.
++        let msg = XPCMessage::decode(&buf[..total])?;
++        buf.drain(..total);
++        Ok(Some(msg))
+     }
+
+     async fn recv_from_channel(&mut self, channel: u32) -> Result<plist::Value, IdeviceError> {
+@@ -167,7 +162,7 @@
+                 },
+                 None => {
+                     let chunk = self.h2_client.read(channel).await?;
+-                    self.partial.entry(channel).or_default().extend(chunk);
++                    bounds::append(self.partial.entry(channel).or_default(), &chunk)?;
+                 }
+             }
+         }
+@@ -309,10 +304,3 @@
+     }
+ }
+
+-/// The XPC message body length from a decoded-OK wrapper: the little-endian u64
+-/// at bytes 8..16. `buf` is known to hold a full wrapper (≥ 24 bytes) here.
+-fn xpc_body_len(buf: &[u8]) -> usize {
+-    u64::from_le_bytes([
+-        buf[8], buf[9], buf[10], buf[11], buf[12], buf[13], buf[14], buf[15],
+-    ]) as usize
+-}
+diff --git a/idevice/src/xpc/format.rs b/idevice/src/xpc/format.rs
+--- a/idevice/src/xpc/format.rs
++++ b/idevice/src/xpc/format.rs
+@@ -289,6 +289,14 @@
+         }
+
+         Self::decode_object(&mut Cursor::new(&buf[8..]))
++    }
++
++    fn require_remaining(cursor: &Cursor<&[u8]>, length: usize) -> Result<(), IdeviceError> {
++        let position = usize::try_from(cursor.position())
++            .map_err(|_| IdeviceError::NotEnoughBytes(0, length))?;
++        let remaining = cursor.get_ref().len().saturating_sub(position);
++        if length > remaining { return Err(IdeviceError::NotEnoughBytes(remaining, length)); }
++        Ok(())
+     }
+
+     fn decode_object(mut cursor: &mut Cursor<&[u8]>) -> Result<Self, IdeviceError> {
+@@ -366,6 +374,8 @@
+                 cursor.read_exact(&mut buf_32)?;
+                 let l = u32::from_le_bytes(buf_32) as usize;
+                 let padding = Self::calculate_padding(l);
++                Self::require_remaining(cursor, l.checked_add(padding)
++                    .ok_or(IdeviceError::NotEnoughBytes(0, l))?)?;
+
+                 let mut key_buf = vec![0; l];
+                 cursor.read_exact(&mut key_buf)?;
+@@ -388,6 +398,8 @@
+                 cursor.read_exact(&mut buf_32)?;
+                 let l = u32::from_le_bytes(buf_32) as usize;
+                 let padding = Self::calculate_padding(l);
++                Self::require_remaining(cursor, l.checked_add(padding)
++                    .ok_or(IdeviceError::NotEnoughBytes(0, l))?)?;
+
+                 let mut data = vec![0; l];
+                 cursor.read_exact(&mut data)?;
+@@ -508,16 +520,14 @@
+         }
+
+         let flags = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
+-        let body_len = u64::from_le_bytes([
+-            data[8], data[9], data[10], data[11], data[12], data[13], data[14], data[15],
+-        ]);
+-        debug!("Body_len: {body_len}");
++        let total = super::bounds::frame_len(data)?
++            .ok_or(IdeviceError::NotEnoughBytes(data.len(), 24))?;
+         let message_id = u64::from_le_bytes([
+             data[16], data[17], data[18], data[19], data[20], data[21], data[22], data[23],
+         ]);
+-        if body_len + 24 > data.len() as u64 {
++        if total > data.len() {
+             debug!(
+-                "Body length is {body_len}, but received bytes is {}",
++                "Wrapper length is {total}, but received bytes is {}",
+                 data.len()
+             );
+             Err(CdTunnelError::SizeMismatch)?
+@@ -525,8 +535,8 @@
+
+         let res = XPCMessage {
+             flags,
+-            message: if body_len > 0 {
+-                Some(XPCObject::decode(&data[24..24 + body_len as usize])?)
++            message: if total > 24 {
++                Some(XPCObject::decode(&data[24..total])?)
+             } else {
+                 None
+             },
 diff --git a/idevice/Cargo.toml b/idevice/Cargo.toml
 --- a/idevice/Cargo.toml
 +++ b/idevice/Cargo.toml
