@@ -1443,6 +1443,14 @@
           "before": "46c193e78c39303bfe394e022c3f29d4734887f926682cd5efe9bdc8027cf77e"
         }
       }
+    },
+    "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz-session-append-uncertain.diff": {
+      "0.2.2-rc.1": {
+        "node_modules/@deepseek-ai/dsh-session-persistence-jsonl/lib/index.js": {
+          "after": "8997ae2ce853ce26aa06cb5543a3a5d47f9c38869ecc4aa3fde0e33364d6ac68",
+          "before": "8a766569e14937ae833441cc75985e14ddbf5d07a201279d6386ef7cc8fea67b"
+        }
+      }
     }
   },
   "schema": 1

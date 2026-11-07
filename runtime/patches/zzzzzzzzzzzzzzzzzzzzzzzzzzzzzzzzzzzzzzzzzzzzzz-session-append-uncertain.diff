@@ -1,0 +1,129 @@
+--- node_modules/@deepseek-ai/dsh-session-persistence-jsonl/lib/index.js
++++ node_modules/@deepseek-ai/dsh-session-persistence-jsonl/lib/index.js
+@@ -26,6 +26,12 @@
+ * than a prior read on this handle. Routed live events buffer in a bounded
+ * window and drain through the same chain as explicit appends.
+ */
++// A private storage outcome which the owning handle unwraps once.
++class UncertainAppendError extends Error {
++	constructor(cause) {
++		super("append outcome cannot be safely retried", { cause });
++	}
++}
+ var JsonlSessionHandle = class {
+ 	storage;
+ 	id;
+@@ -34,6 +40,7 @@
+ 	state;
+ 	lease;
+ 	chain = Promise.resolve();
++	appendUncertain;
+ 	closing;
+ 	observedLength = 0;
+ 	/** Routed live events awaiting their batching deadline (persistence-owned copies). */
+@@ -162,6 +169,7 @@
+ 			}
+ 			await this.chain;
+ 			const failures = [];
++			if (drainFailure === void 0 && this.appendUncertain !== void 0) failures.push(this.appendUncertain);
+ 			if (drainFailure !== void 0) failures.push(drainFailure instanceof Error ? drainFailure : new Error(errorChain(drainFailure)));
+ 			try {
+ 				await this.lease?.release();
+@@ -222,6 +230,7 @@
+ 	}
+ 	/** The shared durable-append body: contiguity, ownership, torn-tail repair, storage write, state advance. */
+ 	async persistContiguous(batch) {
++		this.assertAppendCertain();
+ 		if (this.access !== "write") throw new SessionReadOnlyError(this.id, "append");
+ 		if (batch.length === 0) return;
+ 		await this.ensureLease();
+@@ -230,11 +239,19 @@
+ 			await this.storage.truncateTornTail(this.header, this.state.tornTruncateTo);
+ 			this.state.tornTruncateTo = void 0;
+ 		}
+-		if (this.state.recoveredTail !== void 0) {
+-			if (this.state.recoveredTail.length > 0) await this.storage.persistBatch(this.header, this.state.recoveredTail, this.state.materialized, this.state.inheritedEventCount);
+-			this.state.recoveredTail = void 0;
+-		}
+-		await this.storage.persistBatch(this.header, batch, this.state.materialized, this.state.inheritedEventCount);
++		try {
++			if (this.state.recoveredTail !== void 0) {
++				if (this.state.recoveredTail.length > 0) await this.storage.persistBatch(this.header, this.state.recoveredTail, this.state.materialized, this.state.inheritedEventCount);
++				this.state.recoveredTail = void 0;
++			}
++			await this.storage.persistBatch(this.header, batch, this.state.materialized, this.state.inheritedEventCount);
++		} catch (error) {
++			if (error instanceof UncertainAppendError) {
++				this.appendUncertain ??= new Error(`session "${this.id}": append outcome is uncertain; close and reopen before writing`, { cause: error.cause });
++				throw error.cause;
++			}
++			throw error;
++		}
+ 		this.state.materialized = true;
+ 		this.state.cursor += batch.length;
+ 		this.state.primed = void 0;
+@@ -261,8 +278,12 @@
+ 		this.assertOpen(operation);
+ 		return this.enqueueChain(async () => {
+ 			this.assertOpen(operation);
++			this.assertAppendCertain();
+ 			return op();
+ 		});
++	}
++	assertAppendCertain() {
++		if (this.appendUncertain !== void 0) throw this.appendUncertain;
+ 	}
+ 	assertOpen(operation) {
+ 		if (this.closing !== void 0) throw new SessionHandleClosedError(this.id, operation);
+@@ -3363,6 +3384,7 @@
+ 		const path = logPath(this.root, meta.cwd, meta.id, this.compression);
+ 		const handle = await open(path, "a");
+ 		let closed = false;
++		let appended = false;
+ 		const closeAppendHandle = async () => {
+ 			if (closed) return;
+ 			closed = true;
+@@ -3373,26 +3395,31 @@
+ 			try {
+ 				await handle.writeFile(content);
+ 				await handle.sync();
++				appended = true;
+ 			} catch (error) {
++				let restored = false;
+ 				try {
+ 					await closeAppendHandle();
+-					await this.rollbackAppend(path, before);
++					const rollback = await open(path, "r+");
++					try {
++						await rollback.truncate(before);
++						await rollback.sync();
++						restored = true;
++					} finally {
++						await rollback.close();
++					}
+ 				} catch (rollbackError) {
+-					throw new AggregateError([error, rollbackError], `failed to roll back append to "${path}"`);
++					const failure = new AggregateError([error, rollbackError], `failed to roll back append to "${path}"`);
++					throw restored ? failure : new UncertainAppendError(failure);
+ 				}
+ 				throw error;
+ 			}
+ 		} finally {
+-			await closeAppendHandle();
+-		}
+-	}
+-	async rollbackAppend(path, size) {
+-		const handle = await open(path, "r+");
+-		try {
+-			await handle.truncate(size);
+-			await handle.sync();
+-		} finally {
+-			await handle.close();
++			try {
++				await closeAppendHandle();
++			} catch (error) {
++				throw appended ? new UncertainAppendError(error) : error;
++			}
+ 		}
+ 	}
+ 	/** Truncate the log file to `offset` bytes and fsync (discard the crash tail). */
