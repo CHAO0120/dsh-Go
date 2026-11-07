@@ -1,0 +1,48 @@
+--- a/node_modules/@deepseek-ai/dsh-session/lib/index.js
++++ b/node_modules/@deepseek-ai/dsh-session/lib/index.js
+@@ -1615,6 +1615,7 @@
+ 		const entry = attachments.get(this);
+ 		if (entry === null) throw new Error(`session "${this.id}" cannot append outside a SessionStore`);
+ 		if (entry !== void 0 && entry.announcement !== "complete") throw new Error(`session "${this.id}" cannot append before session/created completes`);
++		if (entry?.commitsStopped) throw new Error(`session "${this.id}" is closing`);
+ 		if (entry?.appending) throw new Error("session append cannot reenter while another append is being published");
+ 		return entry;
+ 	}
+@@ -1634,6 +1635,8 @@
+ 				"session/event",
+ 				...callbackArgs
+ 			]);
++			// Dispatch collection can call code; enforce the cutoff at final acceptance too.
++			if (entry?.commitsStopped) throw new Error(`session "${this.id}" is closing`);
+ 			this.log.push(event);
+ 			this.eventsSnapshot = void 0;
+ 			if (entry !== void 0 && callbacks !== void 0) invokeContainedSessionObservers(entry.emitCtx, "session/event", entry.id, callbackArgs, callbacks);
+@@ -2024,6 +2027,13 @@
+ 		if (failure !== void 0) throw failure.reason;
+ 		return callbacks.length > 0;
+ 	}
++	/** Internal AgentFactory cutoff: retain lookup/flush until the existing final detach. */
++	dshGoStopCommits(session) {
++		const entry = attachments.get(session);
++		if (entry == null) return;
++		if (this.store.get(entry.id) !== entry) throw new Error(`session "${session.id}" is not live in this store`);
++		entry.commitsStopped = true;
++	}
+ 	/** Return the exact live entry; detached/prepared objects reject. */
+ 	liveEntryFor(session) {
+ 		const entry = attachments.get(session);
+--- a/node_modules/@deepseek-ai/dsh-agent-loop/lib/index.js
++++ b/node_modules/@deepseek-ai/dsh-agent-loop/lib/index.js
+@@ -1570,6 +1570,12 @@
+ 				failures.push(error);
+ 			}
+ 			try {
++				// Driver/scope cleanup may publish final events; stop new commits only now.
++				if (detachSession !== void 0) loopCtx.sessions.dshGoStopCommits(session);
++			} catch (error) {
++				failures.push(error);
++			}
++			try {
+ 				await stored?.handle.close();
+ 			} catch (error) {
+ 				failures.push(error);
