@@ -217,6 +217,35 @@ jobs:
         run: |
           node --test runtime/tests/*.test.mjs app/tool/engine_auth/*.test.mjs
           python3 -I runtime/tests/test_patch_dsh.py
+      # reverse temp branch only (request 028): exact request commands on the same tree and prefix, plus the raw fixture stdout/stderr/IPC (reporting, no effect on the result)
+      - name: Request 028 target and raw fixture output (reverse temp branch only)
+        if: ${{ !cancelled() }}
+        run: |
+          echo "uid=$(id -u) node=$(node --version) git=$(git --version)"
+          node --test runtime/tests/workspace-dispose-error.test.mjs && echo "TARGET_EXIT=0" || echo "TARGET_EXIT=$?"
+          node --test runtime/tests/session-event-admission.test.mjs runtime/tests/workspace-lifecycle.test.mjs runtime/tests/workspace-observation-queue.test.mjs runtime/tests/workspace-watch-error.test.mjs && echo "ADJACENT_EXIT=0" || echo "ADJACENT_EXIT=$?"
+          node --input-type=module - <<'JSEOF'
+          import { fork } from 'node:child_process';
+          import { mkdtemp, mkdir, readdir, chmod, rm } from 'node:fs/promises';
+          import { tmpdir } from 'node:os';
+          import { join, resolve } from 'node:path';
+          const root = await mkdtemp(join(tmpdir(), 'workspace-dispose-error-raw-'));
+          const temporary = join(root, 'tmp'); await mkdir(temporary);
+          const child = fork(resolve('runtime/tests/fixtures/workspace-dispose-error.mjs'), [], { env: { ...process.env, TMPDIR: temporary, TMP: temporary, TEMP: temporary, WORKSPACE_DISPOSE_FIXTURE: root }, stdio: ['ignore', 'pipe', 'pipe', 'ipc'] });
+          let out = '', err = '', msg;
+          child.stdout.on('data', c => { out += c; });
+          child.stderr.on('data', c => { err += c; });
+          child.on('message', m => { msg = m; });
+          const timer = setTimeout(() => child.kill('SIGKILL'), 30000);
+          const [code, signal] = await new Promise(r => child.once('close', (c, s) => r([c, s])));
+          clearTimeout(timer);
+          console.log('RAW_FIXTURE exit=' + code + ' signal=' + signal);
+          console.log('RAW_FIXTURE ipc=' + JSON.stringify(msg));
+          console.log('RAW_FIXTURE stdout<<<'); console.log(out + '>>>');
+          console.log('RAW_FIXTURE stderr<<<'); console.log(err + '>>>');
+          for (const n of await readdir(temporary).catch(() => [])) if (n.startsWith('dsh-workspace-changes-')) await chmod(join(temporary, n), 0o700).catch(() => {});
+          await rm(root, { recursive: true, force: true });
+          JSEOF
       - name: Media and example plugins
         run: |
           (cd runtime/media/dsh-media && npm install --ignore-scripts --no-package-lock --no-audit --no-fund && npm test)
