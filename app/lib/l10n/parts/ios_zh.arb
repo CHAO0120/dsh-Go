@@ -40,5 +40,102 @@
   "iosLinuxSuspendedBody": "上次 App 退出时，Linux 里还有命令没跑完，App 可能就是因为它闪退的。为免再闪退，Linux 环境先暂停，其他功能照常。想再用就重新启用。",
   "iosLinuxResume": "重新启用 Linux 环境",
   "iosLinuxResumed": "已重新启用。重启本机引擎后，命令才会用上它。",
-  "iosLinuxErrorBusy": "Linux 环境还在使用。等命令停下再试，不行就重新打开 App。"
+  "iosLinuxErrorBusy": "Linux 环境还在使用。等命令停下再试，不行就重新打开 App。",
+  "iosPhoneLinkTitle": "本机连接",
+  "iosPhoneLinkIntro": "用这台 iPhone 自己的开发者服务读屏、点按和输入，不用一直连着电脑。先在手机上打开开发者模式，并保持 LocalDevVPN 已连接。每次手机动作仍要你点允许。",
+  "iosPhoneLinkUnavailable": "需要 iOS 17 或更高版本。",
+  "iosPhoneLinkStepPairing": "导入配对凭据",
+  "iosPhoneLinkPairingHint": "用 Mac 或 Windows 电脑生成的远程配对文件（.plist）",
+  "iosPhoneLinkPairingDevice": "已记住在这台手机上",
+  "iosPhoneLinkPairingSession": "只用这一次，退出 App 后清除",
+  "iosPhoneLinkPairingLocked": "手机解锁后才能读取保存的凭据",
+  "iosPhoneLinkPairingUnreadable": "保存的凭据读不出来，重新导入一次",
+  "iosPhoneLinkImport": "导入",
+  "iosPhoneLinkReplace": "更换",
+  "iosPhoneLinkLegacy": "发现旧版本留下的配对文件",
+  "iosPhoneLinkLegacyHint": "迁移时按你选的方式保存，然后删掉旧文件。迁移前不会用它。",
+  "iosPhoneLinkMigrate": "迁移",
+  "iosPhoneLinkStepEnable": "打开开发者连接",
+  "iosPhoneLinkEnableHint": "默认关闭。关掉会立刻停下正在进行的手机任务。",
+  "iosPhoneLinkStepCheck": "检查连接",
+  "iosPhoneLinkCheckHint": "确认 VPN、配对和开发者服务都通",
+  "iosPhoneLinkCheck": "检查",
+  "iosPhoneLinkChecked": "连接正常",
+  "iosPhoneLinkDdi": "开发者镜像",
+  "iosPhoneLinkDdiHint": "部分功能需要。约 17 MB，来自第三方 DeveloperDiskImage 镜像仓库（不是 Apple 下载站），按固定哈希校验，再由 Apple 为这台手机个性化。",
+  "iosPhoneLinkDdiPrepare": "准备",
+  "iosPhoneLinkDdiMounted": "已挂载",
+  "iosPhoneLinkWorking": "正在处理…",
+  "iosPhoneLinkDownloading": "正在下载 {done} / {total}",
+  "@iosPhoneLinkDownloading": {
+    "placeholders": {
+      "done": {
+        "type": "String"
+      },
+      "total": {
+        "type": "String"
+      }
+    }
+  },
+  "iosPhoneLinkClear": "清除配对凭据",
+  "iosPhoneLinkClearHint": "同时关掉开发者连接。电脑和「文件」里的原文件需要你自己删。",
+  "iosPhoneLinkClearConfirm": "清除配对凭据？",
+  "iosPhoneLinkEnhanceTitle": "可选增强",
+  "iosPhoneLinkXctest": "XCTest 增强",
+  "iosPhoneLinkXctestHint": "需要另外安装并签名 PhoneRunner，能读取界面元素。部分 App 可能要求重新登录或拒绝使用。不开时用本机连接。",
+  "iosPhoneLinkClipboardTitle": "回到 App 恢复原剪贴板",
+  "iosPhoneLinkClipboardHint": "输入时临时借用了剪贴板。先核对目标 App 已经完成或取消粘贴，再恢复。",
+  "iosPhoneLinkClipboardRestore": "恢复",
+  "iosPhoneLinkClipboardOverwrite": "仍要恢复，覆盖现在的剪贴板",
+  "iosPhoneLinkClipboardDiscard": "丢弃保存的旧剪贴板",
+  "iosPhoneLinkErrorBusy": "还有一项设置在进行，等它结束再试。",
+  "iosPhoneLinkErrorForeground": "要在 App 打开、手机解锁时操作。",
+  "iosPhoneLinkErrorPairingInvalid": "这个文件不是可用的远程配对凭据。",
+  "iosPhoneLinkErrorStorage": "保存没成功。「记住在这台手机上」需要手机设了解锁密码。",
+  "iosPhoneLinkErrorPairingRequired": "先导入配对凭据。",
+  "iosPhoneLinkErrorTunnel": "连不上本机服务。确认 LocalDevVPN 已连接、开发者模式已打开，再试一次。",
+  "iosPhoneLinkErrorPairingRejected": "手机不认这份配对凭据。重新生成一份再导入。",
+  "iosPhoneLinkErrorDdiNeeded": "需要先准备开发者镜像。",
+  "iosPhoneLinkErrorDdiDownload": "镜像下载没成功。检查网络后再试。",
+  "iosPhoneLinkErrorDdiIntegrity": "下载的镜像没通过校验，已经丢掉了。",
+  "iosPhoneLinkErrorDdiUnsupported": "没有适合这台手机型号或系统版本的镜像。",
+  "iosPhoneLinkErrorDdiMount": "挂载没成功。已经在用的其他镜像不会被替换。",
+  "iosPhoneLinkErrorClipboardChanged": "之后又复制过别的内容，所以没有恢复。",
+  "iosPhoneLinkErrorOther": "没有完成（{code}）。",
+  "@iosPhoneLinkErrorOther": {
+    "placeholders": {
+      "code": {
+        "type": "String"
+      }
+    }
+  },
+  "iosPetPipTitle": "宠物画中画",
+  "iosPetPipHint": "操控手机时，宠物以画中画留在屏幕上，App 才能在后台接着干活。用的是系统画中画，不录音、不定位。",
+  "iosPetPipRequired": "手机操控要先打开它",
+  "iosPetPipReady": "已就绪，手机任务开始时出现",
+  "iosPetPipKeepingAlive": "正在让 App 在后台继续运行",
+  "iosPetPipAlways": "任务结束后也留着",
+  "iosPetPipStart": "开始画中画",
+  "iosPetPipStartHint": "画中画没有自己出现时，点这里打开",
+  "iosPetPipPaused": "手机任务在画中画里暂停了",
+  "iosPetPipReview": "继续或停止",
+  "iosPetPipResume": "恢复",
+  "iosPetPipChoosePet": "选宠物",
+  "iosPetPipErrorNoPet": "先选一只宠物",
+  "iosPetPipErrorUnsupported": "这台手机不支持画中画",
+  "iosPetPipErrorLocked": "锁屏时画中画停了",
+  "iosPetPipErrorAudio": "录音、通话或别的声音占用时，画中画停了",
+  "iosPetPipErrorPack": "这只宠物的素材有问题，换一只试试",
+  "iosPetPipErrorStart": "画中画没能打开",
+  "iosPetPipErrorClosed": "画中画被关掉了",
+  "iosPetPipErrorOther": "画中画停了（{code}）",
+  "@iosPetPipErrorOther": {
+    "placeholders": {
+      "code": {
+        "type": "String"
+      }
+    }
+  },
+  "iosPetPipChoosePetHint": "在宠物设置里选一只",
+  "iosPetPipReopen": "重新准备画中画"
 }

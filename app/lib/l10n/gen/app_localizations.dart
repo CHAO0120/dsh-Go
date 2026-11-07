@@ -15434,6 +15434,444 @@ abstract class L10n {
   /// **'Linux 环境还在使用。等命令停下再试，不行就重新打开 App。'**
   String get iosLinuxErrorBusy;
 
+  /// No description provided for @iosPhoneLinkTitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'本机连接'**
+  String get iosPhoneLinkTitle;
+
+  /// No description provided for @iosPhoneLinkIntro.
+  ///
+  /// In zh, this message translates to:
+  /// **'用这台 iPhone 自己的开发者服务读屏、点按和输入，不用一直连着电脑。先在手机上打开开发者模式，并保持 LocalDevVPN 已连接。每次手机动作仍要你点允许。'**
+  String get iosPhoneLinkIntro;
+
+  /// No description provided for @iosPhoneLinkUnavailable.
+  ///
+  /// In zh, this message translates to:
+  /// **'需要 iOS 17 或更高版本。'**
+  String get iosPhoneLinkUnavailable;
+
+  /// No description provided for @iosPhoneLinkStepPairing.
+  ///
+  /// In zh, this message translates to:
+  /// **'导入配对凭据'**
+  String get iosPhoneLinkStepPairing;
+
+  /// No description provided for @iosPhoneLinkPairingHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'用 Mac 或 Windows 电脑生成的远程配对文件（.plist）'**
+  String get iosPhoneLinkPairingHint;
+
+  /// No description provided for @iosPhoneLinkPairingDevice.
+  ///
+  /// In zh, this message translates to:
+  /// **'已记住在这台手机上'**
+  String get iosPhoneLinkPairingDevice;
+
+  /// No description provided for @iosPhoneLinkPairingSession.
+  ///
+  /// In zh, this message translates to:
+  /// **'只用这一次，退出 App 后清除'**
+  String get iosPhoneLinkPairingSession;
+
+  /// No description provided for @iosPhoneLinkPairingLocked.
+  ///
+  /// In zh, this message translates to:
+  /// **'手机解锁后才能读取保存的凭据'**
+  String get iosPhoneLinkPairingLocked;
+
+  /// No description provided for @iosPhoneLinkPairingUnreadable.
+  ///
+  /// In zh, this message translates to:
+  /// **'保存的凭据读不出来，重新导入一次'**
+  String get iosPhoneLinkPairingUnreadable;
+
+  /// No description provided for @iosPhoneLinkImport.
+  ///
+  /// In zh, this message translates to:
+  /// **'导入'**
+  String get iosPhoneLinkImport;
+
+  /// No description provided for @iosPhoneLinkReplace.
+  ///
+  /// In zh, this message translates to:
+  /// **'更换'**
+  String get iosPhoneLinkReplace;
+
+  /// No description provided for @iosPhoneLinkLegacy.
+  ///
+  /// In zh, this message translates to:
+  /// **'发现旧版本留下的配对文件'**
+  String get iosPhoneLinkLegacy;
+
+  /// No description provided for @iosPhoneLinkLegacyHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'迁移时按你选的方式保存，然后删掉旧文件。迁移前不会用它。'**
+  String get iosPhoneLinkLegacyHint;
+
+  /// No description provided for @iosPhoneLinkMigrate.
+  ///
+  /// In zh, this message translates to:
+  /// **'迁移'**
+  String get iosPhoneLinkMigrate;
+
+  /// No description provided for @iosPhoneLinkStepEnable.
+  ///
+  /// In zh, this message translates to:
+  /// **'打开开发者连接'**
+  String get iosPhoneLinkStepEnable;
+
+  /// No description provided for @iosPhoneLinkEnableHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'默认关闭。关掉会立刻停下正在进行的手机任务。'**
+  String get iosPhoneLinkEnableHint;
+
+  /// No description provided for @iosPhoneLinkStepCheck.
+  ///
+  /// In zh, this message translates to:
+  /// **'检查连接'**
+  String get iosPhoneLinkStepCheck;
+
+  /// No description provided for @iosPhoneLinkCheckHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'确认 VPN、配对和开发者服务都通'**
+  String get iosPhoneLinkCheckHint;
+
+  /// No description provided for @iosPhoneLinkCheck.
+  ///
+  /// In zh, this message translates to:
+  /// **'检查'**
+  String get iosPhoneLinkCheck;
+
+  /// No description provided for @iosPhoneLinkChecked.
+  ///
+  /// In zh, this message translates to:
+  /// **'连接正常'**
+  String get iosPhoneLinkChecked;
+
+  /// No description provided for @iosPhoneLinkDdi.
+  ///
+  /// In zh, this message translates to:
+  /// **'开发者镜像'**
+  String get iosPhoneLinkDdi;
+
+  /// No description provided for @iosPhoneLinkDdiHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'部分功能需要。约 17 MB，来自第三方 DeveloperDiskImage 镜像仓库（不是 Apple 下载站），按固定哈希校验，再由 Apple 为这台手机个性化。'**
+  String get iosPhoneLinkDdiHint;
+
+  /// No description provided for @iosPhoneLinkDdiPrepare.
+  ///
+  /// In zh, this message translates to:
+  /// **'准备'**
+  String get iosPhoneLinkDdiPrepare;
+
+  /// No description provided for @iosPhoneLinkDdiMounted.
+  ///
+  /// In zh, this message translates to:
+  /// **'已挂载'**
+  String get iosPhoneLinkDdiMounted;
+
+  /// No description provided for @iosPhoneLinkWorking.
+  ///
+  /// In zh, this message translates to:
+  /// **'正在处理…'**
+  String get iosPhoneLinkWorking;
+
+  /// No description provided for @iosPhoneLinkDownloading.
+  ///
+  /// In zh, this message translates to:
+  /// **'正在下载 {done} / {total}'**
+  String iosPhoneLinkDownloading(String done, String total);
+
+  /// No description provided for @iosPhoneLinkClear.
+  ///
+  /// In zh, this message translates to:
+  /// **'清除配对凭据'**
+  String get iosPhoneLinkClear;
+
+  /// No description provided for @iosPhoneLinkClearHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'同时关掉开发者连接。电脑和「文件」里的原文件需要你自己删。'**
+  String get iosPhoneLinkClearHint;
+
+  /// No description provided for @iosPhoneLinkClearConfirm.
+  ///
+  /// In zh, this message translates to:
+  /// **'清除配对凭据？'**
+  String get iosPhoneLinkClearConfirm;
+
+  /// No description provided for @iosPhoneLinkEnhanceTitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'可选增强'**
+  String get iosPhoneLinkEnhanceTitle;
+
+  /// No description provided for @iosPhoneLinkXctest.
+  ///
+  /// In zh, this message translates to:
+  /// **'XCTest 增强'**
+  String get iosPhoneLinkXctest;
+
+  /// No description provided for @iosPhoneLinkXctestHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'需要另外安装并签名 PhoneRunner，能读取界面元素。部分 App 可能要求重新登录或拒绝使用。不开时用本机连接。'**
+  String get iosPhoneLinkXctestHint;
+
+  /// No description provided for @iosPhoneLinkClipboardTitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'回到 App 恢复原剪贴板'**
+  String get iosPhoneLinkClipboardTitle;
+
+  /// No description provided for @iosPhoneLinkClipboardHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'输入时临时借用了剪贴板。先核对目标 App 已经完成或取消粘贴，再恢复。'**
+  String get iosPhoneLinkClipboardHint;
+
+  /// No description provided for @iosPhoneLinkClipboardRestore.
+  ///
+  /// In zh, this message translates to:
+  /// **'恢复'**
+  String get iosPhoneLinkClipboardRestore;
+
+  /// No description provided for @iosPhoneLinkClipboardOverwrite.
+  ///
+  /// In zh, this message translates to:
+  /// **'仍要恢复，覆盖现在的剪贴板'**
+  String get iosPhoneLinkClipboardOverwrite;
+
+  /// No description provided for @iosPhoneLinkClipboardDiscard.
+  ///
+  /// In zh, this message translates to:
+  /// **'丢弃保存的旧剪贴板'**
+  String get iosPhoneLinkClipboardDiscard;
+
+  /// No description provided for @iosPhoneLinkErrorBusy.
+  ///
+  /// In zh, this message translates to:
+  /// **'还有一项设置在进行，等它结束再试。'**
+  String get iosPhoneLinkErrorBusy;
+
+  /// No description provided for @iosPhoneLinkErrorForeground.
+  ///
+  /// In zh, this message translates to:
+  /// **'要在 App 打开、手机解锁时操作。'**
+  String get iosPhoneLinkErrorForeground;
+
+  /// No description provided for @iosPhoneLinkErrorPairingInvalid.
+  ///
+  /// In zh, this message translates to:
+  /// **'这个文件不是可用的远程配对凭据。'**
+  String get iosPhoneLinkErrorPairingInvalid;
+
+  /// No description provided for @iosPhoneLinkErrorStorage.
+  ///
+  /// In zh, this message translates to:
+  /// **'保存没成功。「记住在这台手机上」需要手机设了解锁密码。'**
+  String get iosPhoneLinkErrorStorage;
+
+  /// No description provided for @iosPhoneLinkErrorPairingRequired.
+  ///
+  /// In zh, this message translates to:
+  /// **'先导入配对凭据。'**
+  String get iosPhoneLinkErrorPairingRequired;
+
+  /// No description provided for @iosPhoneLinkErrorTunnel.
+  ///
+  /// In zh, this message translates to:
+  /// **'连不上本机服务。确认 LocalDevVPN 已连接、开发者模式已打开，再试一次。'**
+  String get iosPhoneLinkErrorTunnel;
+
+  /// No description provided for @iosPhoneLinkErrorPairingRejected.
+  ///
+  /// In zh, this message translates to:
+  /// **'手机不认这份配对凭据。重新生成一份再导入。'**
+  String get iosPhoneLinkErrorPairingRejected;
+
+  /// No description provided for @iosPhoneLinkErrorDdiNeeded.
+  ///
+  /// In zh, this message translates to:
+  /// **'需要先准备开发者镜像。'**
+  String get iosPhoneLinkErrorDdiNeeded;
+
+  /// No description provided for @iosPhoneLinkErrorDdiDownload.
+  ///
+  /// In zh, this message translates to:
+  /// **'镜像下载没成功。检查网络后再试。'**
+  String get iosPhoneLinkErrorDdiDownload;
+
+  /// No description provided for @iosPhoneLinkErrorDdiIntegrity.
+  ///
+  /// In zh, this message translates to:
+  /// **'下载的镜像没通过校验，已经丢掉了。'**
+  String get iosPhoneLinkErrorDdiIntegrity;
+
+  /// No description provided for @iosPhoneLinkErrorDdiUnsupported.
+  ///
+  /// In zh, this message translates to:
+  /// **'没有适合这台手机型号或系统版本的镜像。'**
+  String get iosPhoneLinkErrorDdiUnsupported;
+
+  /// No description provided for @iosPhoneLinkErrorDdiMount.
+  ///
+  /// In zh, this message translates to:
+  /// **'挂载没成功。已经在用的其他镜像不会被替换。'**
+  String get iosPhoneLinkErrorDdiMount;
+
+  /// No description provided for @iosPhoneLinkErrorClipboardChanged.
+  ///
+  /// In zh, this message translates to:
+  /// **'之后又复制过别的内容，所以没有恢复。'**
+  String get iosPhoneLinkErrorClipboardChanged;
+
+  /// No description provided for @iosPhoneLinkErrorOther.
+  ///
+  /// In zh, this message translates to:
+  /// **'没有完成（{code}）。'**
+  String iosPhoneLinkErrorOther(String code);
+
+  /// No description provided for @iosPetPipTitle.
+  ///
+  /// In zh, this message translates to:
+  /// **'宠物画中画'**
+  String get iosPetPipTitle;
+
+  /// No description provided for @iosPetPipHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'操控手机时，宠物以画中画留在屏幕上，App 才能在后台接着干活。用的是系统画中画，不录音、不定位。'**
+  String get iosPetPipHint;
+
+  /// No description provided for @iosPetPipRequired.
+  ///
+  /// In zh, this message translates to:
+  /// **'手机操控要先打开它'**
+  String get iosPetPipRequired;
+
+  /// No description provided for @iosPetPipReady.
+  ///
+  /// In zh, this message translates to:
+  /// **'已就绪，手机任务开始时出现'**
+  String get iosPetPipReady;
+
+  /// No description provided for @iosPetPipKeepingAlive.
+  ///
+  /// In zh, this message translates to:
+  /// **'正在让 App 在后台继续运行'**
+  String get iosPetPipKeepingAlive;
+
+  /// No description provided for @iosPetPipAlways.
+  ///
+  /// In zh, this message translates to:
+  /// **'任务结束后也留着'**
+  String get iosPetPipAlways;
+
+  /// No description provided for @iosPetPipStart.
+  ///
+  /// In zh, this message translates to:
+  /// **'开始画中画'**
+  String get iosPetPipStart;
+
+  /// No description provided for @iosPetPipStartHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'画中画没有自己出现时，点这里打开'**
+  String get iosPetPipStartHint;
+
+  /// No description provided for @iosPetPipPaused.
+  ///
+  /// In zh, this message translates to:
+  /// **'手机任务在画中画里暂停了'**
+  String get iosPetPipPaused;
+
+  /// No description provided for @iosPetPipReview.
+  ///
+  /// In zh, this message translates to:
+  /// **'继续或停止'**
+  String get iosPetPipReview;
+
+  /// No description provided for @iosPetPipResume.
+  ///
+  /// In zh, this message translates to:
+  /// **'恢复'**
+  String get iosPetPipResume;
+
+  /// No description provided for @iosPetPipChoosePet.
+  ///
+  /// In zh, this message translates to:
+  /// **'选宠物'**
+  String get iosPetPipChoosePet;
+
+  /// No description provided for @iosPetPipErrorNoPet.
+  ///
+  /// In zh, this message translates to:
+  /// **'先选一只宠物'**
+  String get iosPetPipErrorNoPet;
+
+  /// No description provided for @iosPetPipErrorUnsupported.
+  ///
+  /// In zh, this message translates to:
+  /// **'这台手机不支持画中画'**
+  String get iosPetPipErrorUnsupported;
+
+  /// No description provided for @iosPetPipErrorLocked.
+  ///
+  /// In zh, this message translates to:
+  /// **'锁屏时画中画停了'**
+  String get iosPetPipErrorLocked;
+
+  /// No description provided for @iosPetPipErrorAudio.
+  ///
+  /// In zh, this message translates to:
+  /// **'录音、通话或别的声音占用时，画中画停了'**
+  String get iosPetPipErrorAudio;
+
+  /// No description provided for @iosPetPipErrorPack.
+  ///
+  /// In zh, this message translates to:
+  /// **'这只宠物的素材有问题，换一只试试'**
+  String get iosPetPipErrorPack;
+
+  /// No description provided for @iosPetPipErrorStart.
+  ///
+  /// In zh, this message translates to:
+  /// **'画中画没能打开'**
+  String get iosPetPipErrorStart;
+
+  /// No description provided for @iosPetPipErrorClosed.
+  ///
+  /// In zh, this message translates to:
+  /// **'画中画被关掉了'**
+  String get iosPetPipErrorClosed;
+
+  /// No description provided for @iosPetPipErrorOther.
+  ///
+  /// In zh, this message translates to:
+  /// **'画中画停了（{code}）'**
+  String iosPetPipErrorOther(String code);
+
+  /// No description provided for @iosPetPipChoosePetHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'在宠物设置里选一只'**
+  String get iosPetPipChoosePetHint;
+
+  /// No description provided for @iosPetPipReopen.
+  ///
+  /// In zh, this message translates to:
+  /// **'重新准备画中画'**
+  String get iosPetPipReopen;
+
   /// No description provided for @launchScreenTitle.
   ///
   /// In zh, this message translates to:

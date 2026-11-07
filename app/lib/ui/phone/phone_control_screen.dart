@@ -11,6 +11,7 @@ import '../../runtime/runtime_state.dart';
 import '../../state/connection_state.dart';
 import '../../state/android_features.dart';
 import '../../state/hosts_state.dart';
+import '../../state/ios_phone_link_state.dart';
 import '../../state/phone_overlay_prefs.dart';
 import '../../state/phone_state.dart';
 import '../../state/phone_turn_end.dart';
@@ -31,6 +32,8 @@ import 'action_log_page.dart';
 import 'a11y_restore_sheet.dart';
 import 'app_rules_page.dart';
 import 'dnd_mode_page.dart';
+import 'ios_pet_pip_section.dart';
+import 'ios_phone_link_section.dart';
 import 'phone_disclosure_sheet.dart';
 import 'phone_background_guide.dart';
 import 'phone_unlock_page.dart';
@@ -104,6 +107,7 @@ class _PhoneControlScreenState extends ConsumerState<PhoneControlScreen> {
   }
 
   Future<void> _onResume() async {
+    unawaited(ref.read(phoneLinkProvider.notifier).refresh());
     await _phone.refreshStatus();
     if (!mounted || !_awaitingA11y) return;
     final on = ref.read(phoneProvider).status.a11y.enabled;
@@ -367,6 +371,7 @@ class _PhoneControlScreenState extends ConsumerState<PhoneControlScreen> {
     final l10n = context.l10n;
     final state = ref.watch(phoneProvider);
     final status = state.status;
+    final link = ref.watch(phoneLinkProvider).status;
     final returnAfterDone = ref.watch(phoneReturnPrefProvider);
     Future<void> setEnabled(bool value) async {
       if (await ref.read(phoneChannelProvider).setEnabled(value)) {
@@ -374,9 +379,31 @@ class _PhoneControlScreenState extends ConsumerState<PhoneControlScreen> {
       }
     }
 
+    // The runner's `bridgeListening` is the XCTest route only; the on-device connection says
+    // ready by its own switch and record.
+    final linkSet = link != null && link.enabled && link.pairingPresent;
+    final taskRow = status.task.active
+        ? ListPageRow(
+            icon: AppIcons.phoneControl,
+            title: l10n.phoneControlWorking,
+            trailing: FixButton(label: l10n.commonStop, onPressed: _stopTask),
+          )
+        : null;
+    final returnRow = MergeSemantics(
+      child: ListPageRow(
+        icon: AppIcons.returnToApp,
+        spot: Spots.phoneReturn,
+        subtitle: l10n.phoneIosReturnHint,
+        subtitleMaxLines: 3,
+        onTap: () => unawaited(_setReturn(!returnAfterDone)),
+        trailing: Switch.adaptive(value: returnAfterDone, onChanged: (value) => unawaited(_setReturn(value))),
+      ),
+    );
+
     return AppPage.list(
       title: l10n.phoneControlTitle,
       children: [
+        const PhoneLinkClipboardCard(),
         OverviewCard(
           margin: const EdgeInsets.symmetric(horizontal: 16),
           leading: const FeatureTile(FeatureKind.phone, size: OverviewCard.avatarSize),
@@ -384,7 +411,7 @@ class _PhoneControlScreenState extends ConsumerState<PhoneControlScreen> {
           subtitle: Text(
             !status.enabled
                 ? l10n.phoneControlNotEnabled
-                : status.bridgeListening
+                : linkSet || status.bridgeListening
                 ? l10n.phoneControlReady
                 : l10n.phoneIosNeedsSetup,
           ),
@@ -394,34 +421,37 @@ class _PhoneControlScreenState extends ConsumerState<PhoneControlScreen> {
           ),
         ),
         const SizedBox(height: 24),
-        ListPageCard(
-          title: l10n.phoneIosServiceTitle,
-          children: [
-            ListPageRow(
-              icon: AppIcons.phoneControl,
-              title: l10n.phoneIosServiceTitle,
-              subtitle: l10n.phoneIosServiceHint,
-              subtitleMaxLines: 4,
-            ),
-            MergeSemantics(
-              child: ListPageRow(
-                icon: AppIcons.returnToApp,
-                spot: Spots.phoneReturn,
-                subtitle: l10n.phoneIosReturnHint,
-                subtitleMaxLines: 3,
-                onTap: () => unawaited(_setReturn(!returnAfterDone)),
-                trailing: Switch.adaptive(value: returnAfterDone, onChanged: (value) => unawaited(_setReturn(value))),
-              ),
-            ),
-            if (status.task.active)
+        if (link == null) ...[
+          // A build without the on-device connection: the runner alone.
+          ListPageCard(
+            title: l10n.phoneIosServiceTitle,
+            children: [
               ListPageRow(
                 icon: AppIcons.phoneControl,
-                title: l10n.phoneControlWorking,
-                trailing: FixButton(label: l10n.commonStop, onPressed: _stopTask),
+                title: l10n.phoneIosServiceTitle,
+                subtitle: l10n.phoneIosServiceHint,
+                subtitleMaxLines: 4,
               ),
+              returnRow,
+              ?taskRow,
+            ],
+          ),
+          PageFootnote(l10n.phoneIosSetupHint),
+        ] else ...[
+          if (taskRow != null) ...[
+            ListPageCard(children: [taskRow]),
+            const SizedBox(height: 24),
           ],
-        ),
-        PageFootnote(l10n.phoneIosSetupHint),
+          const PhoneLinkSection(),
+          PageFootnote(l10n.iosPhoneLinkIntro),
+          const SizedBox(height: 24),
+          const IosPetPipSection(),
+          PageFootnote(l10n.iosPetPipHint),
+          const SizedBox(height: 24),
+          ListPageCard(children: [returnRow]),
+          const SizedBox(height: 24),
+          const PhoneLinkExtrasSection(),
+        ],
       ],
     );
   }

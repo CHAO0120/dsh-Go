@@ -8836,6 +8836,240 @@ class L10nEn extends L10n {
   String get iosLinuxErrorBusy => 'Linux is still in use. Try again once the command stops, or reopen the app.';
 
   @override
+  String get iosPhoneLinkTitle => 'On-device connection';
+
+  @override
+  String get iosPhoneLinkIntro =>
+      'Reads the screen, taps and types through this iPhone\'s own developer services, without staying connected to a computer. Turn on Developer Mode first and keep LocalDevVPN connected. Each phone action still needs your OK.';
+
+  @override
+  String get iosPhoneLinkUnavailable => 'Needs iOS 17 or later.';
+
+  @override
+  String get iosPhoneLinkStepPairing => 'Import a pairing record';
+
+  @override
+  String get iosPhoneLinkPairingHint => 'A remote pairing file (.plist) made on a Mac or Windows computer';
+
+  @override
+  String get iosPhoneLinkPairingDevice => 'Kept on this phone';
+
+  @override
+  String get iosPhoneLinkPairingSession => 'This time only, cleared when the app quits';
+
+  @override
+  String get iosPhoneLinkPairingLocked => 'The saved record can be read once the phone is unlocked';
+
+  @override
+  String get iosPhoneLinkPairingUnreadable => 'The saved record can\'t be read. Import it again.';
+
+  @override
+  String get iosPhoneLinkImport => 'Import';
+
+  @override
+  String get iosPhoneLinkReplace => 'Replace';
+
+  @override
+  String get iosPhoneLinkLegacy => 'A pairing file from an earlier version was found';
+
+  @override
+  String get iosPhoneLinkLegacyHint =>
+      'Moving it saves it the way you choose, then deletes the old file. It isn\'t used until then.';
+
+  @override
+  String get iosPhoneLinkMigrate => 'Move';
+
+  @override
+  String get iosPhoneLinkStepEnable => 'Turn on the developer connection';
+
+  @override
+  String get iosPhoneLinkEnableHint => 'Off by default. Turning it off stops any phone task at once.';
+
+  @override
+  String get iosPhoneLinkStepCheck => 'Check the connection';
+
+  @override
+  String get iosPhoneLinkCheckHint => 'Confirms the VPN, pairing and developer services all work';
+
+  @override
+  String get iosPhoneLinkCheck => 'Check';
+
+  @override
+  String get iosPhoneLinkChecked => 'The connection works';
+
+  @override
+  String get iosPhoneLinkDdi => 'Developer disk image';
+
+  @override
+  String get iosPhoneLinkDdiHint =>
+      'Some features need it. About 17 MB from the third-party DeveloperDiskImage mirror (not Apple\'s download site), checked against fixed hashes, then personalized for this phone by Apple.';
+
+  @override
+  String get iosPhoneLinkDdiPrepare => 'Prepare';
+
+  @override
+  String get iosPhoneLinkDdiMounted => 'Mounted';
+
+  @override
+  String get iosPhoneLinkWorking => 'Working…';
+
+  @override
+  String iosPhoneLinkDownloading(String done, String total) {
+    return 'Downloading $done of $total';
+  }
+
+  @override
+  String get iosPhoneLinkClear => 'Clear the pairing record';
+
+  @override
+  String get iosPhoneLinkClearHint =>
+      'Also turns the developer connection off. Copies on your computer or in Files are yours to delete.';
+
+  @override
+  String get iosPhoneLinkClearConfirm => 'Clear the pairing record?';
+
+  @override
+  String get iosPhoneLinkEnhanceTitle => 'Optional';
+
+  @override
+  String get iosPhoneLinkXctest => 'XCTest enhancement';
+
+  @override
+  String get iosPhoneLinkXctestHint =>
+      'Needs PhoneRunner installed and signed separately; it can read on-screen elements. Some apps may ask you to sign in again or refuse. Without it, the on-device connection is used.';
+
+  @override
+  String get iosPhoneLinkClipboardTitle => 'Restore your clipboard';
+
+  @override
+  String get iosPhoneLinkClipboardHint =>
+      'Typing borrowed the clipboard. Check that the other app has finished or cancelled the paste, then restore it.';
+
+  @override
+  String get iosPhoneLinkClipboardRestore => 'Restore';
+
+  @override
+  String get iosPhoneLinkClipboardOverwrite => 'Restore anyway, replacing what is there now';
+
+  @override
+  String get iosPhoneLinkClipboardDiscard => 'Discard the saved clipboard';
+
+  @override
+  String get iosPhoneLinkErrorBusy => 'Another step is still running. Try again when it finishes.';
+
+  @override
+  String get iosPhoneLinkErrorForeground => 'Do this with the app open and the phone unlocked.';
+
+  @override
+  String get iosPhoneLinkErrorPairingInvalid => 'This file isn\'t a usable remote pairing record.';
+
+  @override
+  String get iosPhoneLinkErrorStorage => 'Saving didn\'t work. \"Kept on this phone\" needs a device passcode.';
+
+  @override
+  String get iosPhoneLinkErrorPairingRequired => 'Import a pairing record first.';
+
+  @override
+  String get iosPhoneLinkErrorTunnel =>
+      'Can\'t reach this phone\'s services. Check that LocalDevVPN is connected and Developer Mode is on, then try again.';
+
+  @override
+  String get iosPhoneLinkErrorPairingRejected =>
+      'The phone didn\'t accept this pairing record. Make a new one and import it.';
+
+  @override
+  String get iosPhoneLinkErrorDdiNeeded => 'The developer disk image needs preparing first.';
+
+  @override
+  String get iosPhoneLinkErrorDdiDownload => 'The download didn\'t work. Check the network and try again.';
+
+  @override
+  String get iosPhoneLinkErrorDdiIntegrity => 'The downloaded image failed its check and was thrown away.';
+
+  @override
+  String get iosPhoneLinkErrorDdiUnsupported => 'There\'s no image for this phone\'s model or iOS version.';
+
+  @override
+  String get iosPhoneLinkErrorDdiMount => 'Mounting didn\'t work. An image already in use isn\'t replaced.';
+
+  @override
+  String get iosPhoneLinkErrorClipboardChanged => 'Something else was copied since, so it wasn\'t restored.';
+
+  @override
+  String iosPhoneLinkErrorOther(String code) {
+    return 'Didn\'t finish ($code).';
+  }
+
+  @override
+  String get iosPetPipTitle => 'Pet picture-in-picture';
+
+  @override
+  String get iosPetPipHint =>
+      'While the phone is operated, your pet stays on screen in picture-in-picture so the app can keep working in the background. It\'s the system\'s picture-in-picture: no recording, no location.';
+
+  @override
+  String get iosPetPipRequired => 'Phone control needs this on';
+
+  @override
+  String get iosPetPipReady => 'Ready; it appears when a phone task starts';
+
+  @override
+  String get iosPetPipKeepingAlive => 'Keeping the app running in the background';
+
+  @override
+  String get iosPetPipAlways => 'Keep it after tasks end';
+
+  @override
+  String get iosPetPipStart => 'Start picture-in-picture';
+
+  @override
+  String get iosPetPipStartHint => 'If picture-in-picture didn\'t appear on its own, open it here';
+
+  @override
+  String get iosPetPipPaused => 'The phone task was paused from picture-in-picture';
+
+  @override
+  String get iosPetPipReview => 'Resume or stop';
+
+  @override
+  String get iosPetPipResume => 'Resume';
+
+  @override
+  String get iosPetPipChoosePet => 'Choose';
+
+  @override
+  String get iosPetPipErrorNoPet => 'Choose a pet first';
+
+  @override
+  String get iosPetPipErrorUnsupported => 'This phone doesn\'t support picture-in-picture';
+
+  @override
+  String get iosPetPipErrorLocked => 'Picture-in-picture stopped when the phone locked';
+
+  @override
+  String get iosPetPipErrorAudio => 'Picture-in-picture stopped while recording, a call or other audio took over';
+
+  @override
+  String get iosPetPipErrorPack => 'This pet\'s artwork has a problem. Try another one.';
+
+  @override
+  String get iosPetPipErrorStart => 'Picture-in-picture couldn\'t open';
+
+  @override
+  String get iosPetPipErrorClosed => 'Picture-in-picture was closed';
+
+  @override
+  String iosPetPipErrorOther(String code) {
+    return 'Picture-in-picture stopped ($code)';
+  }
+
+  @override
+  String get iosPetPipChoosePetHint => 'Pick one in pet settings';
+
+  @override
+  String get iosPetPipReopen => 'Get picture-in-picture ready again';
+
+  @override
   String get launchScreenTitle => 'Launch screen';
 
   @override

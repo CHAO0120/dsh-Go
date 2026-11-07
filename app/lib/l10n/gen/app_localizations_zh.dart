@@ -8372,6 +8372,232 @@ class L10nZh extends L10n {
   String get iosLinuxErrorBusy => 'Linux 环境还在使用。等命令停下再试，不行就重新打开 App。';
 
   @override
+  String get iosPhoneLinkTitle => '本机连接';
+
+  @override
+  String get iosPhoneLinkIntro => '用这台 iPhone 自己的开发者服务读屏、点按和输入，不用一直连着电脑。先在手机上打开开发者模式，并保持 LocalDevVPN 已连接。每次手机动作仍要你点允许。';
+
+  @override
+  String get iosPhoneLinkUnavailable => '需要 iOS 17 或更高版本。';
+
+  @override
+  String get iosPhoneLinkStepPairing => '导入配对凭据';
+
+  @override
+  String get iosPhoneLinkPairingHint => '用 Mac 或 Windows 电脑生成的远程配对文件（.plist）';
+
+  @override
+  String get iosPhoneLinkPairingDevice => '已记住在这台手机上';
+
+  @override
+  String get iosPhoneLinkPairingSession => '只用这一次，退出 App 后清除';
+
+  @override
+  String get iosPhoneLinkPairingLocked => '手机解锁后才能读取保存的凭据';
+
+  @override
+  String get iosPhoneLinkPairingUnreadable => '保存的凭据读不出来，重新导入一次';
+
+  @override
+  String get iosPhoneLinkImport => '导入';
+
+  @override
+  String get iosPhoneLinkReplace => '更换';
+
+  @override
+  String get iosPhoneLinkLegacy => '发现旧版本留下的配对文件';
+
+  @override
+  String get iosPhoneLinkLegacyHint => '迁移时按你选的方式保存，然后删掉旧文件。迁移前不会用它。';
+
+  @override
+  String get iosPhoneLinkMigrate => '迁移';
+
+  @override
+  String get iosPhoneLinkStepEnable => '打开开发者连接';
+
+  @override
+  String get iosPhoneLinkEnableHint => '默认关闭。关掉会立刻停下正在进行的手机任务。';
+
+  @override
+  String get iosPhoneLinkStepCheck => '检查连接';
+
+  @override
+  String get iosPhoneLinkCheckHint => '确认 VPN、配对和开发者服务都通';
+
+  @override
+  String get iosPhoneLinkCheck => '检查';
+
+  @override
+  String get iosPhoneLinkChecked => '连接正常';
+
+  @override
+  String get iosPhoneLinkDdi => '开发者镜像';
+
+  @override
+  String get iosPhoneLinkDdiHint =>
+      '部分功能需要。约 17 MB，来自第三方 DeveloperDiskImage 镜像仓库（不是 Apple 下载站），按固定哈希校验，再由 Apple 为这台手机个性化。';
+
+  @override
+  String get iosPhoneLinkDdiPrepare => '准备';
+
+  @override
+  String get iosPhoneLinkDdiMounted => '已挂载';
+
+  @override
+  String get iosPhoneLinkWorking => '正在处理…';
+
+  @override
+  String iosPhoneLinkDownloading(String done, String total) {
+    return '正在下载 $done / $total';
+  }
+
+  @override
+  String get iosPhoneLinkClear => '清除配对凭据';
+
+  @override
+  String get iosPhoneLinkClearHint => '同时关掉开发者连接。电脑和「文件」里的原文件需要你自己删。';
+
+  @override
+  String get iosPhoneLinkClearConfirm => '清除配对凭据？';
+
+  @override
+  String get iosPhoneLinkEnhanceTitle => '可选增强';
+
+  @override
+  String get iosPhoneLinkXctest => 'XCTest 增强';
+
+  @override
+  String get iosPhoneLinkXctestHint => '需要另外安装并签名 PhoneRunner，能读取界面元素。部分 App 可能要求重新登录或拒绝使用。不开时用本机连接。';
+
+  @override
+  String get iosPhoneLinkClipboardTitle => '回到 App 恢复原剪贴板';
+
+  @override
+  String get iosPhoneLinkClipboardHint => '输入时临时借用了剪贴板。先核对目标 App 已经完成或取消粘贴，再恢复。';
+
+  @override
+  String get iosPhoneLinkClipboardRestore => '恢复';
+
+  @override
+  String get iosPhoneLinkClipboardOverwrite => '仍要恢复，覆盖现在的剪贴板';
+
+  @override
+  String get iosPhoneLinkClipboardDiscard => '丢弃保存的旧剪贴板';
+
+  @override
+  String get iosPhoneLinkErrorBusy => '还有一项设置在进行，等它结束再试。';
+
+  @override
+  String get iosPhoneLinkErrorForeground => '要在 App 打开、手机解锁时操作。';
+
+  @override
+  String get iosPhoneLinkErrorPairingInvalid => '这个文件不是可用的远程配对凭据。';
+
+  @override
+  String get iosPhoneLinkErrorStorage => '保存没成功。「记住在这台手机上」需要手机设了解锁密码。';
+
+  @override
+  String get iosPhoneLinkErrorPairingRequired => '先导入配对凭据。';
+
+  @override
+  String get iosPhoneLinkErrorTunnel => '连不上本机服务。确认 LocalDevVPN 已连接、开发者模式已打开，再试一次。';
+
+  @override
+  String get iosPhoneLinkErrorPairingRejected => '手机不认这份配对凭据。重新生成一份再导入。';
+
+  @override
+  String get iosPhoneLinkErrorDdiNeeded => '需要先准备开发者镜像。';
+
+  @override
+  String get iosPhoneLinkErrorDdiDownload => '镜像下载没成功。检查网络后再试。';
+
+  @override
+  String get iosPhoneLinkErrorDdiIntegrity => '下载的镜像没通过校验，已经丢掉了。';
+
+  @override
+  String get iosPhoneLinkErrorDdiUnsupported => '没有适合这台手机型号或系统版本的镜像。';
+
+  @override
+  String get iosPhoneLinkErrorDdiMount => '挂载没成功。已经在用的其他镜像不会被替换。';
+
+  @override
+  String get iosPhoneLinkErrorClipboardChanged => '之后又复制过别的内容，所以没有恢复。';
+
+  @override
+  String iosPhoneLinkErrorOther(String code) {
+    return '没有完成（$code）。';
+  }
+
+  @override
+  String get iosPetPipTitle => '宠物画中画';
+
+  @override
+  String get iosPetPipHint => '操控手机时，宠物以画中画留在屏幕上，App 才能在后台接着干活。用的是系统画中画，不录音、不定位。';
+
+  @override
+  String get iosPetPipRequired => '手机操控要先打开它';
+
+  @override
+  String get iosPetPipReady => '已就绪，手机任务开始时出现';
+
+  @override
+  String get iosPetPipKeepingAlive => '正在让 App 在后台继续运行';
+
+  @override
+  String get iosPetPipAlways => '任务结束后也留着';
+
+  @override
+  String get iosPetPipStart => '开始画中画';
+
+  @override
+  String get iosPetPipStartHint => '画中画没有自己出现时，点这里打开';
+
+  @override
+  String get iosPetPipPaused => '手机任务在画中画里暂停了';
+
+  @override
+  String get iosPetPipReview => '继续或停止';
+
+  @override
+  String get iosPetPipResume => '恢复';
+
+  @override
+  String get iosPetPipChoosePet => '选宠物';
+
+  @override
+  String get iosPetPipErrorNoPet => '先选一只宠物';
+
+  @override
+  String get iosPetPipErrorUnsupported => '这台手机不支持画中画';
+
+  @override
+  String get iosPetPipErrorLocked => '锁屏时画中画停了';
+
+  @override
+  String get iosPetPipErrorAudio => '录音、通话或别的声音占用时，画中画停了';
+
+  @override
+  String get iosPetPipErrorPack => '这只宠物的素材有问题，换一只试试';
+
+  @override
+  String get iosPetPipErrorStart => '画中画没能打开';
+
+  @override
+  String get iosPetPipErrorClosed => '画中画被关掉了';
+
+  @override
+  String iosPetPipErrorOther(String code) {
+    return '画中画停了（$code）';
+  }
+
+  @override
+  String get iosPetPipChoosePetHint => '在宠物设置里选一只';
+
+  @override
+  String get iosPetPipReopen => '重新准备画中画';
+
+  @override
   String get launchScreenTitle => '启动画面';
 
   @override
