@@ -7666,6 +7666,24 @@ class L10nZh extends L10n {
   String get iosLinuxErrorOther => '没有完成，再试一次。';
 
   @override
+  String get iosLinuxState => '状态';
+
+  @override
+  String get iosLinuxStatePaused => '已暂停';
+
+  @override
+  String get iosLinuxSuspendedBody => '上次 App 退出时，Linux 里还有命令没跑完，App 可能就是因为它闪退的。为免再闪退，Linux 环境先暂停，其他功能照常。想再用就重新启用。';
+
+  @override
+  String get iosLinuxResume => '重新启用 Linux 环境';
+
+  @override
+  String get iosLinuxResumed => '已重新启用。重启本机引擎后，命令才会用上它。';
+
+  @override
+  String get iosLinuxErrorBusy => 'Linux 环境还在使用。等命令停下再试，不行就重新打开 App。';
+
+  @override
   String get launchScreenTitle => '启动画面';
 
   @override

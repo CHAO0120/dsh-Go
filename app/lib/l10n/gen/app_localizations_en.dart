@@ -8111,6 +8111,25 @@ class L10nEn extends L10n {
   String get iosLinuxErrorOther => 'That didn\'t finish. Try again.';
 
   @override
+  String get iosLinuxState => 'Status';
+
+  @override
+  String get iosLinuxStatePaused => 'Paused';
+
+  @override
+  String get iosLinuxSuspendedBody =>
+      'When the app last closed, a command was still running in Linux, and it may be what made the app crash. So that it doesn\'t happen again, Linux is paused; everything else works as usual. Turn it back on when you want it.';
+
+  @override
+  String get iosLinuxResume => 'Turn Linux back on';
+
+  @override
+  String get iosLinuxResumed => 'Turned back on. Restart the local engine for commands to use it.';
+
+  @override
+  String get iosLinuxErrorBusy => 'Linux is still in use. Try again once the command stops, or reopen the app.';
+
+  @override
   String get launchScreenTitle => 'Launch screen';
 
   @override

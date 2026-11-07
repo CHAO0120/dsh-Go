@@ -14078,6 +14078,42 @@ abstract class L10n {
   /// **'没有完成，再试一次。'**
   String get iosLinuxErrorOther;
 
+  /// No description provided for @iosLinuxState.
+  ///
+  /// In zh, this message translates to:
+  /// **'状态'**
+  String get iosLinuxState;
+
+  /// No description provided for @iosLinuxStatePaused.
+  ///
+  /// In zh, this message translates to:
+  /// **'已暂停'**
+  String get iosLinuxStatePaused;
+
+  /// No description provided for @iosLinuxSuspendedBody.
+  ///
+  /// In zh, this message translates to:
+  /// **'上次 App 退出时，Linux 里还有命令没跑完，App 可能就是因为它闪退的。为免再闪退，Linux 环境先暂停，其他功能照常。想再用就重新启用。'**
+  String get iosLinuxSuspendedBody;
+
+  /// No description provided for @iosLinuxResume.
+  ///
+  /// In zh, this message translates to:
+  /// **'重新启用 Linux 环境'**
+  String get iosLinuxResume;
+
+  /// No description provided for @iosLinuxResumed.
+  ///
+  /// In zh, this message translates to:
+  /// **'已重新启用。重启本机引擎后，命令才会用上它。'**
+  String get iosLinuxResumed;
+
+  /// No description provided for @iosLinuxErrorBusy.
+  ///
+  /// In zh, this message translates to:
+  /// **'Linux 环境还在使用。等命令停下再试，不行就重新打开 App。'**
+  String get iosLinuxErrorBusy;
+
   /// No description provided for @launchScreenTitle.
   ///
   /// In zh, this message translates to:

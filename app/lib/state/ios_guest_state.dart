@@ -15,6 +15,7 @@ abstract interface class GuestInstaller {
   Future<IosGuestStatus> status();
   Future<IosGuestStatus> install();
   Future<IosGuestStatus> uninstall();
+  Future<IosGuestStatus> resume();
   Future<bool> cancel();
   Future<Map<String, int>> usage();
 }
@@ -31,6 +32,8 @@ class _Bridge implements GuestInstaller {
   @override
   Future<IosGuestStatus> uninstall() => _bridge.uninstall();
   @override
+  Future<IosGuestStatus> resume() => _bridge.resume();
+  @override
   Future<bool> cancel() => _bridge.cancel();
   @override
   Future<Map<String, int>> usage() => _bridge.usage();
@@ -45,7 +48,16 @@ final guestInstallerProvider = Provider<GuestInstaller?>(
 enum GuestStep { download, verify, extract, publish }
 
 class GuestView {
-  const GuestView({this.status, this.step, this.done = 0, this.total = 0, this.bytes, this.failure, this.justInstalled = false});
+  const GuestView({
+    this.status,
+    this.step,
+    this.done = 0,
+    this.total = 0,
+    this.bytes,
+    this.failure,
+    this.justInstalled = false,
+    this.justResumed = false,
+  });
 
   /// Null until the first answer, and off iOS.
   final IosGuestStatus? status;
@@ -62,6 +74,10 @@ class GuestView {
 
   /// Installed while the app was open: the engine picks it up when it starts again.
   final bool justInstalled;
+
+  /// Turned back on after a run that didn't finish: like [justInstalled], it waits for the engine
+  /// to start again.
+  final bool justResumed;
 
   /// Within the current step, 0–1; null when there's nothing to measure yet.
   double? get fraction => total > 0 ? (done / total).clamp(0.0, 1.0) : null;
@@ -81,6 +97,7 @@ class GuestView {
     String? failure,
     bool clearFailure = false,
     bool? justInstalled,
+    bool? justResumed,
   }) => GuestView(
     status: status ?? this.status,
     step: clearStep ? null : step ?? this.step,
@@ -89,6 +106,7 @@ class GuestView {
     bytes: bytes ?? this.bytes,
     failure: clearFailure ? null : failure ?? this.failure,
     justInstalled: justInstalled ?? this.justInstalled,
+    justResumed: justResumed ?? this.justResumed,
   );
 }
 
@@ -136,7 +154,10 @@ class IosGuestController extends Notifier<GuestView> {
   void _show(IosGuestStatus status) {
     if (!ref.mounted) return;
     final before = state.status;
-    state = state.copyWith(status: status, clearStep: !GuestView(status: status).installing);
+    state = state.copyWith(
+      status: status,
+      clearStep: !GuestView(status: status).installing,
+    );
     if (status.installed && !status.busy && (before == null || !before.installed || state.bytes == null)) {
       unawaited(_measure());
     }
@@ -181,6 +202,22 @@ class IosGuestController extends Notifier<GuestView> {
       final status = await installer.uninstall();
       if (!ref.mounted) return;
       state = GuestView(status: status);
+    } on PlatformException catch (error) {
+      _failed(error);
+    }
+  }
+
+  /// After a Linux run that didn't finish (the app may have crashed with it), Linux stays paused
+  /// until the user turns it back on here.
+  Future<void> resume() async {
+    final installer = _installer;
+    if (installer == null) return;
+    state = state.copyWith(clearFailure: true);
+    try {
+      final status = await installer.resume();
+      if (!ref.mounted) return;
+      state = state.copyWith(justResumed: !status.suspended);
+      _show(status);
     } on PlatformException catch (error) {
       _failed(error);
     }

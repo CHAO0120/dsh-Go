@@ -30,6 +30,7 @@ class LinuxSection extends ConsumerWidget {
     'checksum' || 'archive' => l10n.iosLinuxErrorDamaged,
     'no_space' => l10n.iosLinuxErrorNoSpace,
     'restart_required' => l10n.iosLinuxErrorInUse,
+    'busy' => l10n.iosLinuxErrorBusy,
     _ => l10n.iosLinuxErrorOther,
   };
 
@@ -70,6 +71,8 @@ class LinuxSection extends ConsumerWidget {
 
     final String? note = switch (view) {
       GuestView(failure: final code?) => failureText(l10n, code),
+      GuestView(justResumed: true) when running => l10n.iosLinuxResumed,
+      _ when status.installed && status.suspended => l10n.iosLinuxSuspendedBody,
       GuestView(justInstalled: true) when running => l10n.iosLinuxRestartEngine,
       _ => null,
     };
@@ -95,7 +98,9 @@ class LinuxSection extends ConsumerWidget {
           SettingsTile(title: l10n.iosLinuxInstall, value: Text(l10n.iosLinuxDownloadSize), onTap: guest.install)
         else ...[
           InfoRow(label: l10n.iosLinuxSystem, value: 'Alpine ${status.version ?? ''}'.trim()),
+          if (status.suspended) InfoRow(label: l10n.iosLinuxState, value: l10n.iosLinuxStatePaused),
           InfoRow(label: l10n.iosLinuxStorage, value: view.bytes == null ? '—' : formatBytes(view.bytes!)),
+          if (status.suspended) SettingsTile(title: l10n.iosLinuxResume, onTap: status.busy ? null : guest.resume),
           SettingsTile(
             title: l10n.iosLinuxUninstall,
             danger: true,

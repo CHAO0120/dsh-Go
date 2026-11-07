@@ -15,15 +15,22 @@ import 'package:flutter_test/flutter_test.dart';
 import '../safe_mode/support.dart';
 import '../shell/golden_harness.dart';
 
-IosGuestStatus _status(String phase, {bool available = true, bool installed = false, bool busy = false}) =>
-    IosGuestStatus(
-      phase: phase,
-      available: available,
-      installed: installed,
-      usable: installed && available && !busy,
-      busy: busy,
-      version: installed ? '3.24.4' : null,
-    );
+IosGuestStatus _status(
+  String phase, {
+  bool available = true,
+  bool installed = false,
+  bool busy = false,
+  bool suspended = false,
+}) => IosGuestStatus(
+  phase: phase,
+  available: available,
+  installed: installed,
+  usable: installed && available && !busy && !suspended,
+  busy: busy,
+  suspended: suspended,
+  suspendedReason: suspended ? 'crashed' : null,
+  version: installed ? '3.24.4' : null,
+);
 
 class _Installer implements GuestInstaller {
   _Installer(this.current);
@@ -52,6 +59,13 @@ class _Installer implements GuestInstaller {
   Future<IosGuestStatus> uninstall() async {
     calls.add('uninstall');
     return current = _status('notInstalled');
+  }
+
+  @override
+  Future<IosGuestStatus> resume() async {
+    calls.add('resume');
+    if (failure case final error?) throw error;
+    return current = _status('installed', installed: true);
   }
 
   @override
@@ -100,7 +114,10 @@ void main() {
     await tester.pump();
     expect(installer.calls, ['install']);
 
-    installer.emit({'type': 'status', 'status': {'phase': 'downloading', 'available': true, 'busy': true}});
+    installer.emit({
+      'type': 'status',
+      'status': {'phase': 'downloading', 'available': true, 'busy': true},
+    });
     installer.emit({'type': 'progress', 'step': 'download', 'done': 1, 'total': 2});
     await tester.pump();
     await tester.pump();
@@ -155,5 +172,30 @@ void main() {
     await tester.pump();
     await tester.pump();
     expect(find.text('下载没成功。检查网络后再试一次。'), findsNothing);
+  }, variant: ios);
+
+  testWidgets('paused after a run that did not finish: it says why, and one tap turns it back on', (tester) async {
+    installer = _Installer(_status('installed', installed: true, suspended: true));
+    await show(tester, engine: RuntimePhase.running);
+    expect(find.text('已暂停'), findsOneWidget);
+    expect(find.textContaining('Linux 环境先暂停'), findsOneWidget);
+    await tester.tap(find.text('重新启用 Linux 环境'));
+    await tester.pump();
+    await tester.pump();
+    expect(installer.calls, ['resume']);
+    expect(find.text('已暂停'), findsNothing);
+    expect(find.text('重新启用 Linux 环境'), findsNothing);
+    expect(find.text('已重新启用。重启本机引擎后，命令才会用上它。'), findsOneWidget);
+  }, variant: ios);
+
+  testWidgets('turning it back on while Linux is still busy says to wait', (tester) async {
+    installer = _Installer(_status('installed', installed: true, suspended: true))
+      ..failure = PlatformException(code: 'ios_guest_busy');
+    await show(tester);
+    await tester.tap(find.text('重新启用 Linux 环境'));
+    await tester.pump();
+    await tester.pump();
+    expect(find.text('Linux 环境还在使用。等命令停下再试，不行就重新打开 App。'), findsOneWidget);
+    expect(find.text('重新启用 Linux 环境'), findsOneWidget);
   }, variant: ios);
 }
