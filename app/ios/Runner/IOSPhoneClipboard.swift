@@ -8,6 +8,7 @@ enum IOSPhoneClipboardError: String, Error {
   case tooLarge = "ERR_PHONE_CLIPBOARD_TOO_LARGE"
   case changed = "ERR_PHONE_CLIPBOARD_CHANGED"
   case stale = "ERR_PHONE_CLIPBOARD_STALE"
+  case denied = "ERR_PHONE_CLIPBOARD_PREPARATION_DENIED"
 }
 
 @MainActor
@@ -21,19 +22,23 @@ protocol IOSPhonePasteboardClient {
 
 @MainActor
 private final class IOSPhoneSystemPasteboard: IOSPhonePasteboardClient {
-  private var board: UIPasteboard { .general }
-  var changeCount: Int { board.changeCount }
-  var itemCount: Int { board.numberOfItems }
-  func types() -> [[String]]? { board.types(forItemSet: nil) }
+  private var board: UIPasteboard? {
+    guard UIApplication.shared.applicationState == .active,
+      UIApplication.shared.isProtectedDataAvailable else { return nil }
+    return UIPasteboard.general
+  }
+  var changeCount: Int { board?.changeCount ?? -1 }
+  var itemCount: Int { board?.numberOfItems ?? -1 }
+  func types() -> [[String]]? { board?.types(forItemSet: nil) }
   func data(type: String, item: Int) -> Data? {
-    guard let values = board.data(forPasteboardType: type, inItemSet: IndexSet(integer: item)),
+    guard let values = board?.data(forPasteboardType: type, inItemSet: IndexSet(integer: item)),
       values.count == 1 else { return nil }
     return values[0]
   }
   func replace(_ items: [[String: Any]], expires: Date?) {
     var options: [UIPasteboard.OptionsKey: Any] = [.localOnly: true]
     if let expires { options[.expirationDate] = expires }
-    board.setItems(items, options: options)
+    board?.setItems(items, options: options)
   }
 }
 
@@ -44,14 +49,19 @@ private final class IOSPhoneSystemPasteboard: IOSPhonePasteboardClient {
 @MainActor
 final class IOSPhoneClipboard {
   static let shared = IOSPhoneClipboard(client: IOSPhoneSystemPasteboard())
+  static let pasteLifetime: TimeInterval = 30
+  struct Prepared<Focus> {
+    let id: UUID
+    let focus: Focus
+  }
   private static let markerType = "io.github.ccch1mneyyy.dshgo.phone-paste-lease"
   private static let textType = "public.utf8-plain-text"
   private final class Lease {
     let id = UUID()
     let original: [[String: Data]]
     let temporaryText: Data
-    let created = Date()
     var writtenCount: Int?
+    var readyAt: TimeInterval?
     var pasteAttempted = false
     var restoreRequested = false
     init(original: [[String: Data]], text: String) {
@@ -62,8 +72,10 @@ final class IOSPhoneClipboard {
   private let client: IOSPhonePasteboardClient
   private let foreground: () -> Bool
   private let settle: () async -> Void
+  private let now: () -> TimeInterval?
   private var lease: Lease?
   private var busy = false
+  private var preparation: UUID?
   var onStateChanged: (() -> Void)?
 
   init(client: IOSPhonePasteboardClient,
@@ -73,8 +85,8 @@ final class IOSPhoneClipboard {
          await withCheckedContinuation { continuation in
            DispatchQueue.main.async { DispatchQueue.main.async { continuation.resume() } }
          }
-       }) {
-    self.client = client; self.foreground = foreground; self.settle = settle
+       }, now: @escaping () -> TimeInterval? = IOSPhoneContinuousTime.now) {
+    self.client = client; self.foreground = foreground; self.settle = settle; self.now = now
   }
 
   var hasPendingRestore: Bool { lease != nil }
@@ -85,13 +97,30 @@ final class IOSPhoneClipboard {
      "restoreRequested": lease?.restoreRequested ?? false]
   }
 
-  /// Called only AFTER the native per-call button, while the app is foreground.
-  /// Failure before replace leaves the pasteboard alone; failure after replace
-  /// retains the original for the foreground restore flow.
-  func begin(text: String, current: @escaping () -> Bool) async throws -> UUID {
+  /// The caller's real target/focus preflight must complete before any pasteboard
+  /// access. It then brings the user back for a separate foreground staging tap.
+  /// Closures are native implementation dependencies, never tool parameters.
+  func prepare<Focus>(text: String, preflight: () async throws -> Focus,
+                      confirm: () async -> Bool, current: @escaping () -> Bool) async throws -> Prepared<Focus> {
+    guard preparation == nil, !busy, lease == nil else { throw IOSPhoneClipboardError.pending }
+    guard current(), !Task.isCancelled else { throw IOSPhoneClipboardError.stale }
+    guard !text.isEmpty, text.utf8.count <= 4096, !text.contains("\0") else { throw IOSPhoneClipboardError.tooLarge }
+    let operation = UUID(); preparation = operation
+    defer { if preparation == operation { preparation = nil } }
+    let focus = try await preflight()
+    guard current(), !Task.isCancelled else { throw IOSPhoneClipboardError.stale }
+    guard await confirm() else { throw IOSPhoneClipboardError.denied }
+    guard current(), !Task.isCancelled, foreground() else { throw IOSPhoneClipboardError.foreground }
+    return Prepared(id: try await begin(text: text, current: current), focus: focus)
+  }
+
+  /// Only prepare's successful preflight and real foreground confirmation reach
+  /// this method. A failure after replace retains the original for restoration.
+  private func begin(text: String, current: @escaping () -> Bool) async throws -> UUID {
     guard !busy, lease == nil else { throw IOSPhoneClipboardError.pending }
     guard foreground(), current(), !Task.isCancelled else { throw IOSPhoneClipboardError.foreground }
     guard !text.isEmpty, text.utf8.count <= 4096, !text.contains("\0") else { throw IOSPhoneClipboardError.tooLarge }
+    guard let started = now(), started.isFinite else { throw IOSPhoneClipboardError.stale }
     busy = true
     defer { busy = false }
     let count = client.changeCount
@@ -128,22 +157,36 @@ final class IOSPhoneClipboard {
       expires: Date().addingTimeInterval(10 * 60))
     await settle()
     guard lease === saved else { throw IOSPhoneClipboardError.stale }
+    // Check lifecycle before even changeCount: its background freshness is not
+    // a substitute for foreground ownership verification.
+    guard current(), !Task.isCancelled, foreground() else {
+      saved.restoreRequested = true; onStateChanged?()
+      throw IOSPhoneClipboardError.foreground
+    }
     saved.writtenCount = client.changeCount
-    guard current(), !Task.isCancelled, foreground(), saved.writtenCount != count,
-      owns(saved) else {
+    guard saved.writtenCount != count, owns(saved) else {
       saved.restoreRequested = true; onStateChanged?()
       throw IOSPhoneClipboardError.changed
     }
+    guard let ready = now(), ready.isFinite, ready >= started else {
+      saved.restoreRequested = true; onStateChanged?()
+      throw IOSPhoneClipboardError.stale
+    }
+    saved.readyAt = ready
     onStateChanged?()
     return saved.id
   }
 
-  /// Reads only our private marker and the already-approved temporary text. If
-  /// UIKit denies this in the background, or another copy replaced it, refuse
-  /// the paste. Never substitute another clipboard value or send a prefix.
-  func validateForPaste(_ id: UUID) throws {
+  /// Background admission is local and single-use; it never reads UIPasteboard,
+  /// including changeCount. Apple forbids background content access, and the
+  /// cached foreground marker/count cannot detect every later external copy.
+  /// The caller must recheck the focused target before this bounded handoff.
+  func validateForPaste(_ id: UUID, current: () -> Bool) throws {
     guard let saved = lease, saved.id == id else { throw IOSPhoneClipboardError.stale }
-    guard owns(saved) else { throw IOSPhoneClipboardError.changed }
+    guard !busy, current(), !Task.isCancelled, !saved.restoreRequested, !saved.pasteAttempted,
+      saved.writtenCount != nil, let ready = saved.readyAt, let time = now(),
+      time.isFinite, time >= ready, time - ready < Self.pasteLifetime else { throw IOSPhoneClipboardError.stale }
+    if foreground(), !owns(saved) { throw IOSPhoneClipboardError.changed }
     saved.pasteAttempted = true
   }
 
@@ -226,7 +269,7 @@ final class IOSPhoneClipboard {
   }
 
   private func owns(_ saved: Lease) -> Bool {
-    guard let count = saved.writtenCount, client.changeCount == count, client.itemCount == 1,
+    guard foreground(), let count = saved.writtenCount, client.changeCount == count, client.itemCount == 1,
       let types = client.types(), types.count == 1,
       Set(types[0]) == Set([Self.markerType, Self.textType]), types[0].count == 2,
       client.data(type: Self.markerType, item: 0) == saved.marker,
@@ -239,6 +282,7 @@ final class IOSPhoneClipboard {
   /// Content read-back also narrows the interval before changeCount publishes.
   /// No sequence of these reads is a cross-process atomic snapshot or CAS.
   private func matches(_ original: [[String: Data]]) -> Bool {
+    guard foreground() else { return false }
     let count = client.changeCount
     guard client.itemCount == original.count else { return false }
     if original.isEmpty { return client.changeCount == count && client.itemCount == 0 }

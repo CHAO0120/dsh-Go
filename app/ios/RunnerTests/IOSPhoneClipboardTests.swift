@@ -33,19 +33,28 @@ final class IOSPhoneClipboardTests: XCTestCase {
     var unreadableTypes = Set<String>()
     var didRead: (() -> Void)?
     var didReplace: (() -> Void)?
+    var foreground: () -> Bool = { true }
+    private(set) var accesses: [String] = []
+    private(set) var backgroundAccesses = 0
     private(set) var writes: [Write] = []
     private(set) var reads: [Read] = []
     private(set) var typeReads = 0
 
     init(_ items: [[String: Data]]) { self.items = items }
-    var changeCount: Int { revision }
-    var itemCount: Int { reportedItemCount ?? items.count }
+    private func accessed(_ name: String) {
+      accesses.append(name)
+      if !foreground() { backgroundAccesses += 1 }
+    }
+    var changeCount: Int { accessed("changeCount"); return revision }
+    var itemCount: Int { accessed("itemCount"); return reportedItemCount ?? items.count }
     func types() -> [[String]]? {
+      accessed("types")
       typeReads += 1
       if let reportedTypes { return reportedTypes() }
       return items.map { $0.keys.sorted() }
     }
     func data(type: String, item: Int) -> Data? {
+      accessed("data")
       reads.append(Read(type: type, item: item))
       let value = items.indices.contains(item) && !unreadableTypes.contains(type)
         ? items[item][type] : nil
@@ -55,6 +64,7 @@ final class IOSPhoneClipboardTests: XCTestCase {
       return value
     }
     func replace(_ values: [[String: Any]], expires: Date?) {
+      accessed("replace")
       var onlyData = true
       let materialized = values.map { item -> [String: Data] in
         var result: [String: Data] = [:]
@@ -81,6 +91,7 @@ final class IOSPhoneClipboardTests: XCTestCase {
   private final class State {
     var foreground = true
     var current = true
+    var clock: TimeInterval? = 100
     var onSettle: (() -> Void)?
   }
 
@@ -102,13 +113,16 @@ final class IOSPhoneClipboardTests: XCTestCase {
   private func fixture(_ items: [[String: Data]]? = nil) -> Fixture {
     let board = RecordingPasteboard(items ?? originalItems())
     let state = State()
+    board.foreground = { state.foreground }
     let clipboard = IOSPhoneClipboard(client: board, foreground: { state.foreground },
-      settle: { state.onSettle?() })
+      settle: { state.onSettle?() }, now: { state.clock })
     return Fixture(board: board, state: state, clipboard: clipboard)
   }
 
   private func begin(_ fixture: Fixture, text: String = "synthetic temporary 中文🙂") async throws -> UUID {
-    try await fixture.clipboard.begin(text: text, current: { fixture.state.current })
+    let prepared = try await fixture.clipboard.prepare(text: text, preflight: { () },
+      confirm: { true }, current: { fixture.state.current })
+    return prepared.id
   }
 
   private func expect(_ error: IOSPhoneClipboardError,
@@ -259,7 +273,7 @@ final class IOSPhoneClipboardTests: XCTestCase {
     let f = fixture()
     let operation = Task { @MainActor in try await self.begin(f) }
     operation.cancel()
-    await expect(.foreground) { _ = try await operation.value }
+    await expect(.stale) { _ = try await operation.value }
     XCTAssertTrue(f.board.reads.isEmpty)
     XCTAssertTrue(f.board.writes.isEmpty)
     XCTAssertFalse(f.clipboard.hasPendingRestore)
@@ -316,7 +330,7 @@ final class IOSPhoneClipboardTests: XCTestCase {
         f.board.items[0][marker] = Data("synthetic foreign marker".utf8)
       default: f.board.items[0][Self.textType] = Data("synthetic different text".utf8)
       }
-      XCTAssertThrowsError(try f.clipboard.validateForPaste(id)) { error in
+      XCTAssertThrowsError(try f.clipboard.validateForPaste(id, current: { f.state.current })) { error in
         XCTAssertEqual(error as? IOSPhoneClipboardError, .changed)
       }
       await expect(.changed) { try await f.clipboard.restore(id: id, current: { true }) }
@@ -338,7 +352,7 @@ final class IOSPhoneClipboardTests: XCTestCase {
       }
     }
     defer { board.didRead = nil }
-    XCTAssertThrowsError(try f.clipboard.validateForPaste(id)) { error in
+    XCTAssertThrowsError(try f.clipboard.validateForPaste(id, current: { f.state.current })) { error in
       XCTAssertEqual(error as? IOSPhoneClipboardError, .changed)
     }
     XCTAssertTrue(changed)
@@ -353,7 +367,7 @@ final class IOSPhoneClipboardTests: XCTestCase {
     // A target could choose an HTML representation instead of the approved
     // plain text. A lagging counter must not permit this extra representation.
     f.board.items[0]["public.html"] = Data("<b>synthetic external payload</b>".utf8)
-    XCTAssertThrowsError(try f.clipboard.validateForPaste(id)) { error in
+    XCTAssertThrowsError(try f.clipboard.validateForPaste(id, current: { f.state.current })) { error in
       XCTAssertEqual(error as? IOSPhoneClipboardError, .changed)
     }
     await expect(.changed) { try await f.clipboard.restore(id: id, current: { true }) }
@@ -369,7 +383,7 @@ final class IOSPhoneClipboardTests: XCTestCase {
     XCTAssertNotEqual(old, fresh)
     let newContents = f.board.items
     await expect(.stale) { try await f.clipboard.restore(id: old, current: { true }) }
-    XCTAssertThrowsError(try f.clipboard.validateForPaste(old)) { error in
+    XCTAssertThrowsError(try f.clipboard.validateForPaste(old, current: { f.state.current })) { error in
       XCTAssertEqual(error as? IOSPhoneClipboardError, .stale)
     }
     f.clipboard.requestRestore(old)
@@ -519,7 +533,7 @@ final class IOSPhoneClipboardTests: XCTestCase {
   func testAttemptedPasteIsNeverAutomaticallyRestoredOnCancellation() async throws {
     let f = fixture()
     let id = try await begin(f)
-    try f.clipboard.validateForPaste(id)
+    try f.clipboard.validateForPaste(id, current: { f.state.current })
     XCTAssertEqual(f.clipboard.status()["pasteMayHaveBeenDispatched"] as? Bool, true)
     let unsolicited = expectation(description: "no automatic restore write")
     unsolicited.isInverted = true
@@ -544,7 +558,7 @@ final class IOSPhoneClipboardTests: XCTestCase {
     assertContentFree(f.clipboard)
     let id = try await begin(f)
     assertContentFree(f.clipboard)
-    try f.clipboard.validateForPaste(id)
+    try f.clipboard.validateForPaste(id, current: { f.state.current })
     assertContentFree(f.clipboard)
     f.state.foreground = false
     f.clipboard.requestRestore(id)
@@ -552,5 +566,167 @@ final class IOSPhoneClipboardTests: XCTestCase {
     f.state.foreground = true
     try await f.clipboard.restore(id: id, current: { true })
     assertContentFree(f.clipboard)
+  }
+
+  func testFailedTargetFocusPreflightCannotReadOrChangeClipboardOrAskForStaging() async {
+    enum SyntheticFailure: Error { case noKeyboard }
+    let f = fixture()
+    f.state.foreground = false
+    var asked = false
+    do {
+      let _: IOSPhoneClipboard.Prepared<String> = try await f.clipboard.prepare(text: "合成文字", preflight: {
+        XCTAssertTrue(f.board.accesses.isEmpty)
+        throw SyntheticFailure.noKeyboard
+      }, confirm: {
+        asked = true; return true
+      }, current: { f.state.current })
+      XCTFail("a failed focus preflight must terminate preparation")
+    } catch SyntheticFailure.noKeyboard { /* The production flow propagates the failed preflight. */ }
+    catch { XCTFail("unexpected error category") }
+    XCTAssertFalse(asked)
+    XCTAssertTrue(f.board.accesses.isEmpty)
+    XCTAssertFalse(f.clipboard.hasPendingRestore)
+  }
+
+  func testForegroundStagingFollowsSuccessfulTargetPreflightAndNewConfirmation() async throws {
+    let f = fixture()
+    f.state.foreground = false
+    var stages: [String] = []
+    let prepared = try await f.clipboard.prepare(text: "合成文字", preflight: {
+      stages.append("target-focus")
+      XCTAssertTrue(f.board.accesses.isEmpty)
+      return "synthetic-focus-observation"
+    }, confirm: {
+      stages.append("foreground-confirmation")
+      XCTAssertEqual(stages, ["target-focus", "foreground-confirmation"])
+      XCTAssertTrue(f.board.accesses.isEmpty)
+      f.state.foreground = true
+      return true // An injected gate result, not a simulated human authorization.
+    }, current: { f.state.current })
+    XCTAssertEqual(prepared.focus, "synthetic-focus-observation")
+    XCTAssertEqual(f.board.writes.count, 1)
+    XCTAssertEqual(f.board.backgroundAccesses, 0)
+    XCTAssertTrue(f.clipboard.hasPendingRestore)
+  }
+
+  func testRefusedStagingAndRevokedPreflightLeaveClipboardUntouched() async {
+    for revoked in [false, true] {
+      let f = fixture()
+      var asked = false
+      await expect(revoked ? .stale : .denied) {
+        _ = try await f.clipboard.prepare(text: "合成文字", preflight: {
+          if revoked { f.state.current = false }
+        }, confirm: {
+          asked = true; return false
+        }, current: { f.state.current })
+      }
+      XCTAssertEqual(asked, !revoked)
+      XCTAssertTrue(f.board.accesses.isEmpty)
+      XCTAssertFalse(f.clipboard.hasPendingRestore)
+    }
+  }
+
+  func testPreparationCannotReenterWhileAwaitingFocusOrConfirmation() async throws {
+    let f = fixture()
+    let prepared = try await f.clipboard.prepare(text: "合成文字", preflight: {
+      await self.expect(.pending) { _ = try await self.begin(f) }
+      XCTAssertTrue(f.board.accesses.isEmpty)
+      return "first-focus"
+    }, confirm: {
+      await self.expect(.pending) { _ = try await self.begin(f) }
+      XCTAssertTrue(f.board.accesses.isEmpty)
+      return true
+    }, current: { f.state.current })
+    XCTAssertEqual(prepared.focus, "first-focus")
+    XCTAssertEqual(f.board.writes.count, 1)
+  }
+
+  func testForegroundLossAfterTemporaryWriteNeverReadsBackgroundCounterOrMarker() async {
+    let f = fixture()
+    f.state.onSettle = {
+      if f.board.writes.count == 1 { f.state.foreground = false }
+    }
+    await expect(.foreground) { _ = try await self.begin(f) }
+    XCTAssertEqual(f.board.writes.count, 1)
+    XCTAssertEqual(f.board.backgroundAccesses, 0)
+    XCTAssertEqual(f.board.accesses.last, "replace")
+    XCTAssertTrue(f.clipboard.hasPendingRestore)
+    XCTAssertEqual(f.clipboard.status()["restoreRequested"] as? Bool, true)
+    XCTAssertEqual(f.clipboard.status()["pasteMayHaveBeenDispatched"] as? Bool, false)
+  }
+
+  func testBackgroundPasteUsesOneShortLocalLeaseWithoutAnyPasteboardGetter() async throws {
+    let f = fixture()
+    let id = try await begin(f)
+    let accesses = f.board.accesses
+    f.state.foreground = false
+    f.state.clock = 129.999
+    try f.clipboard.validateForPaste(id, current: { f.state.current })
+    XCTAssertEqual(f.board.accesses, accesses)
+    XCTAssertEqual(f.board.backgroundAccesses, 0)
+    XCTAssertTrue(f.clipboard.hasPendingRestore)
+    XCTAssertEqual(f.clipboard.status()["pasteMayHaveBeenDispatched"] as? Bool, true)
+    XCTAssertThrowsError(try f.clipboard.validateForPaste(id, current: { f.state.current })) { error in
+      XCTAssertEqual(error as? IOSPhoneClipboardError, .stale)
+    }
+    XCTAssertEqual(f.board.accesses, accesses)
+  }
+
+  func testCachedForegroundLeaseDoesNotClaimBackgroundExternalChangeDetection() async throws {
+    let f = fixture()
+    let id = try await begin(f)
+    f.state.foreground = false
+    let accesses = f.board.accesses
+    f.board.externalWrite([[Self.textType: Data("synthetic external copy".utf8)]])
+    // This deliberately records the limit of the local lease: no supported
+    // background read establishes what a target will paste. The native staging
+    // sheet discloses that boundary; this fixture is not a CAS or HID test.
+    XCTAssertNoThrow(try f.clipboard.validateForPaste(id, current: { f.state.current }))
+    XCTAssertEqual(f.board.accesses, accesses)
+    XCTAssertEqual(f.board.backgroundAccesses, 0)
+    f.state.foreground = true
+    await expect(.changed) { try await f.clipboard.restore(id: id, current: { true }) }
+    XCTAssertEqual(f.board.writes.count, 1)
+  }
+
+  func testExactExpiryInvalidClockOrBackwardClockRefusesWithoutBackgroundReads() async throws {
+    let samples: [TimeInterval?] = [130, 130.001, 99, nil,
+      TimeInterval.nan, TimeInterval.infinity, -TimeInterval.infinity]
+    for sample in samples {
+      let f = fixture()
+      let id = try await begin(f)
+      let accesses = f.board.accesses
+      f.state.foreground = false; f.state.clock = sample
+      XCTAssertThrowsError(try f.clipboard.validateForPaste(id, current: { f.state.current })) { error in
+        XCTAssertEqual(error as? IOSPhoneClipboardError, .stale)
+      }
+      XCTAssertEqual(f.board.accesses, accesses)
+      XCTAssertEqual(f.board.backgroundAccesses, 0)
+      XCTAssertEqual(f.clipboard.status()["pasteMayHaveBeenDispatched"] as? Bool, false)
+    }
+  }
+
+  func testMissingClockBeforeSnapshotNeverReadsOrWritesClipboard() async {
+    let f = fixture()
+    f.state.clock = nil
+    await expect(.stale) { _ = try await self.begin(f) }
+    XCTAssertTrue(f.board.accesses.isEmpty)
+    XCTAssertFalse(f.clipboard.hasPendingRestore)
+  }
+
+  func testRestoreRequestOrCurrentRevocationDisablesBackgroundLeaseWithoutReads() async throws {
+    for restore in [false, true] {
+      let f = fixture()
+      let id = try await begin(f)
+      let accesses = f.board.accesses
+      f.state.foreground = false
+      if restore { f.clipboard.requestRestore(id) } else { f.state.current = false }
+      XCTAssertThrowsError(try f.clipboard.validateForPaste(id, current: { f.state.current })) { error in
+        XCTAssertEqual(error as? IOSPhoneClipboardError, .stale)
+      }
+      XCTAssertEqual(f.board.accesses, accesses)
+      XCTAssertEqual(f.board.backgroundAccesses, 0)
+      XCTAssertEqual(f.clipboard.status()["pasteMayHaveBeenDispatched"] as? Bool, false)
+    }
   }
 }

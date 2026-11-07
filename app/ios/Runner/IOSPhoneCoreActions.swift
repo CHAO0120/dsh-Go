@@ -9,9 +9,15 @@ final class IOSPhoneCoreActions {
     let ownerID: String
     let binding: IOSPhoneScreen.Binding
     var mayHaveActed = false
+    var clipboardLease: UUID?
     init(ownerID: String, binding: IOSPhoneScreen.Binding) {
       self.ownerID = ownerID; self.binding = binding
     }
+  }
+  private struct InputFocus {
+    let reply: IOSPhoneCoreReply
+    let evidence: IOSPhoneScreen.InputEvidence
+    let nativeFrameID: String
   }
   private let core: IOSPhoneCoreDevice
   private let screen: IOSPhoneScreen
@@ -56,7 +62,6 @@ final class IOSPhoneCoreActions {
       && self.binding == binding && self.core.currentRunID(ownerID: ownerID) == runID }
     busy = true
     defer { busy = false }
-    var clipboardLease: UUID?
     do {
       try require(live)
       let token = plan.screen ?? latestToken
@@ -112,10 +117,6 @@ final class IOSPhoneCoreActions {
       if (plan.method == .screen || plan.method == .open), capabilities["touch"] == true {
         _ = try await send(["op": "prepareInput"], execution, current: live)
       }
-      if plan.usesClipboard {
-        execution.mayHaveActed = true // The approved temporary clipboard write can itself take effect.
-        clipboardLease = try await IOSPhoneClipboard.shared.begin(text: plan.text!, current: live)
-      }
       if plan.method == .open, let application {
         let opened = try await send(["op": "launch", "bundleId": application], execution, current: live)
         guard await consent.waitForTarget(request, current: live) else {
@@ -162,8 +163,8 @@ final class IOSPhoneCoreActions {
         }
         _ = try await send(values, execution, current: live)
       case .type:
-        return try await type(plan, point: point!, frame: checked, clipboard: clipboardLease,
-          execution: execution, current: live)
+        return try await type(plan, point: point!, frame: checked, request: request,
+          consent: consent, execution: execution, current: live)
       case .collect:
         return try await collect(plan, first: fresh, anchor: point, execution: execution, current: live)
       default: throw IOSPhoneScreenError.invalid
@@ -173,7 +174,7 @@ final class IOSPhoneCoreActions {
       return .success("动作已派发；这不保证目标应用已完成。\n" + output.text)
     } catch {
       screen.invalidate(); latestToken = nil
-      if let clipboardLease { IOSPhoneClipboard.shared.requestRestore(clipboardLease) }
+      if let clipboardLease = execution.clipboardLease { IOSPhoneClipboard.shared.requestRestore(clipboardLease) }
       let message: String
       if let failure = error as? IOSPhoneCoreFailure {
         execution.mayHaveActed = execution.mayHaveActed || failure.mayHaveActed
@@ -189,31 +190,50 @@ final class IOSPhoneCoreActions {
   }
 
   private func type(_ plan: IOSPhoneOperation, point: CGPoint, frame: IOSPhoneScreen.FreshFrame,
-                    clipboard: UUID?, execution: Execution, current: @escaping () -> Bool) async throws -> IOSPhoneOutcome {
-    _ = try await send(["op": "tap", "x": Double(point.x), "y": Double(point.y),
-      "nativeFrameId": frame.nativeFrameID], execution, current: current)
-    var focused = try await capture(execution, current: current)
-    var evidence = try await screen.inspectInput(reply: focused, binding: execution.binding, current: current)
-    let settle = Date().addingTimeInterval(3)
-    while !evidence.keyboardHint, !evidence.sensitive, Date() < settle {
+                    request: IOSPhoneRequest, consent: IOSPhoneTaskConsent,
+                    execution: Execution, current: @escaping () -> Bool) async throws -> IOSPhoneOutcome {
+    let clipboard = IOSPhoneClipboard.shared
+    defer {
+      // A failed foreground write may retain a snapshot before prepare returns
+      // its lease ID. Never describe that failure as free of possible effects.
+      if clipboard.hasPendingRestore { execution.mayHaveActed = true }
+      if let lease = execution.clipboardLease { clipboard.requestRestore(lease) }
+    }
+    let evidence: IOSPhoneScreen.InputEvidence
+    if plan.usesClipboard {
+      let prepared = try await clipboard.prepare(text: plan.text!, preflight: {
+        let focus = try await self.focusInput(point: point, frame: frame, execution: execution, current: current)
+        // Keep a local focus-frame observation across the foreground staging
+        // trip. It is not returned to the model as a new action authority.
+        let observed = try await self.screen.observe(reply: focus.reply, binding: execution.binding,
+          image: false, detail: false, current: current)
+        return observed.screen
+      }, confirm: {
+        await consent.prepareClipboard(request, current: current)
+      }, current: current)
+      execution.clipboardLease = prepared.id
+      execution.mayHaveActed = true
+      guard await consent.waitForTarget(request, current: current) else {
+        throw IOSPhoneOperationError(message: "临时剪贴板已准备，但用户未返回目标；没有派发粘贴，请回到 DSH Go 恢复原剪贴板。")
+      }
       try requireBackground(current)
-      try await Task.sleep(nanoseconds: 150_000_000)
-      focused = try await capture(execution, current: current)
-      evidence = try await screen.inspectInput(reply: focused, binding: execution.binding, current: current)
-    }
-    guard !evidence.sensitive else { throw IOSPhoneScreenError.sensitive }
-    guard evidence.keyboardHint else {
-      throw IOSPhoneOperationError(message: "点击后未识别到键盘线索，不能确认可输入；请用 handoff。")
-    }
-    guard let frameID = focused.metadata.nativeFrameId,
-      focused.metadata.interfaceOrientation == frame.orientation else { throw IOSPhoneScreenError.orientation }
-    try requireBackground(current)
-    if let clipboard {
-      try IOSPhoneClipboard.shared.validateForPaste(clipboard)
-      _ = try await send(["op": "paste", "replace": true, "nativeFrameId": frameID], execution, current: current)
-      IOSPhoneClipboard.shared.requestRestore(clipboard)
+      let returned = try await capture(execution, current: current)
+      let checked = try await screen.revalidate(screen: prepared.focus, binding: execution.binding,
+        fresh: returned, requiresTextInput: true, current: current)
+      evidence = try await screen.inspectInput(reply: returned, binding: execution.binding, current: current)
+      guard !evidence.sensitive else { throw IOSPhoneScreenError.sensitive }
+      guard evidence.keyboardHint else {
+        throw IOSPhoneOperationError(message: "返回后没有核实到原键盘线索；没有派发粘贴，请用 handoff。")
+      }
+      try requireBackground(current)
+      try clipboard.validateForPaste(prepared.id, current: current)
+      _ = try await send(["op": "paste", "replace": true, "nativeFrameId": checked.nativeFrameID], execution, current: current)
+      clipboard.requestRestore(prepared.id)
     } else {
-      _ = try await send(["op": "ascii", "replace": true, "text": plan.text!, "nativeFrameId": frameID], execution, current: current)
+      let focus = try await focusInput(point: point, frame: frame, execution: execution, current: current)
+      evidence = focus.evidence
+      try requireBackground(current)
+      _ = try await send(["op": "ascii", "replace": true, "text": plan.text!, "nativeFrameId": focus.nativeFrameID], execution, current: current)
     }
     var after = try await capture(execution, current: current)
     var readback = try await screen.inspectInput(reply: after, binding: execution.binding, current: current)
@@ -240,8 +260,30 @@ final class IOSPhoneCoreActions {
       after = try await capture(execution, current: current)
     }
     let output = try await observe(after, execution, image: false, detail: false, current: current)
-    if clipboard != nil { prefix += "\n请回到 DSH Go 恢复原剪贴板；原内容只保存在本 App 内存，没有发送给模型。" }
+    if plan.usesClipboard { prefix += "\n请回到 DSH Go 恢复原剪贴板；原内容只保存在本 App 内存，没有发送给模型。" }
     return .success(prefix + "\n" + output.text)
+  }
+
+  private func focusInput(point: CGPoint, frame: IOSPhoneScreen.FreshFrame, execution: Execution,
+                          current: @escaping () -> Bool) async throws -> InputFocus {
+    _ = try await send(["op": "tap", "x": Double(point.x), "y": Double(point.y),
+      "nativeFrameId": frame.nativeFrameID], execution, current: current)
+    var focused = try await capture(execution, current: current)
+    var evidence = try await screen.inspectInput(reply: focused, binding: execution.binding, current: current)
+    let settle = Date().addingTimeInterval(3)
+    while !evidence.keyboardHint, !evidence.sensitive, Date() < settle {
+      try requireBackground(current)
+      try await Task.sleep(nanoseconds: 150_000_000)
+      focused = try await capture(execution, current: current)
+      evidence = try await screen.inspectInput(reply: focused, binding: execution.binding, current: current)
+    }
+    guard !evidence.sensitive else { throw IOSPhoneScreenError.sensitive }
+    guard evidence.keyboardHint else {
+      throw IOSPhoneOperationError(message: "点击后未识别到键盘线索，不能确认可输入；请用 handoff。")
+    }
+    guard let frameID = focused.metadata.nativeFrameId,
+      focused.metadata.interfaceOrientation == frame.orientation else { throw IOSPhoneScreenError.orientation }
+    return InputFocus(reply: focused, evidence: evidence, nativeFrameID: frameID)
   }
 
   private func collect(_ plan: IOSPhoneOperation, first: IOSPhoneCoreReply, anchor: CGPoint?,

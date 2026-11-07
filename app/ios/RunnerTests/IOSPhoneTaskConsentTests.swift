@@ -14,6 +14,9 @@ final class IOSPhoneTaskConsentTests: XCTestCase {
   private static let grantButton = "允许 30 分钟"
   private static let callButton = "允许这一次"
   private static let denyButton = "拒绝"
+  private static let clipboardTitle = "准备本次非 ASCII 粘贴？"
+  private static let clipboardButton = "准备剪贴板"
+  private static let clipboardDeny = "取消输入"
 
   private enum FixtureFailure: Error {
     case unavailableUI
@@ -40,13 +43,18 @@ final class IOSPhoneTaskConsentTests: XCTestCase {
     private(set) var answer: Bool?
     private var task: Task<Void, Never>?
 
-    init(request: Runner.IOSPhoneRequest, fixture: Fixture, finished: XCTestExpectation) {
+    init(request: Runner.IOSPhoneRequest, fixture: Fixture, finished: XCTestExpectation, clipboard: Bool = false) {
       self.request = request
       self.finished = finished
       task = Task { @MainActor [self] in
-        let allowed = await fixture.consent.approve(request,
-          detail: "合成测试：本次只检查确认状态，不执行实际手机动作。",
-          needsTarget: false, current: { fixture.state.current })
+        let allowed: Bool
+        if clipboard {
+          allowed = await fixture.consent.prepareClipboard(request, current: { fixture.state.current })
+        } else {
+          allowed = await fixture.consent.approve(request,
+            detail: "合成测试：本次只检查确认状态，不执行实际手机动作。",
+            needsTarget: false, current: { fixture.state.current })
+        }
         answer = allowed
         // A recording consumer of the real consent result, never an actual
         // executor. A false result must not reach this synthetic continuation.
@@ -152,11 +160,12 @@ final class IOSPhoneTaskConsentTests: XCTestCase {
   }
 
   private func request(run: String = "synthetic-consent-run",
-                       session: String = "synthetic-consent-session") throws -> Runner.IOSPhoneRequest {
+                       session: String = "synthetic-consent-session", clipboard: Bool = false) throws -> Runner.IOSPhoneRequest {
+    let params = clipboard ? "{\"screen\":\"s1\",\"id\":1,\"text\":\"合成输入\"}" : "{}"
     let envelope: [String: Any] = [
       "v": 1, "runId": run, "id": UUID().uuidString,
       "owner": ["sessionId": session, "callId": UUID().uuidString],
-      "action": ["kind": "runner-call", "method": "apps", "params": "{}"],
+      "action": ["kind": "runner-call", "method": clipboard ? "type" : "apps", "params": params],
       "expiresAt": Date().addingTimeInterval(600).timeIntervalSince1970 * 1000,
     ]
     return try JSONDecoder().decode(Runner.IOSPhoneRequest.self,
@@ -164,17 +173,17 @@ final class IOSPhoneTaskConsentTests: XCTestCase {
   }
 
   private func start(_ fixture: Fixture, run: String = "synthetic-consent-run",
-                     session: String = "synthetic-consent-session") throws -> RunningApproval {
+                     session: String = "synthetic-consent-session", clipboard: Bool = false) throws -> RunningApproval {
     let finished = expectation(description: "production consent settled")
     finished.assertForOverFulfill = true
-    let operation = RunningApproval(request: try request(run: run, session: session),
-      fixture: fixture, finished: finished)
+    let operation = RunningApproval(request: try request(run: run, session: session, clipboard: clipboard),
+      fixture: fixture, finished: finished, clipboard: clipboard)
     fixture.operations.append(operation)
     return operation
   }
 
   private func nextSheet(_ fixture: Fixture, operation: RunningApproval,
-                         grant: Bool) async throws -> Runner.IOSPhoneApproval {
+                         grant: Bool, clipboard: Bool = false) async throws -> Runner.IOSPhoneApproval {
     for _ in 0..<500 {
       if operation.answer != nil {
         XCTFail("consent settled before its expected native confirmation appeared")
@@ -186,11 +195,12 @@ final class IOSPhoneTaskConsentTests: XCTestCase {
         !sheet.isBeingPresented, !sheet.isBeingDismissed
       {
         fixture.sheets.append(sheet)
-        let heading = grant ? Self.grantTitle : Self.callTitle
-        let allow = grant ? Self.grantButton : Self.callButton
+        let heading = clipboard ? Self.clipboardTitle : (grant ? Self.grantTitle : Self.callTitle)
+        let allow = clipboard ? Self.clipboardButton : (grant ? Self.grantButton : Self.callButton)
+        let deny = clipboard ? Self.clipboardDeny : Self.denyButton
         guard Self.labels(in: sheet.view).contains(where: { $0.text == heading }),
           Self.buttons(in: sheet.view).contains(where: { $0.currentTitle == allow }),
-          Self.buttons(in: sheet.view).contains(where: { $0.currentTitle == Self.denyButton })
+          Self.buttons(in: sheet.view).contains(where: { $0.currentTitle == deny })
         else {
           XCTFail("the native sheet did not match the required approval stage")
           throw FixtureFailure.unexpectedSheet
@@ -469,6 +479,60 @@ final class IOSPhoneTaskConsentTests: XCTestCase {
       try self.answer(call, title: Self.callButton)
       try await self.completed(operation, expected: false)
       XCTAssertEqual(fixture.state.admittedContinuations, 0)
+    }
+  }
+
+  func testClipboardPreparationCannotCreateItsOwnGrantOrUseANonTextRequest() async throws {
+    let fixture = Fixture(host: UIViewController())
+    let text = try request(clipboard: true)
+    let withoutGrant = await fixture.consent.prepareClipboard(text, current: { true })
+    XCTAssertFalse(withoutGrant)
+    let nonText = await fixture.consent.prepareClipboard(try request(), current: { true })
+    XCTAssertFalse(nonText)
+    XCTAssertEqual(fixture.state.presentationAttempts, 0)
+    XCTAssertFalse(fixture.consent.isGranted)
+  }
+
+  func testClipboardPreparationNeedsItsOwnNativeSheetWithoutExtendingTheGrant() async throws {
+    try await withFixture { fixture in
+      try await self.establish(fixture)
+      fixture.state.clock = 1010
+      let operation = try self.start(fixture, clipboard: true)
+      let sheet = try await self.nextSheet(fixture, operation: operation, grant: false, clipboard: true)
+      XCTAssertNil(operation.answer)
+      XCTAssertEqual(fixture.state.admittedContinuations, 1)
+      XCTAssertEqual(fixture.consent.remainingSeconds, 1790)
+      try self.answer(sheet, title: Self.clipboardButton)
+      try await self.completed(operation, expected: true)
+      XCTAssertEqual(fixture.state.admittedContinuations, 2)
+      XCTAssertEqual(fixture.consent.remainingSeconds, 1790)
+      XCTAssertEqual(fixture.sheets.count, 3)
+    }
+  }
+
+  func testDeniedClipboardSheetCannotDonateAnApproval() async throws {
+    try await withFixture { fixture in
+      try await self.establish(fixture)
+      let operation = try self.start(fixture, clipboard: true)
+      let sheet = try await self.nextSheet(fixture, operation: operation, grant: false, clipboard: true)
+      try self.answer(sheet, title: Self.clipboardDeny)
+      try await self.completed(operation, expected: false)
+      XCTAssertEqual(fixture.state.admittedContinuations, 1)
+    }
+  }
+
+  func testClipboardSheetRejectsRetiredOwnerAndCannotSwitchSessions() async throws {
+    try await withFixture { fixture in
+      try await self.establish(fixture)
+      let wrongOwner = try self.start(fixture, session: "another-session", clipboard: true)
+      try await self.completed(wrongOwner, expected: false)
+      XCTAssertEqual(fixture.state.presentationAttempts, 2)
+      let operation = try self.start(fixture, clipboard: true)
+      let sheet = try await self.nextSheet(fixture, operation: operation, grant: false, clipboard: true)
+      fixture.consent.retire()
+      try self.answer(sheet, title: Self.clipboardButton)
+      try await self.completed(operation, expected: false)
+      XCTAssertEqual(fixture.state.admittedContinuations, 1)
     }
   }
 }

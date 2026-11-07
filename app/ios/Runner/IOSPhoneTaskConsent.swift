@@ -56,13 +56,34 @@ final class IOSPhoneTaskConsent {
     let suffix = needsTarget
       ? "\n\n允许后，请自行切回要操控的界面。DSH Go 会重新核对屏幕；界面变化或画中画停止时不继续。通知点击本身不批准。"
       : "\n\n仅执行本次调用；这不批准后续动作。"
+    let clipboardSteps = (try? IOSPhoneOperation(request))?.usesClipboard == true
+      ? "\n\n如果使用 CoreDevice 输入非 ASCII 文字：先切回目标检查焦点，再回到 DSH Go 确认临时剪贴板，最后切回目标粘贴。即使没有通知，也请在焦点点击后回到本 App；焦点检查未通过时不会修改剪贴板。"
+      : ""
     let allowed = await actions.confirm(request, title: "允许这一次手机动作？",
-      detail: detail + suffix, allow: "允许这一次", deny: "拒绝", preview: preview)
+      detail: detail + suffix + clipboardSteps, allow: "允许这一次", deny: "拒绝", preview: preview)
     return allowed && live() && isGranted && grantOwner == owner && foreground
   }
 
   func prepareForeground(_ request: IOSPhoneRequest, current: () -> Bool) async -> Bool {
     await waitForForeground(request, current: current)
+  }
+
+  /// A focus check in the target must precede this additional staging sheet.
+  /// Returning to DSH Go alone does not authorize a clipboard replacement.
+  func prepareClipboard(_ request: IOSPhoneRequest, current: @escaping () -> Bool) async -> Bool {
+    guard (try? IOSPhoneOperation(request))?.usesClipboard == true else { return false }
+    let operation = generation
+    let owner = Owner(runID: request.runId, sessionID: request.owner.sessionId)
+    let live = { !Task.isCancelled && current() && self.generation == operation
+      && self.grantOwner == owner && self.isGranted
+      && request.expiresAt > Date().timeIntervalSince1970 * 1000 }
+    guard live(), await waitForForeground(request, current: live,
+      notificationBody: "已检查本次输入目标的键盘线索。请回到 DSH Go 确认临时剪贴板；尚未修改剪贴板或输入文字。"),
+      live(), foreground else { return false }
+    let allowed = await actions.confirm(request, title: "准备本次非 ASCII 粘贴？",
+      detail: "刚才已复核目标画面并检查键盘和敏感输入线索；这些线索不是输入焦点或安全性的证明。\n\n现在会在前台保存原剪贴板，并临时写入本次已批准的全文。原内容只保存在本 App 内存，不发送给模型。\n\n允许后请在 30 秒内自行切回刚才的输入界面，期间不要复制其他内容。DSH Go 会再次核对画面；后台无法回读剪贴板，不能保证发现其他 App 的并发复制。\n\n粘贴后请回到 DSH Go 核对并恢复原剪贴板；App 终止会丢失保存的原内容。取消不会撤回已派发的焦点点击。",
+      allow: "准备剪贴板", deny: "取消输入")
+    return allowed && live() && foreground
   }
 
   /// Waiting for the user to choose a target is not an automatic app switch.
@@ -95,14 +116,15 @@ final class IOSPhoneTaskConsent {
     UIApplication.shared.applicationState == .active && UIApplication.shared.isProtectedDataAvailable
   }
 
-  private func waitForForeground(_ request: IOSPhoneRequest, current: () -> Bool) async -> Bool {
+  private func waitForForeground(_ request: IOSPhoneRequest, current: () -> Bool,
+                                notificationBody: String = "请回到 DSH Go 查看这一次动作。点这条通知只打开 App，不会批准或执行。") async -> Bool {
     if foreground { return current() }
     let center = UNUserNotificationCenter.current()
     let settings = await center.notificationSettings()
     if current(), [.authorized, .provisional, .ephemeral].contains(settings.authorizationStatus) {
       let content = UNMutableNotificationContent()
       content.title = "手机操控等待你确认"
-      content.body = "请回到 DSH Go 查看这一次动作。点这条通知只打开 App，不会批准或执行。"
+      content.body = notificationBody
       // No action/category identifiers and no tool arguments or clipboard data.
       try? await center.add(UNNotificationRequest(identifier: request.id, content: content, trigger: nil))
     }
