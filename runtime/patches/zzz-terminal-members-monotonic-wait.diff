@@ -1,0 +1,26 @@
+diff --git a/node_modules/@deepseek-ai/dsh-subprocess-local/lib/index.js b/node_modules/@deepseek-ai/dsh-subprocess-local/lib/index.js
+index c153954..944182b 100644
+--- a/node_modules/@deepseek-ai/dsh-subprocess-local/lib/index.js
++++ b/node_modules/@deepseek-ai/dsh-subprocess-local/lib/index.js
+@@ -12,6 +12,7 @@ import { randomBytes } from "node:crypto";
+ import { loadWin32ProcessBindings, probeCurrentTokenJobSupport } from "@deepseek-ai/dsh-win32-process";
+ import { Buffer } from "node:buffer";
+ import { PassThrough } from "node:stream";
++import { performance } from "node:perf_hooks";
+ //#region lib/types/linux-scope.js
+ /** Linux user-systemd scope launch and managed-range ownership. */
+ const SYSTEMCTL_TIMEOUT_MS = 5e3;
+@@ -1122,10 +1123,10 @@ var LocalTerminalHandle = class {
+ 	}
+ 	async waitForMembers(members) {
+ 		if (members.length === 0) return [];
+-		const until = Date.now() + this.graceMs;
++		const until = performance.now() + this.graceMs;
+ 		let survivors = this.survivors(members, this.inspector.snapshot());
+-		while (survivors.length > 0 && Date.now() < until) {
+-			await delay(Math.min(25, Math.max(1, until - Date.now())));
++		while (survivors.length > 0 && performance.now() < until) {
++			await delay(Math.min(25, Math.max(1, until - performance.now())));
+ 			survivors = this.survivors(members, this.inspector.snapshot());
+ 		}
+ 		return survivors;
