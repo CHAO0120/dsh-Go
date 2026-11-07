@@ -1,6 +1,10 @@
 package io.github.ccch1mneyyy.dsh_app.runtime
 
 import java.io.File
+import java.nio.file.Files
+import java.nio.file.StandardOpenOption
+import java.nio.file.attribute.PosixFilePermissions
+import org.junit.Assume.assumeTrue
 import org.junit.Assert.*
 import org.junit.Test
 
@@ -119,4 +123,91 @@ class GuestAgentsModeTest {
             assertEquals(modified, file.lastModified())
         } finally { root.deleteRecursively() }
     }
+    @Test fun aManagedUpdateLeavesAnAlreadyOpenFileComplete() {
+        val root = kotlin.io.path.createTempDirectory("agents-publication").toFile()
+        try {
+            assumeTrue(root.toPath().fileSystem.supportedFileAttributeViews().contains("posix"))
+            val file = File(root, "root/.dsh/AGENTS.md")
+            GuestSetup.writeAgentsMd(root, phoneStorage = false, directEngine = true)
+            val expectedUpdated = file.readBytes()
+            GuestSetup.writeAgentsMd(root, phoneStorage = false)
+            val original = file.readBytes()
+            assertFalse(original.contentEquals(expectedUpdated))
+            file.inputStream().use { opened ->
+                GuestSetup.writeAgentsMd(root, phoneStorage = false, directEngine = true)
+                assertArrayEquals(expectedUpdated, file.readBytes())
+                assertArrayEquals(original, opened.readBytes())
+            }
+        } finally { root.deleteRecursively() }
+    }
+
+    @Test fun aManagedUpdatePreservesExistingPosixPermissions() {
+        val root = kotlin.io.path.createTempDirectory("agents-mode-bits").toFile()
+        try {
+            assumeTrue(root.toPath().fileSystem.supportedFileAttributeViews().contains("posix"))
+            val file = File(root, "root/.dsh/AGENTS.md")
+            GuestSetup.writeAgentsMd(root, phoneStorage = false)
+            val permissions = PosixFilePermissions.fromString("rw-r-----")
+            Files.setPosixFilePermissions(file.toPath(), permissions)
+            GuestSetup.writeAgentsMd(root, phoneStorage = false, directEngine = true)
+            assertTrue(file.readText().contains("`${root.canonicalPath}/root/workspace`"))
+            assertEquals(permissions, Files.getPosixFilePermissions(file.toPath()))
+            assertEquals(listOf("AGENTS.md"), file.parentFile!!.list()!!.toList())
+        } finally { root.deleteRecursively() }
+    }
+
+    @Test fun aNewManagedFileUsesOrdinaryFileCreationPermissions() {
+        val root = kotlin.io.path.createTempDirectory("agents-default-mode").toFile()
+        try {
+            assumeTrue(root.toPath().fileSystem.supportedFileAttributeViews().contains("posix"))
+            val control = File(root, "ordinary").also { it.writeText("control") }
+            GuestSetup.writeAgentsMd(root, phoneStorage = false)
+            val file = File(root, "root/.dsh/AGENTS.md")
+            assertEquals(Files.getPosixFilePermissions(control.toPath()), Files.getPosixFilePermissions(file.toPath()))
+        } finally { root.deleteRecursively() }
+    }
+
+    @Test fun managedSymlinksStillFollowTheirTargetsIncludingMissingTargets() {
+        val root = kotlin.io.path.createTempDirectory("agents-link").toFile()
+        try {
+            assumeTrue(root.toPath().fileSystem.supportedFileAttributeViews().contains("posix"))
+            val file = File(root, "root/.dsh/AGENTS.md")
+            GuestSetup.writeAgentsMd(root, phoneStorage = false)
+            val target = File(file.parentFile, "linked")
+            Files.move(file.toPath(), target.toPath())
+            Files.createSymbolicLink(file.toPath(), target.toPath().fileName)
+            GuestSetup.writeAgentsMd(root, phoneStorage = false, directEngine = true)
+            assertTrue(Files.isSymbolicLink(file.toPath()))
+            assertTrue(target.readText().contains("`${root.canonicalPath}/root/workspace`"))
+            Files.delete(target.toPath())
+            GuestSetup.writeAgentsMd(root, phoneStorage = false)
+            assertTrue(Files.isSymbolicLink(file.toPath()))
+            assertTrue(target.readText().startsWith("<!-- dsh-app:managed"))
+        } finally { root.deleteRecursively() }
+    }
+
+    @Test fun aReadOnlyManagedFileIsNotReplacedThroughItsWritableParent() {
+        val root = kotlin.io.path.createTempDirectory("agents-read-only").toFile()
+        try {
+            assumeTrue(root.toPath().fileSystem.supportedFileAttributeViews().contains("posix"))
+            val file = File(root, "root/.dsh/AGENTS.md")
+            GuestSetup.writeAgentsMd(root, phoneStorage = false)
+            val original = file.readBytes()
+            val permissions = PosixFilePermissions.fromString("r--------")
+            val probe = File(file.parentFile, "write-admission-probe").also { it.writeText("probe") }
+            Files.setPosixFilePermissions(probe.toPath(), permissions)
+            val denied = try {
+                Files.newByteChannel(probe.toPath(), StandardOpenOption.WRITE).use { }
+                false
+            } catch (_: java.nio.file.AccessDeniedException) {
+                true
+            }
+            assumeTrue("The real filesystem must deny WRITE for the read-only probe", denied)
+            Files.setPosixFilePermissions(file.toPath(), permissions)
+            GuestSetup.writeAgentsMd(root, phoneStorage = false, directEngine = true)
+            assertArrayEquals(original, file.readBytes())
+            assertEquals(permissions, Files.getPosixFilePermissions(file.toPath()))
+        } finally { root.deleteRecursively() }
+    }
+
 }

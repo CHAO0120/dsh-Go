@@ -12,6 +12,12 @@ import java.io.File
 import java.io.IOException
 import java.net.Inet4Address
 import java.net.InetAddress
+import java.nio.file.Files
+import java.nio.file.LinkOption
+import java.nio.file.NoSuchFileException
+import java.nio.file.StandardCopyOption
+import java.nio.file.StandardOpenOption
+import java.nio.file.attribute.PosixFilePermissions
 
 /** Small files inside the rootfs that must reflect the device before each start. */
 object GuestSetup {
@@ -128,8 +134,38 @@ object GuestSetup {
                     else "\$DSH_HOME/dsh-app/diagnostics.md",
                 )
             file.parentFile?.mkdirs()
-            if (!file.exists() || file.readText() != text) file.writeText(text)
+            if (!file.exists() || file.readText() != text) writeManagedAgents(file, text)
         } catch (_: Exception) {
+        }
+    }
+
+    /** Publish complete managed text; explicit links keep their existing follow-and-write behavior. */
+    private fun writeManagedAgents(file: File, text: String) {
+        val path = file.toPath()
+        if (Files.isSymbolicLink(path) || !path.fileSystem.supportedFileAttributeViews().contains("posix")) {
+            file.writeText(text)
+            return
+        }
+        val permissions = try {
+            Files.getPosixFilePermissions(path, LinkOption.NOFOLLOW_LINKS)
+        } catch (_: NoSuchFileException) {
+            null
+        }
+        if (permissions == null) {
+            // The existing helper uses writeText, preserving this platform's ordinary creation mode.
+            SafeMode.writeAtomic(file, text)
+            return
+        }
+        // Check the existing file's actual write admission without creating or truncating it.
+        Files.newByteChannel(path, StandardOpenOption.WRITE).use { }
+        val temp = Files.createTempFile(path.parent, ".AGENTS.md.dsh-app-", ".tmp",
+            PosixFilePermissions.asFileAttribute(permissions))
+        try {
+            temp.toFile().writeText(text)
+            Files.setPosixFilePermissions(temp, permissions)
+            Files.move(temp, path, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING)
+        } finally {
+            Files.deleteIfExists(temp)
         }
     }
 
