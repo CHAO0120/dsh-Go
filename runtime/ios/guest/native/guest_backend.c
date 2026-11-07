@@ -85,7 +85,8 @@ int dsh_guest_initialize(const struct dsh_guest_options *options) {
     pthread_mutex_unlock(&gate);
     return e;
   }
-  if (!strcmp(root, "/") || strlen(root) > sizeof data - 6) {
+  // fakefs opens root/meta.db as well as root/data. Reject before entering iSH.
+  if (!strcmp(root, "/") || strlen(root) > sizeof data - sizeof "/meta.db") {
     pthread_mutex_unlock(&gate);
     return EINVAL;
   }

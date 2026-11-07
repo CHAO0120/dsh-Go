@@ -388,3 +388,83 @@ index 4e86c15..c368e51 100644
      strcpy(uts->release, "4.20.69-ish");
      snprintf(uts->version, sizeof(uts->version), "%s %s %s", uname_version, __DATE__, __TIME__);
  #if defined(GUEST_ARM64)
+--- a/fs/fake.c
++++ b/fs/fake.c
+@@ -1131,7 +1131,9 @@
+ 
+     // this is annoying
+     char entry_path[MAX_PATH + 1];
+-    realfs_getpath(fd, entry_path);
++    int path_error = realfs_getpath(fd, entry_path);
++    if (path_error < 0)
++        return path_error;
+ 
+     /* [T-ios-log-verbose-tier] Per-ENTRY trace, gated on the app's Verbose
+      * level. Unconditional it produced 1.68 M lines / 183 MB in one day from
+@@ -1147,7 +1149,9 @@
+             *strrchr(entry_path, '/') = '\0';
+         }
+     } else if (strcmp(entry->name, ".") != 0) {
+-        // god I don't know what to do if this would overflow
++        // A host directory plus its next entry must fit, including slash and NUL.
++        if (strlen(entry_path) + 1 + strlen(entry->name) >= sizeof(entry_path))
++            return _ENAMETOOLONG;
+         strcat(entry_path, "/");
+         strcat(entry_path, entry->name);
+     }
+@@ -1464,10 +1468,15 @@
+ 
+ static int fakefs_mount(struct mount *mount) {
+     char db_path[PATH_MAX];
+-    strcpy(db_path, mount->source);
+-    char *basename = strrchr(db_path, '/') + 1;
+-    assert(strcmp(basename, "data") == 0);
+-    strcpy(basename, "meta.db");
++    const char *slash = strrchr(mount->source, '/');
++    if (slash == NULL || strcmp(slash + 1, "data") != 0)
++        return _EINVAL;
++    size_t prefix_length = slash + 1 - mount->source;
++    // meta.db is longer than data; validate its full path before either copy.
++    if (prefix_length > sizeof(db_path) - sizeof("meta.db"))
++        return _ENAMETOOLONG;
++    memcpy(db_path, mount->source, prefix_length);
++    memcpy(db_path + prefix_length, "meta.db", sizeof("meta.db"));
+ 
+     // do this now so rebuilding can use root_fd
+     int err = realfs.mount(mount);
+--- a/fs/real.c
++++ b/fs/real.c
+@@ -32,8 +32,8 @@
+ 
+ static int getpath(int fd, char *buf) {
+ #if defined(__linux__)
+-    char proc_fd[20];
+-    sprintf(proc_fd, "/proc/self/fd/%d", fd);
++    char proc_fd[64];
++    snprintf(proc_fd, sizeof(proc_fd), "/proc/self/fd/%d", fd);
+     ssize_t size = readlink(proc_fd, buf, MAX_PATH - 1);
+     if (size >= 0)
+         buf[size] = '\0';
+--- a/fs/path.c
++++ b/fs/path.c
+@@ -229,7 +229,9 @@
+                 mount_release(mount);
+                 if (levels >= 5)
+                     return _ELOOP;
+-                // readlink does not null terminate
++                // readlink may fill the supplied capacity without a terminator.
++                if ((size_t) res >= MAX_PATH - (size_t) (c - out))
++                    return _ENAMETOOLONG;
+                 c[res] = '\0';
+                 // if we should restart from the root, copy down
+                 if (*c == '/')
+@@ -237,6 +239,9 @@
+                 char *expanded_path = possible_symlink;
+                 strcpy(expanded_path, out);
+                 if (strcmp(p, "") != 0) {
++                    size_t prefix_length = strlen(expanded_path);
++                    if (strlen(p) >= sizeof(possible_symlink) - prefix_length - 1)
++                        return _ENAMETOOLONG;
+                     strcat(expanded_path, "/");
+                     strcat(expanded_path, p);
+                 }
