@@ -6,6 +6,13 @@ mod ddi;
 mod core_device;
 mod media;
 
+// Synthetic tests include the exact HTTP/2 and budget modules reconstructed
+// from the pinned upstream patch; production uses the idevice dependency.
+#[cfg(test)]
+use idevice::{IdeviceError, ReadWrite, xpc};
+#[cfg(test)]
+mod xpc_resource_tests;
+
 use std::ffi::{CStr, CString, c_char};
 use std::net::{IpAddr, SocketAddr};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
