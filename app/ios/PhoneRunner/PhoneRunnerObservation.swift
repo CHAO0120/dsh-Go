@@ -253,6 +253,27 @@ final class PhoneRunnerObservation {
       }
     }
 
+    /// How two same-sized frames differ: pixels changed by more than a faint shade, the largest
+    /// change, and the box around them (in pixels). For diagnostics.
+    func difference(_ other: Frame) -> String {
+      guard pixelWidth == other.pixelWidth, pixelHeight == other.pixelHeight,
+        luma.count == other.luma.count, !luma.isEmpty else {
+        return "size \(pixelWidth)x\(pixelHeight) vs \(other.pixelWidth)x\(other.pixelHeight)"
+      }
+      var changed = 0, largest = 0
+      var minX = pixelWidth, minY = pixelHeight, maxX = -1, maxY = -1
+      for i in 0..<luma.count {
+        let delta: Int = abs(Int(luma[i]) - Int(other.luma[i]))
+        largest = max(largest, delta)
+        guard delta > 24 else { continue }
+        changed += 1
+        let x = i % pixelWidth, y = i / pixelWidth
+        minX = min(minX, x); maxX = max(maxX, x); minY = min(minY, y); maxY = max(maxY, y)
+      }
+      let box = changed == 0 ? "none" : "\(minX),\(minY)-\(maxX),\(maxY)"
+      return "\(changed)/\(luma.count) pixels, largest \(largest), box \(box), size \(pixelWidth)x\(pixelHeight)"
+    }
+
     /// The same screen to act on: the same app, direction and geometry, and either identical
     /// pixels or, on a screen-sized image, at most 1% of pixels changed by more than a faint
     /// shade. That lets a scroll indicator fade, the clock tick or a caret blink; a dialog, a
@@ -332,7 +353,11 @@ final class PhoneRunnerObservation {
     guard (1...4).contains(fresh.orientation), record.frame.orientation == fresh.orientation else {
       throw PhoneRunnerObservationError.orientation
     }
-    guard record.frame.matches(fresh) else { throw PhoneRunnerObservationError.changed }
+    guard record.frame.matches(fresh) else {
+      // Numbers only, for working out what moves on a real screen; never pixels or text.
+      print("[phone-runner] frame changed: \(record.frame.difference(fresh))")
+      throw PhoneRunnerObservationError.changed
+    }
     return record
   }
 

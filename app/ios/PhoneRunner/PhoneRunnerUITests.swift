@@ -494,7 +494,10 @@ final class PhoneTools {
     let detail = params["detail"] as? Bool ?? false
     let root = try app.snapshot()
     let after = try capture(input: false)
-    guard before.frame.matches(after.frame) else { throw PhoneRunnerObservationError.changed }
+    guard before.frame.matches(after.frame) else {
+      print("[phone-runner] frame changed: \(before.frame.difference(after.frame))")
+      throw PhoneRunnerObservationError.changed
+    }
     serial += 1
     var found: [Int: Element] = [:]
     var lines: [String] = []
@@ -773,7 +776,10 @@ final class PhoneTools {
       throw ToolError("焦点附近出现密码、验证码、支付或掩码提示，没有继续输入；请用 handoff。")
     }
     let after = try capture(input: true)
-    guard before.frame.matches(after.frame) else { throw PhoneRunnerObservationError.changed }
+    guard before.frame.matches(after.frame) else {
+      print("[phone-runner] frame changed: \(before.frame.difference(after.frame))")
+      throw PhoneRunnerObservationError.changed
+    }
     _ = try inputApplication()
     try checkTypingResult()
     return (app, value)
