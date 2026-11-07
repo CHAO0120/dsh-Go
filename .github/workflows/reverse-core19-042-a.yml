@@ -1,0 +1,161 @@
+# reverse temp branch only (request 042 A). Not product; never merged.
+# One Linux job. Preparation copies ci.yml's "Runtime and bridge" job (setup-node, locked npm ci
+# --ignore-scripts into a throwaway prefix, fs-local-original.js, rtbuild patch-dsh, locked pnpm
+# prefix, the same six env vars), then exactly the one requested node --test command.
+name: reverse core19 042 A
+
+on:
+  push:
+    branches: [reverse/core19-042-a]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  FLUTTER_VERSION: 3.47.7
+  NODE_VERSION: 24.22.1
+  GRADLE_VERSION: 9.3.1
+  TZ: Asia/Shanghai
+
+jobs:
+  runtime:
+    name: Request 042 A glob path framing
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      UV_USE_IO_URING: 0 # same as ci.yml's runtime job
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - name: Toolchain and tree identity (reporting only)
+        run: |
+          set +e
+          mkdir -p "$RUNNER_TEMP/out"
+          echo "HEAD=$(git rev-parse HEAD)"
+          echo "SOURCE_ROOT=$(pwd)"
+          echo "RUNNER_TEMP=$RUNNER_TEMP"
+          git log -3 --format='COMMIT %H parents=%P %s'
+          for f in runtime/patches/pins.json runtime/locks/dsh-0.2.2-rc.1/package.json runtime/locks/dsh-0.2.2-rc.1/package-lock.json runtime/locks/pnpm-11.28.5/package.json runtime/locks/pnpm-11.28.5/package-lock.json runtime/lib/rtbuild.py runtime/build-runtime.sh runtime/tests/glob-path-framing.test.mjs runtime/tests/grep-retention-cost.test.mjs runtime/patches/zzzzzzzz-glob-null-path-framing.diff .github/reverse-042/check-new-pins.py .github/reverse-042/expected-new-pins.json; do
+            [ -f "$f" ] && echo "SRC $(sha256sum "$f" | cut -c1-64) blob=$(git hash-object "$f") $f"
+          done
+          echo "PATCH_DIFFS=$(ls runtime/patches/*.diff | wc -l)"
+          echo "UID=$(id -u) GID=$(id -g) USER=$(id -un)"
+          uname -srm | sed 's/^/KERNEL /'
+          grep PRETTY_NAME /etc/os-release
+          echo "NODE $(node --version) NPM $(npm --version) $(python3 --version 2>&1)"
+          echo "NODE_BIN $(command -v node)"
+          echo "SYSTEM_PATH_RG $(command -v rg || echo none) (reported only; not used by the tests or the probe)"
+          exit 0
+      - name: Base pins read-only original
+        run: |
+          set -e
+          cp runtime/patches/pins.json "$RUNNER_TEMP/base-pins.json"
+          chmod a-w "$RUNNER_TEMP/base-pins.json"
+          cp "$RUNNER_TEMP/base-pins.json" "$RUNNER_TEMP/out/base-pins.json"
+          sha=$(sha256sum "$RUNNER_TEMP/base-pins.json" | cut -c1-64)
+          echo "BASE_PINS sha=$sha bytes=$(wc -c < "$RUNNER_TEMP/base-pins.json") mode=$(stat -c %a "$RUNNER_TEMP/base-pins.json") $RUNNER_TEMP/base-pins.json"
+          test "$sha" = 2a3d04e05708e887f00be0a80338ead13b4ca1e1c72c5bf300be02bd266e53fb
+          echo "BASE_PINS_IDENTITY_OK"
+      - name: Install a throwaway patched DSH (original pins, strict, no --record)
+        id: fresh
+        run: |
+          set +e
+          run() { echo "+ $*"; "$@"; rc=$?; echo "  EXIT=$rc"; [ $rc -eq 0 ] || exit $rc; }
+          tgt=node_modules/@deepseek-ai/dsh-tool-fs-search/lib/index.js
+          version=$(sed -nE 's/^DSH_VERSION="\$\{DSH_VERSION:-(.+)\}"$/\1/p' runtime/build-runtime.sh)
+          prefix="$RUNNER_TEMP/dsh"
+          echo "=== PREP BEGIN $(date -u +%Y-%m-%dT%H:%M:%SZ) prefix=$prefix version=$version"
+          [ ! -e "$prefix" ] || { echo "PREFIX_ALREADY_EXISTS"; exit 1; }
+          run mkdir "$prefix"
+          run cp "runtime/locks/dsh-$version/package.json" "runtime/locks/dsh-$version/package-lock.json" "$prefix/"
+          run npm ci --prefix "$prefix" --ignore-scripts --no-audit --no-fund
+          run cp "$prefix/node_modules/@deepseek-ai/dsh-fs-local/lib/index.js" "$prefix/fs-local-original.js"
+          echo "TARGET_BEFORE $(sha256sum "$prefix/$tgt" | cut -c1-64) $tgt"
+          echo "PINS_BEFORE $(sha256sum runtime/patches/pins.json | cut -c1-64)"
+          echo "+ python3 -I runtime/lib/rtbuild.py patch-dsh --prefix $prefix --dsh-version $version "
+          python3 -I runtime/lib/rtbuild.py patch-dsh --prefix "$prefix" --dsh-version "$version"  > "$RUNNER_TEMP/out/patch-dsh-strict.log" 2>&1
+          rc=$?
+          cat "$RUNNER_TEMP/out/patch-dsh-strict.log"
+          echo "PATCH_DSH_EXIT=$rc lines=$(wc -l < "$RUNNER_TEMP/out/patch-dsh-strict.log") patched=$(grep -c ': patched ' "$RUNNER_TEMP/out/patch-dsh-strict.log") already=$(grep -c 'already patched' "$RUNNER_TEMP/out/patch-dsh-strict.log")"
+          echo "TARGET_AFTER $(sha256sum "$prefix/$tgt" | cut -c1-64) $tgt"
+          echo "PINS_AFTER $(sha256sum runtime/patches/pins.json | cut -c1-64) cr=$(tr -cd '\r' < runtime/patches/pins.json | wc -c)"
+          echo "=== PREP END $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          [ $rc -eq 0 ] || exit $rc
+          pnpm_version=$(sed -nE 's/^PNPM_VERSION="\$\{PNPM_VERSION:-(.+)\}"$/\1/p' runtime/build-runtime.sh)
+          pnpm_prefix="$RUNNER_TEMP/pnpm"
+          run mkdir "$pnpm_prefix"
+          run cp "runtime/locks/pnpm-$pnpm_version/package.json" "runtime/locks/pnpm-$pnpm_version/package-lock.json" "$pnpm_prefix/"
+          run npm ci --prefix "$pnpm_prefix" --ignore-scripts --no-audit --no-fund
+          {
+            echo "DSH_PREFIX=$prefix"
+            echo "DSH_TEST_PREFIX=$prefix"
+            echo "PNPM_BIN=$pnpm_prefix/node_modules/pnpm/bin/pnpm.mjs"
+            echo "DSH_INSTALL=$prefix/node_modules/@deepseek-ai/dsh"
+            echo "DSH_TOOLS_DIR=$prefix/node_modules/@deepseek-ai/dsh-tools"
+            echo "DSH_FS_LOCAL_ORIGINAL_JS=$prefix/fs-local-original.js"
+          } >> "$GITHUB_ENV"
+          echo "ENV DSH_PREFIX=$prefix DSH_TEST_PREFIX=$prefix PNPM_BIN=$pnpm_prefix/node_modules/pnpm/bin/pnpm.mjs DSH_INSTALL=$prefix/node_modules/@deepseek-ai/dsh DSH_TOOLS_DIR=$prefix/node_modules/@deepseek-ai/dsh-tools DSH_FS_LOCAL_ORIGINAL_JS=$prefix/fs-local-original.js"
+      - name: Read-only resolveRgPath probe (A prefix)
+        if: ${{ !cancelled() && steps.fresh.outcome == 'success' }}
+        run: |
+          set +e
+          cat > "$RUNNER_TEMP/rg-probe.mjs" <<'JSEOF'
+          import { pathToFileURL } from 'node:url';
+          import { join, resolve } from 'node:path';
+          import { realpathSync, readFileSync, statSync, readdirSync } from 'node:fs';
+          import { createHash } from 'node:crypto';
+          import { execFileSync } from 'node:child_process';
+          const prefix = resolve(process.argv[2]);
+          console.log('RG_PREFIX', prefix);
+          console.log('RG_VSCODE_DIRS', readdirSync(join(prefix, 'node_modules/@vscode')).join(' '));
+          console.log('RG_VSCODE_RIPGREP_VERSION', JSON.parse(readFileSync(join(prefix, 'node_modules/@vscode/ripgrep/package.json'), 'utf8')).version);
+          const lib = join(prefix, 'node_modules/@deepseek-ai/dsh-tool-fs-search/lib/index.js');
+          console.log('RG_LIB_SHA256', createHash('sha256').update(readFileSync(lib)).digest('hex'));
+          const { resolveRgPath } = await import(pathToFileURL(lib));
+          const p = await resolveRgPath();
+          console.log('RG_RESOLVED', p);
+          const real = realpathSync(p);
+          const st = statSync(real);
+          console.log('RG_REALPATH', real);
+          console.log('RG_INSIDE_PREFIX', real.startsWith(prefix + '/'));
+          console.log('RG_PERM', (st.mode & 0o7777).toString(8), 'RG_SIZE', st.size);
+          console.log('RG_SHA256', createHash('sha256').update(readFileSync(real)).digest('hex'));
+          for (const line of execFileSync(p, ['--version'], { encoding: 'utf8' }).split('\n')) if (line) console.log('RG_VERSION_OUT', line);
+          JSEOF
+          echo "+ node $RUNNER_TEMP/rg-probe.mjs $RUNNER_TEMP/dsh"
+          node "$RUNNER_TEMP/rg-probe.mjs" "$RUNNER_TEMP/dsh" 2>&1 | tee -a "$RUNNER_TEMP/out/rg-probe.txt"
+          echo "RG_PROBE_EXIT=${PIPESTATUS[0]}"
+          exit 0
+      - name: Command node --test runtime/tests/glob-path-framing.test.mjs
+        id: test
+        if: ${{ !cancelled() && steps.fresh.outcome == 'success' }}
+        run: |
+          set +e
+          echo "=== CMD BEGIN $(date -u +%Y-%m-%dT%H:%M:%SZ) cwd=$(pwd)"
+          echo "+ node --test runtime/tests/glob-path-framing.test.mjs"
+          node --test runtime/tests/glob-path-framing.test.mjs > "$RUNNER_TEMP/out/test.stdout" 2> "$RUNNER_TEMP/out/test.stderr"
+          rc=$?
+          echo "=== CMD END $(date -u +%Y-%m-%dT%H:%M:%SZ) CMD_EXIT=$rc"
+          echo "rc=$rc" >> "$GITHUB_OUTPUT"
+          echo "--- STDOUT $(wc -c < "$RUNNER_TEMP/out/test.stdout") bytes sha256=$(sha256sum "$RUNNER_TEMP/out/test.stdout" | cut -c1-64) ---"
+          cat "$RUNNER_TEMP/out/test.stdout"
+          echo "--- STDERR $(wc -c < "$RUNNER_TEMP/out/test.stderr") bytes sha256=$(sha256sum "$RUNNER_TEMP/out/test.stderr" | cut -c1-64) ---"
+          cat "$RUNNER_TEMP/out/test.stderr"
+          echo "--- END ---"
+          exit 0
+      - name: Upload request 042 outputs (reverse temp branch only)
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: reverse-042-A-outputs
+          path: ${{ runner.temp }}/out
+          if-no-files-found: warn
+          retention-days: 7
+      - name: Keep the node --test command's real result as the job result
+        if: ${{ !cancelled() && steps.test.outcome == 'success' && steps.test.outputs.rc != '0' }}
+        run: exit 1
