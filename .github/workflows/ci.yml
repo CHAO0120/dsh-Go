@@ -213,6 +213,30 @@ jobs:
             echo "DSH_TOOLS_DIR=$prefix/node_modules/@deepseek-ai/dsh-tools"
             echo "DSH_FS_LOCAL_ORIGINAL_JS=$prefix/fs-local-original.js"
           } >> "$GITHUB_ENV"
+      # reverse temp branch only (request 034): environment, native addons, pins and target identity (reporting, no effect on the result)
+      - name: Request 034 environment, pins and target (reverse temp branch only)
+        run: |
+          set +e
+          echo "uid=$(id -u) node=$(node --version) npm=$(npm --version) python=$(python3 --version 2>&1) git=$(git --version)"
+          grep PRETTY_NAME /etc/os-release; uname -srm
+          node -p "'NODE_VERSIONS ' + JSON.stringify(process.versions)"
+          echo "HEAD=$(git rev-parse HEAD)"
+          sha256sum runtime/patches/pins.json | sed 's/^/PINS /'
+          ls runtime/patches/ | grep -c '' | sed 's/^/PATCH_FILES /'
+          ls runtime/patches/zzzzzzzzzz-goal-edited-cap-checkpoint.diff 2>&1 | sed 's/^/NEW_PATCH /'
+          sha256sum "$DSH_PREFIX/node_modules/@deepseek-ai/dsh-goal/lib/index.js" | sed 's/^/TARGET /'
+          sha256sum runtime/tests/goal-round-cap-checkpoint.test.mjs | sed 's/^/TESTFILE /'
+          sha256sum "$DSH_FS_LOCAL_ORIGINAL_JS" "$DSH_PREFIX/node_modules/@deepseek-ai/dsh-fs-local/lib/index.js" | sed 's/^/FSLOCAL /'
+          find "$DSH_PREFIX/node_modules" -name '*.node' -printf 'ADDON %s %p\n' 2>/dev/null | head -40
+          echo "ENV DSH_PREFIX=$DSH_PREFIX DSH_TEST_PREFIX=$DSH_TEST_PREFIX PNPM_BIN=$PNPM_BIN DSH_INSTALL=$DSH_INSTALL DSH_TOOLS_DIR=$DSH_TOOLS_DIR DSH_FS_LOCAL_ORIGINAL_JS=$DSH_FS_LOCAL_ORIGINAL_JS"
+          ls -la "$PNPM_BIN"; node "$PNPM_BIN" --version 2>&1 | sed 's/^/PNPM_VERSION /'
+          exit 0
+      # reverse temp branch only (request 034 A): the requested target command, once, before the attached full suite
+      - name: Request 034 A target (reverse temp branch only)
+        run: |
+          echo "=== REQ034 A TARGET BEGIN $(date -u +%H:%M:%SZ)"
+          DSH_PREFIX="$DSH_PREFIX" node --test runtime/tests/goal-round-cap-checkpoint.test.mjs && echo "TARGET_EXIT=0" || echo "TARGET_EXIT=$?"
+          echo "=== REQ034 A TARGET END $(date -u +%H:%M:%SZ)"
       - name: Unit tests
         run: |
           node --test runtime/tests/*.test.mjs app/tool/engine_auth/*.test.mjs
@@ -254,6 +278,37 @@ jobs:
           gradle-version: ${{ env.GRADLE_VERSION }}
       - working-directory: app/android
         run: gradle --stacktrace :app:testArm64DebugUnitTest
+      # reverse temp branch only (request 034): JUnit XML counts, toolchain and source identity after the full JVM run (reporting, no effect on the result)
+      - name: JUnit XML summary (reverse temp branch only)
+        if: ${{ !cancelled() }}
+        working-directory: app/android
+        run: |
+          set +e
+          java -version 2>&1 | sed 's/^/JAVA_VERSION /'
+          gradle --version 2>/dev/null | grep -E '^(Gradle|Kotlin|JVM|OS)' | sed 's/^/GRADLE_VERSION /'
+          echo "HEAD=$(git rev-parse HEAD)"
+          sha256sum app/src/main/kotlin/io/github/ccch1mneyyy/dsh_app/MainActivity.kt app/src/main/kotlin/io/github/ccch1mneyyy/dsh_app/phone/SystemActions.kt | sed 's/^/SRC /'
+          python3 -I - <<'PYEOF'
+          import glob, xml.etree.ElementTree as ET
+          files = sorted(set(glob.glob('../build/**/test-results/testArm64DebugUnitTest/*.xml', recursive=True) + glob.glob('**/build/**/test-results/testArm64DebugUnitTest/*.xml', recursive=True)))
+          T = F = E = S = 0
+          for f in files:
+              r = ET.parse(f).getroot()
+              t, fa, er, sk = (int(r.get(k, 0)) for k in ('tests', 'failures', 'errors', 'skipped'))
+              T += t; F += fa; E += er; S += sk
+              name = r.get('name') or f
+              print(f"SUITE {name} tests={t} failures={fa} errors={er} skipped={sk}")
+              for c in r.iter('testcase'):
+                  bad = [k for k in ('failure', 'error', 'skipped') if c.find(k) is not None]
+                  if bad:
+                      print(f"  CASE {c.get('name')} time={c.get('time')} status={','.join(bad)}")
+                  for k in ('failure', 'error', 'skipped'):
+                      for x in c.findall(k):
+                          print(f"    {k.upper()} message={(x.get('message') or '')[:2000]}")
+                          print('    ' + (x.text or '')[:30000].replace(chr(10), chr(10) + '    '))
+          print(f"JUNIT_TOTAL files={len(files)} tests={T} failures={F} errors={E} skipped={S}")
+          PYEOF
+          exit 0
 
   ci-ok:
     name: CI OK
