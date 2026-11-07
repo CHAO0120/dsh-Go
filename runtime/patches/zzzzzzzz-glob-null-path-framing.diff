@@ -1,0 +1,19 @@
+--- a/node_modules/@deepseek-ai/dsh-tool-fs-search/lib/index.js
++++ b/node_modules/@deepseek-ai/dsh-tool-fs-search/lib/index.js
+@@ -595,6 +595,7 @@
+ 	}
+ 	const parts = [
+ 		"--files",
++		"--null",
+ 		...pruning,
+ 		`--glob=${input.pattern}`,
+ 		"--sort=modified",
+@@ -843,7 +844,7 @@
+ 				paths: []
+ 			};
+ 			const all = [];
+-			for (const line of run.stdout.split("\n")) {
++			for (const line of run.stdout.split("\0")) {
+ 				if (line.length === 0) continue;
+ 				const displayPath = toWorkdirRelative(line, run.workdir);
+ 				all.push(displayPath);
