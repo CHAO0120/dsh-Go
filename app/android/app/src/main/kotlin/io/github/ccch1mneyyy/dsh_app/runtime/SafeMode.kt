@@ -534,6 +534,7 @@ object SafeMode {
 //   export <output.tar>  preserve raw original conversations outside the original HOME
 'use strict'
 const fs = require('fs')
+const createHash = require('crypto').createHash
 const path = require('path')
 const cp = require('child_process')
 
@@ -591,16 +592,43 @@ function withLock (file, fn) {
       break
     } catch (e) {
       if (e.code !== 'EEXIST') throw e
-      const pid = parseInt(String(readText(lock) || '').trim(), 10)
-      if (pid > 0 && !alive(pid)) {
-        fs.rmSync(lock, { force: true })
-        continue
-      }
+      if (takeOverExitedLock(lock)) continue
       if (Date.now() > deadline) die('package.json 正被别的进程修改（锁文件 ' + lock + '），稍后再试')
       sleep(100)
     }
   }
   try { return fn() } finally { fs.rmSync(lock, { force: true }) }
+}
+// Keep the raw record for the shared hash and the identity recheck.
+function holderExited (record) {
+  if (!/^\d+\n$/.test(record)) return false
+  const pid = Number(record.trim())
+  if (pid === 0 || pid > 2147483647 || pid === process.pid) return false
+  try { process.kill(pid, 0); return false } catch (e) { return e.code === 'ESRCH' }
+}
+function takeOverExitedLock (lock) {
+  const record = readText(lock)
+  if (record === null || !holderExited(record)) return false
+  const claim = lock + '.takeover-' + createHash('sha256').update(record).digest('hex').slice(0, 16)
+  let fd
+  try {
+    fd = fs.openSync(claim, 'wx', 0o600)
+    try { fs.writeFileSync(fd, process.pid + '\n') } finally { fs.closeSync(fd) }
+  } catch (e) {
+    if (fd !== undefined) {
+      fs.rmSync(claim, { force: true })
+      throw e
+    }
+    if (e.code === 'EEXIST' || e.code === 'EPERM') return false
+    throw e
+  }
+  try {
+    if (readText(lock) !== record || !holderExited(record)) return false
+    try { fs.rmSync(lock, { force: true }) } catch (e) { return false }
+    return true
+  } finally {
+    try { fs.rmSync(claim, { force: true }) } catch (e) {}
+  }
 }
 function writeAtomic (file, text) {
   const tmp = file + '.' + process.pid + '.' + Date.now() + '.tmp'
