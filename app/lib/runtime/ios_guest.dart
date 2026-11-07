@@ -6,9 +6,11 @@ import 'package:flutter/services.dart';
 final class IosGuestStatus {
   const IosGuestStatus({required this.phase, required this.available,
     required this.installed, required this.usable, required this.busy,
+    this.suspended = false, this.suspendedReason,
     this.version, this.errorCode, this.errorMessage});
   final String phase;
-  final bool available, installed, usable, busy;
+  final bool available, installed, usable, busy, suspended;
+  final String? suspendedReason;
   final String? version, errorCode, errorMessage;
   factory IosGuestStatus.fromMap(Map<Object?, Object?> map) {
     final error = map['error'];
@@ -16,6 +18,7 @@ final class IosGuestStatus {
     return IosGuestStatus(phase: map['phase'] as String,
       available: map['available'] == true, installed: map['installed'] == true,
       usable: map['usable'] == true, busy: map['busy'] == true,
+      suspended: map['suspended'] == true, suspendedReason: map['suspendedReason'] as String?,
       version: map['version'] as String?, errorCode: errors['code'] as String?,
       errorMessage: errors['message'] as String?);
   }
@@ -44,6 +47,9 @@ final class IosGuestBridge {
   Future<IosGuestStatus> status() => _statusMethod('status');
   Future<IosGuestStatus> install() => _statusMethod('install');
   Future<IosGuestStatus> uninstall() => _statusMethod('uninstall');
+  /// Clears the prior crash record. Restart the local engine to apply this;
+  /// a running engine keeps its immutable startup routing snapshot.
+  Future<IosGuestStatus> resume() => _statusMethod('resume');
   Future<bool> cancel() async {
     _requireIos();
     final value = await _methods.invokeMapMethod<Object?, Object?>('cancel');

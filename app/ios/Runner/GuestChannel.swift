@@ -51,13 +51,22 @@ final class GuestChannel: NSObject, FlutterStreamHandler {
   }
   private func snapshot() -> [String: Any] {
     var installed = false
+    var suspended = false
+    var crashGateKnown = false
     var error = lastError ?? supportFailure
     do { installed = try installer?.installed() ?? false }
     catch let failure { if error == nil { error = guestFailure(failure) } }
     let available = installer != nil && kernel.available
+    if let installer {
+      do {
+        suspended = try kernel.isSuspended(in: installer.base)
+        crashGateKnown = true
+      } catch let failure { if error == nil { error = guestFailure(failure) } }
+    }
     return ["schema": 1, "phase": phase ?? (error != nil ? "error" : installed ? "installed" : "notInstalled"),
       "version": installed ? GuestRootfsArchive.version as Any : NSNull(),
-      "available": available, "installed": installed, "usable": installed && available && operation == nil,
+      "available": available, "installed": installed, "usable": installed && available && crashGateKnown && !suspended && operation == nil,
+      "suspended": suspended, "suspendedReason": suspended ? "crashed" as Any : NSNull(),
       "busy": operation != nil,
       "error": error.map { ["code": $0.code, "message": $0.message] } as Any? ?? NSNull()]
   }
@@ -74,6 +83,13 @@ final class GuestChannel: NSObject, FlutterStreamHandler {
       case "status": reply(result, snapshot())
       case "cancel":
         reply(result, ["cancelled": cancellation?.cancel() ?? false])
+      case "resume":
+        guard operation == nil else { throw GuestFailure("busy", "Linux installation is busy.") }
+        guard let installer else { throw GuestFailure("storage_unavailable", "The app support directory is unavailable.") }
+        try kernel.resume(in: installer.base)
+        lastError = nil
+        emitStatus()
+        reply(result, snapshot())
       case "install":
         guard operation == nil else { throw GuestFailure("busy", "Linux installation is busy.") }
         guard kernel.available else { throw GuestFailure("unavailable", "The Linux backend is unavailable in this build.") }

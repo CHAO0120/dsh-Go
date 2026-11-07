@@ -1,4 +1,5 @@
 #include "guest_backend.h"
+#include "guest_crash.h"
 #include "guest_dns.h"
 #include "bound_admission.h"
 #include "bound_ish_fs.h"
@@ -30,7 +31,8 @@ static dsh_job_threads *threads;
 static dsh_job_bridge *bridge;
 static struct task *supervisor;
 static uint64_t next_id, active_id;
-static char *root_path;
+static char *root_path, *crash_directory;
+static struct dsh_crash_guard crash_guard = DSH_CRASH_GUARD_INIT;
 static struct dsh_path_span *protected;
 static size_t protected_count;
 static int workspace_mounted, temp_mounted, waiting, install_change;
@@ -73,7 +75,7 @@ static int prepare_devices(void) {
 int dsh_guest_initialize(const struct dsh_guest_options *options) {
   if (!options || !options->root || !options->protected_paths ||
       !options->protected_count || options->protected_count > 128) return EINVAL;
-  char root[PATH_MAX], data[PATH_MAX];
+  char root[PATH_MAX], data[PATH_MAX], directory[PATH_MAX];
   pthread_mutex_lock(&gate);
   if (install_change) { pthread_mutex_unlock(&gate); return EBUSY; }
   // The install lease also protects root lookup: never carry a canonical path
@@ -86,6 +88,16 @@ int dsh_guest_initialize(const struct dsh_guest_options *options) {
   if (!strcmp(root, "/") || strlen(root) > sizeof data - 6) {
     pthread_mutex_unlock(&gate);
     return EINVAL;
+  }
+  size_t parent_length = (size_t)(strrchr(root, '/') - root);
+  if (!parent_length) { pthread_mutex_unlock(&gate); return EINVAL; }
+  memcpy(directory, root, parent_length); directory[parent_length] = '\0';
+  int suspended = 0;
+  int record_error = dsh_crash_check(directory,
+      state == DSH_GUEST_QUARANTINED ? NULL : &crash_guard, &suspended);
+  if (record_error || suspended) {
+    pthread_mutex_unlock(&gate);
+    return record_error ? record_error : EOWNERDEAD;
   }
   if (state != DSH_GUEST_COLD) {
     int e = state == DSH_GUEST_QUARANTINED ? EIO :
@@ -106,13 +118,11 @@ int dsh_guest_initialize(const struct dsh_guest_options *options) {
     pthread_mutex_unlock(&gate);
     return e;
   }
-  // After entering upstream initialization, failure is permanent. The upstream
-  // does not provide a complete allocation-failure/whole-kernel unwind API.
-  state = DSH_GUEST_QUARANTINED;
   root_path = strdup(root);
+  crash_directory = strdup(directory);
   protected_count = options->protected_count + 1;
   protected = calloc(protected_count, sizeof *protected);
-  int e = (!root_path || !protected) ? ENOMEM : 0;
+  int e = (!root_path || !crash_directory || !protected) ? ENOMEM : 0;
   for (size_t i = 0; !e && i < protected_count; ++i) {
     const char *path = i ? options->protected_paths[i - 1] : root;
     if (!path || path[0] != '/' || !path[1] || strlen(path) >= PATH_MAX) {
@@ -122,6 +132,20 @@ int dsh_guest_initialize(const struct dsh_guest_options *options) {
     if (!copy) { e = ENOMEM; break; }
     protected[i] = (struct dsh_path_span){copy, strlen(copy)};
   }
+  // initialize itself enters upstream code before the first task's start.
+  // A separate generation protects that phase without claiming a running task.
+  uint64_t initialization = 0;
+  if (!e) {
+    if (next_id == UINT64_MAX) e = EOVERFLOW;
+    else {
+      initialization = ++next_id;
+      e = dsh_crash_begin(&crash_guard, crash_directory, initialization, 1);
+    }
+  }
+  int recorded = !e;
+  // After entering upstream initialization, failure is permanent. The upstream
+  // does not provide a complete allocation-failure/whole-kernel unwind API.
+  if (!e) state = DSH_GUEST_QUARANTINED;
   struct task *saved = current;
   strcpy(data, root); strcat(data, "/data");
   if (!e) e = host_error(mount_root(&fakefs, data));
@@ -141,7 +165,20 @@ int dsh_guest_initialize(const struct dsh_guest_options *options) {
   }
   if (!e) e = dsh_job_threads_install(threads);
   current = saved;
+  // Initialization has no guest/output pthreads. A returned failure is settled;
+  // a fatal signal never reaches this point and leaves the durable record.
+  if (recorded) {
+    int cleanup = dsh_crash_settle(&crash_guard, initialization);
+    if (!e) e = cleanup;
+  }
   if (!e) state = DSH_GUEST_READY;
+  else if (state == DSH_GUEST_COLD) {
+    for (size_t i = 0; protected && i < protected_count; ++i)
+      free((void *)protected[i].bytes);
+    free(protected); protected = NULL; protected_count = 0;
+    free(root_path); root_path = NULL;
+    free(crash_directory); crash_directory = NULL;
+  }
   pthread_mutex_unlock(&gate);
   return e;
 }
@@ -211,6 +248,8 @@ int dsh_guest_start_with_clock(const struct dsh_guest_request *request,
   dsh_root *workspace = NULL, *temporary = NULL;
   struct task *saved = current, *task = NULL;
   struct dsh_job_stdio io = {{NULL, NULL, NULL}, {-1, -1, -1}};
+  uint64_t generation = 0;
+  int recorded = 0;
   if (!e) {
     struct dsh_path_span path = {request->workspace, strlen(request->workspace)};
     workspace = dsh_admit_workspace(path, protected, protected_count, request->workspace_readonly != 0);
@@ -227,6 +266,16 @@ int dsh_guest_start_with_clock(const struct dsh_guest_request *request,
       temporary = dsh_admit_workspace(path, deny, protected_count + 1, false);
       if (!temporary) e = errno;
       free(deny);
+    }
+  }
+  // DNS synchronization already calls into the guest filesystem. Persist first,
+  // before any iSH work; rejected/queued calls never own another task's record.
+  if (!e) {
+    if (next_id == UINT64_MAX) e = EOVERFLOW;
+    else {
+      generation = ++next_id;
+      e = dsh_crash_begin(&crash_guard, crash_directory, generation, 0);
+      recorded = !e;
     }
   }
   // Refresh before exposing any approved host directory to the guest namespace.
@@ -250,7 +299,7 @@ int dsh_guest_start_with_clock(const struct dsh_guest_request *request,
   if (!e) e = host_error(become_new_init_child());
   if (!e) {
     task = current;
-    active_id = ++next_id;
+    active_id = generation;
     task->dsh_job_id = active_id;
     e = dsh_job_threads_begin(threads, active_id);
   }
@@ -280,6 +329,12 @@ int dsh_guest_start_with_clock(const struct dsh_guest_request *request,
     if (task && task->files) { fdtable_release(task->files); task->files = NULL; }
     state = DSH_GUEST_QUARANTINED;
     *job_id = 0;
+  }
+  // DNS/preflight failure started no task. Once mount/task construction was
+  // touched, the backend cannot prove full settlement: retain the record.
+  if (e && recorded && !touched) {
+    int cleanup = dsh_crash_settle(&crash_guard, generation);
+    if (cleanup) state = DSH_GUEST_QUARANTINED;
   }
   current = saved;
   dsh_job_stdio_close(&io);
@@ -375,7 +430,8 @@ int dsh_guest_wait(uint64_t id, unsigned timeout_ms, struct dsh_guest_result *re
     result->exit_code = (status & 0x7f) ? 128 + (status & 0x7f) : (status >> 8) & 255;
     result->resources_settled = 1;
     active_id = 0;
-    state = DSH_GUEST_READY;
+    e = dsh_crash_settle(&crash_guard, id);
+    state = e ? DSH_GUEST_QUARANTINED : DSH_GUEST_READY;
   }
   waiting = 0;
   pthread_mutex_unlock(&gate);
@@ -386,6 +442,21 @@ enum dsh_guest_state dsh_guest_status(void) {
   enum dsh_guest_state result = state;
   pthread_mutex_unlock(&gate);
   return result;
+}
+
+int dsh_guest_crash_status(const char *directory, int *suspended) {
+  pthread_mutex_lock(&gate);
+  int e = dsh_crash_check(directory,
+      state == DSH_GUEST_QUARANTINED ? NULL : &crash_guard, suspended);
+  pthread_mutex_unlock(&gate);
+  return e;
+}
+int dsh_guest_crash_resume(const char *directory) {
+  pthread_mutex_lock(&gate);
+  int e = state == DSH_GUEST_RUNNING || state == DSH_GUEST_QUARANTINED ||
+          install_change ? EBUSY : dsh_crash_resume(directory, &crash_guard);
+  pthread_mutex_unlock(&gate);
+  return e;
 }
 
 int dsh_guest_begin_install_change(void) {

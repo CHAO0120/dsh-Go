@@ -38,6 +38,15 @@ typedef int (*dsh_guest_output)(void *, int stream, uint64_t end_offset,
 int dsh_guest_initialize(const struct dsh_guest_options *);
 int dsh_guest_begin_install_change(void);
 void dsh_guest_end_install_change(void);
+// directory is the trusted dsh-guest installation base (parent of rootfs).
+// An interrupted task suspends new kernel entry with EOWNERDEAD. This includes
+// process termination/jetsam, not only a proved kernel crash. No task data is
+// stored. Queries never initialize the kernel; absent directories are clear.
+int dsh_guest_crash_status(const char *directory, int *suspended);
+// Explicit user action only. Does not restart/reset the kernel; RUNNING,
+// QUARANTINED or an installation lease returns EBUSY. Refresh the engine's
+// startup snapshot after success. Returns positive host errno on failure.
+int dsh_guest_crash_resume(const char *directory);
 int dsh_guest_start(const struct dsh_guest_request *, dsh_guest_output, void *,
                     uint64_t *job_id);
 // Same start contract; trusted monotonic activity clock is borrowed until wait

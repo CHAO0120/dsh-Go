@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { guestMetadataView, guestInstallRequiredMessage } from './metadata.mjs';
+import { guestMetadataView, guestInstallRequiredMessage, guestSuspendedMessage } from './metadata.mjs';
 import { SerialGuestChannel } from './channel.mjs';
 import { GuestPaths, guestEnvironment } from './paths.mjs';
 
@@ -7,6 +7,7 @@ export const guestUnavailableMessage = '这个命令在 iOS 本机不可用，�
 const unsupported = 'ERR_IOS_GUEST_MIXED: 此脚本将 Node Worker 与 Linux 命令或无法安全判定的执行混用；请拆成独立工具调用，未执行此脚本。';
 
 export class GuestProvider {
+  #channel;
   #queue;
   #forbiddenRoots;
   #readMetadata;
@@ -18,6 +19,7 @@ export class GuestProvider {
     if (readMetadata !== undefined && typeof readMetadata !== 'function') throw new TypeError('Invalid trusted guest metadata reader');
     this.#readMetadata = readMetadata;
     this.#temporaryRoot = temporaryRoot;
+    this.#channel = channel;
     this.#queue = channel && new SerialGuestChannel(channel, { cleanupDeadline });
     this.#forbiddenRoots = [...forbiddenRoots];
   }
@@ -25,7 +27,9 @@ export class GuestProvider {
   get metadata() {
     let cached;
     try { cached = this.#readMetadata?.(); } catch {}
-    return guestMetadataView(cached, !!this.#queue, this.#queue?.state);
+    const value = guestMetadataView(cached, !!this.#queue, this.#queue?.state);
+    return this.#channel?.suspended ? Object.freeze({ ...value, state: 'suspended',
+      suspended: true, suspendedReason: 'crashed', available: false }) : value;
   }
 
   async execute({ decision, argv, policy, cwd, temporaryRoot, env, stdin, signal, graceMs, output }) {
@@ -34,9 +38,10 @@ export class GuestProvider {
       return { exitCode, signal: null };
     };
     if (decision.route === 'unsupported') return fail(unsupported, 2);
+    const metadata = this.metadata;
+    if (metadata.suspended) return fail(guestSuspendedMessage, 126);
     if (!this.#queue) return fail(guestUnavailableMessage, 127);
     if (this.#readMetadata) {
-      const metadata = this.metadata;
       if (metadata.installed !== 'present') return fail(metadata.installed === 'absent' ? guestInstallRequiredMessage :
         'ERR_IOS_GUEST_INSTALL_INVALID: Linux 安装状态不完整，请在设置中重新安装 Linux 环境。', 127);
     }

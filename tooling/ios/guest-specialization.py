@@ -1,5 +1,5 @@
 """Exact iOS-only guest additions."""
-FILES = ('runtime/ios/guest/preload-selector.cjs', 'runtime/ios/guest/overrides.mjs', 'runtime/ios/guest/bootstrap.mjs', 'runtime/ios/guest/native-channel.mjs', 'runtime/ios/guest/channel.mjs', 'runtime/ios/guest/paths.mjs', 'runtime/ios/guest/provider.mjs', 'runtime/ios/guest/route.mjs', 'runtime/ios/guest/file-paths.mjs', 'runtime/ios/guest/delivery.mjs', 'runtime/ios/guest/metadata.mjs', 'runtime/ios/guest/cleanup-budget.mjs', 'runtime/ios/guest/virtual-filesystem.mjs')
+FILES = ('runtime/ios/guest/preload-selector.cjs', 'runtime/ios/guest/overrides.mjs', 'runtime/ios/guest/bootstrap.mjs', 'runtime/ios/guest/suspended.mjs', 'runtime/ios/guest/native-channel.mjs', 'runtime/ios/guest/channel.mjs', 'runtime/ios/guest/paths.mjs', 'runtime/ios/guest/provider.mjs', 'runtime/ios/guest/route.mjs', 'runtime/ios/guest/file-paths.mjs', 'runtime/ios/guest/delivery.mjs', 'runtime/ios/guest/metadata.mjs', 'runtime/ios/guest/cleanup-budget.mjs', 'runtime/ios/guest/virtual-filesystem.mjs')
 EDITS = {'runtime/ohos/process/index.mjs': (('  get temporaryRoot() { return this.backend.temporaryRoot; }',
                                      '  get temporaryRoot() { return this.backend.temporaryRoot; }\n'
                                      '  isHostPath(path) { return this.backend.roots.some(root => path === root || '

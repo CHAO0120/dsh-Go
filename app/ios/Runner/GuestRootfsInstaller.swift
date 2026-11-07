@@ -11,6 +11,11 @@ import Glibc
 protocol GuestRootfsLease: AnyObject { func release() }
 protocol GuestKernelAccess: AnyObject {
   var available: Bool { get }
+  /// Reads only the crash gate. A marker owned by a live task is not a crash.
+  func isSuspended(in directory: URL) throws -> Bool
+  /// Clears the durable gate atomically against native task admission. Existing
+  /// engine snapshots stay unchanged; callers must restart the engine to apply it.
+  func resume(in directory: URL) throws
   func reserveRootfsMutation() throws -> GuestRootfsLease
 }
 

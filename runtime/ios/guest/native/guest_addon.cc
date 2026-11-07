@@ -335,6 +335,10 @@ void dispatch(uv_async_t *handle) {
     bool valid = event_base(o->env, job, "exit", event);
     valid = valid && napi_create_int32(o->env, result.exit_code, &value) == napi_ok && set(o->env, event, "exitCode", value);
     valid = valid && napi_create_int32(o->env, error, &value) == napi_ok && set(o->env, event, "error", value);
+    // Host errno numbers differ between Darwin and Linux. Expose a stable
+    // code for old snapshots that attempt a task after a record was retained.
+    if (error == EOWNERDEAD)
+      valid = valid && napi_create_string_utf8(o->env, "ios_guest_suspended", NAPI_AUTO_LENGTH, &value) == napi_ok && set(o->env, event, "errorCode", value);
     valid = valid && napi_get_boolean(o->env, result.abandoned != 0, &value) == napi_ok && set(o->env, event, "abandoned", value);
     valid = valid && napi_get_boolean(o->env, result.resources_settled != 0, &value) == napi_ok && set(o->env, event, "resourcesSettled", value);
     if (valid) invoke(job, event);

@@ -1,9 +1,19 @@
-import { guestInstallRequiredMessage } from './metadata.mjs';
+import { guestInstallRequiredMessage, guestSuspendedMessage } from './metadata.mjs';
 // root is the fakefs container (data + meta.db); the C backend appends /data.
 // Trusted owner injection only. This module neither probes nor boots a kernel.
 export function createNativeGuestChannel(native, { root, protectedPaths = [], readInstallation }) {
+  // Once this engine has observed a suspended task, an explicit settings resume
+  // only affects a fresh owner after engine restart. Queued calls check again at
+  // dispatch time so clearing the disk record cannot release old queued work.
+  let suspended = false;
   return Object.freeze({
+    get suspended() { return suspended; },
     exec(request, output) {
+      if (suspended) return Object.freeze({
+        finished: Promise.resolve().then(() => output('stderr', Buffer.from(guestSuspendedMessage + '\n')))
+          .then(() => ({ exitCode: 126, signal: null, resourcesSettled: true })),
+        signal() {}, abandon() {},
+      });
       const workspace = request.mounts.find(m => m.guest === '/workspace')?.host;
       const temporary = request.mounts.find(m => m.guest === '/tmp')?.host;
       if (!workspace || !temporary || !['read-only', 'workspace-write'].includes(request.mode)) throw new TypeError('Invalid guest mounts or policy');
@@ -49,6 +59,7 @@ export function createNativeGuestChannel(native, { root, protectedPaths = [], re
           });
           streams[stream - 1].catch(fail);
         } else if (value.type === 'exit') {
+          if (value.errorCode === 'ios_guest_suspended') suspended = true;
           clearTimeout(retry);
           // Native confirms ACKs or explicit discard; still await every JS consumer.
           // Cancellation cannot retire a live consumer merely because C has settled.
@@ -60,9 +71,10 @@ export function createNativeGuestChannel(native, { root, protectedPaths = [], re
               // Recheck after a settled native error: uninstall can win after preflight.
               // ENOENT alone is insufficient; a missing guest executable must stay a task error.
               const missing = readInstallation?.() === 'absent';
-              const diagnostic = missing ? guestInstallRequiredMessage : `ERR_IOS_GUEST_TASK: Native task failed (errno ${value.error}).`;
+              const diagnostic = value.errorCode === 'ios_guest_suspended' ? guestSuspendedMessage :
+                missing ? guestInstallRequiredMessage : `ERR_IOS_GUEST_TASK: Native task failed (errno ${value.error}).`;
               Promise.resolve(output('stderr', Buffer.from(diagnostic + '\n'))).then(
-                () => completion.resolve({ exitCode: missing ? 127 : 126, signal: null, nativeError: value.error, resourcesSettled: true }), completion.reject);
+                () => completion.resolve({ exitCode: suspended ? 126 : missing ? 127 : 126, signal: null, nativeError: value.error, resourcesSettled: true }), completion.reject);
             } else completion.resolve({ exitCode: value.exitCode, signal: null, resourcesSettled: true });
           }, completion.reject).catch(completion.reject);
         } else fail(new Error('Unknown guest event'));

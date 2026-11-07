@@ -148,7 +148,10 @@ private final class NativeEngine {
 
   func configureGuest(_ snapshot: [String: Any]) throws {
     let bytes = try JSONSerialization.data(withJSONObject: snapshot)
-    guard let json = String(data: bytes, encoding: .utf8), json.withCString({ guestConfig(snapshot["installed"] as? Bool == true ? 1 : 0, $0) }) == 0 else {
+    // A suspended startup still loads the rejection owner so Linux commands get
+    // a stable pause error. This flag never admits a native guest task itself.
+    let hasGuestOwner = snapshot["installed"] as? Bool == true || snapshot["suspended"] as? Bool == true
+    guard let json = String(data: bytes, encoding: .utf8), json.withCString({ guestConfig(hasGuestOwner ? 1 : 0, $0) }) == 0 else {
       throw EngineFailure("ios_guest_config", "Linux 环境启动快照不可用。")
     }
   }
@@ -1012,24 +1015,24 @@ final class EngineChannel: NSObject, FlutterStreamHandler {
       // Installation changes take effect at the next engine start. This is an
       // App-owned snapshot, never a user environment/configuration override.
       let linux = GuestRootfsInstaller(base: filesDirectory.appendingPathComponent("dsh-guest", isDirectory: true))
-      let linuxInstalled = (try? linux.installed()) == true
-      let linuxAvailable = linuxInstalled && NativeGuestKernelAccess.shared.available
+      let linuxStartup = GuestStartupState(installer: linux, kernel: NativeGuestKernelAccess.shared)
+      if let failure = linuxStartup.failure {
+        // A storage/protocol failure disables guest admission while the ordinary
+        // engine remains usable. Do not log the private path or record contents.
+        _ = appendLog("Linux crash gate unavailable (" + failure.code + ").", stream: "system")
+      }
       // Never mount cache/ohos-process: it holds virtual-shell spill/state.
       let linuxTemporary = FileManager.default.temporaryDirectory.appendingPathComponent("dsh-guest-" + UUID().uuidString, isDirectory: true)
-      if linuxAvailable {
+      if linuxStartup.available {
         pendingGuestTemporary = try GuestStartupTemporary.create(url: linuxTemporary, generation: runtimeGeneration)
       }
       let protectedPaths = [dshHome, agentsHome, cache, installer.root, filesDirectory.appendingPathComponent("dsh-guest", isDirectory: true)].map { $0.standardizedFileURL.path }
-      try native?.configureGuest([
-        "installed": linuxAvailable,
-        "root": linux.root.path,
-        "temporaryRoot": linuxTemporary.path,
-        "addon": (native?.frameworks ?? "") + "/DshGuestBridge.framework/DshGuestBridge",
-        "protectedPaths": protectedPaths,
-        "metadata": ["v": 1, "source": "ios-native-owner", "state": linuxAvailable ? "ready" : "unavailable",
-                     "installed": linuxInstalled ? "present" : "absent", "available": linuxAvailable,
-                     "enforcement": "partial", "python": "unknown"]
-      ])
+      var linuxSnapshot = linuxStartup.routingSnapshot
+      linuxSnapshot["root"] = linux.root.path
+      linuxSnapshot["temporaryRoot"] = linuxTemporary.path
+      linuxSnapshot["addon"] = (native?.frameworks ?? "") + "/DshGuestBridge.framework/DshGuestBridge"
+      linuxSnapshot["protectedPaths"] = protectedPaths
+      try native?.configureGuest(linuxSnapshot)
       try native?.begin(
         runtime: installer.root.path, guest: guestRoot.path, home: dshHome.path, cache: cache.path,
         workspace: workspace.path, env: launchEnvironment)

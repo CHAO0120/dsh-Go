@@ -1,7 +1,10 @@
 // Installed snapshot comes only from the iOS host, never an env/config override.
 if ((await import('node:worker_threads')).isMainThread) {
   const guestSnapshot = JSON.parse(process._linkedBinding('dsh_ios_guest_config').read());
-  if (guestSnapshot?.installed === true) {
+  if (guestSnapshot?.suspended === true || guestSnapshot?.metadata?.state === 'suspended') {
+    const { installSuspendedGuestOwner } = await import('../ios/guest/suspended.mjs');
+    installSuspendedGuestOwner({ readMetadata: () => guestSnapshot.metadata });
+  } else if (guestSnapshot?.installed === true) {
     const { installGuestOwner } = await import('../ios/guest/bootstrap.mjs');
     const module = { exports: {} };
     process.dlopen(module, guestSnapshot.addon);
