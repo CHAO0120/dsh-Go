@@ -1007,6 +1007,13 @@ abstract final class Spots {
     keywords: (l) => l.searchKwSafeMode,
     androidOnly: true,
   );
+  static final workspaceRecovery = SettingSpot(
+    'workspace-recovery',
+    page: SettingsPageId.engine,
+    title: (l) => l.workspaceRecoveryEnable,
+    altTitle: (l) => l.workspaceRecoveryDisable,
+    keywords: (l) => l.searchKwWorkspaceRecovery,
+  );
   static final engineReset = SettingSpot(
     'engine-reset',
     page: SettingsPageId.engine,
@@ -1036,6 +1043,13 @@ abstract final class Spots {
     page: SettingsPageId.remote,
     title: (l) => l.remoteAutoConnectOnStartup,
     keywords: (l) => l.searchKwRemoteAutoConnect,
+  );
+
+  static final remoteCompactHistory = SettingSpot(
+    'remote-compact-history',
+    page: SettingsPageId.remote,
+    title: (l) => l.remoteCompactHistory,
+    keywords: (l) => l.searchKwRemoteCompactHistory,
   );
 
   // 引擎参数 and its pages (drawn from the engine's schema).
@@ -1154,10 +1168,12 @@ final _rows = <SettingSpot>[
   Spots.autoStart,
   Spots.autoSafe,
   Spots.safeMode,
+  Spots.workspaceRecovery,
   Spots.engineReset,
   Spots.engineUninstall,
   Spots.addSshHost,
   Spots.remoteAutoConnect,
+  Spots.remoteCompactHistory,
   Spots.subagentDepth,
   Spots.parallelCalls,
   Spots.commandTimeout,

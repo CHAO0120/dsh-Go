@@ -311,6 +311,12 @@ class _WebEntryHostState extends ConsumerState<WebEntryHost> {
               : null;
           await _compose(request);
         }
+      case ScreenshotEntry(:final path):
+        await _onShare(
+          IncomingShare(
+            files: [SharedFile(path: path, name: path.split('/').last)],
+          ),
+        );
       case OpenChatEntry(:final host, :final sessionId):
         if (!mounted || !await DiscardGuard.confirmLeave(context) || !mounted) return;
         final hosts = ref.read(hostsProvider);

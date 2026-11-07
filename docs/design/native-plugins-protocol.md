@@ -111,14 +111,14 @@ v1 内新增，规则和取舍见 [plugin-platform.md](plugin-platform.md) §2�
 
 面板另有 `placement: "plugin"`（协商：App 的 `surfaces` 没有列出时，只放这里的面板退回 `session.tab`）和 `presentation: "page" | "sheet"`。
 
-`turn.note` 的数据走 §4.3 的流，`scope` 必须带 `sessionId`，否则 `end(not-found)`。数据是 `{ <回合序号>: { text, tone? } }`，桥接逐条清洗，最多保留最新的 `turnNotesPerFeed`（64）个。宿主注册用 `ctx.dshGo.turnNote(id, dataFn)`。
+`turn.note` 的数据走 §4.3 的流，`scope` 必须带 `sessionId`，否则 `end(not-found)`。数据是 `{ <回合序号>: { text, tone? } }`，桥接逐条清洗，最多保留最新的 `turnNotesPerFeed`（64）个。宿主注册用 `ctx.dshGo.turnNote(id, dataFn)`。App 在一段对话里最多订阅 8 个插件的尾注，给面板和状态条留出流的预算（每条连接 32 个订阅）。
 
 ### 1.3 校验规则
 
 - **逐项校验**：每个条目独立判定，出错的条目丢弃，其余照常；问题记到插件的 `issues`（§3.3）。
 - `severity: "error"` = 该条目或字段被丢弃；`"warn"` = 保留（可能已截断）。
 - 未知顶层键、未知条目字段：忽略，记 `unknown-field`（warn）。
-- 未知 surface（如第二期的 `pets`、`turn.note`）：忽略，记 `unknown-surface`（warn）。
+- 未知 surface（如第二期的 `pets`）：忽略，记 `unknown-surface`（warn）。
 - 超过每插件上限：保留前 N 个，记 `too-many`（warn）。
 - `panel` 指向不存在的面板：去掉该字段，记 `invalid-field`（error）。
 - 没有 `effect`、宿主半侧也没注册处理的 actions，以及既没注册又没静态视图的面板：保留，但 `ready: false`，记 `no-handler`（warn）。App 对 `ready: false` 的条目置灰或不显示（由 App 决定）。
@@ -128,8 +128,8 @@ v1 内新增，规则和取舍见 [plugin-platform.md](plugin-platform.md) §2�
 
 | want | 附带字段 | 只在哪个 surface 附带 | 上限 |
 |---|---|---|---|
-| `draft` | `context.draft`：输入框当前文字 | `composer.actions` | 16 KiB（UTF-8） |
-| `clipboard` | `context.clipboard`：剪贴板文字 | `composer.actions` | 16 KiB |
+| `draft` | `context.draft`：输入框当前文字 | `composer.actions`、`composer.tools` | 16 KiB（UTF-8） |
+| `clipboard` | `context.clipboard`：剪贴板文字 | `composer.actions`、`composer.tools` | 16 KiB |
 | `message` | `context.message`：被长按的那条助手消息的正文 | `message.actions` | 16 KiB |
 
 - App 在插件首次被点按前提示一次，用户拒绝就不附带。
@@ -160,7 +160,7 @@ export function apply(ctx) {
 |---|---|---|
 | `panel` | `panel(id, { view, data?, actions? }) → dispose` | `view`：视图对象，或 `(scope, caps) => 视图 \| Promise<视图>`。`data`：`(scope, emit, caps) => 取消函数 \| void \| Promise<…>`。`actions`：`{ <action>: handler }`，处理视图里按钮 / options / confirm 的点按 |
 | `strip` | `strip(id, { data })` 或 `strip(id, dataFn) → dispose` | `dataFn` 同面板的 `data`：`(scope, emit, caps)`。数据形状固定为 `{ text, icon?, tone? }`（§4.5） |
-| `on` | `on(id, handler) → dispose` | 处理 `composer.actions` / `message.actions` / strip 的点按；面板没给 `actions` 表时，面板里的点按也落到这里（`event.action` 区分） |
+| `on` | `on(id, handler) → dispose` | 处理 `composer.actions` / `message.actions` / `composer.tools` / `session.actions` / strip 的点按；面板没给 `actions` 表时，面板里的点按也落到这里（`event.action` 区分） |
 | `refresh` | `refresh(id, scope?)` | 声明视图变了：桥接给订阅了该面板（且 scope 匹配）的连接发 `stale`，App 重新 GET 视图 |
 | `v` / `bridge` | 只读属性 | 协议主版本 `1`；桥接版本字符串 |
 
@@ -268,6 +268,8 @@ HTTP 错误（守卫的 401/403/503 除外）的正文：
 | `degraded` | error | 已降级 |
 
 ## 4. 路由
+
+**NA protocol v1 change（#656，能力缺省兼容）：** `surfaces`、`components` 查询参数分别独立处理。未提供某参数时，桥接向插件的视图回调省略对应可选字段，让 SDK 沿用原有 v1 surface / component 默认；显式空参数（例如 `surfaces=`）仍传空数组，表示该类能力均未声明，不自动回退。明确提供的列表按解析规则规范化后传递：按逗号拆分，去掉每项两端空白，丢掉空项和超过 64 个 UTF-16 代码单元的项，最多保留 64 项（例如 `surfaces=panels,,plugin` 得到 `["panels", "plugin"]`）。此规则不改变 `v` 的版本准入；`placement: "plugin"` 仍须在 `surfaces` 明确列出才保留，否则退回 `session.tab`。清单的 `contributes` 类别和 placement 是不同集合，`plugin` 不是新的清单类别。
 
 ### 4.1 `GET /dsh-go/v1/contributions`
 
@@ -399,7 +401,7 @@ HTTP 错误（守卫的 401/403/503 除外）的正文：
   "v": 1,
   "pkg": "dsh-go-example-quick",
   "id": "translate",                  // 贡献 id（面板点按时是面板 id）
-  "surface": "composer.actions",      // composer.actions | message.actions | composer.strip | panel
+  "surface": "composer.actions",      // composer.actions | message.actions | composer.tools | session.actions | composer.strip | panel
   "action": "refresh",                // 仅 panel：视图里按钮 / options / confirm 的 action 名（1–64 字符）
   "value": "b",                       // 仅 panel：options 选中的值等，任意 JSON，≤ 4 KiB
   "scope": { "sessionId": "…" },

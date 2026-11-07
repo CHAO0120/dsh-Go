@@ -27,6 +27,7 @@ String diagnosticsMarkdown(DiagnosticsSnapshot s, {int maxBytes = diagnosticsMar
     ..writeln();
   _environment(b, s);
   _connection(b, s);
+  _phone(b, s);
   _performance(b, s);
   _errors(b, s);
   _log(b, '引擎日志（尾部）', s.engineLog, diagnosticsEngineLines);
@@ -108,13 +109,48 @@ void _environment(StringBuffer b, DiagnosticsSnapshot s) {
 
 void _connection(StringBuffer b, DiagnosticsSnapshot s) {
   b.writeln('## 连接');
-  final entries = s.connection.entries.where((e) => e.value != null && '${e.value}'.isNotEmpty).toList();
+  final entries = s.connection.entries
+      .where((e) => e.key != 'history' && e.value != null && '${e.value}'.isNotEmpty)
+      .toList();
   if (entries.isEmpty) {
     b.writeln('- 没有正在观察的连接');
   } else {
     for (final e in entries) {
       b.writeln('- ${e.key}：${e.value}');
     }
+  }
+  final history = s.connection['history'];
+  if (history is Map && history['events'] is List) {
+    b.writeln('- 已观察的连接历史（已丢弃 ${history['dropped']} 条；不代表观察间隙的完整时序）：');
+    for (final event in (history['events'] as List).whereType<Map>()) {
+      final fields = [
+        '#${event['sequence']}',
+        'at=${event['observedAtEpochMs']}',
+        '+${event['elapsedMs']}ms',
+        '${event['phase']}',
+        if (event['step'] != null) '${event['step']}',
+        'attempt=${event['attempt']}',
+        if (event['transport'] != null) 'transport=${event['transport']}',
+        if (event['fallbackReason'] != null) 'fallback=${event['fallbackReason']}',
+        if (event['errorKind'] != null) 'error=${event['errorKind']}',
+        if (event['retryable'] != null) 'retryable=${event['retryable']}',
+        if (event['reasonCode'] != null) 'reason=${event['reasonCode']}',
+      ];
+      b.writeln('- ${fields.join(' · ')}');
+    }
+  }
+  b.writeln();
+}
+
+void _phone(StringBuffer b, DiagnosticsSnapshot s) {
+  b.writeln('## 手机操控（本机）');
+  final phone = s.phone;
+  if (!phone.ready) {
+    b.writeln('- 手机状态不可用');
+  } else {
+    b
+      ..writeln('- 手机操控开关：${phone.enabled} · 桥接监听：${phone.bridgeListening}')
+      ..writeln('- 无障碍开关：${phone.a11y.enabled} · 服务已连接：${phone.a11y.serviceConnected}');
   }
   b.writeln();
 }

@@ -393,6 +393,27 @@ void main() {
       expect(find.text('文字已复制，粘贴到输入框即可'), findsOneWidget);
     });
 
+    testWidgets('a pet screenshot reaches the web composer as an unsent image', (tester) async {
+      final slot = Directory.systemTemp.createTempSync('dsh-web-screenshot');
+      addTearDown(() {
+        if (slot.existsSync()) slot.deleteSync(recursive: true);
+      });
+      final image = File('${slot.path}/screenshot.png')..writeAsBytesSync(tinyPng);
+      await _pumpHome(tester, _windows.first, session: 's1');
+      await _entries.push({'kind': 'screenshot', 'path': image.path});
+      for (var i = 0; i < 40 && _composeCalls().isEmpty; i++) {
+        await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 20)));
+        await pumpFrames(tester, 2);
+      }
+
+      expect(_opened().last, {'newSession': true});
+      expect(_composeCalls().single, contains('"name":"screenshot.png"'));
+      expect(_composeCalls().single, contains('"type":"image/png"'));
+      expect(image.existsSync(), isFalse);
+      _page.post('DshAppCompose', jsonEncode({'text': true, 'files': 1}));
+      await pumpFrames(tester, 2);
+    });
+
     testWidgets('launcher: 新对话 starts one in the page; a recent conversation opens there', (tester) async {
       final container = await _pumpHome(tester, _windows.first, session: 's1');
       await _entries.push({'kind': 'new'});

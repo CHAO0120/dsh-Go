@@ -23,6 +23,15 @@ import '../transport/webrtc_transport.dart';
 import '../util/bytes.dart';
 import 'secret_store.dart';
 
+// Accounts using the same storage object and server keys share commit order.
+// An Expando does not keep an otherwise unreachable SecretStore alive.
+class _AccountStorageState {
+  Future<void> credentialWrites = Future<void>.value();
+  int signInEpoch = 0;
+}
+
+final _accountStorageStates = Expando<Map<String, _AccountStorageState>>();
+
 /// The signed-in account on one Server.
 class RemoteUser {
   const RemoteUser({required this.account, required this.deviceId, required this.serverUrl, this.provider});
@@ -264,6 +273,7 @@ class RemoteAccount {
     this.peerConnector,
     this.preferredTransports,
     this.onDirectFallback,
+    this.compactHistory = false,
     this.directTimeout = const Duration(seconds: 8),
     this.iceServersTimeout = const Duration(seconds: 10),
   }) : serverUrl = normalizeServerUrl(serverUrl ?? defaultRemoteServer),
@@ -271,6 +281,8 @@ class RemoteAccount {
        _socketConnector = socketConnector {
     api = RemoteServerApi(this.serverUrl, httpClient: httpClient);
     _scope = hashes.sha256.convert(utf8.encode(this.serverUrl.origin)).toString().substring(0, 24);
+    final scopes = _accountStorageStates[secrets] ??= {};
+    _storageState = scopes.putIfAbsent(_scope, _AccountStorageState.new);
   }
 
   final Uri serverUrl;
@@ -297,6 +309,13 @@ class RemoteAccount {
   /// raw native exception text, SDP or candidate addresses.
   void Function(String reason)? onDirectFallback;
 
+  /// Requests bounded history summaries from supporting Hosts. Captured by
+  /// [connectHost] for that client's lifetime, including automatic reconnects.
+  /// Changing it only affects the next [connectHost], not live streams or
+  /// cached history. The first successful session fixes the effective mode:
+  /// an unsupported Host stays full even if it gains support on reconnect.
+  bool compactHistory;
+
   /// How long a direct attempt may take to open its DataChannel before the
   /// next path is tried (the Server's larger deadline is capped at 15 s).
   final Duration directTimeout;
@@ -312,11 +331,12 @@ class RemoteAccount {
   _Identity? _identity;
   Future<_Identity>? _creatingIdentity;
   _Credentials? _credentials;
-  Future<void> _credentialWrites = Future<void>.value();
+  // Shared only within this storage object and normalized server scope.
+  late final _AccountStorageState _storageState;
   bool _restored = false;
   Future<void>? _restoring;
   Map<String, _Pin>? _pins;
-  Future<String>? _refreshing;
+  ({_Credentials owner, Future<String> result})? _refreshing;
   _ActiveConnection? _active;
   final Map<String, DateTime> _directCooldown = {};
   final Map<String, DateTime> _turnCooldown = {};
@@ -495,6 +515,7 @@ class RemoteAccount {
     await _saveCredentials(
       _Credentials.fromTokens(identity.deviceId, account, tokens, provider: provider),
       beforeWrite: beforeCommit,
+      signIn: true,
     );
     return RemoteUser(account: account, deviceId: identity.deviceId, serverUrl: serverUrl, provider: provider);
   }
@@ -534,40 +555,47 @@ class RemoteAccount {
     );
     await _secrets.write(_identityKey, jsonEncode(identity.toJson()));
     _identity = identity;
-    _credentials = null;
-    await _secrets.delete(_credentialsKey);
+    await _dropCredentials();
     return identity;
   }
 
-  Future<void> _saveCredentials(_Credentials credentials, {void Function()? beforeWrite}) {
+  Future<void> _saveCredentials(_Credentials credentials, {void Function()? beforeWrite, bool signIn = false}) {
     // SecretStore writes are atomic, but not cancellable. Serialize commits
     // so a slow older write cannot finish after a newer login's write.
-    final write = _credentialWrites.then((_) async {
+    final write = _storageState.credentialWrites.then((_) async {
       beforeWrite?.call();
       await _secrets.write(_credentialsKey, jsonEncode(credentials.toJson()));
       _credentials = credentials;
+      if (signIn) _storageState.signInEpoch++;
     });
-    _credentialWrites = write.catchError((Object _) {});
+    _storageState.credentialWrites = write.catchError((Object _) {});
     return write;
   }
 
   /// Signs out: closes the active connection, revokes this device on the
   /// Server (best effort, when [revokeDevice]) and deletes its tokens. A
   /// revoked device identity is discarded too; Host pins are kept.
+  /// A newer committed sign-in retires further cleanup from this logout;
+  /// a revoke or storage delete already issued cannot be undone here.
   Future<void> logout({bool revokeDevice = true}) async {
+    final epoch = _storageState.signInEpoch;
+    bool isCurrent() => epoch == _storageState.signInEpoch;
     await _restore();
+    if (!isCurrent()) return;
     await _active?.close();
+    if (!isCurrent()) return;
     final credentials = _credentials;
     if (revokeDevice && credentials != null) {
       try {
-        await api.revokeSelf(await accessToken());
+        final token = await accessToken();
+        if (!isCurrent()) return;
+        await api.revokeSelf(token);
       } on Object {
         // Offline or already revoked: still sign out locally.
       }
     }
-    _credentials = null;
-    await _secrets.delete(_credentialsKey);
-    if (revokeDevice) {
+    await _dropCredentials(isCurrent: isCurrent);
+    if (revokeDevice && isCurrent()) {
       _identity = null;
       await _secrets.delete(_identityKey);
     }
@@ -591,12 +619,19 @@ class RemoteAccount {
     if (!forceRefresh && credentials.accessTokenExpiresAt.isAfter(DateTime.now().add(const Duration(seconds: 60)))) {
       return credentials.accessToken;
     }
-    return _refreshing ??= _rotate(credentials).whenComplete(() => _refreshing = null);
+    final refreshing = _refreshing;
+    if (refreshing != null && identical(refreshing.owner, credentials)) return refreshing.result;
+    late final Future<String> result;
+    result = _rotate(credentials).whenComplete(() {
+      if (identical(_refreshing?.result, result)) _refreshing = null;
+    });
+    _refreshing = (owner: credentials, result: result);
+    return result;
   }
 
   Future<String> _rotate(_Credentials credentials) async {
     if (!credentials.refreshTokenExpiresAt.isAfter(DateTime.now())) {
-      await _dropCredentials();
+      await _dropCredentials(owner: credentials);
       throw const RemoteConnectException(
         RemoteFailure('ACCOUNT_AUTH_REQUIRED', 'The device sign-in expired; sign in again.', retryable: false),
       );
@@ -605,13 +640,20 @@ class RemoteAccount {
       final tokens = await api.refresh(credentials.deviceId, credentials.refreshToken);
       await _saveCredentials(
         _Credentials.fromTokens(credentials.deviceId, credentials.account, tokens, provider: credentials.provider),
+        beforeWrite: () {
+          if (!identical(_credentials, credentials)) {
+            throw const RemoteConnectException(
+              RemoteFailure('ACCOUNT_AUTH_REQUIRED', 'The device sign-in changed during refresh.', retryable: false),
+            );
+          }
+        },
       );
       return tokens.accessToken;
     } on RemoteApiException catch (error) {
       if (error.retryable || error.code == 'CONNECTION_FAILED' || error.code == 'RATE_LIMITED') {
         throw RemoteConnectException(RemoteFailure(error.code, error.message, retryable: true));
       }
-      await _dropCredentials();
+      await _dropCredentials(owner: credentials);
       throw RemoteConnectException(
         RemoteFailure(
           'ACCOUNT_AUTH_REQUIRED',
@@ -622,9 +664,17 @@ class RemoteAccount {
     }
   }
 
-  Future<void> _dropCredentials() async {
-    _credentials = null;
-    await _secrets.delete(_credentialsKey);
+  Future<void> _dropCredentials({_Credentials? owner, bool Function()? isCurrent}) {
+    // Deletes share the commit queue; retired refreshes and logouts recheck
+    // their owner at the point where the mutation would actually begin.
+    final write = _storageState.credentialWrites.then((_) async {
+      if (isCurrent != null && !isCurrent()) return;
+      if (owner != null && !identical(_credentials, owner)) return;
+      _credentials = null;
+      await _secrets.delete(_credentialsKey);
+    });
+    _storageState.credentialWrites = write.catchError((Object _) {});
+    return write;
   }
 
   // ---------------------------------------------------------------------------
@@ -749,13 +799,15 @@ class RemoteAccount {
     Duration healthTimeout = const Duration(seconds: 10),
     DshTracer? tracer,
   }) async {
+    final historyMode = _HistoryMode(compactHistory);
     await _restore();
     final previous = _active;
     _active = null;
     await previous?.close();
-    final carrier = RemoteTunnelCarrier(
+    late final RemoteTunnelCarrier carrier;
+    carrier = RemoteTunnelCarrier(
       hostId: host.id,
-      open: (last) => _openHostSession(host, last, confirmNewHost),
+      open: (last) => _openHostSession(host, last, confirmNewHost, historyMode, () => carrier.isClosed),
       healthInterval: healthInterval,
       healthTimeout: healthTimeout,
       tracer: tracer,
@@ -798,9 +850,15 @@ class RemoteAccount {
     }
   }
 
-  Future<RemoteHostSession> _openHostSession(RemoteHost host, RemoteFailure? previous, HostTrustPrompt? confirm) async {
+  Future<RemoteHostSession> _openHostSession(
+    RemoteHost host,
+    RemoteFailure? previous,
+    HostTrustPrompt? confirm,
+    _HistoryMode historyMode,
+    bool Function() isCancelled,
+  ) async {
     try {
-      return await _openHostSessionOnce(host, previous, confirm);
+      return await _openHostSessionOnce(host, previous, confirm, historyMode, isCancelled);
     } on RemoteConnectException {
       rethrow;
     } on Object catch (error) {
@@ -812,6 +870,8 @@ class RemoteAccount {
     RemoteHost host,
     RemoteFailure? previous,
     HostTrustPrompt? confirm,
+    _HistoryMode historyMode,
+    bool Function() isCancelled,
   ) async {
     final identity = _identity;
     if (identity == null || _credentials == null) {
@@ -847,11 +907,11 @@ class RemoteAccount {
     // (refresh once when the token is refused).
     _TransportSelection selection;
     try {
-      selection = await _connectTransport(token, host.id);
+      selection = await _connectTransport(token, host.id, isCancelled);
     } on RemoteTransportException catch (error) {
       if (error.code != 'AUTH_INVALID' && error.code != 'TOKEN_EXPIRED') rethrow;
       token = await accessToken(forceRefresh: true);
-      selection = await _connectTransport(token, host.id);
+      selection = await _connectTransport(token, host.id, isCancelled);
     }
     final transport = selection.transport;
 
@@ -884,10 +944,12 @@ class RemoteAccount {
     );
 
     // 4. Capability probe: the first RPC must be harness.transport.describe.
+    var probingCapabilities = true;
     try {
       final description = asMap(
         await rpc.call('harness.transport.describe', const <String, Object?>{}, timeout: const Duration(seconds: 10)),
       );
+      probingCapabilities = false;
       final raw = description?['capabilities'];
       if (raw is! List ||
           raw.length > maxRemoteCapabilityEntries ||
@@ -920,11 +982,34 @@ class RemoteAccount {
           ),
         );
       }
+      final supportsCompact = capabilities.contains('remote.history.compact.v1');
+      final compact = historyMode.negotiated ?? (supportsCompact && historyMode.requested);
+      if (compact && !supportsCompact) {
+        throw const RemoteConnectException(
+          RemoteFailure(
+            'HISTORY_MODE_CHANGED',
+            'The Host no longer supports compact history; create a new client to load full history.',
+            retryable: false,
+          ),
+        );
+      }
+      if (supportsCompact) {
+        final result = asMap(
+          await rpc.call('remote.history.configure', {'compact': compact}, timeout: const Duration(seconds: 10)),
+        );
+        if (result == null || result.length != 1 || result['compact'] is! bool || result['compact'] != compact) {
+          throw const RemoteConnectException(
+            RemoteFailure('INVALID_MESSAGE', 'The Host returned an invalid history configuration.', retryable: false),
+          );
+        }
+      }
+      historyMode.negotiated = compact;
       setup.stop();
       RemoteNetworkDiagnostics snapshot() => RemoteNetworkDiagnostics(
         transportMode: transport is WebRtcTransport ? transport.actualMode : transport.mode,
         connectionDuration: setup.elapsed,
         roundTripTime: transport is WebRtcTransport ? transport.roundTripTime : null,
+        peerNetwork: transport is WebRtcTransport ? transport.peerNetwork : null,
         fallbackReason:
             selection.fallbackReason ??
             (transport is WebRtcTransport && transport.actualMode == null
@@ -948,7 +1033,7 @@ class RemoteAccount {
       );
     } on RemoteRpcException catch (error) {
       await rpc.close();
-      if (error.code == 'METHOD_NOT_FOUND') {
+      if (probingCapabilities && error.code == 'METHOD_NOT_FOUND') {
         throw const RemoteConnectException(
           RemoteFailure(
             'HARNESS_VERSION_INCOMPATIBLE',
@@ -971,10 +1056,13 @@ class RemoteAccount {
   /// the Host may still hold state for the old one. Noise always starts only
   /// after the final data plane is chosen. Recent failures skip the bad path
   /// for 45 seconds; a changed native network hint clears that cooldown.
-  Future<_TransportSelection> _connectTransport(String token, String hostId) async {
+  Future<_TransportSelection> _connectTransport(String token, String hostId, bool Function() isCancelled) async {
     final connector = peerConnector;
     if (connector == null) {
-      return _TransportSelection(await _connectRelay(token, hostId), RemoteNetworkFallbackReason.webrtcUnavailable);
+      return _TransportSelection(
+        await _connectRelay(token, hostId, isCancelled: isCancelled),
+        RemoteNetworkFallbackReason.webrtcUnavailable,
+      );
     }
     var preferred = RemoteTransportMode.values;
     try {
@@ -1001,8 +1089,10 @@ class RemoteAccount {
     // must not suppress a fresh lookup on the separately authorized TURN stage.
     Future<List<RemoteIceServer>> fetchIce(String id) => api.turnCredentials(token, id);
 
-    if (!wantDirect && !wantTurn) return _TransportSelection(await _connectRelay(token, hostId), reason);
-    var control = await _connectRelay(token, hostId, direct: true, preferred: preferred);
+    if (!wantDirect && !wantTurn) {
+      return _TransportSelection(await _connectRelay(token, hostId, isCancelled: isCancelled), reason);
+    }
+    var control = await _connectRelay(token, hostId, direct: true, preferred: preferred, isCancelled: isCancelled);
     if (control.directTransports.isEmpty) {
       return _TransportSelection(control, RemoteNetworkFallbackReason.webrtcUnavailable);
     }
@@ -1025,7 +1115,9 @@ class RemoteAccount {
         _directCooldown[hostId] = DateTime.now().add(const Duration(seconds: 45));
         _notifyFallback(reason);
       }
-      if (wantTurn) control = await _connectRelay(token, hostId, direct: true, preferred: preferred);
+      if (wantTurn) {
+        control = await _connectRelay(token, hostId, direct: true, preferred: preferred, isCancelled: isCancelled);
+      }
     }
     if (wantTurn) {
       try {
@@ -1053,7 +1145,7 @@ class RemoteAccount {
     } else if (!wantDirect) {
       await control.close();
     }
-    return _TransportSelection(await _connectRelay(token, hostId), reason);
+    return _TransportSelection(await _connectRelay(token, hostId, isCancelled: isCancelled), reason);
   }
 
   void _notifyFallback(RemoteNetworkFallbackReason reason) {
@@ -1067,6 +1159,7 @@ class RemoteAccount {
   Future<RelayTransport> _connectRelay(
     String token,
     String hostId, {
+    required bool Function() isCancelled,
     bool direct = false,
     List<RemoteTransportMode>? preferred,
   }) => RelayTransport.connect(
@@ -1076,6 +1169,7 @@ class RemoteAccount {
     hostDeviceId: hostId,
     clientVersion: clientVersion,
     connector: _socketConnector,
+    isCancelled: isCancelled,
     tracer: controlTracer,
     offerDirect: direct,
     preferredTransports: preferred,
@@ -1174,6 +1268,14 @@ const Set<String> _terminalCodes = {
   'UNSUPPORTED_VERSION',
   'ACCOUNT_AUTH_REQUIRED',
 };
+
+// A client's transcript cache must not mix compact and full baselines.
+class _HistoryMode {
+  _HistoryMode(this.requested);
+
+  final bool requested;
+  bool? negotiated;
+}
 
 class _ActiveConnection {
   _ActiveConnection(this.client, this.carrier);

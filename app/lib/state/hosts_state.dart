@@ -268,6 +268,41 @@ class RemoteAutoConnectController extends Notifier<bool> {
 
 final remoteAutoConnectProvider = NotifierProvider<RemoteAutoConnectController, bool>(RemoteAutoConnectController.new);
 
+/// Reduces history payloads on supporting Remote Hosts, never live events.
+/// Changes apply to the next client, so an active turn is not interrupted.
+class RemoteCompactHistoryController extends Notifier<bool> {
+  static const prefsKey = 'remote_compact_history';
+  late Future<void> _loaded;
+
+  @override
+  bool build() {
+    _loaded = _load();
+    return false;
+  }
+
+  Future<void> get ready => _loaded;
+
+  Future<void> _load() async {
+    try {
+      final stored = (await SharedPreferences.getInstance()).getBool(prefsKey);
+      if (stored != null && ref.mounted) state = stored;
+    } catch (_) {}
+  }
+
+  Future<void> set(bool value) async {
+    await _loaded;
+    if (!ref.mounted) return;
+    state = value;
+    try {
+      await (await SharedPreferences.getInstance()).setBool(prefsKey, value);
+    } catch (_) {}
+  }
+}
+
+final remoteCompactHistoryProvider = NotifierProvider<RemoteCompactHistoryController, bool>(
+  RemoteCompactHistoryController.new,
+);
+
 /// Which host the chat, session list and new chats use. Persisted.
 class ActiveHostController extends Notifier<HostRef> {
   static const prefsKey = 'active_host';
@@ -365,19 +400,52 @@ class RelayServerController extends Notifier<String?> {
   }
 
   /// Back to dsh.r2049.cn (each server keeps its own sign-in).
-  Future<void> useDefault() async {
-    await _set(null);
-    ref.invalidate(relayAccountProvider);
-  }
+  Future<void> useDefault() => ref.read(_relayServerActionsProvider).useDefault();
 
   /// Switches to [server] (normalized; throws [HostLinkError] when invalid)
   /// and signs in there with email + password.
+  Future<void> loginWithPassword({required String server, required String email, required String password}) =>
+      ref.read(_relayServerActionsProvider).loginWithPassword(server: server, email: email, password: password);
+}
+
+// Commands need their own Ref: the backend watches the server state, so the
+// server notifier cannot read/invalidate its downstream providers. This provider
+// does not watch the selection and remains alive when a login sheet closes.
+final _relayServerActionsProvider = Provider<_RelayServerActions>(_RelayServerActions.new);
+
+class _RelayServerActions {
+  _RelayServerActions(this.ref);
+
+  final Ref ref;
+  int _operation = 0;
+
+  bool _owns(int operation, String? selection) =>
+      ref.mounted && operation == _operation && ref.read(relayServerProvider) == selection;
+
+  Future<void> useDefault() async {
+    final operation = ++_operation;
+    await ref.read(relayServerProvider.notifier)._set(null);
+    if (_owns(operation, null)) ref.invalidate(relayAccountProvider);
+  }
+
   Future<void> loginWithPassword({required String server, required String email, required String password}) async {
     ref.read(readListCredentialEpochProvider.notifier).advance();
     final origin = DshRemoteRelayBackend.normalizeServer(server);
-    await _set(origin == defaultRelayServer ? null : origin);
-    await ref.read(relayBackendProvider).loginWithPassword(email.trim(), password);
-    ref.invalidate(relayAccountProvider);
+    final selection = origin == defaultRelayServer ? null : origin;
+    final operation = ++_operation;
+    await ref.read(relayServerProvider.notifier)._set(selection);
+    // Persistence may yield to another server action, including A -> B -> A.
+    // Never resolve a retired request against the newly selected backend.
+    if (!_owns(operation, selection)) {
+      throw HostLinkError(HostLinkErrorKind.other, appL10n.remoteSignInCancelled);
+    }
+    final backend = ref.read(relayBackendProvider);
+    await backend.loginWithPassword(email.trim(), password);
+    // The captured account may have completed successfully after selection
+    // changed. Keep that result, but do not rebuild/cancel its successor login.
+    if (_owns(operation, selection) && identical(backend, ref.read(relayBackendProvider))) {
+      ref.invalidate(relayAccountProvider);
+    }
   }
 }
 
@@ -388,6 +456,7 @@ final relayServerProvider = NotifierProvider<RelayServerController, String?>(Rel
 /// The relay client (`packages/dsh_remote`) for the chosen server. Tests
 /// override with a fake; [UnavailableRelayBackend] turns the native relay off.
 final relayBackendProvider = Provider<RelayBackend>((ref) {
+  final history = ref.read(remoteCompactHistoryProvider.notifier);
   final backend = DshRemoteRelayBackend(
     secrets: ref.watch(secretStoreProvider),
     serverUrl: ref.watch(relayServerProvider),
@@ -395,6 +464,15 @@ final relayBackendProvider = Provider<RelayBackend>((ref) {
     // flutter_webrtc has no HarmonyOS implementation: straight to the relay,
     // not two handshakes that fail on the way there.
     peerConnector: ref.watch(webRtcAvailableProvider) ? flutterPeerConnector : null,
+    loadCompactHistory: () async {
+      await history.ready;
+      return ref.read(remoteCompactHistoryProvider);
+    },
+  );
+  ref.listen<bool>(
+    remoteCompactHistoryProvider,
+    (_, enabled) => backend.compactHistory = enabled,
+    fireImmediately: true,
   );
   // The old default-off preference no longer controls automatic transport selection.
   unawaited(
