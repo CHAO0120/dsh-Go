@@ -159,13 +159,15 @@ final class IOSPhoneClipboard {
       expires: Date().addingTimeInterval(10 * 60))
     await settle()
     guard lease === saved else { throw IOSPhoneClipboardError.stale }
-    // Check lifecycle before even changeCount: its background freshness is not
-    // a substitute for foreground ownership verification.
+    // Record an available foreground count even if the original caller was
+    // cancelled during settle. Otherwise the retained snapshot can never pass
+    // owns() during a later, separately authorized restoration. Never sample
+    // in the background, and do not mistake this sample for ownership proof.
+    if foreground() { saved.writtenCount = client.changeCount }
     guard current(), !Task.isCancelled, foreground() else {
       saved.restoreRequested = true; onStateChanged?()
       throw IOSPhoneClipboardError.foreground
     }
-    saved.writtenCount = client.changeCount
     guard saved.writtenCount != count, owns(saved) else {
       saved.restoreRequested = true; onStateChanged?()
       throw IOSPhoneClipboardError.changed

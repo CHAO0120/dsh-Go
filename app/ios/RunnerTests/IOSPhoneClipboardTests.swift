@@ -655,6 +655,65 @@ final class IOSPhoneClipboardTests: XCTestCase {
     XCTAssertEqual(f.clipboard.status()["pasteMayHaveBeenDispatched"] as? Bool, false)
   }
 
+  func testRevokedCallerAfterWriteStillRecordsCountForLaterAuthorizedRestore() async throws {
+    let f = fixture()
+    let original = f.board.items
+    f.state.onSettle = {
+      if f.board.writes.count == 1 { f.state.current = false }
+    }
+    await expect(.foreground) { _ = try await self.begin(f) }
+    f.state.onSettle = nil
+    XCTAssertFalse(f.state.current)
+    XCTAssertTrue(f.state.foreground)
+    XCTAssertEqual(f.board.accesses.last, "changeCount")
+    XCTAssertEqual(f.board.backgroundAccesses, 0)
+    XCTAssertEqual(f.clipboard.status()["restoreRequested"] as? Bool, true)
+    XCTAssertEqual(f.clipboard.status()["pasteMayHaveBeenDispatched"] as? Bool, false)
+    let id = try XCTUnwrap(f.clipboard.restorationID)
+    // A new authorized restore, not reuse of the revoked input authorization.
+    try await f.clipboard.restore(id: id, current: { true })
+    XCTAssertEqual(f.board.items, original)
+    XCTAssertEqual(f.board.writes.count, 2)
+    XCTAssertFalse(f.clipboard.hasPendingRestore)
+  }
+
+  func testTaskCancellationAfterWriteStillAllowsLaterForegroundRestore() async throws {
+    let f = fixture()
+    let original = f.board.items
+    let operation = Task { @MainActor in try await self.begin(f) }
+    f.state.onSettle = {
+      if f.board.writes.count == 1 { operation.cancel() }
+    }
+    await expect(.foreground) { _ = try await operation.value }
+    f.state.onSettle = nil
+    XCTAssertTrue(operation.isCancelled)
+    XCTAssertTrue(f.state.current)
+    XCTAssertEqual(f.board.accesses.last, "changeCount")
+    XCTAssertEqual(f.board.backgroundAccesses, 0)
+    XCTAssertEqual(f.clipboard.status()["pasteMayHaveBeenDispatched"] as? Bool, false)
+    let id = try XCTUnwrap(f.clipboard.restorationID)
+    try await f.clipboard.restore(id: id, current: { true })
+    XCTAssertEqual(f.board.items, original)
+    XCTAssertEqual(f.board.writes.count, 2)
+    XCTAssertFalse(f.clipboard.hasPendingRestore)
+  }
+
+  func testSavedCountAfterRevocationStillRejectsAnExternalReplacement() async throws {
+    let f = fixture()
+    f.state.onSettle = {
+      if f.board.writes.count == 1 { f.state.current = false }
+    }
+    await expect(.foreground) { _ = try await self.begin(f) }
+    f.state.onSettle = nil
+    let id = try XCTUnwrap(f.clipboard.restorationID)
+    let external = [[Self.textType: Data("synthetic later external copy".utf8)]]
+    f.board.externalWrite(external)
+    await expect(.changed) { try await f.clipboard.restore(id: id, current: { true }) }
+    XCTAssertEqual(f.board.items, external)
+    XCTAssertEqual(f.board.writes.count, 1)
+    XCTAssertTrue(f.clipboard.hasPendingRestore)
+  }
+
   func testBackgroundPasteUsesOneShortLocalLeaseWithoutAnyPasteboardGetter() async throws {
     let f = fixture()
     let id = try await begin(f)
