@@ -1,8 +1,13 @@
 package io.github.ccch1mneyyy.dsh_app.runtime
 
+import android.system.ErrnoException
+import android.system.Os
+import android.system.OsConstants
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
+import java.io.FileOutputStream
+import java.security.MessageDigest
 
 /** Enabled bundles, installed packages and settings layer of the main profile at one moment. */
 data class ProfileSnapshot(
@@ -208,15 +213,7 @@ object LastKnownGood {
             if (lock.createNewFile()) {
                 break
             }
-            val holder = try {
-                lock.readText().trim().toIntOrNull()
-            } catch (_: Exception) {
-                null
-            }
-            if (holder != null && !File("/proc/$holder").exists()) {
-                lock.delete()
-                continue
-            }
+            if (takeOverExitedLock(lock)) continue
             if (System.currentTimeMillis() > deadline) throw IllegalStateException(busyConfig)
             Thread.sleep(50)
         }
@@ -225,6 +222,62 @@ object LastKnownGood {
             return block()
         } finally {
             lock.delete()
+        }
+    }
+
+    private fun readLockRecord(lock: File): String? = try {
+        lock.readText(Charsets.UTF_8)
+    } catch (_: Exception) {
+        null
+    }
+
+    private fun holderExited(record: String): Boolean {
+        if (!Regex("[0-9]+\\n").matches(record)) return false
+        val pid = record.dropLast(1).toIntOrNull() ?: return false
+        if (pid <= 0 || pid == android.os.Process.myPid()) return false
+        return try {
+            Os.kill(pid, 0)
+            false
+        } catch (error: ErrnoException) {
+            error.errno == OsConstants.ESRCH
+        }
+    }
+
+    // Match dsh-atomic-write: contenders for one dead record share a claim.
+    // An existing claim, even from a dead claimant, is never reclaimed here.
+    private fun takeOverExitedLock(lock: File): Boolean {
+        val record = readLockRecord(lock) ?: return false
+        if (!holderExited(record)) return false
+        val hash = MessageDigest.getInstance("SHA-256")
+            .digest(record.toByteArray(Charsets.UTF_8))
+            .take(8).joinToString("") { "%02x".format(it.toInt() and 0xff) }
+        val claim = File(lock.path + ".takeover-" + hash)
+        val fd = try {
+            Os.open(claim.path, OsConstants.O_CREAT or OsConstants.O_EXCL or OsConstants.O_WRONLY, 384)
+        } catch (error: ErrnoException) {
+            if (error.errno == OsConstants.EEXIST || error.errno == OsConstants.EPERM) return false
+            throw error
+        }
+        try {
+            // Android's FileOutputStream(fd) borrows fd; closing the stream does not own this close.
+            var writeFailure: Throwable? = null
+            try {
+                FileOutputStream(fd).use { it.write("${android.os.Process.myPid()}\n".toByteArray(Charsets.UTF_8)) }
+            } catch (error: Throwable) {
+                writeFailure = error
+                throw error
+            } finally {
+                try {
+                    Os.close(fd)
+                } catch (closeError: Throwable) {
+                    if (writeFailure == null) throw closeError
+                    writeFailure.addSuppressed(closeError)
+                }
+            }
+            if (readLockRecord(lock) != record || !holderExited(record)) return false
+            return lock.delete()
+        } finally {
+            claim.delete()
         }
     }
 
