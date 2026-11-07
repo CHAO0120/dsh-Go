@@ -306,3 +306,361 @@ diff --git a/idevice/src/services/dvt/xctest/mod.rs b/idevice/src/services/dvt/x
 +        assert_eq!(id.test_method(), Some("testServe"));
 +    }
 +}
+diff --git a/idevice/src/http.rs b/idevice/src/http.rs
+--- a/idevice/src/http.rs
++++ b/idevice/src/http.rs
+@@ -14,6 +14,8 @@
+
+ /// Maximum number of redirects to follow before giving up
+ const MAX_REDIRECTS: usize = 10;
++/// Header budget for the bounded one-shot path (including the final CRLF).
++const MAX_BOUNDED_HEAD: usize = 16 * 1024;
+
+ #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+ pub enum Method {
+@@ -77,7 +79,7 @@
+         let mut body = self.body;
+
+         for _ in 0..=MAX_REDIRECTS {
+-            let resp = send_once(method, &url, &headers, &body).await?;
++            let resp = send_once(method, &url, &headers, &body, None).await?;
+             match resp.status {
+                 301 | 302 | 303 | 307 | 308 => {
+                     let Some(location) = resp.header("location") else {
+@@ -103,6 +105,32 @@
+             "too many redirects (>{MAX_REDIRECTS})"
+         )))
+     }
++
++    /// Sends exactly once with a cap on all received HTTP bytes (headers,
++    /// framing, trailers and body) and one deadline covering DNS, connection,
++    /// TLS, request write and response read. Does not follow redirects, so a
++    /// sensitive POST cannot move to another authority or downgrade to HTTP.
++    pub async fn send_bounded(
++        self,
++        maximum_response: usize,
++        deadline: std::time::Duration,
++    ) -> Result<HttpResponse, IdeviceError> {
++        if maximum_response == 0 || deadline.is_zero() {
++            return Err(IdeviceError::Http("invalid HTTP response budget".into()));
++        }
++        response_deadline(
++            deadline,
++            send_once(self.method, &self.url, &self.headers, &self.body, Some(maximum_response)),
++        ).await
++    }
++}
++
++async fn response_deadline<T>(
++    deadline: std::time::Duration,
++    operation: impl std::future::Future<Output = Result<T, IdeviceError>>,
++) -> Result<T, IdeviceError> {
++    tokio::time::timeout(deadline, operation).await
++        .map_err(|_| IdeviceError::Http("HTTP request deadline exceeded".into()))?
+ }
+
+ pub async fn get(url: impl Into<String>) -> Result<HttpResponse, IdeviceError> {
+@@ -234,6 +262,7 @@
+     url: &str,
+     headers: &[(String, String)],
+     body: &[u8],
++    maximum_response: Option<usize>,
+ ) -> Result<HttpResponse, IdeviceError> {
+     let parsed = parse_url(url)?;
+     debug!("{} {} ({} body bytes)", method.as_str(), url, body.len());
+@@ -270,7 +299,7 @@
+     stream.write_all(&req).await?;
+     stream.flush().await?;
+
+-    read_response(&mut stream).await
++    read_response(&mut stream, maximum_response).await
+ }
+
+ fn push_header(buf: &mut Vec<u8>, name: &str, value: &str) {
+@@ -280,15 +309,24 @@
+     buf.extend_from_slice(b"\r\n");
+ }
+
+-async fn read_response(stream: &mut Box<dyn ReadWrite>) -> Result<HttpResponse, IdeviceError> {
++async fn read_response(
++    stream: &mut Box<dyn ReadWrite>,
++    maximum: Option<usize>,
++) -> Result<HttpResponse, IdeviceError> {
+     let mut buf = Vec::new();
+
+     // Read until the end of the header block.
+     let head_end = loop {
+         if let Some(pos) = find_subsequence(&buf, b"\r\n\r\n") {
++            if maximum.is_some() && pos + 4 > MAX_BOUNDED_HEAD {
++                return Err(IdeviceError::Http("HTTP response headers exceed limit".into()));
++            }
+             break pos;
+         }
+-        if !read_more(stream, &mut buf).await? {
++        if maximum.is_some() && buf.len() >= MAX_BOUNDED_HEAD {
++            return Err(IdeviceError::Http("HTTP response headers exceed limit".into()));
++        }
++        if !read_more(stream, &mut buf, maximum).await? {
+             return Err(IdeviceError::Http(
+                 "connection closed before HTTP headers were complete".into(),
+             ));
+@@ -302,27 +340,53 @@
+         .iter()
+         .find(|(k, _)| k.eq_ignore_ascii_case("transfer-encoding"))
+         .is_some_and(|(_, v)| v.to_ascii_lowercase().contains("chunked"));
+-    let content_length = headers
++    let content_length_header = headers
+         .iter()
+-        .find(|(k, _)| k.eq_ignore_ascii_case("content-length"))
+-        .and_then(|(_, v)| v.trim().parse::<usize>().ok());
++        .find(|(k, _)| k.eq_ignore_ascii_case("content-length"));
++    let content_length = if maximum.is_some() {
++        if headers.iter().filter(|(key, _)| key.eq_ignore_ascii_case("content-length")).count() > 1
++            || headers.iter().filter(|(key, _)| key.eq_ignore_ascii_case("transfer-encoding")).count() > 1
++            || (chunked && content_length_header.is_some()) {
++            return Err(IdeviceError::Http("ambiguous HTTP response framing".into()));
++        }
++        if headers.iter().any(|(key, value)| key.eq_ignore_ascii_case("transfer-encoding")
++            && !value.eq_ignore_ascii_case("chunked")) {
++            return Err(IdeviceError::Http("unsupported HTTP transfer encoding".into()));
++        }
++        match content_length_header {
++            Some((_, value)) if !value.is_empty() && value.bytes().all(|byte| byte.is_ascii_digit()) =>
++                Some(value.parse::<usize>().map_err(|_| IdeviceError::Http("HTTP content length exceeds limit".into()))?),
++            Some(_) => return Err(IdeviceError::Http("invalid HTTP content length".into())),
++            None => None,
++        }
++    } else {
++        content_length_header.and_then(|(_, value)| value.trim().parse::<usize>().ok())
++    };
+
+     let body = if chunked {
+         // Connection: close means the peer closes after the final chunk, so read
+         // to end-of-stream and decode the complete chunked body.
+-        while read_more(stream, &mut buf).await? {}
++        while read_more(stream, &mut buf, maximum).await? {}
+         decode_chunked(&buf[body_start..])?
+     } else if let Some(len) = content_length {
+-        while buf.len() < body_start + len {
+-            if !read_more(stream, &mut buf).await? {
++        let expected_end = body_start.checked_add(len)
++            .ok_or_else(|| IdeviceError::Http("HTTP content length exceeds limit".into()))?;
++        if maximum.is_some_and(|maximum| expected_end > maximum) {
++            return Err(IdeviceError::Http("HTTP response exceeds limit".into()));
++        }
++        while buf.len() < expected_end {
++            if !read_more(stream, &mut buf, maximum).await? {
++                if maximum.is_some() {
++                    return Err(IdeviceError::Http("truncated HTTP response body".into()));
++                }
+                 break; // truncated; return what we have
+             }
+         }
+-        let end = (body_start + len).min(buf.len());
++        let end = expected_end.min(buf.len());
+         buf[body_start..end].to_vec()
+     } else {
+         // No framing info: read until the peer closes.
+-        while read_more(stream, &mut buf).await? {}
++        while read_more(stream, &mut buf, maximum).await? {}
+         buf[body_start..].to_vec()
+     };
+
+@@ -337,11 +401,18 @@
+ async fn read_more(
+     stream: &mut Box<dyn ReadWrite>,
+     buf: &mut Vec<u8>,
++    maximum: Option<usize>,
+ ) -> Result<bool, IdeviceError> {
+     let mut tmp = [0u8; 16384];
+-    let n = stream.read(&mut tmp).await?;
++    let remaining = maximum.map(|maximum| maximum.saturating_sub(buf.len()));
++    // A one-byte EOF probe is allowed at the limit; it is never appended.
++    let wanted = remaining.map_or(tmp.len(), |left| left.saturating_add(1).min(tmp.len()));
++    let n = stream.read(&mut tmp[..wanted]).await?;
+     if n == 0 {
+         return Ok(false);
++    }
++    if remaining.is_some_and(|left| n > left) {
++        return Err(IdeviceError::Http("HTTP response exceeds limit".into()));
+     }
+     buf.extend_from_slice(&tmp[..n]);
+     Ok(true)
+@@ -392,17 +463,21 @@
+         let size = usize::from_str_radix(size_hex, 16).map_err(|_| err())?;
+         data = &data[line_end + 2..];
+         if size == 0 {
+-            break; // last chunk; ignore any trailers
+-        }
+-        if data.len() < size + 2 {
++            // The terminal chunk still needs its empty line (or a complete
++            // trailer block); a truncated zero-size line is not a full body.
++            if data == b"\r\n" || data.ends_with(b"\r\n\r\n") { break; }
++            return Err(err());
++        }
++        let end = size.checked_add(2).ok_or_else(err)?;
++        if data.len() < end {
+             return Err(err());
+         }
+         out.extend_from_slice(&data[..size]);
+         // Each chunk's data is followed by a CRLF.
+-        if &data[size..size + 2] != b"\r\n" {
++        if &data[size..end] != b"\r\n" {
+             return Err(err());
+         }
+-        data = &data[size + 2..];
++        data = &data[end..];
+     }
+     Ok(out)
+ }
+@@ -534,3 +609,110 @@
+         assert_eq!(decode_chunked(body).unwrap(), b"abc");
+     }
+ }
++
++
++#[cfg(test)]
++mod dsh_tss_bounds_tests {
++    use super::*;
++    use std::time::Duration;
++
++    async fn response(bytes: &[u8], maximum: usize) -> Result<HttpResponse, IdeviceError> {
++        // Memory-only transport: there is no socket, DNS, server or TSS request.
++        let (mut writer, reader) = tokio::io::duplex(bytes.len() + 1);
++        writer.write_all(bytes).await.unwrap();
++        drop(writer);
++        let mut stream: Box<dyn ReadWrite> = Box::new(reader);
++        read_response(&mut stream, Some(maximum)).await
++    }
++
++    #[tokio::test]
++    async fn exact_wire_limit_and_one_byte_over() {
++        let wire = b"HTTP/1.1 200 OK\r\nContent-Length: 5\r\n\r\nhello";
++        assert_eq!(response(wire, wire.len()).await.unwrap().body, b"hello");
++        assert!(response(wire, wire.len() - 1).await.is_err());
++    }
++
++    #[tokio::test]
++    async fn declared_length_overflow_and_truncation_are_errors() {
++        for wire in [
++            format!("HTTP/1.1 200 OK\r\nContent-Length: {}\r\n\r\n", usize::MAX),
++            "HTTP/1.1 200 OK\r\nContent-Length: 1048577\r\n\r\n".into(),
++            "HTTP/1.1 200 OK\r\nContent-Length: 5\r\n\r\nhey".into(),
++        ] {
++            assert!(response(wire.as_bytes(), 1024 * 1024).await.is_err());
++        }
++    }
++
++    #[tokio::test]
++    async fn eof_body_is_bounded_including_headers() {
++        let wire = b"HTTP/1.1 200 OK\r\n\r\nhello";
++        assert_eq!(response(wire, wire.len()).await.unwrap().body, b"hello");
++        assert!(response(wire, wire.len() - 1).await.is_err());
++    }
++
++    #[tokio::test]
++    async fn chunked_total_includes_framing_and_requires_terminal() {
++        let wire = b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n2\r\nhe\r\n3\r\nllo\r\n0\r\n\r\n";
++        assert_eq!(response(wire, wire.len()).await.unwrap().body, b"hello");
++        assert!(response(wire, wire.len() - 1).await.is_err());
++        assert!(response(&wire[..wire.len() - 2], wire.len()).await.is_err());
++        let overflow = format!("{:x}\r\n", usize::MAX);
++        assert!(decode_chunked(overflow.as_bytes()).is_err());
++    }
++
++    #[tokio::test]
++    async fn headers_have_a_separate_small_limit() {
++        let wire = format!("HTTP/1.1 200 OK\r\nX-Large: {}\r\nContent-Length: 0\r\n\r\n", "a".repeat(MAX_BOUNDED_HEAD));
++        let error = response(wire.as_bytes(), 1024 * 1024).await.unwrap_err();
++        assert!(error.to_string().contains("headers exceed limit"));
++    }
++
++    #[tokio::test]
++    async fn ambiguous_or_invalid_framing_is_rejected() {
++        for headers in [
++            "Content-Length: 0\r\nContent-Length: 0",
++            "Transfer-Encoding: chunked\r\nContent-Length: 0",
++            "Transfer-Encoding: chunked\r\nTransfer-Encoding: chunked",
++            "Transfer-Encoding: gzip, chunked",
++            "Content-Length: -1",
++            "Content-Length: invalid",
++        ] {
++            let wire = format!("HTTP/1.1 200 OK\r\n{headers}\r\n\r\n0\r\n\r\n");
++            assert!(response(wire.as_bytes(), 1024).await.is_err(), "{headers}");
++        }
++    }
++
++    #[tokio::test(start_paused = true)]
++    async fn whole_operation_uses_one_deadline() {
++        let started = tokio::time::Instant::now();
++        let result: Result<(), IdeviceError> = response_deadline(Duration::from_secs(30), async {
++            // Independent phases cannot each restart the 30-second budget.
++            tokio::time::sleep(Duration::from_secs(20)).await;
++            tokio::time::sleep(Duration::from_secs(20)).await;
++            Ok(())
++        }).await;
++        assert!(result.unwrap_err().to_string().contains("deadline exceeded"));
++        assert_eq!(started.elapsed(), Duration::from_secs(30));
++    }
++
++    #[tokio::test(start_paused = true)]
++    async fn stalled_read_timeout_drops_the_owned_stream() {
++        let (mut peer, reader) = tokio::io::duplex(16);
++        let result = response_deadline(Duration::from_secs(30), async move {
++            let mut stream: Box<dyn ReadWrite> = Box::new(reader);
++            read_response(&mut stream, Some(1024)).await
++        }).await;
++        assert!(result.unwrap_err().to_string().contains("deadline exceeded"));
++        // The timeout cancels the operation by dropping its stream owner.
++        assert!(peer.write_all(b"x").await.is_err());
++    }
++
++    #[tokio::test(start_paused = true)]
++    async fn operation_within_deadline_succeeds() {
++        let result = response_deadline(Duration::from_secs(30), async {
++            tokio::time::sleep(Duration::from_secs(29)).await;
++            response(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok", 128).await
++        }).await.unwrap();
++        assert_eq!(result.body, b"ok");
++    }
++}
+diff --git a/idevice/src/tss.rs b/idevice/src/tss.rs
+--- a/idevice/src/tss.rs
++++ b/idevice/src/tss.rs
+@@ -14,7 +14,10 @@
+ /// TSS client version string sent in requests
+ const TSS_CLIENT_VERSION_STRING: &str = "libauthinstall-1033.0.2";
+ /// Apple's TSS endpoint URL
+-const TSS_CONTROLLER_ACTION_URL: &str = "http://gs.apple.com/TSS/controller?action=2";
++const TSS_CONTROLLER_ACTION_URL: &str = "https://gs.apple.com/TSS/controller?action=2";
++/// Full encoded HTTP response, including headers and transfer framing.
++const TSS_MAX_RESPONSE_BYTES: usize = 1024 * 1024;
++const TSS_REQUEST_DEADLINE: std::time::Duration = std::time::Duration::from_secs(30);
+
+ /// Represents a TSS request to Apple's signing server
+ #[derive(Debug)]
+@@ -73,15 +76,20 @@
+             "Sending TSS request: {}",
+             crate::pretty_print_dictionary(&self.inner)
+         );
+-        // The TSS controller is plain HTTP, so no TLS/crypto provider is needed.
++        // A single authenticated HTTPS request. No redirect or HTTP fallback;
++        // the deadline includes DNS/TCP/TLS and bounds every response read.
+         let res = crate::http::HttpRequest::post(TSS_CONTROLLER_ACTION_URL)
+             .header("Cache-Control", "no-cache")
+             .header("Content-type", "text/xml; charset=\"utf-8\"")
+             .header("User-Agent", "InetURL/1.0")
+             .body(plist_to_xml_bytes(&self.inner))
+-            .send()
+-            .await?
+-            .text();
++            .send_bounded(TSS_MAX_RESPONSE_BYTES, TSS_REQUEST_DEADLINE)
++            .await?;
++        if res.status != 200 {
++            return Err(IdeviceError::Http("TSS HTTP status was not 200".into()));
++        }
++        let res = String::from_utf8(res.body)
++            .map_err(|_| IdeviceError::Http("TSS response was not UTF-8".into()))?;
+
+         debug!("Apple responded with {res}");
+         let trimmed = res.trim_start_matches("STATUS=0&");
