@@ -1,7 +1,9 @@
 # iOS W3 手机操控：主线接入合同
 
-本合同对应 ios5 的 W3 / ADDENDUM-01–06，组合基底为
-`a394e435f90ad97e59d7886f39520d1b674afcb6`。它描述本补丁的原生接口与实现边界；
+本合同最初对应 ios5 的 W3 / ADDENDUM-01–06，原组合基底为
+`a394e435f90ad97e59d7886f39520d1b674afcb6`。本次按 ADDENDUM-09 §3.1，
+以 `ae4b0564d73e17d8c134c8d84bf05f367feca995` 补充第 2 节配对存在性与后端选择，
+其余章节保留已有范围。它描述原生接口与实现边界；
 **不是已完成 Dart 设置页、Apple 编译或真机验收的声明**。本轮不改
 `app/lib/ui/`、`app/lib/l10n/`，也不改变 Android/OHOS 的接口行为。
 
@@ -44,7 +46,7 @@
 | `buildAvailable` | 当前构建包含 native 实现，且系统至少 iOS 17；不是连接成功 |
 | `defaultBackend` | 固定 `coredevice`；不提供给模型选择后端的参数 |
 | `appRoutes` | 包名到 `coredevice` / `xctest` 的 map；默认无规则 |
-| `pairing.present` | 记录是否可用；不表示 pair-verify 成功 |
+| `pairing.present` | 保存状态查询发现记录；不保证此刻能读取／校验，也不表示 pair-verify 成功 |
 | `pairing.storage` | `device` / `session` / `none` / `unknown` |
 | `pairing.code` | `OK` 或稳定错误码；Keychain 错误不回传原始系统对象 |
 | `legacyPairingNeedsMigration` | 旧明文位置存在；需要用户明确迁移，不自动沿用 |
@@ -70,9 +72,25 @@
 `stopping` 也不能当作已停止。初始连接检查成功只证明这一次已完成的阶段，后续
 模型调用会重新取得自己的 owner 并核对 generation。
 
-旧 `dsh/phone` 的 `bridgeListening` 仍沿用原 XCTest 配置判定，不能当作新 CoreDevice
-连接指示。主线手机连接卡请读取本节 `dsh/phone_link` 的分阶段结果；旧诊断字段
-不应被解释为“CoreDevice 不可用”或“已完成真实连接”。
+旧 `dsh/phone` 的 `bridgeListening` 精确定义为
+`bridge != nil && IOSPhoneSelfRunner.shared.isConfigured`。生产内存配对路径的
+`isConfigured` 只确认 native client 存在和 `hasRecord` 为真，不读取配对私钥，
+也不完整检查启动配置。**桥已绑定且记录存在，仍可能读不出或校验不过该记录**；
+`bridgeListening=true` 不能显示成“运行器就绪”或“连接已验证”。`pairing.present`
+和其 `code=OK` 也只是保存状态查询成功，不是新一次凭据内容验证。
+
+ADDENDUM-09 §3.1 选择保留该存在性查询；加载失败不自动转 Mac。选中端上
+XCTest 后，记录读取／校验失败以既有 `.setup` 失败返回，原生说明会提示配置或
+记录不可用；Runner 继续明确说明本次不会自动转向 Mac，请用户检查后重新发起。
+没有新增专门的状态键或错误码来表示“存在但不可读”，不能由 UI 猜造一个值。
+方法、参数、phase 和现有错误码集合都不变；调用结果仍通过 `isError=true`
+与 `text` 说明失败。只有既有路线起初没有选中端上 XCTest 时，才可能使用已有
+Mac endpoint；不要把它解释为对这次失败的重试。
+
+界面文案建议：凭据状态显示“已保存配对记录，仍需检查连接”；旧桥字段显示
+“本地桥和配对记录已配置，尚未验证运行器就绪”。主线手机连接卡继续读取
+`dsh/phone_link` 的分阶段 `connection/checks`，不要用旧字段推断 CoreDevice。
+本包不实现 Dart 设置页；读取失败也不承诺解锁一定能修好，损坏记录仍需用户处理。
 
 剪贴板 map 的字段为 `pendingRestore`, `foregroundRequired`（true）、
 `memoryOnly`（true）、`pasteMayHaveBeenDispatched`, `restoreRequested`。

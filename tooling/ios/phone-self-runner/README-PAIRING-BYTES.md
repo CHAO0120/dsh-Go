@@ -85,6 +85,46 @@ call the record provider. An injected memory provider must also supply its
 availability closure; absent availability is false. Startup still handles a
 record being unavailable or invalid when actually loaded.
 
+## Presence and backend selection (ADDENDUM-09 §3.1)
+
+The selected policy keeps the attribute-only presence query. It does not restore
+private-key reads to status polling and does not add an automatic Mac fallback
+after an on-device preparation failure. Presence, loadability, pair-verify and
+an accepted XCTest endpoint are separate observations.
+
+In the production memory-provider path, `isConfigured` means that the native
+client exists and `hasRecord` reports a stored/session record. It does not check
+all launch configuration, load the bytes, normalize keys, contact the device or
+prove that PhoneRunner is ready. A remembered item can be present while its
+subsequent read or validation fails. That failure is `.setup`, before native
+startup admission, and the caller returns the existing failure outcome. The
+fixed native explanation now includes unreadable/invalid records as well as
+incomplete configuration; it does not assert that every `.setup` is a Keychain
+failure or that unlocking always repairs it.
+
+The existing `dsh/phone` status key `bridgeListening` is
+`bridge != nil && IOSPhoneSelfRunner.shared.isConfigured`. When the bridge is
+bound and the record is present, it can therefore remain true despite a later
+load failure. The existing `pairing.present` / `pairing.code=OK` status likewise
+reports presence, not a fresh content validation. Neither is a ready indicator.
+The separate CoreDevice `connection` / `checks` fields retain their own meaning.
+
+`IOSPhoneRunner` selects the on-device XCTest owner when `link.enabled` and
+`isConfigured` are true. A failure from that selected owner returns its message
+and the existing instruction that this call will not automatically switch to a
+Mac runner. It does not try the legacy file provider either. A separate Mac
+endpoint can still be selected through the existing route when the on-device
+route was not selected; this is not a retry of the failed call. The native
+resource predicate `mayUseMacFallback` alone is not an automatic retry policy.
+
+There are no new Dart methods, arguments, keys, phase values or error codes.
+The existing runner result still uses `isError=true` and `text`; the explanatory
+text changes, while route selection and failure semantics stay as implemented
+in 17. UI wording should say that a record is saved and still needs a successful
+check, rather than label `bridgeListening` as a verified connection. See the
+[UI contract](../phone-control/UI-CONTRACT.md#2-状态字段). Dart UI is maintained
+separately and is not changed by this patch.
+
 ## Verification
 
 ```sh
@@ -109,3 +149,9 @@ and unavailable records without private-key reads. These methods are already
 within the existing RunnerTests class selections. They require Apple SDKs and
 are not claimed executed on Linux. Native Apple linking, Swift type-checking,
 real Keychain behavior and actual device startup remain Apple validation gates.
+
+The ADDENDUM-09 follow-up adds one owner regression case for presence=true with
+a throwing record provider: status does not load it, preparation reports setup,
+native is never started and a later status query still does not read private
+bytes. This is authored XCTest, not an executed Apple test; the no-Mac-retry
+branch is additionally traced in the unchanged production Runner.

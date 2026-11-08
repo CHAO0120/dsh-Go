@@ -158,6 +158,23 @@ final class IOSPhoneSelfRunnerTests: XCTestCase {
     XCTAssertTrue(native.configurations.isEmpty)
   }
 
+  func testPresentButUnreadableRecordFailsSetupWithoutNativeAdmission() async throws {
+    let native = Recorder()
+    var loads = 0
+    let owner = try fixture(recorder: native,
+      pairingData: { loads += 1; throw IOSPhonePairingError.missing }, pairingAvailable: { true })
+    XCTAssertTrue(owner.isConfigured)
+    XCTAssertEqual(loads, 0)
+    let result = await owner.prepare(current: { true })
+    if case .failure(.setup) = result {} else { XCTFail("record presence was mistaken for readable pairing") }
+    XCTAssertEqual(loads, 1)
+    XCTAssertTrue(native.configurations.isEmpty)
+    XCTAssertTrue(native.callbacks.isEmpty)
+    XCTAssertTrue(native.stops.isEmpty)
+    XCTAssertTrue(owner.isConfigured)
+    XCTAssertEqual(loads, 1, "later status must not reread the record")
+  }
+
   func testConcurrentWaitersShareStartupAndOneCancellationDoesNotStopTheOther() async throws {
     let native = Recorder()
     let owner = try fixture(recorder: native)

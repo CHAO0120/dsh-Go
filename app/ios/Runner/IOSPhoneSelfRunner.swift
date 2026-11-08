@@ -30,7 +30,7 @@ enum IOSPhoneSelfRunnerError: Error {
     case .developerImageRequired:
       return "本机开发者镜像（DDI）尚未就绪。请回到手机连接设置，由用户选择下载并挂载；这一步不会自动安装镜像或重试操控。"
     case .setup:
-      return "端上 XCTest 配置不完整。请导入有效的远程配对凭据，检查运行器包名和本机开发者服务端口。"
+      return "端上 XCTest 尚未就绪：配置不完整，或配对记录无法读取／校验。记录存在不代表可以使用；请解锁设备后检查配对记录、运行器包名和本机开发者服务端口。"
     case .failed:
       return "端上 XCTest 没有连接成功，没有执行动作。请检查配对、LocalDevVPN、开发者模式、匹配的开发者镜像和已签名安装的 PhoneRunner。"
     case .invalidHandshake:
@@ -153,6 +153,8 @@ final class IOSPhoneSelfRunner {
     guard native != nil else { return false }
     // Status must not read/normalize private-key bytes. In-memory providers
     // supply an independent availability query; only begin() loads the record.
+    // Presence is a route-selection hint, not proof of loadability or readiness.
+    // A later load failure remains .setup; Runner does not retry it on the Mac.
     if pairingData != nil { return pairingAvailable?() ?? false }
     var directory: ObjCBool = false
     return FileManager.default.fileExists(atPath: pairingURL.path, isDirectory: &directory) && !directory.boolValue
