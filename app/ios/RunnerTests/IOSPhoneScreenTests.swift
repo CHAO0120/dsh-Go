@@ -67,6 +67,23 @@ final class IOSPhoneScreenTests: XCTestCase {
     func finish() { release.signal() }
   }
 
+  private final class AnnotationGate: @unchecked Sendable {
+    private let lock = NSLock()
+    private let release = DispatchSemaphore(value: 0)
+    private var didStart = false
+    private var wasMain: Bool?
+    private var releasedInTime = false
+    var started: Bool { lock.lock(); defer { lock.unlock() }; return didStart }
+    var mainThread: Bool? { lock.lock(); defer { lock.unlock() }; return wasMain }
+    var completed: Bool { lock.lock(); defer { lock.unlock() }; return releasedInTime }
+    func willRender() {
+      lock.lock(); wasMain = Thread.isMainThread; didStart = true; lock.unlock()
+      let released = release.wait(timeout: .now() + 4) == .success
+      lock.lock(); releasedInTime = released; lock.unlock()
+    }
+    func finish() { release.signal() }
+  }
+
   private final class ScriptedRecognition: @unchecked Sendable {
     private let lock = NSLock()
     private var batches: [[IOSPhoneScreen.Text]]
@@ -161,6 +178,80 @@ final class IOSPhoneScreenTests: XCTestCase {
     for (x, y) in [(Double(output.imageWidth), 0.0), (0.0, Double(output.imageHeight)), (-1.0, 0.0), (.nan, 0.0)] {
       XCTAssertThrowsError(try screen.imagePoint(screen: output.screen, x: x, y: y, binding: binding))
     }
+  }
+
+  func testAnnotationRunsOffMainWhileMainActorCanProgressAndReturnsRealJPEG() async throws {
+    let gate = AnnotationGate()
+    defer { gate.finish() }
+    let texts = [text()]
+    let screen = IOSPhoneScreen(recognize: { _ in texts }, annotationWillRender: { gate.willRender() })
+    let frame = try reply(picture(width: 1000, height: 2000))
+    let pending = Task { try await screen.observe(reply: frame, binding: binding,
+      image: true, detail: true, current: { true }) }
+    try await wait { gate.started }
+    // This MainActor continuation runs while the actual render entry is held.
+    XCTAssertTrue(Thread.isMainThread)
+    XCTAssertEqual(gate.mainThread, false)
+    gate.finish()
+    let output = try await pending.value
+    XCTAssertTrue(gate.completed)
+    let jpeg = try XCTUnwrap(output.jpeg)
+    XCTAssertLessThanOrEqual(jpeg.count, 880 * 1024)
+    let source = try XCTUnwrap(CGImageSourceCreateWithData(jpeg as CFData, nil))
+    let pixels = try XCTUnwrap(CGImageSourceCreateImageAtIndex(source, 0, nil))
+    XCTAssertEqual(pixels.width, output.imageWidth)
+    XCTAssertEqual(pixels.height, output.imageHeight)
+    XCTAssertLessThanOrEqual(max(pixels.width, pixels.height), 1280)
+    XCTAssertEqual(screen.elementLabel(screen: output.screen, id: 1, binding: binding), "Synthetic label")
+  }
+
+  func testAnnotationKeepsTheAnalysisGateUntilTheWorkerCompletes() async throws {
+    let gate = AnnotationGate()
+    defer { gate.finish() }
+    let screen = IOSPhoneScreen(recognize: { _ in [] }, annotationWillRender: { gate.willRender() })
+    let frame = try reply(picture())
+    let pending = Task { try await screen.observe(reply: frame, binding: binding,
+      image: false, detail: false, current: { true }) }
+    try await wait { gate.started }
+    await expect(.busy) {
+      _ = try await screen.observe(reply: frame, binding: self.binding,
+        image: false, detail: false, current: { true })
+    }
+    gate.finish()
+    // The newer attempt invalidates the old observation even when it is busy.
+    await expect(.cancelled) { _ = try await pending.value }
+    XCTAssertTrue(gate.completed)
+    XCTAssertNil(screen.approvalPreview(screen: "s1", binding: binding))
+  }
+
+  func testCancellationDuringAnnotationCannotPublishTheFinishedJPEG() async throws {
+    let gate = AnnotationGate()
+    defer { gate.finish() }
+    let screen = IOSPhoneScreen(recognize: { _ in [] }, annotationWillRender: { gate.willRender() })
+    let frame = try reply(picture())
+    let pending = Task { try await screen.observe(reply: frame, binding: binding,
+      image: true, detail: false, current: { true }) }
+    try await wait { gate.started }
+    pending.cancel(); gate.finish()
+    await expect(.cancelled) { _ = try await pending.value }
+    XCTAssertTrue(gate.completed)
+    XCTAssertNil(screen.approvalPreview(screen: "s1", binding: binding))
+  }
+
+  func testObservationAgeIncludesTimeSpentRenderingAnnotations() async throws {
+    let gate = AnnotationGate()
+    defer { gate.finish() }
+    var time: TimeInterval = 10
+    let screen = IOSPhoneScreen(recognize: { _ in [] }, now: { time },
+      annotationWillRender: { gate.willRender() })
+    let frame = try reply(picture())
+    let pending = Task { try await screen.observe(reply: frame, binding: binding,
+      image: false, detail: false, current: { true }) }
+    try await wait { gate.started }
+    time = 131; gate.finish()
+    await expect(.stale) { _ = try await pending.value }
+    XCTAssertTrue(gate.completed)
+    XCTAssertNil(screen.approvalPreview(screen: "s1", binding: binding))
   }
 
   func testOnlyLatestScreenAndExactSessionOwnerEpochCanResolveAnElement() async throws {

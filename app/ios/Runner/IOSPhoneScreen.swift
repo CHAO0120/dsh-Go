@@ -83,7 +83,7 @@ final class IOSPhoneScreen {
   }
   typealias Recognizer = @Sendable (CGImage) throws -> [Text]
 
-  private struct Element {
+  private struct Element: Sendable {
     let id: Int
     let text: String
     /// Unit rectangle with a TOP-left origin, matching the returned JPEG.
@@ -119,10 +119,18 @@ final class IOSPhoneScreen {
     let requiresTextInput: Bool
   }
 
-  /// CGImage is immutable here; all buffers and records are owned by this value
-  /// and only move from the image-analysis queue to MainActor after completion.
-  private struct Analysis: @unchecked Sendable {
-    let image: CGImage
+  private enum PreviewRequest: Equatable, Sendable { case required, bestEffort }
+
+  private struct Preview: Sendable {
+    let elements: [Element]
+    let data: Data?
+    let width: Int
+    let height: Int
+  }
+
+  /// Only owned data and geometry leave the analysis queue. The CGImage and
+  /// UIKit drawing objects stay local to its autorelease pool.
+  private struct Analysis: Sendable {
     let width: Int
     let height: Int
     let orientation: Int
@@ -132,10 +140,14 @@ final class IOSPhoneScreen {
     let texts: [Text]
     let maskDots: Bool
     let matchesReference: Bool?
+    let preview: Preview?
   }
 
   static let observationLifetime: TimeInterval = 120
   private let recognize: Recognizer
+  /// An optional test observation immediately before the real renderer runs.
+  /// It receives no pixels or text and production does not install it.
+  private let annotationWillRender: (@Sendable () -> Void)?
   private let now: () -> TimeInterval
   private var latest: Observation?
   private var operation = UUID()
@@ -143,8 +155,10 @@ final class IOSPhoneScreen {
   private var processing = false
 
   init(recognize: @escaping Recognizer = IOSPhoneScreen.visionRecognize,
-       now: (() -> TimeInterval)? = nil) {
+       now: (() -> TimeInterval)? = nil,
+       annotationWillRender: (@Sendable () -> Void)? = nil) {
     self.recognize = recognize
+    self.annotationWillRender = annotationWillRender
     // Darwin's continuous clock includes device sleep on the app's iOS 15
     // minimum target. Swift ContinuousClock would require iOS 16.
     self.now = now ?? { IOSPhoneContinuousTime.now() ?? .nan }
@@ -158,22 +172,15 @@ final class IOSPhoneScreen {
     let ticket = operation
     let captured = now()
     try check(binding: binding, current: current)
-    let value = try await analyze(reply, withText: true)
+    let value = try await analyze(reply, withText: true, preview: image ? .required : .bestEffort)
     try check(ticket: ticket, binding: binding, current: current)
     guard validAge(since: captured, maximum: Self.observationLifetime), serial < UInt64.max else {
       throw IOSPhoneScreenError.stale
     }
-    let elements = Self.elements(value.texts)
-    var size = Self.outputSize(width: value.width, height: value.height)
-    var preview: Data?
-    do {
-      let rendered = try Self.annotatedJPEG(value.image, size: size, elements: elements)
-      preview = rendered.data; size = rendered.size
-    } catch IOSPhoneScreenError.limit where !image {
-      // A text-only model request may still be approved from its textual target.
-      // Absence of a local preview never relaxes pixel revalidation.
-      preview = nil
-    }
+    guard let rendered = value.preview else { throw IOSPhoneScreenError.invalid }
+    let elements = rendered.elements
+    let size = (width: rendered.width, height: rendered.height)
+    let preview = rendered.data
     let nextSerial = serial + 1
     let screen = "s\(nextSerial)"
     let sensitive = value.maskDots || Self.sensitiveText(value.texts)
@@ -304,11 +311,13 @@ final class IOSPhoneScreen {
   }
 
   private func analyze(_ reply: IOSPhoneCoreReply, withText: Bool,
-                       reference: MatchReference? = nil) async throws -> Analysis {
+                       reference: MatchReference? = nil,
+                       preview: PreviewRequest? = nil) async throws -> Analysis {
     guard !processing else { throw IOSPhoneScreenError.busy }
     processing = true
     defer { processing = false }
     let recognize = self.recognize
+    let annotationWillRender = self.annotationWillRender
     return try await withCheckedThrowingContinuation { continuation in
       DispatchQueue.global(qos: .userInitiated).async {
         do {
@@ -332,9 +341,26 @@ final class IOSPhoneScreen {
               matches = image.width == reference.width && image.height == reference.height
                 && (exact || Self.tolerates(reference: reference, pixels: pixels, texts: texts))
             }
-            return Analysis(image: image, width: image.width, height: image.height,
+            var annotation: Preview?
+            if let preview {
+              let elements = Self.elements(texts)
+              var size = Self.outputSize(width: image.width, height: image.height)
+              var data: Data?
+              annotationWillRender?()
+              do {
+                let rendered = try Self.annotatedJPEG(image, size: size, elements: elements)
+                data = rendered.data; size = rendered.size
+              } catch IOSPhoneScreenError.limit where preview == .bestEffort {
+                // A text-only model request may still be approved from its textual target.
+                // Absence of a local preview never relaxes pixel revalidation.
+                data = nil
+              }
+              annotation = Preview(elements: elements, data: data, width: size.width, height: size.height)
+            }
+            return Analysis(width: image.width, height: image.height,
               orientation: orientation, nativeFrameID: frame,
-              digest: digest, pixels: pixels, texts: texts, maskDots: dots, matchesReference: matches)
+              digest: digest, pixels: pixels, texts: texts, maskDots: dots,
+              matchesReference: matches, preview: annotation)
           }
           continuation.resume(returning: value)
         } catch let error as IOSPhoneScreenError { continuation.resume(throwing: error) }
@@ -620,7 +646,7 @@ final class IOSPhoneScreen {
     return (max(1, Int(Double(width) * scale)), max(1, Int(Double(height) * scale)))
   }
 
-  private static func annotatedJPEG(_ image: CGImage, size initial: (width: Int, height: Int),
+  nonisolated private static func annotatedJPEG(_ image: CGImage, size initial: (width: Int, height: Int),
                                     elements: [Element]) throws -> (data: Data, size: (width: Int, height: Int)) {
     var size = initial
     let minimumLongEdge = min(640, max(initial.width, initial.height))

@@ -377,6 +377,7 @@ jobs:
             -only-testing:RunnerTests/IOSPhonePairingStoreTests \
             -only-testing:RunnerTests/IOSPhoneCoreDeviceTests \
             -only-testing:RunnerTests/IOSPhoneScreenTests \
+            -only-testing:RunnerTests/IOSPhoneDDIBackgroundTests \
             -only-testing:RunnerTests/IOSPhoneOperationTests \
             -only-testing:RunnerTests/IOSPhoneApprovalTests \
             -only-testing:RunnerTests/IOSPhoneClipboardTests \

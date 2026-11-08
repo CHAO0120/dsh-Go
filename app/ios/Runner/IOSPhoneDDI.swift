@@ -111,7 +111,10 @@ final class IOSPhoneDDICache {
     report(completed, total: total, id: preparation, sink: progress)
     for asset in assets {
       try Task.checkCancellation()
-      if (try? directory.verify(asset)) == true {
+      let cached = try? await Self.verifyOnWorker { try directory.verify(asset) }
+      // A cancelled verifier is not a cache miss that may start a download.
+      try Task.checkCancellation()
+      if cached == true {
         completed += asset.bytes; report(completed, total: total, id: preparation, sink: progress); continue
       }
       let temporary = ".download-" + UUID().uuidString
@@ -138,6 +141,27 @@ final class IOSPhoneDDICache {
     sink(progressCompleted, total)
   }
 
+  /// The caller retains its busy gate and directory capability until this
+  /// worker has joined, including cancellation. No verification result is
+  /// accepted after cancellation; a blocking filesystem call can still finish
+  /// before the next cooperative check. This never grants Rust file authority.
+  nonisolated static func verifyOnWorker(_ work: @escaping @Sendable () throws -> Bool) async throws -> Bool {
+    try Task.checkCancellation()
+    let worker = Task.detached(priority: .utility) {
+      try Task.checkCancellation()
+      let verified = try work()
+      try Task.checkCancellation()
+      return verified
+    }
+    let verified = try await withTaskCancellationHandler {
+      try await worker.value
+    } onCancel: {
+      worker.cancel()
+    }
+    try Task.checkCancellation()
+    return verified
+  }
+
   nonisolated static func verify(_ url: URL, asset: Asset) throws -> Bool {
     let descriptor = open(url.path, O_RDONLY | O_CLOEXEC | O_NOFOLLOW | O_NONBLOCK)
     guard descriptor >= 0 else { throw IOSPhoneDDIError.cache }
@@ -153,6 +177,7 @@ final class IOSPhoneDDICache {
     var buffer = [UInt8](repeating: 0, count: 65_536)
     var received: Int64 = 0
     while true {
+      try Task.checkCancellation()
       let count = buffer.withUnsafeMutableBytes { raw in
         Darwin.read(descriptor, raw.baseAddress, raw.count)
       }
