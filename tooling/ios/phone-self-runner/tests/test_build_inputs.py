@@ -247,6 +247,52 @@ class NoticeCollection(unittest.TestCase):
         self.metadata['packages'].reverse()
         self.assertEqual(self.exporter.generate(self.metadata), expected)
 
+    def test_source_suffixes_do_not_count_as_automatic_notices(self):
+        code_paths = ['src/license.rs', 'notice.RS', 'src/COPYRIGHT.c', 'LICENSE.h',
+                      'NOTICE.py', 'license.js', 'notice.ts', 'LICENSE.go', 'licenses/source.rs']
+        for path in code_paths:
+            target = self.crate / path
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(b'synthetic code is not an original notice\n')
+        report, notices = self.exporter.generate(self.metadata)
+        fixture = next(p for p in report['notices']['packages'] if p['name'] == 'fixture')
+        self.assertEqual({p['path'] for p in fixture['files']}, {'LICENSE-MIT', 'third_party/NOTICE'})
+        self.assertNotIn(b'synthetic code is not an original notice', notices)
+        (self.crate / 'LICENSE-MIT').unlink()
+        (self.crate / 'third_party/NOTICE').unlink()
+        with self.assertRaisesRegex(ValueError, 'No license or notice text'):
+            self.exporter.generate(self.metadata)
+
+    def test_text_suffixes_multiple_licenses_and_nested_originals_stay_verbatim(self):
+        names = ['LICENSE.APACHE', 'LICENSE.Apache2.0', 'LICENCE-BSD.txt', 'LICENSE-MIT.md',
+                 'COPYING.LESSER', 'COPYING.GPL-3.0', 'COPYRIGHT.rst', 'NOTICE.html', 'AUTHORS',
+                 'licenses/OFL-1.1.txt', 'src/third_party/LICENSE-ISC']
+        originals = {}
+        for name in names:
+            data = ('synthetic original for ' + name + '\r\n').encode('utf-8')
+            target = self.crate / name
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(data)
+            originals[name] = data
+        report, notices = self.exporter.generate(self.metadata)
+        self.exporter.verify(report, notices)
+        fixture = next(p for p in report['notices']['packages'] if p['name'] == 'fixture')
+        self.assertEqual({p['path'] for p in fixture['files']},
+                         set(names) | {'LICENSE-MIT', 'third_party/NOTICE'})
+        for item in fixture['files']:
+            if item['path'] in originals:
+                self.assertEqual(notices[item['offset']:item['offset'] + item['bytes']], originals[item['path']])
+
+    def test_declared_nonstandard_license_path_remains_explicit_input(self):
+        target = self.crate / 'legal/terms.custom'
+        target.parent.mkdir()
+        target.write_bytes(b'explicitly declared original terms\r\n')
+        self.metadata['packages'][2]['license_file'] = 'legal/terms.custom'
+        report, notices = self.exporter.generate(self.metadata)
+        fixture = next(p for p in report['notices']['packages'] if p['name'] == 'fixture')
+        item = next(p for p in fixture['files'] if p['path'] == 'legal/terms.custom')
+        self.assertEqual(notices[item['offset']:item['offset'] + item['bytes']], target.read_bytes())
+
     def test_missing_empty_and_binary_license_text_cannot_generate_a_bundle(self):
         (self.crate / 'third_party/NOTICE').unlink()
         license_file = self.crate / 'LICENSE-MIT'

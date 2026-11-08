@@ -8,11 +8,22 @@ import sys
 
 HERE = Path(__file__).resolve().parent
 NOTICE_NAME = re.compile(r'^(licen[cs]e|copying|notice|copyright|authors|patents?)([._-].*)?$', re.I)
+# Auto-discovery is a filename heuristic, not source-code or license parsing.
+# Keep suffixes such as .txt/.md/.rst and license identifiers such as .APACHE.
+SOURCE_SUFFIXES = {'.rs', '.c', '.cc', '.cpp', '.cxx', '.h', '.hpp', '.py',
+                   '.js', '.jsx', '.ts', '.tsx', '.go', '.java', '.kt', '.swift'}
 MAX_NOTICE_BYTES = 2 * 1024 * 1024
 
 
 def digest(data):
     return hashlib.sha256(data).hexdigest()
+
+
+def automatic_notice_path(relative):
+    if relative.suffix.lower() in SOURCE_SUFFIXES:
+        return False
+    in_license_directory = any(part.lower() in {'licenses', 'licences'} for part in relative.parts[:-1])
+    return bool(NOTICE_NAME.fullmatch(relative.name) or in_license_directory)
 
 
 def inventory(metadata):
@@ -61,8 +72,7 @@ def license_inputs(package):
         raise ValueError('Unexpected local path dependency')
     for path in root.rglob('*'):
         relative = path.relative_to(root)
-        in_license_directory = any(part.lower() in {'licenses', 'licences'} for part in relative.parts[:-1])
-        if path.is_file() and (NOTICE_NAME.fullmatch(path.name) or in_license_directory):
+        if path.is_file() and automatic_notice_path(relative):
             paths.add(path)
     if package.get('license_file'):
         path = root / package['license_file']

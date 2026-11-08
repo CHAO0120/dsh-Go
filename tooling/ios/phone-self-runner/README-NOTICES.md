@@ -14,6 +14,16 @@ UTF-8 bytes, line endings and copyright statements. It does not replace all MIT
 packages with one generic paragraph. It rejects empty, binary, symlinked or
 oversized files; a text is limited to 2 MiB before reading its full contents.
 
+Automatic filename discovery excludes common source-code suffixes, including
+`src/license.rs` and `notice.rs`; these cannot supply otherwise-missing license
+coverage just because their stems match. This also applies inside licenses
+directories. Text suffixes and multiple-license names such as `LICENSE-MIT.md`,
+`LICENSE.APACHE` and `COPYING.LESSER` remain eligible, as do actual notice files
+under source directories. Explicit Cargo `license_file` paths and pinned
+supplement inputs retain their existing path, regular-file, text and hash
+checks. This is a filename heuristic, not semantic classification of file
+contents. Existing frozen NOTICES artifacts are not rewritten by this change.
+
 The generated `NOTICES.txt` labels each package and original filename, records
 the authors declared by Cargo, and reproduces all collected texts. The sanitized
 `THIRD_PARTY_CRATES.json` additionally records the complete document's SHA-256 and
