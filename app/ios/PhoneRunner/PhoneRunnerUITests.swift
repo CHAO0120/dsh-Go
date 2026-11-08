@@ -496,12 +496,17 @@ final class PhoneTools {
   /// couple of times before refusing; only a picture that held still across the snapshot is kept.
   private func stillScreen() throws -> (before: Captured, root: XCUIElementSnapshot, after: Captured) {
     for attempt in 1...3 {
-      let before = try capture(input: false)
-      let root = try before.application.app.snapshot()
-      let after = try capture(input: false)
-      if before.frame.matches(after.frame) { return (before, root, after) }
-      // Numbers only, for working out what moves on a real screen; never pixels or text.
-      print("[phone-runner] frame changed (read \(attempt) of 3): \(before.frame.difference(after.frame))")
+      do {
+        let before = try capture(input: false)
+        let root = try before.application.app.snapshot()
+        let after = try capture(input: false)
+        if before.frame.matches(after.frame) { return (before, root, after) }
+        // Numbers only, for working out what moves on a real screen; never pixels or text.
+        print("[phone-runner] frame changed (read \(attempt) of 3): \(before.frame.difference(after.frame))")
+      } catch PhoneRunnerObservationError.app where attempt < 3 {
+        // Going home or opening an app: which app is in front is itself still changing.
+        print("[phone-runner] front app changing (read \(attempt) of 3)")
+      }
       if attempt < 3 { RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.5)) }
     }
     throw PhoneRunnerObservationError.changed
@@ -682,7 +687,7 @@ final class PhoneTools {
     RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.6))
     do {
       return try screen([:])
-    } catch PhoneRunnerObservationError.changed {
+    } catch PhoneRunnerObservationError.changed, PhoneRunnerObservationError.app {
       // The action itself went through; saying it stopped would invite doing it twice.
       throw ToolError("这一步已经做了，但屏幕还在变化，没有读到稳定的画面。请重新 screen 核对结果，不要重复这一步。")
     }
