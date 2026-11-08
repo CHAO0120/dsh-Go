@@ -1,0 +1,94 @@
+--- a/node_modules/@deepseek-ai/dsh-workspace/lib/index.js
++++ b/node_modules/@deepseek-ai/dsh-workspace/lib/index.js
+@@ -1,10 +1,14 @@
+ import { randomUUID } from "node:crypto";
+-import { mkdir, realpath, stat } from "node:fs/promises";
++import { mkdir, realpath, stat as hostStat } from "node:fs/promises";
+ import { Service } from "@deepseek-ai/cordis";
+ import { posix, win32 } from "node:path";
+ import { z } from "zod";
+ import { brandString } from "@deepseek-ai/dsh-brand";
+ import { defineDomain, domainTable } from "@deepseek-ai/dsh-storage-domain";
++const ohosWorkspacePaths = process.platform === "openharmony" ? globalThis[Symbol.for("dsh.go.ohos.workspace-paths")] : void 0;
++async function stat(path) {
++	return ohosWorkspacePaths?.handles(path) ? ohosWorkspacePaths.stat(path) : hostStat(path);
++}
+ //#region lib/types/paths.js
+ /**
+ * Path canonicalization for workspace identity.
+@@ -47,6 +51,7 @@
+ */
+ async function realpathNormalize(path) {
+ 	if (!fullyQualifiedWorkspacePath(path)) throw new TypeError(`Workspace path is not fully qualified: '${path}'`);
++	if (ohosWorkspacePaths?.handles(path)) return await ohosWorkspacePaths.realpath(path);
+ 	return await realpath(path);
+ }
+ //#endregion
+@@ -451,7 +456,7 @@
+ 			if (state.workspaceIds.length > 0 || state.archivedSessionIds.length > 0 || sessions.list().length > 0 || (await this.listStoredHeaders()).length > 0) return void 0;
+ 			const path = await resolveDirectory();
+ 			if (!fullyQualifiedWorkspacePath(path)) throw new TypeError(`Workspace path is not fully qualified: '${path}'`);
+-			await mkdir(path, { recursive: true });
++			if (!ohosWorkspacePaths?.handles(path)) await mkdir(path, { recursive: true });
+ 			const canonical = await realpathNormalize(path);
+ 			if ((await this.listStoredHeaders()).length > 0 || sessions.list().length > 0) return void 0;
+ 			return this.createCanonical(canonical, defaultWorkspaceTitle(path), true);
+@@ -910,7 +915,9 @@
+ 			this.sessionPaths.set(header.id, path);
+ 			this.invalidSessionPaths.delete(header.id);
+ 		} catch (error) {
+-			if (fullyQualifiedWorkspacePath(header.cwd) && error instanceof Error && "code" in error && error.code === "ENOENT") this.missingSessionPaths.add(header.id);
++			// Preserve saved logical identity; access still requires the current grant.
++			if (ohosWorkspacePaths?.isRoot(header.cwd)) this.sessionPaths.set(header.id, header.cwd);
++			else if (fullyQualifiedWorkspacePath(header.cwd) && error instanceof Error && "code" in error && error.code === "ENOENT") this.missingSessionPaths.add(header.id);
+ 			this.invalidSessionPaths.set(header.id, `cwd '${header.cwd}' does not resolve`);
+ 		}
+ 	}
+--- a/node_modules/@deepseek-ai/dsh-working-directory/lib/index.js
++++ b/node_modules/@deepseek-ai/dsh-working-directory/lib/index.js
+@@ -3,6 +3,7 @@
+ import z from "@deepseek-ai/schemastery";
+ import { z as z$1 } from "zod";
+ import { createUserMessage } from "@deepseek-ai/dsh-llm";
++const ohosWorkspacePaths = process.platform === "openharmony" ? globalThis[Symbol.for("dsh.go.ohos.workspace-paths")] : void 0;
+ //#region lib/types/index.js
+ /**
+ * Session working directories, durable changes, and model context.
+@@ -79,6 +80,7 @@
+ 	*/
+ 	get(session) {
+ 		const directory = this.workingDirectoryProjectionHandle.stateOf(session) ?? this.defaultDirectory;
++		if (ohosWorkspacePaths?.handles(directory)) return directory;
+ 		return globalThis[Symbol.for("dsh.go.direct")]?.toHost(directory) ?? directory;
+ 	}
+ 	/**
+@@ -92,6 +94,21 @@
+ 	ensure(agent, signal) {
+ 		return this.serialize(agent, signal, async (control) => {
+ 			const current = this.get(agent.session);
++			if (ohosWorkspacePaths?.handles(current)) {
++				let directory;
++				try { directory = await ohosWorkspacePaths.directory(current, current, control); }
++				catch (error) {
++					if (!["ENOENT", "ENOTDIR"].includes(error.code) || error.reason === "ERR_WORKSPACE_REAUTHORIZATION_REQUIRED") throw error;
++					const original = agent.session.header.cwd ?? this.defaultDirectory;
++					const restored = await ohosWorkspacePaths.directory(original, current, control);
++					this.commit(agent, restored, true, control);
++					return restored;
++				}
++				control.throwIfAborted();
++				agent.ctx.fiber.assertActive();
++				if (this.workingDirectoryProjectionHandle.stateOf(agent.session) === null) agent.session.append("working-directory/change", { cwd: directory });
++				return directory;
++			}
+ 			const target = await this.ctx.fs.resolve(current, { signal: control });
+ 			const info = await this.ctx.fs.stat(target, control);
+ 			control.throwIfAborted();
+@@ -127,6 +144,7 @@
+ 		return `Current working directory: ${JSON.stringify(this.get(session))}.`;
+ 	}
+ 	async directory(path, cwd, signal) {
++		if (ohosWorkspacePaths?.handles(path) || ohosWorkspacePaths?.handles(cwd)) return await ohosWorkspacePaths.directory(path, cwd, signal);
+ 		const target = await this.ctx.fs.resolve(path, {
+ 			cwd,
+ 			signal
