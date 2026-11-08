@@ -779,7 +779,7 @@ final class PhoneTools {
         throw ToolError("新读屏未能核对完整输入文字，没有按回车／发送；请核对屏幕。")
       }
       _ = try inputApplication()
-      readback.app.typeText("\n")
+      entered.app.typeText("\n")
       try checkTypingResult()
     }
     return try settled()
