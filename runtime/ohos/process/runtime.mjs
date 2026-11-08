@@ -25,6 +25,7 @@ const commandName = command => {
 
 export class VirtualSubprocessRuntime {
   capabilities = Object.freeze({ ...capabilities,
+    nodeStreamingStdin: nodeScriptAvailable(),
     commands: nodeScriptAvailable() ? capabilities.commands : Object.freeze(capabilities.commands.filter(name => name !== 'node')),
     nodeScripts: nodeScriptAvailable() ? 'worker-rebased' : 'none' });
   live = new Set();
@@ -35,10 +36,14 @@ export class VirtualSubprocessRuntime {
   #disposePromise;
   #resourceFailures = new Set();
   #createOwnedGitServer;
+  #selectExternal;
+  #concurrent;
 
   constructor({ workspaceRoots, temporaryRoot, onSpillFailure = () => {} } = {}, internals = {}) {
     // Explicit trusted test seam; never read from Worker messages or DSH config.
     this.#createOwnedGitServer = internals.createOwnedGitServer ?? createOwnedGitServer;
+    this.#selectExternal = internals.selectExternal;
+    this.#concurrent = internals.concurrent === true;
     if (typeof this.#createOwnedGitServer !== 'function') throw new TypeError('Invalid owned-resource server factory');
     if (!Array.isArray(workspaceRoots) || workspaceRoots.length === 0) {
       throw new TypeError('workspaceRoots 必须由宿主显式配置为非空的绝对工作区目录数组');
@@ -117,17 +122,27 @@ export class VirtualSubprocessRuntime {
       policy = prepared.policy;
       validateArgv(argv);
     }
-    const lane = this.lanes[commandName(argv[0]) === 'rg' ? 'search' : 'execution'];
+    const external = this.#selectExternal?.(argv, policy);
+    if (external) {
+      const routed = policy ? external.prepare(argv, policy, spec.signal) : argv;
+      return external.spawn({ ...spec, argv: routed, ...(policy ? { policy } : {}) });
+    }
+    const lane = this.#concurrent ? { queue: [] } : this.lanes[commandName(argv[0]) === 'rg' ? 'search' : 'execution'];
     const state = { worker: undefined, resources: undefined, stopped: false, finishing: false,
       settled: false, outcome: undefined, failure: undefined, providerFailure: undefined, rangeFailure: undefined };
     const completion = Promise.withResolvers();
     const gone = Promise.withResolvers();
+    const started = Promise.withResolvers();
+    let didStart = false;
+    started.promise.catch(() => {});
     // The original promises still reject to callers; attach internal observers
     // so a cleanup failure before a caller begins awaiting is never unhandled.
     completion.promise.catch(() => {});
     gone.promise.catch(() => {});
     const collected = {};
     const output = {};
+    const input = spec.stdio.stdin === 'pipe' ? new PassThrough({ highWaterMark: 65536 }) : undefined;
+    input?.on('error', () => {});
     for (const label of ['stdout', 'stderr']) {
       const mode = spec.stdio[label];
       if (mode === 'pipe') output[label] = new PassThrough();
@@ -144,6 +159,8 @@ export class VirtualSubprocessRuntime {
     const settle = cleanupFailure => {
       const providerErrors = new Set([cleanupFailure, state.providerFailure].filter(Boolean));
       spec.signal?.removeEventListener('abort', handle.terminate);
+      input?.destroy();
+      if (!didStart) started.reject(state.failure ?? Object.assign(new Error('任务在启动前已结束'), { code: 'ERR_OHOS_NOT_STARTED' }));
       for (const collector of Object.values(collected)) {
         try { collector.seal(); } catch (error) { providerErrors.add(error); }
       }
@@ -166,7 +183,7 @@ export class VirtualSubprocessRuntime {
         completion.reject(failures.length === 1 ? failures[0]
           : new AggregateError(failures, 'Virtual process and resource cleanup failed', { cause: failures[0] }));
       } else if (state.failure && !state.stopped) completion.reject(state.failure);
-      else completion.resolve(state.stopped ? { exitCode: null, signal: 'SIGTERM' } : state.outcome);
+      else completion.resolve(state.stopped ? { exitCode: null, signal: state.stopSignal ?? 'SIGTERM' } : state.outcome);
       queueMicrotask(() => this.startNext(lane));
     };
     const finish = () => {
@@ -179,10 +196,11 @@ export class VirtualSubprocessRuntime {
       Promise.resolve().then(() => state.resources?.finish({ cancelled: state.stopped })).then(() => settle(), settle);
     };
     const handle = {
-      stdin: undefined, stdout: output.stdout, stderr: output.stderr, control: undefined, collected,
-      done: completion.promise,
-      terminate: () => {
+      stdin: input, stdout: output.stdout, stderr: output.stderr, control: undefined, collected,
+      done: completion.promise, started: started.promise,
+      terminate: signal => {
         if (state.settled || state.stopped) return;
+        state.stopSignal = typeof signal === 'string' ? signal : 'SIGTERM';
         state.stopped = true;
         state.resources?.stop();
         if (state.worker) void state.worker.terminate().catch(error => { state.providerFailure ??= error; });
@@ -206,10 +224,10 @@ export class VirtualSubprocessRuntime {
         if (state.stopped || state.finishing || state.settled || state.worker) return;
         lane.active = handle;
         try {
-          if (spec.stdio.stdin === 'pipe' || spec.stdio.control === 'pipe') {
+          const name = commandName(argv[0]);
+          if (spec.stdio.control === 'pipe' || (spec.stdio.stdin === 'pipe' && name !== 'node')) {
             throw Object.assign(new Error('当前虚拟 shell 只支持批量 stdin；交互字节通道尚未实现'), { code: 'ERR_OHOS_STREAM_UNAVAILABLE' });
           }
-          const name = commandName(argv[0]);
           if (!name) {
             write('stderr', Buffer.from(unavailableMessage + '\n'));
             state.outcome = { exitCode: 127, signal: null };
@@ -238,12 +256,18 @@ export class VirtualSubprocessRuntime {
             try {
               worker = createNodeScriptWorker({ args: argv.slice(1), cwd, roots,
                 workspaceRoots: [policy?.workspaceRoot ?? cwd], readOnly: policy?.mode === 'read-only', env: workerEnv,
-                stdin: typeof spec.stdio.stdin === 'object' ? spec.stdio.stdin.data : '' });
+                stdin: typeof spec.stdio.stdin === 'object' ? spec.stdio.stdin.data : '',
+                streamStdin: spec.stdio.stdin === 'pipe' });
             } catch (error) {
               if (['ENOENT', 'ENOTDIR', 'ERR_OHOS_NODE_SCRIPT_ARGUMENTS', 'ERR_OHOS_NODE_PRELOAD_REQUIRED'].includes(error.code)) {
-                write('stderr', Buffer.from(`${error.code}: ${error.message}\n`));
-                state.outcome = { exitCode: error.code === 'ERR_OHOS_NODE_SCRIPT_ARGUMENTS' ? 2 : error.code === 'ERR_OHOS_NODE_PRELOAD_REQUIRED' ? 127 : 1, signal: null };
-                finish(); return;
+                didStart = true;
+                started.resolve();
+                queueMicrotask(() => {
+                  write('stderr', Buffer.from(`${error.code}: ${error.message}\n`));
+                  state.outcome = { exitCode: error.code === 'ERR_OHOS_NODE_SCRIPT_ARGUMENTS' ? 2 : error.code === 'ERR_OHOS_NODE_PRELOAD_REQUIRED' ? 127 : 1, signal: null };
+                  finish();
+                });
+                return;
               }
               throw error;
             }
@@ -267,6 +291,12 @@ export class VirtualSubprocessRuntime {
             });
           }
           state.worker = worker;
+          didStart = true;
+          started.resolve();
+          if (input) {
+            worker.stdin.on('error', error => input.destroy(error));
+            input.pipe(worker.stdin);
+          }
           let workerExited = false;
           const ended = new Set();
           const finishWorker = () => {
@@ -297,6 +327,7 @@ export class VirtualSubprocessRuntime {
             else state.failure = error;
           });
           worker.once('exit', exitCode => {
+            input?.destroy();
             // Worker events retain the script integer; the subprocess seam exposes a POSIX status.
             if (nodeTask) state.outcome = { exitCode: exitCode & 0xff, signal: null };
             if (!state.outcome && !state.failure && !state.stopped) state.failure = new Error(`虚拟进程 worker 未报告结果，退出码 ${exitCode}`);
