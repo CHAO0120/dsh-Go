@@ -369,25 +369,67 @@ jobs:
           "$node" tooling/ios/engine-smoke/tools-check.mjs --simulator "$DSH_SIMULATOR" --app app/build/ios/iphonesimulator/Runner.app --work "$RUNNER_TEMP/tools-check"
 
       - name: Exercise Swift phone and companion voice contracts
+        id: swift
         if: ${{ !cancelled() && steps.prepare.outcome == 'success' }}
         working-directory: app
         run: |
-          xcodebuild test -workspace ios/Runner.xcworkspace -scheme Runner \
-            -destination "id=$DSH_SIMULATOR" -only-testing:RunnerTests/IOSPhoneSelfRunnerTests \
-            -only-testing:RunnerTests/IOSPhonePairingStoreTests \
-            -only-testing:RunnerTests/IOSPhoneCoreDeviceTests \
-            -only-testing:RunnerTests/IOSPhoneScreenTests \
-            -only-testing:RunnerTests/IOSPhoneDDIBackgroundTests \
-            -only-testing:RunnerTests/IOSPhoneOperationTests \
-            -only-testing:RunnerTests/IOSPhoneApprovalTests \
-            -only-testing:RunnerTests/IOSPhoneClipboardTests \
-            -only-testing:RunnerTests/IOSPhoneXCTestObservationTests \
-            -only-testing:RunnerTests/IOSPhoneRPCDispatchTests \
-            -only-testing:RunnerTests/IOSPhoneTaskConsentTests \
-            -only-testing:RunnerTests/IOSPhoneResultEnvelopeTests \
-            -only-testing:RunnerTests/IOSCompanionVoiceTests \
-            -only-testing:RunnerTests/IOSAudioSessionCoordinatorTests \
-            -parallel-testing-enabled NO CODE_SIGNING_ALLOWED=NO
+          suites="IOSPhoneSelfRunnerTests IOSPhonePairingStoreTests IOSPhoneCoreDeviceTests IOSPhoneScreenTests
+            IOSPhoneDDIBackgroundTests IOSPhoneOperationTests IOSPhoneApprovalTests IOSPhoneClipboardTests
+            IOSPhoneXCTestObservationTests IOSPhoneRPCDispatchTests IOSPhoneTaskConsentTests
+            IOSPhoneResultEnvelopeTests IOSCompanionVoiceTests IOSAudioSessionCoordinatorTests"
+          only=(); for suite in $suites; do only+=("-only-testing:RunnerTests/$suite"); done
+          bundle="$RUNNER_TEMP/swift-contracts.xcresult"
+          log="$RUNNER_TEMP/swift-contracts.log"
+          status=0
+          xcodebuild test -workspace ios/Runner.xcworkspace -scheme Runner -destination "id=$DSH_SIMULATOR" \
+            "${only[@]}" -resultBundlePath "$bundle" -parallel-testing-enabled NO CODE_SIGNING_ALLOWED=NO \
+            2>&1 | tee "$log" || status=$?
+          # xcodebuild has said TEST SUCCEEDED with whole suites never run, so each one has to say it passed.
+          missing=""
+          for suite in $suites; do grep -q "Test Suite '$suite' passed" "$log" || missing="$missing $suite"; done
+          if [ -n "$missing" ]; then
+            echo "::error title=Swift contracts::suites that never passed:$missing"
+            echo "::error title=Swift contracts::last case started: $(grep -F "Test Case '-[RunnerTests" "$log" | tail -1)"
+            xcrun xcresulttool get test-results tests --path "$bundle" > "$RUNNER_TEMP/swift-tests.json" 2>&1 || true
+            python3 - "$RUNNER_TEMP/swift-tests.json" <<'PY' || true
+          import json, sys
+          try:
+              nodes = json.load(open(sys.argv[1])).get('testNodes', [])
+          except Exception as error:
+              print('::notice title=xcresult::unreadable: %s' % error)
+              sys.exit(0)
+          lines = []
+          def walk(node):
+              kind, name, result = node.get('nodeType', ''), node.get('name', ''), node.get('result', '')
+              if kind == 'Test Suite':
+                  cases = [c for c in node.get('children', []) if c.get('nodeType') == 'Test Case']
+                  lines.append('%s %s: %d cases' % (name, result, len(cases)))
+              if kind == 'Test Case':
+                  if result != 'Passed':
+                      lines.append('  %s %s' % (name, result))
+                      for child in node.get('children', []):
+                          lines.append('    ' + child.get('name', '')[:300])
+                  return
+              for child in node.get('children', []):
+                  walk(child)
+          for node in nodes:
+              walk(node)
+          text = '%0A'.join(line.replace('%', '%25') for line in lines)
+          print('::notice title=xcresult tests::' + text[:3500])
+          PY
+            status=1
+          fi
+          exit $status
+
+      - name: Keep the Swift contract results
+        if: ${{ failure() && steps.swift.outcome == 'failure' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: ios-swift-contracts
+          path: |
+            ${{ runner.temp }}/swift-contracts.xcresult
+            ${{ runner.temp }}/swift-contracts.log
+          retention-days: 7
 
       - name: Capture the native pet renderer in the simulator
         if: ${{ !cancelled() && steps.prepare.outcome == 'success' }}
