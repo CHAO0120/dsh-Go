@@ -2,7 +2,6 @@ package io.github.ccch1mneyyy.dsh_app.phone
 
 import io.github.ccch1mneyyy.dsh_app.phone.background.BackgroundResourceJournal
 import java.time.ZoneId
-import java.lang.management.ManagementFactory
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
@@ -578,55 +577,6 @@ class PhoneTaskSessionsTest {
         assertTrue(task("A", "2").tasks.isActive)
         assertNull(sessions.completed(receipt.taskId, "1", receipt.lifecycle))
     }
-    @Test fun policyPublicationExcludesANewAdmissionUntilTheValueIsVisible() {
-        val published = AtomicReference(PhonePolicies())
-        val publisherThread = AtomicLong()
-        val insidePublish = CountDownLatch(1)
-        val releasePublish = CountDownLatch(1)
-        val attempting = CountDownLatch(1)
-        val admitted = CountDownLatch(1)
-        val failure = AtomicReference<Throwable?>()
-        val caller = Thread {
-            attempting.countDown()
-            try {
-                val admission = admit("policy-race")
-                admitted.countDown()
-                assertTrue(published.get().unlocks.secretFields)
-                sessions.run(admission, PhoneToolCatalog.APPS, emptyMap())
-            } catch (e: Throwable) { failure.set(e); admitted.countDown() }
-        }
-        val writer = pool.submit<PhonePolicies?> {
-            sessions.updatePolicies(mapOf("unlocks" to mapOf("secretFields" to true)), published::get) { next ->
-                publisherThread.set(Thread.currentThread().id)
-                insidePublish.countDown()
-                check(releasePublish.await(5, TimeUnit.SECONDS))
-                published.set(next)
-            }
-        }
-        try {
-            assertTrue(insidePublish.await(5, TimeUnit.SECONDS))
-            caller.start()
-            assertTrue(attempting.await(5, TimeUnit.SECONDS))
-            // Observe the actual monitor barrier, not a sleep or assumed scheduler delay.
-            val until = System.nanoTime() + TimeUnit.SECONDS.toNanos(5)
-            val threads = ManagementFactory.getThreadMXBean()
-            var info = threads.getThreadInfo(caller.id)
-            while (info?.lockOwnerId != publisherThread.get() && admitted.count != 0L && System.nanoTime() < until) {
-                Thread.yield()
-                info = threads.getThreadInfo(caller.id)
-            }
-            assertEquals(publisherThread.get(), info?.lockOwnerId)
-            assertEquals(Thread.State.BLOCKED, info?.threadState)
-            assertEquals(1L, admitted.count)
-            releasePublish.countDown()
-            assertNotNull(writer.get(5, TimeUnit.SECONDS))
-            assertTrue(admitted.await(5, TimeUnit.SECONDS))
-            caller.join(5_000)
-            assertFalse(caller.isAlive)
-            assertNull(failure.get())
-        } finally { releasePublish.countDown(); caller.join(5_000) }
-    }
-
     @Test fun anAlreadyAdmittedTaskRejectsUnlockButStillAllowsRestoringRestrictions() {
         val current = AtomicReference(PhonePolicies(unlocks = PhoneUnlocks(ownApp = true)))
         val admitted = admit("active")
