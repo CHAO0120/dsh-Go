@@ -31,9 +31,15 @@ final class IOSPhoneTaskConsentTests: XCTestCase {
     let host: UIViewController
     var clock: TimeInterval? = 1000
     var current = true
+    var onCurrentCheck: (() -> Void)?
     var presentationAttempts = 0
     var admittedContinuations = 0
     init(host: UIViewController) { self.host = host }
+
+    func isCurrent() -> Bool {
+      onCurrentCheck?()
+      return current
+    }
   }
 
   @MainActor
@@ -49,11 +55,11 @@ final class IOSPhoneTaskConsentTests: XCTestCase {
       task = Task { @MainActor [self] in
         let allowed: Bool
         if clipboard {
-          allowed = await fixture.consent.prepareClipboard(request, current: { fixture.state.current })
+          allowed = await fixture.consent.prepareClipboard(request, current: { fixture.state.isCurrent() })
         } else {
           allowed = await fixture.consent.approve(request,
             detail: "合成测试：本次只检查确认状态，不执行实际手机动作。",
-            needsTarget: false, current: { fixture.state.current })
+            needsTarget: false, current: { fixture.state.isCurrent() })
         }
         answer = allowed
         // A recording consumer of the real consent result, never an actual
@@ -88,6 +94,7 @@ final class IOSPhoneTaskConsentTests: XCTestCase {
     }
 
     func retireAndCancel() {
+      state.onCurrentCheck = nil
       state.current = false
       consent.retire()
       for operation in operations {
@@ -497,7 +504,7 @@ final class IOSPhoneTaskConsentTests: XCTestCase {
     }
   }
 
-  func testGrantClockRejectsExactExpiryBackwardUnavailableAndNonfiniteSamples() async throws {
+  func testObservedExpiryStaysRetiredDespiteLaterClockSamples() async throws {
     try await withFixture { fixture in
       try await self.establish(fixture)
       XCTAssertEqual(fixture.consent.remainingSeconds, 1800)
@@ -505,10 +512,11 @@ final class IOSPhoneTaskConsentTests: XCTestCase {
       XCTAssertTrue(fixture.consent.isGranted)
       XCTAssertEqual(fixture.consent.remainingSeconds, 0.001, accuracy: 0.000000001)
 
-      // These are injected clock samples, not a real 30-minute wait or a
-      // device sleep/resume test. Every invalid sample must fail this read.
+      // These are injected samples, not a real 30-minute wait or a device
+      // sleep/resume test. Once expiry is observed, even a later in-range
+      // sample cannot resurrect the retired grant.
       let invalid: [TimeInterval?] = [2800, 2800.001, 999, nil,
-        TimeInterval.nan, TimeInterval.infinity, -TimeInterval.infinity]
+        TimeInterval.nan, TimeInterval.infinity, -TimeInterval.infinity, 1000, 2000]
       for sample in invalid {
         fixture.state.clock = sample
         XCTAssertFalse(fixture.consent.isGranted)
@@ -624,6 +632,253 @@ final class IOSPhoneTaskConsentTests: XCTestCase {
       try self.answer(sheet, title: Self.clipboardButton)
       try await self.completed(operation, expected: false)
       XCTAssertEqual(fixture.state.admittedContinuations, 1)
+    }
+  }
+
+  func testExpiryMonitorNotifiesOnceWithoutAnotherRequestOrGetter() async throws {
+    try await withFixture { fixture in
+      try await self.establish(fixture)
+      let expired = self.expectation(description: "current grant expired without polling")
+      expired.assertForOverFulfill = true
+      var owners: [String] = []
+      fixture.consent.onExpiration = { [weak consent = fixture.consent] run, session in
+        owners.append(run + "/" + session)
+        // The callback may reenter readers: the grant must already be gone.
+        XCTAssertFalse(consent?.isGranted ?? true)
+        XCTAssertEqual(consent?.remainingSeconds, 0)
+        expired.fulfill()
+      }
+      fixture.state.clock = 2800
+      await self.fulfillment(of: [expired], timeout: 3)
+      XCTAssertEqual(owners, ["synthetic-consent-run/synthetic-consent-session"])
+      fixture.state.clock = 1000
+      XCTAssertFalse(fixture.consent.isGranted)
+      XCTAssertEqual(fixture.consent.checkExpiration(), 0)
+      fixture.consent.retire()
+      XCTAssertEqual(owners.count, 1)
+      XCTAssertEqual(fixture.state.presentationAttempts, 2)
+    }
+  }
+
+  func testExplicitRetireCancelsOldExpiryNotification() async throws {
+    try await withFixture { fixture in
+      try await self.establish(fixture)
+      let unexpected = self.expectation(description: "retired grant must not expire again")
+      unexpected.isInverted = true
+      fixture.consent.onExpiration = { _, _ in unexpected.fulfill() }
+      fixture.consent.retire()
+      fixture.state.clock = 2800
+      await self.fulfillment(of: [unexpected], timeout: 1.25)
+      XCTAssertEqual(fixture.consent.checkExpiration(), 0)
+      XCTAssertFalse(fixture.consent.isGranted)
+    }
+  }
+
+  func testNewOwnerGrantDoesNotInheritOldExpiryNotification() async throws {
+    try await withFixture { fixture in
+      try await self.establish(fixture, run: "engine-a", session: "session-a")
+      fixture.state.clock = 2000
+      try await self.establish(fixture, run: "engine-b", session: "session-b")
+      var owners: [String] = []
+      let expired = self.expectation(description: "only replacement grant expires")
+      expired.assertForOverFulfill = true
+      fixture.consent.onExpiration = { run, session in
+        owners.append(run + "/" + session)
+        expired.fulfill()
+      }
+      fixture.state.clock = 2800 // The replaced grant's deadline.
+      try await Task.sleep(nanoseconds: 1_250_000_000)
+      XCTAssertTrue(owners.isEmpty)
+      XCTAssertEqual(fixture.consent.remainingSeconds, 1000)
+      fixture.state.clock = 3800
+      await self.fulfillment(of: [expired], timeout: 3)
+      XCTAssertEqual(owners, ["engine-b/session-b"])
+      XCTAssertFalse(fixture.consent.isGranted)
+      XCTAssertEqual(fixture.state.presentationAttempts, 4)
+    }
+  }
+
+  func testNewExplicitRequestAfterExpiryRequiresBothFreshSheets() async throws {
+    try await withFixture { fixture in
+      try await self.establish(fixture)
+      var expirations = 0
+      fixture.consent.onExpiration = { _, _ in expirations += 1 }
+      fixture.state.clock = 2800
+      // Do not poll a getter first. approve() must retire the old generation
+      // before it captures the replacement operation's generation.
+      let operation = try self.start(fixture)
+      let grant = try await self.nextSheet(fixture, operation: operation, grant: true)
+      XCTAssertEqual(expirations, 1)
+      XCTAssertFalse(fixture.consent.isGranted)
+      try self.answer(grant, title: Self.grantButton)
+      let call = try await self.nextSheet(fixture, operation: operation, grant: false)
+      XCTAssertNil(operation.answer)
+      try self.answer(call, title: Self.callButton)
+      try await self.completed(operation, expected: true)
+      XCTAssertEqual(fixture.consent.remainingSeconds, 1800)
+      XCTAssertEqual(fixture.state.presentationAttempts, 4)
+      XCTAssertEqual(expirations, 1)
+    }
+  }
+
+  func testMonitorExpiryInvalidatesVisibleCallEvenIfClockLaterRecovers() async throws {
+    try await withFixture { fixture in
+      let operation = try self.start(fixture)
+      let grant = try await self.nextSheet(fixture, operation: operation, grant: true)
+      try self.answer(grant, title: Self.grantButton)
+      let call = try await self.nextSheet(fixture, operation: operation, grant: false)
+      let expired = self.expectation(description: "visible call loses its original grant")
+      expired.assertForOverFulfill = true
+      fixture.consent.onExpiration = { _, _ in expired.fulfill() }
+      fixture.state.clock = 2800
+      await self.fulfillment(of: [expired], timeout: 3)
+      fixture.state.clock = 1000
+      try self.answer(call, title: Self.callButton)
+      try await self.completed(operation, expected: false)
+      XCTAssertFalse(fixture.consent.isGranted)
+      XCTAssertEqual(fixture.state.admittedContinuations, 0)
+    }
+  }
+
+  func testDecliningCallKeepsOriginalGrantAndDeadlineForNextRequest() async throws {
+    try await withFixture { fixture in
+      try await self.establish(fixture)
+      var expirations = 0
+      fixture.consent.onExpiration = { _, _ in expirations += 1 }
+      fixture.state.clock = 1060
+      let denied = try self.start(fixture)
+      let deniedCall = try await self.nextSheet(fixture, operation: denied, grant: false)
+      try self.answer(deniedCall, title: Self.denyButton)
+      try await self.completed(denied, expected: false)
+      XCTAssertEqual(fixture.consent.remainingSeconds, 1740)
+      XCTAssertEqual(expirations, 0)
+      let replacement = try self.start(fixture)
+      let replacementCall = try await self.nextSheet(fixture, operation: replacement, grant: false)
+      try self.answer(replacementCall, title: Self.callButton)
+      try await self.completed(replacement, expected: true)
+      XCTAssertEqual(fixture.consent.remainingSeconds, 1740)
+      XCTAssertEqual(fixture.state.presentationAttempts, 4)
+      XCTAssertEqual(fixture.state.admittedContinuations, 2)
+      XCTAssertEqual(expirations, 0)
+    }
+  }
+
+  func testClockRegressionAfterObservedProgressRetiresCurrentGrant() async throws {
+    try await withFixture { fixture in
+      try await self.establish(fixture)
+      var expirations = 0
+      fixture.consent.onExpiration = { _, _ in expirations += 1 }
+      fixture.state.clock = 1100
+      XCTAssertEqual(fixture.consent.remainingSeconds, 1700)
+      fixture.state.clock = 1050 // Still after grant start, but before last read.
+      XCTAssertFalse(fixture.consent.isGranted)
+      XCTAssertEqual(expirations, 1)
+      fixture.state.clock = 1100
+      XCTAssertFalse(fixture.consent.isGranted)
+      XCTAssertEqual(expirations, 1)
+    }
+  }
+
+  func testUnavailableClockNotifiesExpiryWithoutAnotherPoll() async throws {
+    try await withFixture { fixture in
+      try await self.establish(fixture)
+      let expired = self.expectation(description: "unavailable clock retires current grant")
+      expired.assertForOverFulfill = true
+      fixture.consent.onExpiration = { _, _ in expired.fulfill() }
+      fixture.state.clock = nil
+      await self.fulfillment(of: [expired], timeout: 3)
+      fixture.state.clock = 1001
+      XCTAssertFalse(fixture.consent.isGranted)
+      XCTAssertEqual(fixture.state.admittedContinuations, 1)
+    }
+  }
+
+  func testExpiryDiscoveredDuringAdmissionCannotShowAReplacementGrantSheet() async throws {
+    try await withFixture { fixture in
+      try await self.establish(fixture)
+      var expirations = 0
+      fixture.consent.onExpiration = { _, _ in expirations += 1 }
+      // approve() first reads the still-valid grant clock. Its subsequent
+      // caller-liveness check advances the injected clock, so isGranted must
+      // expire this operation instead of presenting a replacement grant.
+      fixture.state.onCurrentCheck = { [weak state = fixture.state] in
+        state?.onCurrentCheck = nil
+        state?.clock = 2800
+      }
+      let operation = try self.start(fixture)
+      try await self.completed(operation, expected: false)
+      XCTAssertEqual(expirations, 1)
+      XCTAssertFalse(fixture.consent.isGranted)
+      XCTAssertEqual(fixture.state.presentationAttempts, 2)
+      XCTAssertEqual(fixture.state.admittedContinuations, 1)
+    }
+  }
+
+  func testClipboardRefusalUsesCapturedCleanupAndPreservesTheTaskGrant() async throws {
+    try await withFixture { fixture in
+      try await self.establish(fixture)
+      fixture.state.clock = 1060
+      var oldCleanup = 0
+      var replacementCleanup = 0
+      fixture.consent.onClipboardRefusal = { oldCleanup += 1 }
+      let denied = try self.start(fixture, clipboard: true)
+      let deniedSheet = try await self.nextSheet(fixture, operation: denied, grant: false, clipboard: true)
+      // Replace the installed callback while the first native sheet is open.
+      // This tests production callback capture, not a simulated native owner.
+      fixture.consent.onClipboardRefusal = { replacementCleanup += 1 }
+      try self.answer(deniedSheet, title: Self.clipboardDeny)
+      try await self.completed(denied, expected: false)
+      XCTAssertEqual(oldCleanup, 1)
+      XCTAssertEqual(replacementCleanup, 0)
+      XCTAssertEqual(fixture.consent.remainingSeconds, 1740)
+
+      let allowed = try self.start(fixture, clipboard: true)
+      let allowedSheet = try await self.nextSheet(fixture, operation: allowed, grant: false, clipboard: true)
+      try self.answer(allowedSheet, title: Self.clipboardButton)
+      try await self.completed(allowed, expected: true)
+      XCTAssertEqual(oldCleanup, 1)
+      XCTAssertEqual(replacementCleanup, 0)
+      XCTAssertEqual(fixture.consent.remainingSeconds, 1740)
+      XCTAssertEqual(fixture.state.presentationAttempts, 4)
+      XCTAssertEqual(fixture.state.admittedContinuations, 2)
+    }
+  }
+
+  func testCancelledClipboardAdmissionStillUsesOnlyItsCapturedCleanup() async throws {
+    try await withFixture { fixture in
+      try await self.establish(fixture)
+      var oldCleanup = 0
+      var replacementCleanup = 0
+      fixture.consent.onClipboardRefusal = { oldCleanup += 1 }
+      let operation = try self.start(fixture, clipboard: true)
+      let sheet = try await self.nextSheet(fixture, operation: operation, grant: false, clipboard: true)
+      fixture.consent.onClipboardRefusal = { replacementCleanup += 1 }
+      fixture.state.current = false
+      try self.answer(sheet, title: Self.clipboardButton)
+      try await self.completed(operation, expected: false)
+      XCTAssertEqual(oldCleanup, 1)
+      XCTAssertEqual(replacementCleanup, 0)
+      XCTAssertEqual(fixture.consent.remainingSeconds, 1800)
+      XCTAssertEqual(fixture.state.admittedContinuations, 1)
+    }
+  }
+
+  func testUnrelatedClipboardRequestDoesNotAcquireTheCurrentCleanupHook() async throws {
+    try await withFixture { fixture in
+      try await self.establish(fixture)
+      var cleanup = 0
+      fixture.consent.onClipboardRefusal = { cleanup += 1 }
+      let nonText = await fixture.consent.prepareClipboard(try self.request(), current: { true })
+      XCTAssertFalse(nonText)
+      let differentOwner = await fixture.consent.prepareClipboard(
+        try self.request(session: "another-session", clipboard: true), current: { true })
+      XCTAssertFalse(differentOwner)
+      let alreadyRetired = await fixture.consent.prepareClipboard(
+        try self.request(clipboard: true), current: { false })
+      XCTAssertFalse(alreadyRetired)
+      XCTAssertEqual(cleanup, 0)
+      XCTAssertEqual(fixture.consent.remainingSeconds, 1800)
+      XCTAssertEqual(fixture.state.presentationAttempts, 2)
     }
   }
 }

@@ -30,6 +30,7 @@ final class IOSPhoneRunner {
   private var lastRoute: Route?
   private var lastXCTestScreen: String?
   private var selfOwnerID = UUID().uuidString
+  private var invocationID = UUID()
   private var lastEndpoint: Endpoint?
 
   init(actions: IOSPhoneActions, selfRunner: IOSPhoneSelfRunner? = nil) {
@@ -40,6 +41,10 @@ final class IOSPhoneRunner {
     configuration.httpCookieStorage = nil
     configuration.connectionProxyDictionary = [:]
     session = URLSession(configuration: configuration)
+    consent.onExpiration = { [weak self] runID, sessionID in
+      guard let self, self.taskOwner == Owner(runID: runID, sessionID: sessionID) else { return }
+      self.retireConnection(ownerID: self.selfOwnerID)
+    }
   }
 
   /// The run is over, and what the user granted was for it.
@@ -48,12 +53,25 @@ final class IOSPhoneRunner {
   }
 
   func finish() {
-    consent.retire(); coreActions.invalidate(); lastRoute = nil; lastXCTestScreen = nil
+    consent.retire()
     taskOwner = nil
+    retireConnection(ownerID: selfOwnerID)
+  }
+
+  /// A declined call closes only this connection and its observations. It does
+  /// not revoke or renew a still-valid task grant. A late refusal has no power
+  /// over a newer invocation, even within the same engine/session tuple.
+  private func retireConnection(ownerID: String, invocationID: UUID? = nil) {
+    guard selfOwnerID == ownerID else { return }
+    if let invocationID, self.invocationID != invocationID { return }
+    selfOwnerID = UUID().uuidString; self.invocationID = UUID()
+    coreActions.invalidate(); lastRoute = nil; lastXCTestScreen = nil
     lastEndpoint = nil
-    selfRunner.stop(ownerID: selfOwnerID)
-    IOSPhoneCoreDevice.shared.stop(ownerID: selfOwnerID)
-    selfOwnerID = UUID().uuidString
+    consent.onClipboardRefusal = nil
+    // Rotate local identities before either backend's synchronous status
+    // callback can reenter. Never use an unowned stop for settings preflight.
+    selfRunner.stop(ownerID: ownerID)
+    core.stop(ownerID: ownerID)
   }
 
   /// Only the already-authorized runner may return to this app; never launch a
@@ -88,6 +106,10 @@ final class IOSPhoneRunner {
            progress: @escaping (IOSPhoneControl.Phase) -> Void = { _ in },
            current: @escaping () -> Bool) async -> IOSPhoneOutcome {
     guard current(), !Task.isCancelled else { return .failure(IOSPhoneSelfRunnerError.cancelled.message) }
+    // Consume an old expiry before capturing this call's identities, so a fresh
+    // explicit request can ask for a new grant after the old connection closes.
+    consent.checkExpiration()
+    guard current(), !Task.isCancelled else { return .failure(IOSPhoneSelfRunnerError.cancelled.message) }
     let incomingOwner = Owner(runID: request.runId, sessionID: request.owner.sessionId)
     if taskOwner != incomingOwner {
       // A different conversation cannot inherit either backend's observations,
@@ -96,6 +118,8 @@ final class IOSPhoneRunner {
       finish()
       taskOwner = incomingOwner
     }
+    let invocationID = UUID(); self.invocationID = invocationID
+    consent.onClipboardRefusal = nil
     if request.action.kind == "runner-handoff" {
       let result = await handOver(request)
       guard !result.isError, current(), !Task.isCancelled, await authorize(), current() else {
@@ -106,7 +130,10 @@ final class IOSPhoneRunner {
     let link = IOSPhoneLink.shared
     let settingsGeneration = link.generation
     let ownerID = selfOwnerID
-    let live = { !Task.isCancelled && current() && self.selfOwnerID == ownerID
+    consent.onClipboardRefusal = { [weak self] in
+      self?.retireConnection(ownerID: ownerID, invocationID: invocationID)
+    }
+    let live = { !Task.isCancelled && current() && self.selfOwnerID == ownerID && self.invocationID == invocationID
       && link.generation == settingsGeneration && IOSPhoneControl.shared.enabled
       && !IOSPhoneControl.shared.isPaused
       && request.expiresAt > Date().timeIntervalSince1970 * 1000 }
@@ -134,11 +161,13 @@ final class IOSPhoneRunner {
       + "\n\n路线由你的设置和可用性决定；XCTest 只在已启用时使用。已经派发或结果不明时不切换重试。"
     guard await consent.prepareForeground(request, current: live), live(),
       await IOSPhoneClipboard.shared.resolvePending(request, actions: actions, current: live), live() else {
+      retireConnection(ownerID: ownerID, invocationID: invocationID)
       return .failure("请先回到 DSH Go 处理上次剪贴板恢复；没有执行新动作。")
     }
     let preview = coreActions.approvalPreview(plan, ownerID: ownerID, sessionID: request.owner.sessionId)
     guard await consent.approve(request, detail: description, needsTarget: plan.needsTarget || plan.method == .open, preview: preview, current: live),
       live(), await authorize(), live(), consent.isGranted else {
+      retireConnection(ownerID: ownerID, invocationID: invocationID)
       return .failure("本次调用没有取得仍有效的逐次批准，没有派发手机动作。不要自动重试。")
     }
     progress(.connecting)
