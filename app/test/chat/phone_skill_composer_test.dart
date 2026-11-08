@@ -43,6 +43,16 @@ void main() {
   final messenger = TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
   tearDown(() => messenger.setMockMethodCallHandler(_method, null));
 
+  Future<void> disposeHarness(WidgetTester tester, SyncHarness h) async {
+    try {
+      await tester.pumpWidget(const SizedBox());
+      await tester.pump(const Duration(milliseconds: 600));
+    } finally {
+      await tester.runAsync(h.close);
+    }
+    await tester.pump();
+  }
+
   Future<SyncHarness> open(WidgetTester tester) async {
     usePhoneView(tester);
     mockClipboard(tester);
@@ -79,16 +89,6 @@ void main() {
       await tester.runAsync(() => Future<void>.delayed(Duration.zero));
       await tester.pump();
     }
-  }
-
-  Future<void> disposeHarness(WidgetTester tester, SyncHarness h) async {
-    try {
-      await tester.pumpWidget(const SizedBox());
-      await tester.pump(const Duration(milliseconds: 600));
-    } finally {
-      await tester.runAsync(h.close);
-    }
-    await tester.pump();
   }
 
   PreparedPhoneSkill selection(SyncHarness h, {String invocation = _invocation}) => PreparedPhoneSkill(
