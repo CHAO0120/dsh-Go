@@ -43,7 +43,8 @@ assert archive.stat().st_size == manifest['archive']['bytes'] and sha(archive) =
 source = output / 'source/runtime/ohos/linux'
 source.mkdir(parents=True)
 for name in ['control.mjs', 'host-paths.mjs', 'owner.mjs', 'instance.mjs', 'base-download.mjs',
-             'prepare-images.mjs', 'backend.mjs', 'controller.mjs', 'streams.mjs', 'native-session.mjs']:
+             'prepare-images.mjs', 'backend.mjs', 'controller.mjs', 'streams.mjs', 'native-session.mjs',
+             'job-diagnostics.mjs', 'proxy.mjs']:
     shutil.copy2(ROOT / 'runtime/ohos/linux' / name, source / name)
 shutil.copytree(ROOT / 'runtime/ohos/net', output / 'source/runtime/ohos/net')
 shutil.copytree(assets, source / 'assets')
