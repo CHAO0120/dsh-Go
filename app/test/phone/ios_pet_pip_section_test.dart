@@ -126,6 +126,20 @@ void main() {
     expect(find.text('重新准备画中画'), findsNothing);
   }, variant: ios);
 
+  testWidgets('no visible source between tasks is waiting, not a failure', (tester) async {
+    current = _ios(enabled: true, usable: true, always: true, error: 'overlay_source_missing');
+    await show(tester);
+    expect(find.text('已就绪，手机任务开始时出现'), findsOneWidget);
+    expect(find.text('恢复'), findsNothing);
+  }, variant: ios);
+
+  testWidgets('no visible source during a task is a failure to start', (tester) async {
+    current = _ios(enabled: true, usable: true, always: true, task: true, error: 'overlay_source_missing');
+    await show(tester);
+    expect(find.text('已就绪，手机任务开始时出现'), findsNothing);
+    expect(find.text('恢复'), findsOneWidget);
+  }, variant: ios);
+
   testWidgets('no pet chosen: it points to pet settings', (tester) async {
     current = _ios(enabled: true, error: 'overlay_pet_not_selected');
     await show(tester);

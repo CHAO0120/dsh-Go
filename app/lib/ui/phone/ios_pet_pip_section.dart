@@ -45,17 +45,20 @@ class IosPetPipSection extends ConsumerWidget {
     final s = ref.watch(petOverlayProvider);
     if (!s.native || !s.ios) return const SizedBox.shrink();
     final overlay = ref.read(petOverlayProvider.notifier);
-    final noPet = s.errorCode == 'overlay_pet_not_selected';
+    // With 始终显示 on and no phone task, the native side has nowhere to show the pet in the app and
+    // says so with this code. That is waiting for the next task, not a failure to recover from.
+    final error = s.errorCode == 'overlay_source_missing' && !s.phoneTaskActive ? null : s.errorCode;
+    final noPet = error == 'overlay_pet_not_selected';
     // A pack problem is fixed by choosing another pet; the rest by trying again.
     final choosePet =
-        noPet || const {'overlay_pack_missing', 'overlay_pack_invalid', 'overlay_sheet_invalid'}.contains(s.errorCode);
+        noPet || const {'overlay_pack_missing', 'overlay_pack_invalid', 'overlay_sheet_invalid'}.contains(error);
     void openPets() =>
         unawaited(Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const PetSettingsPage())));
 
     final String line;
     if (!s.enabled) {
       line = l10n.iosPetPipRequired;
-    } else if (s.errorCode case final code?) {
+    } else if (error case final code?) {
       line = petPipErrorText(l10n, code);
     } else if (s.snoozed) {
       line = l10n.iosPetPipErrorClosed;
@@ -64,7 +67,7 @@ class IosPetPipSection extends ConsumerWidget {
     } else {
       line = l10n.iosPetPipReady;
     }
-    final stopped = s.enabled && (s.errorCode != null || s.snoozed);
+    final stopped = s.enabled && (error != null || s.snoozed);
 
     return ListPageCard(
       children: [
