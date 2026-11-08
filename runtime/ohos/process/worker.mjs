@@ -11,9 +11,13 @@ import { nodeCommand } from './node-command.mjs';
 import { nodeScriptAvailable } from './node-script.mjs';
 
 const { argv, cwd, roots, stdin, env, policy } = workerData;
+const workspaceGrant = workerData.dshOhosWorkspaceGrants !== undefined;
 const ownedGitClient = createOwnedGitClient(parentPort);
 const filesystem = createFilesystem(roots, policy);
-const nodeAvailable = nodeScriptAvailable();
+if (workspaceGrant && !(await filesystem.fs.stat(cwd)).isDirectory) throw Object.assign(new Error('ENOTDIR'), { code: 'ENOTDIR' });
+const nodeAvailable = !workspaceGrant && nodeScriptAvailable();
+const unsupportedGrantCommand = async () => ({ stdout: '', stderr:
+  'ERR_WORKSPACE_SCOPE_UNSUPPORTED: Node 脚本与 owned-git 尚未接入目录租约\n', exitCode: 126 });
 const bash = new Bash({
   fs: filesystem.fs,
   cwd,
@@ -25,12 +29,14 @@ const bash = new Bash({
   customCommands: [
     defineCommand('rg', executeRg),
     defineCommand('git', async (args, context) => {
+      if (workspaceGrant) return unsupportedGrantCommand();
       const dispatcher = createHttpDispatcher({ proxyEnv: Object.fromEntries(context.env) });
       try { return await executeGit(args, { ...context, ownedGit: ownedGitClient.api, fetch: createFetch(dispatcher) }); }
       finally { await dispatcher.destroy(); }
     }),
     ...(nodeAvailable ? [defineCommand('node', nodeCommand({ roots,
-      workspaceRoots: [policy?.workspaceRoot ?? cwd], readOnly: policy?.mode === 'read-only' }))] : []),
+      workspaceRoots: [policy?.workspaceRoot ?? cwd], readOnly: policy?.mode === 'read-only' }))]
+      : workspaceGrant ? [defineCommand('node', unsupportedGrantCommand)] : []),
   ],
   executionLimits: { maxExecutionTimeMs: Infinity, maxOutputSize: 64 * 1024 * 1024 },
 });
@@ -61,6 +67,6 @@ try {
 } catch (error) {
   parentPort.postMessage({ failure: { name: error.name, message: error.message, code: error.code, stack: error.stack } });
 } finally {
-  ownedGitClient.close();
-  parentPort.close();
+  try { filesystem.close(); }
+  finally { ownedGitClient.close(); parentPort.close(); }
 }
