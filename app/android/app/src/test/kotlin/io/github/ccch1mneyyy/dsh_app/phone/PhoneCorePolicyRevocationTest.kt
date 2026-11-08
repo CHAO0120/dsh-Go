@@ -215,6 +215,7 @@ class PhoneCorePolicyRevocationTest {
         )
         val peer = object : PrivilegedChannel {
             override fun execute(request: Bundle, beforeSend: () -> Unit): Bundle = error("no Android Bundle exchange")
+            override val backgroundLimit = 1
             override fun alive() = true
             override fun close() {}
         }
@@ -271,6 +272,7 @@ class PhoneCorePolicyRevocationTest {
         )
         val peer = object : PrivilegedChannel {
             override fun execute(request: Bundle, beforeSend: () -> Unit): Bundle = error("no Android Bundle exchange")
+            override val backgroundLimit = 1
             override fun alive() = true
             override fun close() {}
         }
