@@ -21,10 +21,12 @@ for name,tree in [('bootstrap.ext4',root),('empty.ext4',None)]:
  r=subprocess.run(argv,capture_output=True);commands.append({'argv':argv,'exitCode':r.returncode});(out/(name+'.stderr')).write_bytes(r.stderr);assert r.returncode==0
  with target.open('rb') as src,(image/(name+'.gz')).open('wb') as dst:
   with gzip.GzipFile(fileobj=dst,filename='',mtime=0,mode='wb') as z:shutil.copyfileobj(src,z)
+# Guest system files belong to root whatever account runs this build.
+def rooted(info):info.uid=info.gid=0;info.uname=info.gname='root';return info
 with tarfile.open(image/'tools.block','w:gz',dereference=False) as t:
- for f in sorted(a.tools_root.iterdir()):t.add(f,arcname=f.name)
- t.add(a.agent,arcname='usr/local/lib/dsh/guest-agent.py')
- info=t.gettarinfo(str(ROOT/'runtime/ohos/linux/guest/agent-init.sh'),arcname='sbin/dsh-init');info.mode=0o755
+ for f in sorted(a.tools_root.iterdir()):t.add(f,arcname=f.name,filter=rooted)
+ t.add(a.agent,arcname='usr/local/lib/dsh/guest-agent.py',filter=rooted)
+ info=rooted(t.gettarinfo(str(ROOT/'runtime/ohos/linux/guest/agent-init.sh'),arcname='sbin/dsh-init'));info.mode=0o755
  with (ROOT/'runtime/ohos/linux/guest/agent-init.sh').open('rb') as f:t.addfile(info,f)
 with (image/'tools.block').open('r+b') as f:f.truncate(((image/'tools.block').stat().st_size+511)//512*512)
 def asset(path):return {'path':str(path),'bytes':path.stat().st_size,'sha256':sha(path)}
