@@ -38,7 +38,6 @@ final class IOSPetOverlay: NSObject {
   private weak var prompt: UIAlertController?
   private var dismissPrompt: (() -> Void)?
   private var stopPromptTaskID: Int?
-  private var wantsRestore = false
 
   private static let enabledKey = "dsh.ios.petOverlay.enabled"
   private static let alwaysKey = "dsh.ios.petOverlay.alwaysShow"
@@ -68,6 +67,10 @@ final class IOSPetOverlay: NSObject {
       reason = blocker
     } else if policy.enabled && state.packID == nil {
       reason = "overlay_pet_not_selected"
+    } else if policy.hasDemand && inForeground && !picture.inlineVisible {
+      // A missing/hidden inline host is current presentation state, not a
+      // lasting failure that blocks a later phone task from attaching its source.
+      reason = "overlay_source_missing"
     } else {
       reason = nil
     }
@@ -119,7 +122,7 @@ final class IOSPetOverlay: NSObject {
         if !playing { self.pauseCurrentTask() }
         // A second system play tap cannot clear the admission lock. The user
         // must return to the app and explicitly choose Continue or Stop.
-        if self.policy.paused { self.wantsRestore = true; self.presentStopConfirmation() }
+        if self.policy.paused { self.policy.requestRestore(); self.presentStopConfirmation() }
         self.renderNow(force: true)
         self.emit()
         return !self.policy.paused
@@ -130,7 +133,7 @@ final class IOSPetOverlay: NSObject {
     }
     picture.onRestore = { [weak self] completion in
       guard let self else { completion(false); return }
-      self.wantsRestore = true
+      self.policy.requestRestore()
       self.restoreConversation()
       self.presentStopConfirmation()
       completion(self.foregroundWindow() != nil)
@@ -272,10 +275,13 @@ final class IOSPetOverlay: NSObject {
     case "openAppDetails": result(false) // No app-specific Android-style PiP permission page.
     case "startPictureInPicture":
       guard inForeground else { return foregroundRequired(result) }
-      evaluate(); result(picture.startFromUser())
+      evaluate()
+      guard policy.hasDemand, isUsable, picture.inlineVisible else { result(false); return }
+      result(picture.startFromUser())
     case "reviewPausedTask":
       guard inForeground else { return foregroundRequired(result) }
-      wantsRestore = true
+      policy.requestRestore()
+      restoreConversation()
       presentStopConfirmation()
       result(statusSnapshot)
     default: result(FlutterMethodNotImplemented)
@@ -342,12 +348,22 @@ final class IOSPetOverlay: NSObject {
       return
     }
     attachVisibleSource()
+    if inForeground && !picture.inlineVisible {
+      // Intentional for alwaysShow without an onscreen embedded host. Do not
+      // prepare from an invisible source or retain overlay_source_missing.
+      stopDrawing()
+      picture.stop()
+      lastRender = nil
+      emit()
+      return
+    }
     picture.setPaused(policy.paused || manualAnimationPaused)
     renderNow(force: true)
     if inForeground {
       do { try picture.prepareInline() }
       catch {
-        lastError = (error as? PetOverlayPackFailure)?.code ?? "overlay_pip_unavailable"
+        let code = (error as? PetOverlayPackFailure)?.code ?? "overlay_pip_unavailable"
+        if code != "overlay_source_missing" { lastError = code }
         picture.stop()
         stopDrawing()
       }
@@ -367,7 +383,7 @@ final class IOSPetOverlay: NSObject {
 
   private var drawingAllowed: Bool {
     policy.hasDemand && isUsable &&
-      ((inForeground && picture.sourceView.window != nil) || (picture.active && !picture.suspended))
+      ((inForeground && picture.inlineVisible) || (picture.active && !picture.suspended))
   }
 
   private func updateDrawing() {
@@ -432,7 +448,6 @@ final class IOSPetOverlay: NSObject {
     guard let id = policy.requestPause() else { return }
     onTaskPauseRequested?(id)
     picture.setPaused(true)
-    wantsRestore = true
   }
 
   private func becameActive() {
@@ -441,7 +456,10 @@ final class IOSPetOverlay: NSObject {
       audioMayPrepare: picture.audioMayPrepare)
     if picture.active { picture.stop(keepInline: policy.hasDemand && isUsable) }
     evaluate()
-    if wantsRestore { restoreConversation(); presentStopConfirmation() }
+    restoreConversation()
+    // Keep paused still permits a later foreground confirmation, independently
+    // of the one navigation request already consumed for this pause.
+    presentStopConfirmation()
   }
 
   private func recoverTransientFailure() {
@@ -457,7 +475,8 @@ final class IOSPetOverlay: NSObject {
   }
 
   private func restoreConversation() {
-    guard wantsRestore else { return }
+    // Consume before the external navigation callback, including reentrancy.
+    guard policy.consumeRestore() else { return }
     if let task = policy.task {
       // Phone requests are owned by the local embedded engine; this is the
       // verified owner session, not whichever chat happens to be visible.
@@ -466,7 +485,6 @@ final class IOSPetOverlay: NSObject {
     } else if let target = state.target {
       var entry = target.arguments; entry["kind"] = "chat"; SystemEntries.send(entry)
     }
-    if !policy.needsStopConfirmation { wantsRestore = false }
   }
 
   private func presentStopConfirmation() {
@@ -490,7 +508,6 @@ final class IOSPetOverlay: NSObject {
     alert.addAction(UIAlertAction(title: words("Continue", "继续"), style: .default) { [weak self] _ in
       guard finish(), let self, self.inForeground, let resume = self.onTaskResumeConfirmed,
         self.policy.confirmResume(id: id) else { return }
-      self.wantsRestore = false
       self.lastError = nil
       self.picture.retryFromUser()
       self.policy.snoozed = false
@@ -499,7 +516,7 @@ final class IOSPetOverlay: NSObject {
     })
     alert.addAction(UIAlertAction(title: words("Stop task", "停止任务"), style: .destructive) { [weak self] _ in
       guard finish(), let self, self.inForeground, self.policy.mayConfirmStop(id: id) else { return }
-      self.wantsRestore = false
+      self.policy.consumeRestore()
       self.onTaskStopConfirmed?(id)
       // The phone owner ends the exact task through endPhoneTask; a failed or
       // stale callback cannot make us pretend its task has ended.
@@ -522,17 +539,21 @@ final class IOSPetOverlay: NSObject {
           source.bottomAnchor.constraint(equalTo: embeddedHost.bottomAnchor)]
         NSLayoutConstraint.activate(sourceConstraints)
       }
-    } else if let window = foregroundWindow(), source.superview !== window {
+    } else if policy.allowsTemporarySource, let window = foregroundWindow() {
+      if source.superview !== window {
+        detachSource()
+        window.addSubview(source)
+        source.translatesAutoresizingMaskIntoConstraints = false
+        // Task-only transitional preview, below the top bar. The final visible
+        // status-card placement remains owned by mainline through attachSource.
+        sourceConstraints = [source.widthAnchor.constraint(equalToConstant: 160),
+          source.heightAnchor.constraint(equalToConstant: 106),
+          source.trailingAnchor.constraint(equalTo: window.safeAreaLayoutGuide.trailingAnchor, constant: -12),
+          source.topAnchor.constraint(equalTo: window.safeAreaLayoutGuide.topAnchor, constant: 60)]
+        NSLayoutConstraint.activate(sourceConstraints)
+      }
+    } else {
       detachSource()
-      window.addSubview(source)
-      source.translatesAutoresizingMaskIntoConstraints = false
-      // Transitional native preview, below the top bar. It is visible and
-      // ignores touches; the final status-card placement belongs to mainline.
-      sourceConstraints = [source.widthAnchor.constraint(equalToConstant: 160),
-        source.heightAnchor.constraint(equalToConstant: 106),
-        source.trailingAnchor.constraint(equalTo: window.safeAreaLayoutGuide.trailingAnchor, constant: -12),
-        source.topAnchor.constraint(equalTo: window.safeAreaLayoutGuide.topAnchor, constant: 60)]
-      NSLayoutConstraint.activate(sourceConstraints)
     }
     source.superview?.layoutIfNeeded()
   }

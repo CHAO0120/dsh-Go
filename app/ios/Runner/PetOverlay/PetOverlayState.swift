@@ -173,11 +173,24 @@ struct PetOverlayPolicy {
   private(set) var task: PetOverlayPhoneTask?
   private(set) var paused = false
   private(set) var needsStopConfirmation = false
+  private(set) var wantsRestore = false
   private var lastTaskID = -1
 
   // ADDENDUM-01: task-only unless alwaysShow was separately chosen. End has
   // no five-minute grace and a Dart `active` push cannot extend the lease.
   var hasDemand: Bool { enabled && !snoozed && (task != nil || alwaysShow) }
+  // alwaysShow can use a real embedded source, but must not leave a temporary
+  // native preview over unrelated Flutter screens after the phone task ends.
+  var allowsTemporarySource: Bool { hasDemand && task != nil }
+
+  mutating func requestRestore() { wantsRestore = true }
+
+  @discardableResult
+  mutating func consumeRestore() -> Bool {
+    let requested = wantsRestore
+    wantsRestore = false
+    return requested
+  }
 
   @discardableResult
   mutating func begin(id: Int, sessionID: String, line: String?) -> Bool {
@@ -192,6 +205,7 @@ struct PetOverlayPolicy {
     task = PetOverlayPhoneTask(id: id, sessionID: sessionID, line: line)
     paused = false
     needsStopConfirmation = false
+    wantsRestore = false
     return true
   }
 
@@ -207,6 +221,7 @@ struct PetOverlayPolicy {
     task = nil
     paused = false
     needsStopConfirmation = false
+    wantsRestore = false
     return true
   }
 
@@ -214,6 +229,7 @@ struct PetOverlayPolicy {
     guard let task, !paused else { return nil }
     paused = true
     needsStopConfirmation = true
+    wantsRestore = true
     return task.id
   }
 
@@ -222,6 +238,7 @@ struct PetOverlayPolicy {
     guard task?.id == id, paused, needsStopConfirmation else { return false }
     paused = false
     needsStopConfirmation = false
+    wantsRestore = false
     return true
   }
 

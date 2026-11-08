@@ -5,11 +5,12 @@
 ## 行为与边界
 
 - 默认关闭。首次开启只能在前台通过原生说明框明确选择；“始终显示”是另一次选择。两个设置独立持久化。
-- 默认只在已认证的手机操控任务期间准备可见视频源。结束最后这个任务立即请求关闭 PiP、停止绘制，并释放自己仍持有的音频配置。没有沿用 Android 的五分钟延迟。只有用户另行选择 `alwaysShow` 时，结束任务后继续显示。
+- 默认只在已认证的手机操控任务期间准备可见视频源。结束最后这个任务立即请求关闭 PiP、停止绘制，并释放自己仍持有的音频配置。没有沿用 Android 的五分钟延迟。用户另行选择 `alwaysShow` 后保留显示需求；已有后台 PiP 可以继续，但仍以 AVKit 的实际 active/suspended 状态为准。无任务时从前台准备或新启动还需要真正可见的嵌入宿主，不保证始终能显示。
 - Dart 的 `PetState` 继续是唯一的状态归约结果。原生只读取 `state/tier/packId/size/quiet/reduceMotion/bubble.text/target` 等既有字段，按真实 `pack.json`、PNG 格子与逐帧毫秒呈现。不从 phone 请求推导新 mood，不展示 `ask`、`detail` 或会话正文，不在 PiP 内批准任何操作。
-- 暂用一个真正可见、非交互的 160×106 pt 原生预览，位于 safe area 右上、顶栏下方。Auto Layout 随旋转重排。最终 UI 可通过 `attachSource(to:)` 把同一个源放入手机操控状态卡。这个过渡位置仍需在具体页面/横屏上检查是否遮住内容；不能把没有做过的界面检查写成通过。
+- 仅手机任务存在时，才允许临时的真正可见、非交互 160×106 pt 原生预览，位于 safe area 右上、顶栏下方。结束任务后，即使 `alwaysShow=true`，它也不再覆盖前台 Flutter 页面。Auto Layout 随旋转重排。主线仍可通过 `attachSource(to:)` 把同一个源放入状态卡，嵌入宿主优先，不受“临时预览仅任务期间”的限制。无任务又无可见宿主时，不准备 inline PiP，手动启动返回 false；`sourceVisible=false`，前台有显示需求时派生 `errorCode=overlay_source_missing`。此状态不写入 `lastError`，也不把配置层 `usable` 永久锁住；后续 phone 任务仍必须满足真实 `keepingAlive` 准入。隐藏、屏幕外或尺寸不足的宿主同样不能当作准备/启动成功。这个过渡位置和状态卡仍需在具体页面/横屏上检查；不能把没有做过的界面检查写成通过。
 - 使用标准系统 PiP 控件。点击画面通常先显示系统控件；**通过系统“还原到 App”按钮回到 App**，不承诺任意点击画面直接跳回。没有私有 `controlsStyle`，没有画上去却不能点击的“停止”按钮。
 - 系统播放/暂停键先请求暂停该 task id 的手机准入；不会取消任务所有权，也不会自行批准、停止或恢复。返回 App 后，原生框提供“保持暂停 / 继续 / 停止任务”。只有真正在前台选“继续/停止”，且当前对话框身份及 task id 都仍匹配，才调用相应 owner 回调；被撤销或替换的旧框不能对同一任务补发确认。
+- 每次新的暂停只请求一次导航到所属对话；导航在发送前消费，选择“保持暂停”后反复回前台仍可提示确认，但不会再次跳转。系统“还原到 App”和前台 `reviewPausedTask` 是新的显式导航意图，可以各自再请求一次。继续、结束或更换任务会清理旧意图；导航本身不会清除暂停或替代动作批准。
 - 系统关闭 PiP 会 snooze 并暂停当前手机任务，不能由后续 `push` 自动重开。录音/独占媒体会话接管、音频中断、锁屏、PiP 失败或不可用都不能继续报告 `keepingAlive=true`。后台 phone 准入仍必须由 phone owner 检查 `isKeepingAlive`，不能用 `enabled`、`usable` 或声明了后台模式代替。
 
 ## 与 phone owner 的 Swift surface
@@ -38,6 +39,8 @@ overlay.endPhoneTask(id: taskID)
 
 `attachSource(to:)` 的调用方还须保证宿主及祖先的 transform 不缩小/移出内容，裁剪区域容得下整个源。当前默认预览没有变换；`sourceVisible` 只执行下列局部几何检查，不是完整的有效可见面积或遮挡检测。
 
+若宿主起初未进入可见窗口，主线应在它实际显示后调用 `attachSource(to:)` 或通过正常状态更新重新评估。当前实现不新增持续的宿主几何观察，也不以 `possible=true` 代替可见源或实际 PiP 成功。无任务、无可见宿主时的 false 返回是现阶段明确限制，不是永久禁用 `alwaysShow`。
+
 Root 的注册、project Sources、`Info.plist` 和 phone 生命周期接入由组合补丁负责；本目录的组件补丁不能单独视为功能已上线。
 
 ## `dsh/pet_overlay` 合同
@@ -54,7 +57,7 @@ Root 的注册、project Sources、`Info.plist` 和 phone 生命周期接入由�
 | `requestPermission` | 无 | bool，报告设备是否支持；没有虚构系统授权弹窗 |
 | `openAppDetails` | 无 | false；iOS 没有对应 Android 的应用悬浮权限页 |
 | `startPictureInPicture`（新增 iOS） | 无 | bool；仅主线明确的前台用户按钮调用，不能作为模型工具 |
-| `reviewPausedTask`（新增 iOS） | 无 | status；仅前台显示当前 task 的继续/停止确认 |
+| `reviewPausedTask`（新增 iOS） | 无 | status；前台显式请求一次所属对话导航，并显示当前 task 的继续/停止确认 |
 
 native → Dart 仍用同通道的 `status` 事件。标准还原使用现有 `SystemEntries` 导航，不额外发送 `answer`、`stop`、`voiceFallback`，也不把返回 App 当作批准。
 
@@ -132,7 +135,7 @@ bash -n tooling/ios/pet-overlay-tests/capture-simulator.sh
 bash tooling/ios/pet-overlay-tests/contract.sh
 ```
 
-编译真实 `PetOverlayState.swift` 和 `PetOverlayPack.swift`，覆盖默认关、独立 alwaysShow、同 owner 暂停/继续/结束、旧回调、路径校验、bubble 到期/quiet、真实包所有帧边界、重复格、循环/一次性、三档尺寸、隐藏时钟冻结、reduced motion、sleeping 不偷换成其他 mood 等。没有 Swift 编译器时明确 exit 77 / SKIP，不可算 PASS。
+编译真实 `PetOverlayState.swift` 和 `PetOverlayPack.swift`，覆盖默认关、独立 alwaysShow、同 owner 暂停/继续/结束、旧回调、一次性导航及显式再次还原、临时预览的任务/开关/snooze 范围、路径校验、bubble 到期/quiet、真实包所有帧边界、重复格、循环/一次性、三档尺寸、隐藏时钟冻结、reduced motion、sleeping 不偷换成其他 mood 等。没有 Swift 编译器时明确 exit 77 / SKIP，不可算 PASS。
 
 ### Apple Simulator：全组件编译与真实 UIKit 截帧
 

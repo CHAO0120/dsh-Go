@@ -12,6 +12,7 @@ struct PetOverlayContract {
     guard CommandLine.arguments.count == 2 else { fatalError("Pass app/assets/pets") }
     let assets = URL(fileURLWithPath: CommandLine.arguments[1], isDirectory: true)
     checkFailureRecovery()
+    checkRestoreAndTemporarySource()
     var policy = PetOverlayPolicy()
     check(!policy.enabled && !policy.alwaysShow && !policy.hasDemand, "default off")
     check(policy.begin(id: 3, sessionID: "fixture", line: "Maps"), "authenticated owner begin")
@@ -104,6 +105,49 @@ struct PetOverlayContract {
       } catch is PetOverlayPackFailure { checks += 1 }
     }
     print("PASS: \(checks) production Swift policy/pack/frame assertions; no AVKit/device claims")
+  }
+
+  static func checkRestoreAndTemporarySource() {
+    var policy = PetOverlayPolicy()
+    check(!policy.allowsTemporarySource && !policy.consumeRestore(), "idle has no preview or pending navigation")
+    policy.enabled = true
+    policy.alwaysShow = true
+    check(policy.hasDemand && !policy.allowsTemporarySource,
+      "alwaysShow alone needs a real embedded source, not a temporary window preview")
+    check(policy.begin(id: 70, sessionID: "restore-owner", line: nil), "restore fixture owner begins")
+    check(policy.allowsTemporarySource, "a current enabled phone task may show the temporary source")
+    check(policy.requestPause() == 70 && policy.wantsRestore, "first pause requests one owner navigation")
+    check(policy.consumeRestore(), "first foreground restore consumes navigation")
+    check(policy.paused && policy.needsStopConfirmation && policy.allowsTemporarySource,
+      "navigation does not approve, resume or remove the paused task preview")
+    check(!policy.consumeRestore() && !policy.consumeRestore(),
+      "repeated foreground returns do not repeatedly navigate while kept paused")
+    check(policy.needsStopConfirmation, "later foreground confirmation is independent of consumed navigation")
+    check(policy.requestPause() == nil && !policy.wantsRestore, "duplicate pause cannot request another navigation")
+    for intent in ["system Restore", "reviewPausedTask"] {
+      policy.requestRestore()
+      check(policy.consumeRestore() && !policy.consumeRestore(), intent + " explicitly requests one more navigation")
+      check(policy.paused && policy.needsStopConfirmation, intent + " cannot implicitly resume")
+    }
+    policy.requestRestore()
+    check(!policy.confirmResume(id: 69) && policy.wantsRestore, "stale resume leaves current intent untouched")
+    check(policy.confirmResume(id: 70) && !policy.wantsRestore && !policy.needsStopConfirmation,
+      "confirmed resume clears the old pause intent")
+    check(policy.requestPause() == 70 && policy.consumeRestore(), "a new pause can request navigation again")
+    policy.requestRestore()
+    check(!policy.end(id: 69) && policy.wantsRestore, "stale end cannot consume current navigation")
+    check(policy.end(id: 70) && !policy.wantsRestore && !policy.allowsTemporarySource && policy.hasDemand,
+      "task end removes pending navigation and temporary preview, retaining separate alwaysShow demand")
+    policy.requestRestore()
+    check(policy.consumeRestore() && !policy.consumeRestore(), "explicit no-task Restore can target the current chat once")
+    policy.requestRestore()
+    check(policy.begin(id: 71, sessionID: "next-owner", line: nil) && !policy.wantsRestore,
+      "a new owner cannot inherit an old restore request")
+    policy.snoozed = true
+    check(!policy.allowsTemporarySource, "snooze forbids the temporary source")
+    policy.snoozed = false
+    policy.enabled = false
+    check(!policy.allowsTemporarySource, "disabled forbids the temporary source even with an owner")
   }
 
   static func checkFailureRecovery() {
