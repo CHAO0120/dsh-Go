@@ -72,7 +72,248 @@ bool rejects(Map<String, Object?> value) {
 }
 
 Future<void> main() async {
+  final diagnostic = <String, Object>{
+    'category': 'tls-interrupted',
+    'evidence': 'stderr',
+    'message': '命令输出提示 TLS 连接被中途断开。请检查网络或代理；仅凭此输出无法判断断开方。',
+  };
+  check(
+    'an unfinished job cannot carry a failure diagnostic',
+    rejects(
+      status({
+        'job': job({'diagnostic': diagnostic}),
+      }),
+    ),
+  );
+  final failedJob = job({
+    'state': 'settled',
+    'outcome': {'exitCode': 128, 'signal': null, 'cancelled': false},
+    'diagnostic': diagnostic,
+  });
+  final dynamic failed = OhosLinuxSnapshot.fromWire(
+    jsonEncode(status({'job': failedJob})),
+  );
+  check(
+    'actual consumer retains the classified fixed message and original exit128',
+    failed.job.diagnostic.category == 'tls-interrupted' &&
+        failed.job.diagnostic.evidence == 'stderr' &&
+        failed.job.diagnostic.message == diagnostic['message'] &&
+        failed.job.outcome.exitCode == 128,
+  );
+  for (final invalid in <Map<String, Object?>>[
+    {
+      'diagnostic': {...diagnostic, 'category': 'provider-is-blocking'},
+    },
+    {
+      'diagnostic': {...diagnostic, 'evidence': 'none'},
+    },
+    {
+      'outcome': {'exitCode': 0, 'signal': null, 'cancelled': false},
+    },
+    {
+      'outcome': {'exitCode': null, 'signal': 'SIGKILL', 'cancelled': true},
+    },
+    {
+      'outcome': {
+        'exitCode': 128,
+        'signal': null,
+        'cancelled': false,
+        'notStarted': true,
+      },
+    },
+  ]) {
+    check(
+      'contradictory diagnostic rejected: ${jsonEncode(invalid)}',
+      rejects(
+        status({
+          'job': {...failedJob, ...invalid},
+        }),
+      ),
+    );
+  }
+  final dynamic legacyJob = OhosLinuxSnapshot.fromWire(
+    jsonEncode(status({'job': job()})),
+  );
+  check(
+    'old job snapshots retain absent diagnostic',
+    legacyJob.job.diagnostic == null,
+  );
+
+  check(
+    'native memory cannot claim that join freed the heap',
+    rejects(status({'nativeMemoryRelease': 'freed'})),
+  );
+  for (final bad in <Object>[false, 85, <String, Object>{}]) {
+    check(
+      'native memory release has a fixed protocol value: $bad',
+      rejects(status({'nativeMemoryRelease': bad})),
+    );
+  }
+  final dynamic memory = OhosLinuxSnapshot.fromWire(
+    jsonEncode(status({'nativeMemoryRelease': 'process-exit'})),
+  );
+  check(
+    'native memory release and Chinese explanation survive the actual consumer',
+    memory.nativeMemoryRelease == 'process-exit' &&
+        memory.nativeMemoryNotice.contains('整个 App 进程'),
+  );
+  final dynamic legacyMemory = OhosLinuxSnapshot.fromWire(jsonEncode(status()));
+  check(
+    'missing memory fact remains unknown, not a freed claim',
+    legacyMemory.nativeMemoryRelease == null &&
+        legacyMemory.nativeMemoryNotice == null,
+  );
+
+  check(
+    'proxy status cannot carry private configuration strings',
+    rejects(
+      status({
+        'proxy': {
+          'source': 'manual',
+          'revision': 1,
+          'httpConfigured': true,
+          'httpsConfigured': true,
+          'httpProxy': 'http://private.invalid:3128',
+        },
+      }),
+    ),
+  );
+  check(
+    'clean checkpoint without guest sync is rejected',
+    rejects(
+      status({
+        'retirement': retirement({'cleanCheckpoint': true}),
+      }),
+    ),
+  );
+  final guestClose = {
+    'epoch': List.filled(64, 'b').join(),
+    'rootfsSync': true,
+    'syncMethod': 'syncfs',
+    'syncScope': 'rootfs',
+  };
+  final persistent = {
+    'persistentInstanceId': '2f887aa7-437e-49b6-bbde-4e30d899d3cc',
+    'bootMode': 'resume',
+    'shutdownComplete': true,
+  };
+  final clean = retirement({'guestClose': guestClose, 'cleanCheckpoint': true});
+  final resumed = OhosLinuxSnapshot.fromWire(
+    jsonEncode(status({...persistent, 'retirement': clean})),
+  );
+  check(
+    'persistent identity, resume and guest sync survive channel decoding',
+    resumed.persistentInstanceId == persistent['persistentInstanceId'] &&
+        resumed.bootMode == 'resume' &&
+        resumed.retirement!.guestClose!.epoch == guestClose['epoch'] &&
+        resumed.retirement!.cleanCheckpoint,
+  );
+  final uncommitted = OhosLinuxSnapshot.fromWire(
+    jsonEncode(
+      status({
+        ...persistent,
+        'retirement': {
+          ...clean,
+          'cleanCheckpoint': false,
+          'releaseErrorCode': 'EIO',
+        },
+      }),
+    ),
+  );
+  check(
+    'retired synchronized guest does not imply committed checkpoint',
+    uncommitted.shutdownComplete &&
+        uncommitted.retirement!.guestClose != null &&
+        !uncommitted.retirement!.cleanCheckpoint &&
+        uncommitted.retirement!.releaseErrorCode == 'EIO',
+  );
+  for (final extra in <Map<String, Object?>>[
+    {
+      'guestClose': {...guestClose, 'rootfsSync': false},
+    },
+    {
+      'guestClose': {...guestClose, 'epoch': 'old'},
+    },
+    {
+      'guestClose': {...guestClose, 'syncMethod': 'sync'},
+    },
+    {
+      'guestClose': {...guestClose, 'syncScope': 'all'},
+    },
+    {'resourcesRetired': false},
+    {'dataRetained': false},
+    {'filesRemoved': true},
+    {'native': null},
+    {
+      'native': {'joined': true, 'retirementError': false, 'apiResult': 0},
+    },
+  ]) {
+    check(
+      'inconsistent clean checkpoint rejected: ${jsonEncode(extra)}',
+      rejects(
+        status({
+          ...persistent,
+          'retirement': {...clean, ...extra},
+        }),
+      ),
+    );
+  }
+  check(
+    'clean checkpoint needs persistent identity',
+    rejects(status({'retirement': clean})),
+  );
+  check(
+    'boot mode cannot masquerade as a new install',
+    rejects(status({...persistent, 'bootMode': 'unknown'})),
+  );
   final scope = OhosLinuxSnapshot.fromWire(jsonEncode(status()));
+  check('legacy proxy facts remain absent', scope.proxy == null);
+  final proxyFacts = {
+    'source': 'manual',
+    'revision': 3,
+    'httpConfigured': true,
+    'httpsConfigured': true,
+  };
+  final proxyObservation = OhosLinuxSnapshot.fromWire(
+    jsonEncode(
+      status({
+        'proxy': proxyFacts,
+        'job': job({'proxyRevision': 2}),
+      }),
+    ),
+  );
+  check(
+    'current proxy configuration and accepted job revision stay separate',
+    proxyObservation.proxy!.source == OhosLinuxProxyMode.manual &&
+        proxyObservation.proxy!.revision == 3 &&
+        proxyObservation.job!.proxyRevision == 2,
+  );
+  for (final extra in <Map<String, Object?>>[
+    {'source': 'future'},
+    {'revision': -1},
+    {'revision': 9007199254740992},
+    {'httpConfigured': 'yes'},
+    {'source': 'direct'},
+    {'httpConfigured': false, 'httpsConfigured': false},
+    {'noProxy': 'private.invalid'},
+  ]) {
+    check(
+      'invalid or private proxy status rejected ${checks.length}',
+      rejects(
+        status({
+          'proxy': {...proxyFacts, ...extra},
+        }),
+      ),
+    );
+  }
+  check(
+    'unsafe job proxy revision rejected',
+    rejects(
+      status({
+        'job': job({'proxyRevision': 9007199254740992}),
+      }),
+    ),
+  );
   check(
     'opened private guest admits explicit jobs without granting host workspace',
     scope.admission && !scope.workspaceLease,
@@ -282,6 +523,34 @@ Future<void> main() async {
     jsonEncode(calls[2]) == jsonEncode(calls[3]) &&
         (calls[2]['arguments'] as Map)['requestId'] == 4 &&
         (calls[2]['arguments'] as Map)['cwd'] == '/workspace',
+  );
+  await client.setProxy(
+    const OhosLinuxProxyConfiguration.manual(
+      httpProxy: 'http://127.0.0.1:3128',
+      noProxy: 'fixture.invalid',
+    ),
+  );
+  await client.setProxy(const OhosLinuxProxyConfiguration.direct());
+  await client.setProxy(const OhosLinuxProxyConfiguration.inherit());
+  check(
+    'typed proxy configuration uses the existing channel without host endpoint overrides',
+    calls[4]['method'] == 'setLinuxProxy' &&
+        jsonEncode(calls[4]['arguments']) ==
+            jsonEncode({
+              'proxy': {
+                'mode': 'manual',
+                'httpProxy': 'http://127.0.0.1:3128',
+                'noProxy': 'fixture.invalid',
+              },
+            }) &&
+        jsonEncode(calls[5]['arguments']) ==
+            jsonEncode({
+              'proxy': {'mode': 'direct'},
+            }) &&
+        jsonEncode(calls[6]['arguments']) ==
+            jsonEncode({
+              'proxy': {'mode': 'inherit'},
+            }),
   );
   MethodChannel.handler = (_, __, ___) async =>
       throw PlatformException(code: 'ERR_OHOS_LINUX_STALE');

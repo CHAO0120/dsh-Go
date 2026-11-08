@@ -149,3 +149,80 @@ test('actual native unjoined null facts stay visible without confirming release'
     assert.deepEqual(observed.retirement.native, value.retirement.native);
   } finally { await fixture.close(); }
 });
+
+test('a clean checkpoint requires guest sync, native retirement and retained disk facts', async () => {
+  const guestClose = { epoch: 'b'.repeat(64), rootfsSync: true, syncMethod: 'syncfs', syncScope: 'rootfs' };
+  const clean = retired({ guestClose, cleanCheckpoint: true });
+  const cases = [
+    { ...clean, guestClose: null }, { ...clean, guestClose: { ...guestClose, rootfsSync: false } },
+    { ...clean, guestClose: { ...guestClose, syncMethod: 'sync' } },
+    { ...clean, guestClose: { ...guestClose, epoch: 'old' } },
+    { ...clean, resourcesRetired: false }, { ...clean, dataRetained: false }, { ...clean, filesRemoved: true },
+    { ...clean, native: null }, { ...clean, native: { ...clean.native, apiResult: 0 } },
+    { ...clean, native: { ...clean.native, joined: false } },
+    { ...clean, native: { ...clean.native, retirementError: true } },
+  ];
+  for (const retirement of cases) {
+    const fixture = await serverFor((_request, response) => reply(response, 200, snapshot({ retirement,
+      persistentInstanceId: '2f887aa7-437e-49b6-bbde-4e30d899d3cc', bootMode: 'resume' })));
+    try { await assert.rejects(new LinuxControl().getStatus(fixture.url, 'test-only-token'), { code: 'ohos_linux_protocol' }); }
+    finally { await fixture.close(); }
+  }
+});
+
+test('persistence observations retain install versus resume and an unconfirmed checkpoint', async () => {
+  const guestClose = { epoch: 'b'.repeat(64), rootfsSync: true, syncMethod: 'syncfs', syncScope: 'rootfs' };
+  const value = snapshot({ persistentInstanceId: '2f887aa7-437e-49b6-bbde-4e30d899d3cc', bootMode: 'resume',
+    retirement: retired({ guestClose, cleanCheckpoint: false, releaseErrorCode: 'EIO' }), shutdownComplete: true });
+  for (const cleanCheckpoint of [false, true]) {
+    value.retirement.cleanCheckpoint = cleanCheckpoint;
+    value.retirement.releaseErrorCode = cleanCheckpoint ? null : 'EIO';
+    const fixture = await serverFor((_request, response) => reply(response, 200, value));
+    try { assert.deepEqual(JSON.parse(await new LinuxControl().getStatus(fixture.url, 'test-only-token')), value); }
+    finally { await fixture.close(); }
+  }
+});
+
+
+test('native memory lifetime crosses the actual HTTP decoder without accepting a false freed claim', async () => {
+  for (const value of ['freed', false, 85, {}]) {
+    const f = await serverFor((_request, response) => reply(response, 200, snapshot({ nativeMemoryRelease: value })));
+    try { await assert.rejects(new LinuxControl().getStatus(f.url, 'test-only-token'), { code: 'ohos_linux_protocol' }); }
+    finally { await f.close(); }
+  }
+  for (const value of [undefined, null, 'process-exit']) {
+    const f = await serverFor((_request, response) => reply(response, 200, snapshot({ nativeMemoryRelease: value })));
+    try { const observed = JSON.parse(await new LinuxControl().getStatus(f.url, 'test-only-token'));
+      assert.equal(observed.nativeMemoryRelease ?? null, value ?? null); }
+    finally { await f.close(); }
+  }
+});
+
+test('proxy configuration uses the current trusted identity while responses contain only safe facts', async () => {
+  const proxy = { mode: 'manual', httpProxy: 'http://127.0.0.1:3128', noProxy: 'fixture.invalid' };
+  const facts = { source: 'manual', revision: 1, httpConfigured: true, httpsConfigured: true };
+  const fixture = await serverFor((request, response) => reply(response, request.method === 'POST' ? 202 : 200,
+    snapshot({ proxy: request.method === 'POST' ? facts : { source: 'inherit', revision: 0, httpConfigured: false, httpsConfigured: false } })));
+  try {
+    const client = new LinuxControl();
+    const actual = JSON.parse(await client.setProxy(fixture.url, 'test-only-token', proxy));
+    assert.deepEqual(actual.proxy, facts);
+    assert.deepEqual(fixture.observed.at(-1).body,
+      { v: 1, instanceId: 'service-930', attemptId: null, action: 'setProxy', proxy });
+    assert.ok(calls.every(row => row.options.usingProxy === false));
+  } finally { await fixture.close(); }
+});
+
+test('proxy response rejects configuration strings, invalid revisions and contradictory facts', async () => {
+  const safe = { source: 'manual', revision: 1, httpConfigured: true, httpsConfigured: true };
+  for (const proxy of [
+    { ...safe, httpProxy: 'http://private.invalid:3128' }, { ...safe, noProxy: 'private.invalid' },
+    { ...safe, source: 'future' }, { ...safe, revision: -1 }, { ...safe, revision: 9007199254740992 },
+    { ...safe, httpConfigured: 'yes' }, { ...safe, source: 'direct' },
+    { ...safe, httpConfigured: false, httpsConfigured: false },
+  ]) {
+    const fixture = await serverFor((_request, response) => reply(response, 200, snapshot({ proxy })));
+    try { await assert.rejects(new LinuxControl().getStatus(fixture.url, 'test-only-token'), { code: 'ohos_linux_protocol' }); }
+    finally { await fixture.close(); }
+  }
+});

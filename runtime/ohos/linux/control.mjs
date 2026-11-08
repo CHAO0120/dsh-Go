@@ -3,6 +3,8 @@ import { STATUS_CODES } from 'node:http';
 import { fileURLToPath } from 'node:url';
 import { isMainThread } from 'node:worker_threads';
 import { linuxHostPaths } from './host-paths.mjs';
+import { deriveLinuxJobDiagnostic } from './job-diagnostics.mjs';
+import { LinuxProxyPolicy } from './proxy.mjs';
 
 const route = '/dsh-go/v1/linux';
 const fail = (code, message, status = 409) => Object.assign(new Error(message), { code, status });
@@ -18,14 +20,15 @@ const output = collector => {
     retainedBytes: bytes.length, truncated: totalBytes > bytes.length };
 };
 const noOwner = () => ({ resourcesRetired: true, filesRemoved: true, dataRetained: false,
-  ownerQuarantined: false, native: null, releaseErrorCode: null });
+  ownerQuarantined: false, native: null, releaseErrorCode: null, guestClose: null, cleanCheckpoint: false });
 function retirement(value) {
   const native = value.native;
   return { resourcesRetired: value.resourcesRetired === true, filesRemoved: value.filesRemoved === true,
     dataRetained: value.dataRetained === true, ownerQuarantined: value.ownerQuarantined === true,
     native: native ? { joined: native.joined === true, retirementError: native.retirementError,
       apiResult: native.apiResult } : null,
-    releaseErrorCode: value.releaseError ? codeOf(value.releaseError) : null };
+    releaseErrorCode: value.releaseError ? codeOf(value.releaseError) : null,
+    guestClose: value.guestClose ? { ...value.guestClose } : null, cleanCheckpoint: value.cleanCheckpoint === true };
 }
 function runRequest(body) {
   if (!Number.isSafeInteger(body.requestId) || body.requestId < 1 || !Array.isArray(body.argv) ||
@@ -51,6 +54,7 @@ export class LinuxControl {
   #disablePromise; #shutdownPromise; #closing = false; #shutdownComplete = false;
   #failed = false; #unknown = false; #lastError = null; #progress = null; #retirement = null;
   #job; #nextRequestId = 1; #lastRequestDigest;
+  #proxy = new LinuxProxyPolicy();
 
   constructor({ hostPaths, assetsDirectory } = {}, internals = {}) {
     this.#paths = hostPaths; this.#assets = assetsDirectory;
@@ -65,20 +69,25 @@ export class LinuxControl {
     const admission = this.#enabled && this.#phase === 'enabled' && guestOpened && !unknown && !this.#closing && !this.#disablePromise;
     const job = this.#job;
     return { v: 1, instanceId: this.#instanceId, attemptId: this.#attemptId,
+      persistentInstanceId: this.#owner?.persistentInstanceId ?? null, bootMode: this.#owner?.bootMode ?? null,
+      nativeMemoryRelease: this.#owner?.nativeOwnerCreated ? 'process-exit' : null,
+      proxy: this.#proxy.status(),
       state: unknown ? 'unknown' : this.#phase, enabled: this.#enabled, admission, guestOpened,
       ownerRetained: !!this.#owner, workspaceLease: false,
       restartRequired: this.#failed || this.#closing || unknown, shutdownComplete: this.#shutdownComplete,
       nextRequestId: this.#nextRequestId, ownerState: this.#owner?.state ?? null, backendState,
       progress: this.#progress && { ...this.#progress }, lastErrorCode: unknown ? 'ERR_OHOS_LINUX_UNKNOWN' : this.#lastError,
-      job: job ? { id: job.id, state: unknown && job.state !== 'settled' ? 'unknown' : job.state,
+      job: job ? { id: job.id, proxyRevision: job.proxyRevision, state: unknown && job.state !== 'settled' ? 'unknown' : job.state,
         started: job.started, cancelRequested: job.cancelRequested, outcome: job.outcome && { ...job.outcome },
-        errorCode: job.errorCode, stdout: output(job.handle.collected.stdout), stderr: output(job.handle.collected.stderr) } : null,
-      retirement: this.#retirement && { ...this.#retirement, native: this.#retirement.native && { ...this.#retirement.native } } };
+        errorCode: job.errorCode, diagnostic: job.diagnostic && { ...job.diagnostic },
+        stdout: output(job.handle.collected.stdout), stderr: output(job.handle.collected.stderr) } : null,
+      retirement: this.#retirement && { ...this.#retirement, native: this.#retirement.native && { ...this.#retirement.native },
+        guestClose: this.#retirement.guestClose && { ...this.#retirement.guestClose } } };
   }
   command(body) {
     if (!plain(body) || body.v !== 1 || typeof body.instanceId !== 'string' ||
         !(body.attemptId === null || typeof body.attemptId === 'string')) throw requestError('Invalid control identity');
-    const fields = { setEnabled: ['enabled'], runPrivateGuest: ['requestId', 'argv', 'cwd', 'env', 'stdin'], shutdown: [] };
+    const fields = { setEnabled: ['enabled'], setProxy: ['proxy'], runPrivateGuest: ['requestId', 'argv', 'cwd', 'env', 'stdin'], shutdown: [] };
     if (!Object.hasOwn(fields, body.action) || Object.keys(body).some(key => !['v', 'instanceId', 'attemptId', 'action', ...fields[body.action]].includes(key))) {
       throw requestError('Unknown action or field');
     }
@@ -86,6 +95,9 @@ export class LinuxControl {
     if (body.action === 'setEnabled') {
       if (typeof body.enabled !== 'boolean') throw requestError('enabled must be boolean');
       this.#setEnabled(body.enabled);
+    } else if (body.action === 'setProxy') {
+      if (this.#closing) throw fail('ERR_OHOS_LINUX_CLOSED', 'Final shutdown already started');
+      this.#proxy.set(body.proxy);
     } else if (body.action === 'runPrivateGuest') this.#run(body);
     else this.shutdown();
     return this.status();
@@ -153,12 +165,16 @@ export class LinuxControl {
     if (!this.status().admission) throw fail('ERR_OHOS_LINUX_DISABLED', 'Private guest admission is closed');
     if (this.#job && this.#job.state !== 'settled') throw fail('ERR_OHOS_LINUX_BUSY', 'One private guest job is still live or unknown');
     if (this.#nextRequestId >= Number.MAX_SAFE_INTEGER) throw fail('ERR_OHOS_LINUX_REQUEST_REUSED', 'Request identity space exhausted');
-    const handle = this.#backend.spawn({ argv: request.argv, cwd: request.cwd, env: request.env, graceMs: 10000,
+    const proxy = this.#proxy.forRequest(request.env);
+    const handle = this.#backend.spawn({ argv: request.argv, cwd: request.cwd, env: proxy.environment, graceMs: 10000,
       stdio: { stdin: { data: request.stdin }, stdout: { maxBytes: 16384 }, stderr: { maxBytes: 16384 } } });
-    const job = { id: body.requestId, handle, state: 'queued', started: false, cancelRequested: false, outcome: null, errorCode: null };
+    const job = { id: body.requestId, proxyRevision: proxy.revision, handle, state: 'queued', started: false, cancelRequested: false, outcome: null, errorCode: null, diagnostic: null };
     this.#job = job; this.#lastRequestDigest = digest; this.#nextRequestId++;
     handle.started.then(() => { job.started = true; if (job.state === 'queued') job.state = 'running'; }, () => {});
-    job.settled = handle.done.then(outcome => { job.outcome = outcome; job.state = 'settled'; }, cause => {
+    job.settled = handle.done.then(outcome => {
+      job.outcome = outcome; job.state = 'settled';
+      job.diagnostic = deriveLinuxJobDiagnostic({ state: job.state, outcome, stderr: output(handle.collected.stderr) });
+    }, cause => {
       job.state = 'unknown'; job.errorCode = codeOf(cause); this.#recordUnknown(cause);
     });
   }

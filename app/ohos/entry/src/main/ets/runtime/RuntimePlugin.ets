@@ -10,6 +10,7 @@ import hilog from '@ohos.hilog';
 import { RuntimeChannelError } from './RuntimeCore';
 import { RuntimeController } from './RuntimeController';
 import { LinuxRunRequest } from './LinuxControl';
+import type { LinuxProxyConfiguration } from './LinuxControl';
 import { ManagedSkillOwner } from './ManagedSkillService';
 import { PhoneBridge } from '../phone/PhoneBridge';
 import type { HostPhoneKey } from 'libdsh_host.so';
@@ -168,6 +169,25 @@ export class RuntimePlugin implements FlutterPlugin, MethodCallHandler, StreamHa
       const enabled: Any = call.argument('enabled');
       if (typeof enabled !== 'boolean') throw new RuntimeChannelError('ohos_linux_arguments', 'Linux 开关必须是布尔值。');
       result.success(await controller.setLinuxEnabled(enabled)); return;
+    }
+    if (call.method === 'setLinuxProxy') {
+      const raw: Any = call.argument('proxy');
+      if (!(raw instanceof Map)) throw new RuntimeChannelError('ohos_linux_arguments', 'Linux 代理参数无效。');
+      const values = raw as Map<string, Object>;
+      values.forEach((value: Object, key: string): void => {
+        if (!['mode', 'httpProxy', 'httpsProxy', 'noProxy'].includes(key) || typeof value !== 'string') {
+          throw new RuntimeChannelError('ohos_linux_arguments', 'Linux 代理参数无效。');
+        }
+      });
+      const mode = values.get('mode');
+      if (typeof mode !== 'string' || !['inherit', 'direct', 'manual'].includes(mode)) {
+        throw new RuntimeChannelError('ohos_linux_arguments', 'Linux 代理模式无效。');
+      }
+      const proxy: LinuxProxyConfiguration = { mode: mode };
+      if (values.has('httpProxy')) proxy.httpProxy = values.get('httpProxy') as string;
+      if (values.has('httpsProxy')) proxy.httpsProxy = values.get('httpsProxy') as string;
+      if (values.has('noProxy')) proxy.noProxy = values.get('noProxy') as string;
+      result.success(await controller.setLinuxProxy(proxy)); return;
     }
     if (call.method === 'runLinuxPrivateGuest') {
       const instance: Any = call.argument('instanceId'); const attempt: Any = call.argument('attemptId');

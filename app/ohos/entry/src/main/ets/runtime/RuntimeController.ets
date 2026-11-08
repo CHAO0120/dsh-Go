@@ -20,6 +20,7 @@ import { TransientTaskOwner } from './TransientTaskOwner';
 import { RuntimeLifecycle, HostLifecycleAck } from './RuntimeLifecycle';
 import { OhosLifecycleTransport } from './OhosLifecycleTransport';
 import { LinuxControl, LinuxRunRequest } from './LinuxControl';
+import type { LinuxProxyConfiguration } from './LinuxControl';
 import { agentReminderAccess, backgroundComputePermission } from './BackgroundCompute';
 
 type RuntimeSink = (event: Map<string, Object | null>) => void;
@@ -625,6 +626,12 @@ export class RuntimeController {
     if (this.requestedStop || this.resetRequested) throw new RuntimeChannelError('ohos_linux_stopping', '引擎正在停止，未更改 Linux 开关。');
     const state = this.linuxHost();
     return this.linux.setEnabled(state.baseUrl as string, state.token as string, enabled);
+  }
+
+  setLinuxProxy(proxy: LinuxProxyConfiguration): Promise<string> {
+    if (this.requestedStop || this.resetRequested) throw new RuntimeChannelError('ohos_linux_stopping', '引擎正在停止，未更改 Linux 代理。');
+    const state = this.linuxHost();
+    return this.linux.setProxy(state.baseUrl as string, state.token as string, proxy);
   }
 
   runLinuxPrivateGuest(request: LinuxRunRequest): Promise<string> {

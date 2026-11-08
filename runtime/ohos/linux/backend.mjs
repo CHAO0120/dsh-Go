@@ -17,7 +17,7 @@ const knownSignals=new Set(['SIGTERM','SIGKILL']);
 export class LinuxRuntimeBackend {
   capabilities=Object.freeze({confinement:Object.freeze([]),streamingStdin:true,workspaceLease:false,pty:false});
   live=new Set();closed=false;state='opening';
-  #opened=deferred();#closedFrame=deferred();#jobs=new Map();#queue=[];#active;#nextJob=0;#session;#controller;#failure;#disposePromise;
+  #opened=deferred();#closedFrame=deferred();#jobs=new Map();#queue=[];#active;#nextJob=0;#session;#controller;#failure;#disposePromise;#guestClose=null;
   constructor({nativeLibraryDirectory,configPath,epoch,temporaryRoot,onSpillFailure=()=>{},closeTimeoutMs=10000}={},internals={}) {
     if(typeof temporaryRoot!=='string'||!isAbsolute(temporaryRoot)||temporaryRoot.includes('\0')||!statSync(temporaryRoot).isDirectory())throw new TypeError('Linux collector root must be a trusted existing private directory');
     if(typeof configPath!=='string'||!isAbsolute(configPath)||configPath.includes('\0')||!/^[a-f0-9]{64}$/.test(epoch))throw new TypeError('Trusted native config and private epoch are required');
@@ -31,6 +31,9 @@ export class LinuxRuntimeBackend {
     this.#controller.on('frame',frame=>this.#frame(frame));
     this.#controller.on('fault',error=>this.#quarantine(error));
   }
+  // A historical wire fact alone is not a clean checkpoint. Owners must use
+  // successful dispose() plus actual native retirement, never this after catch.
+  get guestClose(){return this.#guestClose;}
   prepare(_argv,_policy,signal){signal?.throwIfAborted();throw failure('ERR_OHOS_BACKEND_CONFINEMENT','Linux guest does not yet provide authorized workspace mounts or read-only confinement; no execution ticket was issued');}
   async resolveExecutable(command,_env,signal){signal?.throwIfAborted();if(typeof command!=='string'||!command||command.includes('\0')||(!isAbsolute(command)&&command.includes('/')))throw new TypeError('Invalid guest command');return command;}
   async terminalEnvironment(signal){signal?.throwIfAborted();return {platform:'posix',defaultShell:'/bin/sh'};}
@@ -83,8 +86,15 @@ export class LinuxRuntimeBackend {
         if(this.state!=='opening'||frame.job!==null||frame.capabilities?.streamingStdin!==true||frame.capabilities?.pidNamespace!==true||frame.capabilities?.workspaceLease!==false)throw failure('ERR_OHOS_LINUX_PROTOCOL','Guest opened capability mismatch');
         this.state='opened';this.#opened.resolve();this.#next();return;
       }
-      if(frame.kind==='closed'){
+      if(frame.kind==='closed'||frame.kind==='close-failed'){
         if(this.#controller.agentClosed||this.state!=='closing'||frame.job!==null||this.live.size||this.#active)throw failure('ERR_OHOS_LINUX_PROTOCOL','Guest closed before all job release facts');
+        if(frame.syncMethod!=='syncfs'||frame.syncScope!=='rootfs')throw failure('ERR_OHOS_LINUX_PROTOCOL','Guest close lacks fixed root filesystem sync evidence');
+        if(frame.kind==='close-failed'){
+          if(frame.rootfsSync!==false||frame.code!=='ERR_OHOS_GUEST_SYNC'||!(frame.errno===null||Number.isInteger(frame.errno)&&frame.errno>0&&frame.errno<=4095))throw failure('ERR_OHOS_LINUX_PROTOCOL','Invalid guest sync failure evidence');
+          const error=failure('ERR_OHOS_LINUX_GUEST_SYNC','Guest root filesystem synchronization failed');error.errno=frame.errno;throw error;
+        }
+        if(frame.rootfsSync!==true)throw failure('ERR_OHOS_LINUX_PROTOCOL','Guest close did not confirm root filesystem synchronization');
+        this.#guestClose=Object.freeze({epoch:frame.epoch,rootfsSync:true,syncMethod:'syncfs',syncScope:'rootfs'});
         this.#controller.agentClosed=true;this.#closedFrame.resolve();return;
       }
       const job=this.#active;if(!job||frame.job!==job.id||job.complete||job.unknown)throw failure('ERR_OHOS_LINUX_PROTOCOL','Guest active job identity mismatch');
@@ -138,7 +148,7 @@ export class LinuxRuntimeBackend {
       this.#session.socket.destroy();
       failureDuringClose??=this.#failure;
       if(failureDuringClose){this.#quarantine(failureDuringClose);throw this.#failure??failureDuringClose;}
-      this.state='closed';return {closed:true,ownerQuarantined:true,native};
+      this.state='closed';return {closed:true,guestClose:this.#guestClose,ownerQuarantined:true,native};
     })();this.#disposePromise.catch(()=>{});return this.#disposePromise;
   }
 }

@@ -10,5 +10,13 @@ const directory = host ? process.env.DSH_GO_OHOS_LINUX_DIRECTORY : undefined;
 const nativeLibraryDirectory = host ? process.env.DSH_GO_OHOS_NATIVE_LIBRARY_DIR : undefined;
 const captured = path(directory) && path(nativeLibraryDirectory)
   ? Object.freeze({ directory, nativeLibraryDirectory }) : undefined;
+let lockExclusive;
+if (host) {
+  try {
+    const binding = process._linkedBinding('dsh_ohos_publication');
+    if (typeof binding.lockExclusive === 'function') lockExclusive = binding.lockExclusive;
+  } catch { /* Enabling Linux reports the unavailable trusted capability. */ }
+}
 
 export const linuxHostPaths = () => captured;
+export const linuxHostLock = () => lockExclusive;

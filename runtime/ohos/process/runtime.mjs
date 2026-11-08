@@ -12,6 +12,8 @@ import { capabilities, subprocessCommands, unavailableMessage } from './commands
 import { distinctRoots, isInside } from './paths.mjs';
 import { createOwnedGitServer } from './owned-server.mjs';
 import { createNodeScriptWorker, formatNodeScriptError, nodeScriptAvailable } from './node-script.mjs';
+import { borrowProcessGrantAuthority, isLogicalWorkspacePath, processGrantNativeDirectory,
+  processWorkspaceGrant, quarantineProcessGrantRetirement } from './files/process-authority.mjs';
 
 const confinedProgram = '/dsh-go/ohos/confined';
 const validateArgv = argv => {
@@ -59,7 +61,8 @@ export class VirtualSubprocessRuntime {
       return canonical;
     };
     // 验证所有宿主输入后才分配自身资源；配置拒绝不能留下新 mkdtemp。
-    this.workspaceRoots = distinctRoots(workspaceRoots.map(root => directory(root, 'workspaceRoots')));
+    this.workspaceRoots = distinctRoots(workspaceRoots.map(root => isLogicalWorkspacePath(root)
+      ? processWorkspaceGrant(root).mountPoint : directory(root, 'workspaceRoots')));
     if (temporaryRoot !== undefined) this.temporaryRoot = directory(temporaryRoot, 'temporaryRoot');
     else {
       this.temporaryRoot = mkdtempSync(join(tmpdir(), 'dsh-ohos-process-'));
@@ -76,11 +79,12 @@ export class VirtualSubprocessRuntime {
     signal?.throwIfAborted();
     validateArgv(argv);
     if (policy.mode !== 'read-only' && policy.mode !== 'workspace-write') throw new Error('非法的受限运行模式');
-    const workspaceRoot = realpathSync(policy.workspaceRoot);
-    if (!this.roots.some(root => isInside(root, workspaceRoot))) throw Object.assign(new Error('EACCES: OHOS_SANDBOX_DENIED: 会话工作区未由宿主授权'), { code: 'EACCES' });
+    const grant = isLogicalWorkspacePath(policy.workspaceRoot) ? processWorkspaceGrant(policy.workspaceRoot) : undefined;
+    const workspaceRoot = grant?.mountPoint ?? realpathSync(policy.workspaceRoot);
+    if (!grant && !this.roots.some(root => isInside(root, workspaceRoot))) throw Object.assign(new Error('EACCES: OHOS_SANDBOX_DENIED: 会话工作区未由宿主授权'), { code: 'EACCES' });
     const token = randomUUID();
     const cancel = () => this.prepared.delete(token);
-    this.prepared.set(token, { argv: [...argv], policy: { ...policy, workspaceRoot }, signal, cancel });
+    this.prepared.set(token, { argv: [...argv], policy: { ...policy, workspaceRoot }, grant, signal, cancel });
     signal?.addEventListener('abort', cancel, { once: true });
     return [confinedProgram, token];
   }
@@ -112,7 +116,7 @@ export class VirtualSubprocessRuntime {
     }
     validateArgv(spec.argv);
     let argv = [...spec.argv];
-    let policy;
+    let policy, grant;
     if (argv[0] === confinedProgram) {
       const prepared = argv.length === 2 && this.prepared.get(argv[1]);
       if (!prepared) throw Object.assign(new Error('无效或已使用的鸿蒙执行票据'), { code: 'ERR_OHOS_INVALID_CONFINEMENT' });
@@ -120,6 +124,7 @@ export class VirtualSubprocessRuntime {
       prepared.signal?.removeEventListener('abort', prepared.cancel);
       argv = prepared.argv;
       policy = prepared.policy;
+      grant = prepared.grant;
       validateArgv(argv);
     }
     const external = this.#selectExternal?.(argv, policy);
@@ -128,7 +133,7 @@ export class VirtualSubprocessRuntime {
       return external.spawn({ ...spec, argv: routed, ...(policy ? { policy } : {}) });
     }
     const lane = this.#concurrent ? { queue: [] } : this.lanes[commandName(argv[0]) === 'rg' ? 'search' : 'execution'];
-    const state = { worker: undefined, resources: undefined, stopped: false, finishing: false,
+    const state = { worker: undefined, resources: undefined, workspace: undefined, stopped: false, finishing: false,
       settled: false, outcome: undefined, failure: undefined, providerFailure: undefined, rangeFailure: undefined };
     const completion = Promise.withResolvers();
     const gone = Promise.withResolvers();
@@ -193,7 +198,15 @@ export class VirtualSubprocessRuntime {
       // Worker exit plus stdout/stderr drain is the first barrier. Drain parent I/O and
       // replies, then exact cleanup/FD close/ledger release, before any lifetime
       // promise settles or this lane can start its following job.
-      Promise.resolve().then(() => state.resources?.finish({ cancelled: state.stopped })).then(() => settle(), settle);
+      Promise.resolve().then(async () => {
+        const failures = [];
+        try { await state.resources?.finish({ cancelled: state.stopped }); } catch (error) { failures.push(error); }
+        try {
+          if (state.workspace && !state.workspace.retire()) throw Object.assign(new Error('ERR_WORKSPACE_DRAIN'), { code: 'ERR_WORKSPACE_DRAIN' });
+        } catch (error) { quarantineProcessGrantRetirement(); failures.push(error); }
+        if (failures.length === 1) throw failures[0];
+        if (failures.length) throw new AggregateError(failures, 'Virtual process resources did not retire');
+      }).then(() => settle(), settle);
     };
     const handle = {
       stdin: input, stdout: output.stdout, stderr: output.stderr, control: undefined, collected,
@@ -202,6 +215,7 @@ export class VirtualSubprocessRuntime {
         if (state.settled || state.stopped) return;
         state.stopSignal = typeof signal === 'string' ? signal : 'SIGTERM';
         state.stopped = true;
+        try { state.workspace?.retire(); } catch (error) { state.providerFailure ??= error; }
         state.resources?.stop();
         if (state.worker) void state.worker.terminate().catch(error => { state.providerFailure ??= error; });
         else finish();
@@ -234,23 +248,30 @@ export class VirtualSubprocessRuntime {
             finish();
             return;
           }
-          const cwd = realpathSync(resolve(spec.cwd));
-          if (!this.roots.some(root => isInside(root, cwd)) || !statSync(cwd).isDirectory()) {
+          if (!grant && isLogicalWorkspacePath(spec.cwd)) {
+            throw Object.assign(new Error('ERR_WORKSPACE_CONFINEMENT_REQUIRED'), { code: 'ERR_WORKSPACE_CONFINEMENT_REQUIRED' });
+          }
+          const cwd = grant ? resolve(spec.cwd) : realpathSync(resolve(spec.cwd));
+          if (grant ? (!isAbsolute(spec.cwd) || spec.cwd !== cwd || !isInside(grant.mountPoint, cwd))
+            : (!this.roots.some(root => isInside(root, cwd)) || !statSync(cwd).isDirectory())) {
             throw Object.assign(new Error('EACCES: 工作目录不在授权工作区内'), { code: 'EACCES' });
           }
           // 没有会话票据的调用只保守取得本次 cwd；不能推断它拥有其他宿主根。
-          const roots = distinctRoots([policy?.workspaceRoot ?? cwd, this.temporaryRoot]);
-          if (!roots.some(root => isInside(root, cwd))) {
+          const roots = grant ? [this.temporaryRoot] : distinctRoots([policy?.workspaceRoot ?? cwd, this.temporaryRoot]);
+          if (!grant && !roots.some(root => isInside(root, cwd))) {
             throw Object.assign(new Error('EACCES: OHOS_SANDBOX_DENIED: 工作目录不在本次会话授权根内'), { code: 'EACCES' });
           }
           const env = { ...scrubbedParentEnv(), ...spec.env, TMPDIR: this.temporaryRoot };
           for (const [key, value] of Object.entries(env)) if (value === undefined) delete env[key];
           // Worker 通过继承 --import 重新建立测试标记；环境变量不能启用仿真。
           const workerEnv = { ...env };
+          if (grant) workerEnv.DSH_GO_OHOS_NATIVE_LIBRARY_DIR = processGrantNativeDirectory();
           if (globalThis[Symbol.for('dsh.go.ohos.sim')] === true && process.env.DSH_GO_OHOS_SIM_PLATFORM) {
             workerEnv.DSH_GO_OHOS_SIM_PLATFORM = process.env.DSH_GO_OHOS_SIM_PLATFORM;
           }
           const nodeTask = name === 'node';
+          if (grant && (nodeTask || name === 'git')) throw Object.assign(new Error(
+            'ERR_WORKSPACE_SCOPE_UNSUPPORTED: Node 脚本与 owned-git 尚未接入目录租约'), { code: 'ERR_WORKSPACE_SCOPE_UNSUPPORTED' });
           let worker;
           if (nodeTask) {
             try {
@@ -272,16 +293,20 @@ export class VirtualSubprocessRuntime {
               throw error;
             }
           } else {
-            state.resources = this.#createOwnedGitServer({
+            if (!grant) state.resources = this.#createOwnedGitServer({
               roots, policy,
               send: message => state.worker.postMessage(message),
               onFailure: error => { state.providerFailure ??= error; handle.terminate(); },
+            });
+            if (grant) state.workspace = borrowProcessGrantAuthority().issue([grant], {
+              readOnly: policy.mode === 'read-only', workspaceRoot: policy.workspaceRoot,
             });
             worker = new Worker(new URL('./worker.mjs', import.meta.url), {
               workerData: {
                 // This fixed provider entry is independent of DSH's plugin
                 // profile. Do not bootstrap that profile in its scrubbed env.
                 dshOhosVirtualProcess: { protocol: 1 },
+                ...(state.workspace ? { dshOhosWorkspaceGrants: { mounts: state.workspace.mounts } } : {}),
                 argv: [name, ...argv.slice(1)], cwd, policy,
                 roots,
                 env, stdin: typeof spec.stdio.stdin === 'object' ? spec.stdio.stdin.data : '',
@@ -318,7 +343,7 @@ export class VirtualSubprocessRuntime {
             });
           }
           if (!nodeTask) worker.on('message', message => {
-            if (state.resources.handle(message)) return;
+            if (state.resources?.handle(message)) return;
             if (message.failure) state.failure = Object.assign(new Error(message.failure.message), message.failure);
             else state.outcome = { exitCode: message.exitCode, signal: null };
           });

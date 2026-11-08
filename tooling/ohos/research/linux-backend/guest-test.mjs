@@ -43,6 +43,6 @@ try{
   check('setsid child reaped even after leader exit',treeOutcome.cancelled===true&&treeOutcome.exitCode===0&&treeOutcome.signal===null&&probe.out.toString()==='True True\n',{outcome:treeOutcome});
   const jobs=[backend.spawn(spec(['python3','-c','print("one")'])),backend.spawn(spec(['python3','-c','print("two")'])),backend.spawn(spec(['python3','-c','print("never")']))];jobs[2].terminate();const results=await Promise.all(jobs.map(j=>j.done));
   check('one guest lane and queued cancellation',jobs[0].collected.stdout.snapshot().bytes.toString()==='one\n'&&jobs[1].collected.stdout.snapshot().bytes.toString()==='two\n'&&results[2].notStarted===true);
-  const disposed=await backend.dispose();check('protocol closed after real jobs then native join',disposed.closed&&disposed.native.joined&&backend.state==='closed'&&backend.live.size===0);
+  const disposed=await backend.dispose();check('protocol synced closed after real jobs then native join',disposed.closed&&disposed.guestClose?.epoch===config.epoch&&disposed.guestClose.rootfsSync===true&&disposed.guestClose.syncMethod==='syncfs'&&disposed.guestClose.syncScope==='rootfs'&&disposed.native.joined&&backend.state==='closed'&&backend.live.size===0);
  }
 }finally{clearTimeout(timeout);console.log(JSON.stringify({checks:checks.length,pass:checks.every(c=>c.pass),state:backend.state}));}

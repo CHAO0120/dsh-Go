@@ -131,15 +131,16 @@ try {
   shutdown = await waitFor(state => state.shutdownComplete, 'real native join', 30000);
   check('final shutdown confirms real native join and drive retirement', shutdown.retirement.resourcesRetired && shutdown.retirement.native.joined === true && shutdown.retirement.native.retirementError === false,
     { retirement: shutdown.retirement });
-  const marker = JSON.parse(await readFile(join(active.directory, 'retired.json'), 'utf8'));
+  const marker = JSON.parse(await readFile(join(active.directory, 'instance.json'), 'utf8'));
   check('published target remains and no native data descriptor survives', shutdown.retirement.filesRemoved === false && shutdown.retirement.dataRetained &&
-    marker.target === active.target && marker.state === 'retired-private-guest' && (await stat(active.target)).size === 536870912 && (await dataDescriptors()).length === 0);
+    marker.target.name === 'target.ext4' && marker.persistentInstanceId === active.persistentInstanceId && marker.state === 'clean' &&
+    shutdown.retirement.cleanCheckpoint && marker.guestClose.epoch === active.epoch && (await stat(active.target)).size === 536870912 && (await dataDescriptors()).length === 0);
   await assert.rejects(access(join(active.directory, 'active.json')), { code: 'ENOENT' });
   check('retired owner does not implicitly create a replacement', ownerCreations === 1 && downloads === 1 && shutdown.restartRequired && !shutdown.admission);
   await writeFile(resultPath, JSON.stringify({ passed: true, checks, observations, shutdown,
     installed: { epoch: active.epoch, directory: active.directory, target: active.target, archiveSha256: active.archiveSha256 },
     ownerCreations, downloads,
-    scope: 'Actual HTTP/BrowserAuth, production LinuxControl/owner/backend, real native TinyEMU and guest. Only pinned archive download transport is a fixture. File preservation is not guest sync/clean recovery; no HAP/device/Huawei HTTP claim.' }, null, 2) + '\n');
+    scope: 'Actual HTTP/BrowserAuth, production LinuxControl/owner/backend, real native TinyEMU and guest. Only pinned archive download transport is a fixture. This single lifetime checks clean close; cross-process recovery is a separate paired test. No HAP/device/Huawei HTTP claim.' }, null, 2) + '\n');
 } finally {
   clearTimeout(deadline); await control.shutdown(); await ctx.fiber.dispose();
   server.closeAllConnections(); await new Promise(resolve => server.close(resolve));

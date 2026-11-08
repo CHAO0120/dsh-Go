@@ -10,13 +10,13 @@ source=out/'source/runtime/ohos/linux';source.mkdir(parents=True)
 for name in ['backend.mjs','controller.mjs','streams.mjs','native-session.mjs']:shutil.copy2(ROOT/'runtime/ohos/linux'/name,source/name)
 for name in ['dsh-subprocess-local','dsh-subprocess','dsh-http-proxy','cordis','cosmokit']:
  shutil.copytree(package.parent/name,out/'source/runtime/ohos/process/node_modules/@deepseek-ai'/name,symlinks=True)
-for name in ['protocol.test.mjs','guest-test.mjs']:shutil.copy2(HERE/name,out/name)
+for name in ['protocol.test.mjs','clean-close.test.mjs','guest-test.mjs']:shutil.copy2(HERE/name,out/name)
 inputs={'source':{p.name:sha(p) for p in source.iterdir()},'collector':{'version':metadata['version'],'packageSha256':sha(package/'package.json'),'outputSha256':sha(package/'lib/output.js')},'nativeLibrarySha256':sha(a.native_library_dir/'libdsh_linux.so'),'guestConfigSha256':sha(a.guest_config)}
 commands=[]
 def execute(argv,label,env=None):
  r=subprocess.run(list(map(str,argv)),capture_output=True,env=env,timeout=210);(out/(label+'.stdout')).write_bytes(r.stdout);(out/(label+'.stderr')).write_bytes(r.stderr);commands.append({'label':label,'argv':list(map(str,argv)),'exitCode':r.returncode});(out/'commands.json').write_text(json.dumps(commands,indent=2)+'\n');assert r.returncode==0,(label,r.stderr.decode(errors='replace'))
 for mode in ['jit','strict']:
- execute([a.node,*(['--jitless','--import',ROOT/'runtime/ohos/sim/preload.mjs'] if mode=='strict' else []),'--test',out/'protocol.test.mjs'],'protocol-'+mode)
+ execute([a.node,*(['--jitless','--import',ROOT/'runtime/ohos/sim/preload.mjs'] if mode=='strict' else []),'--test',out/'protocol.test.mjs',out/'clean-close.test.mjs'],'protocol-'+mode)
 config_path=a.guest_config.resolve();original=json.loads(config_path.read_text());inputs['guestFiles']={}
 for key,value in original.items():
  if key in ['bios','kernel','initrd']:

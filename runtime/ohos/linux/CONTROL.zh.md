@@ -1,6 +1,6 @@
-# 930 App → Node Linux 控制合同 v1
+# 931 App → Node Linux 控制合同 v1
 
-状态：930 的 ETS / Dart 与 Node 同步实现合同。依据为 705、829 的单开关/独立实例/事实分离要求，以及 922 中实际 `connection`、917 owner、914 backend 接缝。本文定义 **930 新增协议**，没有声称此前已有 Linux RPC 或 NativeHost 方法。
+状态：930固定入口与931扩展的 ETS / Dart / Node 同步合同，wire版本保持1，旧版本缺少新增可选观察字段时保留null。依据为 705、829 的单开关/独立实例/事实分离要求，以及 922 中实际 `connection`、917 owner、914 backend 接缝。本文定义 **930 新增、931扩展的协议**，没有声称此前已有 Linux RPC 或 NativeHost 方法。
 
 ## 1. 固定入口与可信输入
 
@@ -11,7 +11,7 @@
 
 ## 2. POST 精确字段
 
-三种 body 均为 JSON object，`Content-Type: application/json`，UTF-8 body 最多 65,536 bytes，body 到达限时 10 秒；未知字段、重复语义、类型错误、NUL argv/env 等拒绝。JSON 重复字面键受 JSON.parse 的最终值规则，不另建自定义 JSON parser。
+各 body 均为 JSON object，`Content-Type: application/json`，UTF-8 body 最多 65,536 bytes，body 到达限时 10 秒；未知字段、重复语义、类型错误、NUL argv/env 等拒绝。JSON 重复字面键受 JSON.parse 的最终值规则，不另建自定义 JSON parser。
 
 每种 body 必须携带 `v: 1`、`instanceId: string`、`attemptId: string | null`。两种身份必须等于当前 `GET` 的值；否则 `409 ERR_OHOS_LINUX_STALE`，不执行任何动作。`instanceId` 是此 service 在本 Node 生命期生成的 UUID；第一次显式启用创建 `attemptId` UUID，本期不允许静默换新 owner。
 
@@ -21,7 +21,7 @@
 {"v":1,"instanceId":"<GET返回>","attemptId":null,"action":"setEnabled","enabled":true}
 ```
 
-成功接受返回 `202` 和完整状态对象。第一次 true 后后台加载固定 manifest / 下载 / 准备 / 安装；`202` 仅表示接受。再次 true 只复用同一个健康 owner/backend。false 立即关闭准入，然后异步 terminate 本 service 持有的未结局 job 并等待真实 `waitForExit`；正常已打开的空闲 VM 保留。false 在安装中取消安装并收尾；本期取消/失败的安装 owner 不重建，再次 true 明确报错并要求重启运行时。请求断连或 HTTP 超时不等于 false。
+成功接受返回 `202` 和完整状态对象。第一次 true 后后台加载固定 manifest，按可信持久记录选择首次下载/安装或同一数据盘的直接恢复；`202` 仅表示接受。再次 true 只复用同一个健康 owner/backend。false 立即关闭准入，然后异步 terminate 本 service 持有的未结局 job 并等待真实 `waitForExit`；正常已打开的空闲 VM 保留。false 在安装中取消安装并收尾；本期取消/失败的安装 owner 不重建，再次 true 明确报错并要求退出并重新启动整个App；保留数据仍须满足干净恢复条件。请求断连或 HTTP 超时不等于 false。
 
 ### 明确的私有 guest 运行
 
@@ -33,7 +33,19 @@
 
 `cwd` 必须显式精确为 `/workspace`，绝不替换宿主 cwd。`argv` 为 1–128 个无 NUL 字符串，首项非空，单项 ≤ 8,192 UTF-8 bytes，合计 ≤ 24,576 bytes。`env` 可省略，最多 64 个键，键须匹配 `[A-Za-z_][A-Za-z0-9_]*` 且 ≤ 128 bytes，值为无 NUL 字符串且单值 ≤ 4,096 bytes，整个 JSON env ≤ 16,384 bytes。`stdin` 可省略，UTF-8 string ≤ 16,384 bytes。
 
-父环境继承仍由 914 backend 的既有 `scrubbedParentEnv()` 删除 `DSH_*` 和凭据形名字；显式 env 按既有 subprocess 契约可显式提供凭据，但不影响已捕获的宿主路径，也不回显/写日志。这里只开放 batch stdin + stdout/stderr 各 16,384 bytes 尾部 collector，没有 pipe/PTY/宿主目录/grant/spill 配置入口。`graceMs` 固定为 10,000，不由 App 自选。取消本期唯一当前 job 使用 `setEnabled(false)`，同时关闭准入；GET 观察 cancelRequested 和真实 settled/unknown。
+父环境继承仍由 914 backend 的既有 `scrubbedParentEnv()` 删除 `DSH_*` 和凭据形名字；代理变量另按下述当前模式处理。显式 env 按既有 subprocess 契约可显式提供凭据，但不影响已捕获的宿主路径，也不自动回显/写日志。这里只开放 batch stdin + stdout/stderr 各 16,384 bytes 尾部 collector，没有 pipe/PTY/宿主目录/grant/spill 配置入口。`graceMs` 固定为 10,000，不由 App 自选。取消本期唯一当前 job 使用 `setEnabled(false)`，同时关闭准入；GET 观察 cancelRequested 和真实 settled/unknown。
+
+### 私有作业代理
+
+```json
+{"v":1,"instanceId":"<GET返回>","attemptId":null,"action":"setProxy","proxy":{"mode":"direct"}}
+```
+
+`attemptId`仍携当前GET的原值。`proxy.mode`为`inherit | direct | manual`；前两者只允许mode，manual另允许`httpProxy`、`httpsProxy`、`noProxy`字符串，各最多4096 UTF-8字节且至少一个HTTP(S)代理URL非空。HTTPS代理缺省时沿用HTTP代理。成功返回202与状态；配置只在本Node会话内，App重启后调用方需重新注入。
+
+同一规范化配置不递增revision。配置可在作业运行时改变，但只影响后续新requestId；原号同参重试先去重，仍返回原作业。manual/direct不允许作业env再携任何代理别名，否则400 `ERR_OHOS_LINUX_PROXY_ENV_CONFLICT`。inherit保留既有活动策略、父环境及显式env优先级；revision只反映setProxy配置，不是外部策略的完整版本，也不是跨客户端租约。
+
+App的HTTP localhost/127.0.0.1代理映射到TinyEMU宿主端10.0.2.2；其他127/8、IPv6 loopback和HTTPS loopback明确拒绝。合并gitee.com及huaweicloud.com直连项，保留整值`*`的客户端语义。控制HTTP本身不走该代理。完整别名、地址、错误码、传输范围和实际客户端验证边界见同目录`PROXY.zh.md`；不影响App归档下载器或全部插件路由。
 
 ### 最终停止
 
@@ -47,13 +59,17 @@
 
 ## 3. GET / 成功 POST 的状态对象
 
-固定返回以下键，不返回宿主路径、原始错误 message/cause、环境、argv 或凭据：
+下列为状态的基础形状。控制层不回显宿主路径、原始错误message/cause、配置环境、argv或代理凭据。任务自己的stdout/stderr仍是原始字节，任意程序可能自行输出敏感内容；因此测量CLI在代理或账号env回合主动省略输出原件，而不能把整个GET泛称为无敏感信息：
 
 ```json
 {
   "v":1,
   "instanceId":"UUID",
   "attemptId":null,
+  "persistentInstanceId":null,
+  "bootMode":null,
+  "nativeMemoryRelease":null,
+  "proxy":{"source":"inherit","revision":0,"httpConfigured":false,"httpsConfigured":false},
   "state":"disabled",
   "enabled":false,
   "admission":false,
@@ -80,8 +96,8 @@
 
 ```json
 {
-  "id":1,"state":"queued","started":false,"cancelRequested":false,
-  "outcome":null,"errorCode":null,
+  "id":1,"state":"queued","started":false,"cancelRequested":false,"proxyRevision":0,
+  "outcome":null,"errorCode":null,"diagnostic":null,
   "stdout":{"encoding":"base64","data":"","totalBytes":0,"retainedBytes":0,"truncated":false},
   "stderr":{"encoding":"base64","data":"","totalBytes":0,"retainedBytes":0,"truncated":false}
 }
@@ -89,13 +105,15 @@
 
 `job.state = queued | running | settled | unknown`；started 仅在 backend handle.started fulfilled 后 true。`outcome` 是 914 的真实 `{exitCode,signal,cancelled}`，必要时带 `notStarted:true`、`requestedSignal:'SIGTERM'`，没有预测性补零。UNKNOWN 保持 outcome=null。流数据是复制出的已收到 raw bytes 的 base64 尾部，totalBytes 与 retainedBytes 分开；上限固定，GET 不消费数据，也不把 UI 接收作为 guest sink ACK。
 
+`proxy`只投影上述四个安全字段，不携URL、凭据或NO_PROXY原串；示例中的两个false以没有当前活动/父代理为前提。direct必须两个false，manual至少一个true。`revision`与job接收时固定的`proxyRevision`均为非负safe integer；当前proxy可以已变化，不能据它推断历史job未用过代理。旧版本未提供这些可选字段时保持未知。
+
 `retirement` 为 null 或 `{resourcesRetired:boolean,filesRemoved:boolean,dataRetained:boolean,ownerQuarantined:boolean,native:null|{joined:boolean,retirementError:boolean|null,apiResult:number|null},releaseErrorCode:string|null}`。真实未 join 可为 `{joined:false,retirementError:null,apiResult:null}`，不得因 `!null` 或默认 `0` 而升级为已退休；有 native 时仅 `joined === true && retirementError === false` 可确认退休。只输出已观测字段，native 缺失时为 null，不补造 joined。将同 owner 资源退休与 job 结局分离。
 
 ## 4. 错误与并发
 
 错误体为 `{"v":1,"error":{"code":"ERR_...","message":"HTTP标准短语"},"status":<当前完整状态>}`；鉴权拒绝不附 status。400/413/415 为请求问题；409 为 stale/busy/disabled/failed/unknown 等拒绝；shutdown 已受理但未确认只在 GET 状态中报告，不能把 202 当完成；503 为缺 connection 或可信 host path。仅在首次显式启用后才可能发现 assets 缺失，此时后台状态 `unavailable`。
 
-setEnabled(true) 在 installing 时为幂等保持；setEnabled(false) 在 disabling 时同样保持，不重发 cancel；在 disabling 完成前 true 拒绝 busy。shutdown 一旦开始不可重新开启。不存在自动重试、后台重建、跨 App 恢复或每任务 grant 已完成的声明。已发布数据不得被 shutdown 或下次安装覆盖/自动清理；若下次启动发现已保留 instance 但无恢复实现，明确拒绝并保留它。
+setEnabled(true) 在 installing 时为幂等保持；setEnabled(false) 在 disabling 时同样保持，不重发 cancel；在 disabling 完成前 true 拒绝 busy。shutdown 一旦开始不可重新开启。不存在自动换号重试、后台重建或每任务grant已完成的声明。931在新的App进程中仅按当前可见且完整合格的clean持久记录恢复同代数据盘；该记录的生成路径要求本epoch的guest syncfs和native成功退役。旧v1、dirty/booting、资产变更或身份错误明确拒绝并保留，不自动重装覆盖。正常shutdown后退出整个App再开与突然杀进程/掉电恢复是不同范围。
 
 ## 5. 需要联测的实际边界
 
@@ -105,3 +123,28 @@ setEnabled(true) 在 installing 时为幂等保持；setEnabled(false) 在 disab
 4. off→terminate 请求→真实 waitForExit→disabled→on，同一 owner/session 创建计数仍 1。
 5. 安装 progress observer throw 不破坏安装；安装 cancel 的真实边界与已发布 dataRetained / native joined / filesRemoved 区分。
 6. 真实 RuntimeController stop/reset 必须等上述 shutdownComplete，HTTP 失败或 UNKNOWN 未确认不能先 nativeStop/reset。此项由 root / 独审实现验证。
+
+
+## 6. 931持久身份、干净关闭与内存
+
+`persistentInstanceId`为已安装数据的UUID，`bootMode`为`install`或`resume`；安装选择尚未成立时两者均null。它们不等于本Node服务的`instanceId`或当前尝试`attemptId`。每次VM启动都有新随机epoch，不能复用旧生命周期的closed帧。恢复固定直接引导target，绝不重走bootstrap安装配置。
+
+`retirement.guestClose`只有当前fulfilled backend.dispose带来的`{epoch,rootfsSync:true,syncMethod:'syncfs',syncScope:'rootfs'}`才成立；closed必须在实际rootfs syncfs成功之后发出。`retirement.cleanCheckpoint`只有该guest事实、native joined且无错误、持久clean记录提交都成功时才true。目录fsync失败等情况可能资源已退役而cleanCheckpoint仍false；`shutdownComplete`不是磁盘干净恢复证明，更不是任意掉电保证。
+
+`cleanCheckpoint:false`表示本轮未确认持久提交，不承诺磁盘记录已回滚。若clean记录已rename可见、随后目录fsync失败，下一新owner仍可能读到完整且合格的clean记录并恢复；它重新验证当前记录，不读取上一进程的内存布尔。该可见性不构成掉电耐久性证明。手机CLI的两阶段验收保守要求前轮cleanCheckpoint严格true，才接受那份SUMMARY作为恢复对照。
+
+`nativeMemoryRelease`为`null | 'process-exit'`。owner真正持有native session后为process-exit，包括Socket封装失败但仍有linuxJoin债务。普通off/on复用同一VM；最终join或UNKNOWN收尾都不清除此事实。null只是缺少该持有事实，不等于零内存、已释放或任意字节数。VM allocation/owner当前保留到整个App进程退出，Node线程stop不是整个App进程退出。Dart提供固定中文notice供界面展示；不从全App PSS推定VM专属内存。
+
+## 7. 931非零作业的固定诊断
+
+`job.diagnostic`为null或`{category,evidence,message}`。仅fulfilled done后的settled、exitCode 1–255、非取消、非信号退出、非notStarted可有诊断；原outcome及errorCode保持。分类只引用完整且有效UTF-8的stderr，最多16KiB；尾部截断、混合多类或无法识别时为unknown，不能用文本修复UNKNOWN生命周期。
+
+| category | evidence | 含义 |
+|---|---|---|
+| dns | stderr | 命令输出报告域名/代理名称解析失败 |
+| connection | stderr | 命令输出报告无法建立连接或连接超时 |
+| tls-interrupted | stderr | 有TLS上下文的unexpected EOF；不能据此确定断开方 |
+| tls-certificate | stderr | 命令输出报告证书校验失败；不建议关闭验证 |
+| unknown | none | 完整错误证据不足，或输出截断/混合/无法识别 |
+
+message是对应固定中文，不拼接stderr、URL或凭据。成功命令出现相同错误字样仍无失败诊断；取消SIGKILL与请求SIGTERM保持原来的不同事实。
