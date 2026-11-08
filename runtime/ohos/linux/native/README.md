@@ -10,7 +10,9 @@
 
 `requestStop` 仅原子置位，不等待、不中断线程、不 signal/terminate Worker。`join` 必须在显式 requestStop 后调用，否则同步抛 `ERR_OHOS_LINUX_STOP_REQUIRED`；只在此时创建 `napi_async_work` 等待 pthread_join。VM 整段寿命用自有 pthread，不占 libuv 池；测试用 UV_THREADPOOL_SIZE=1 在 VM 运行时实际完成文件 I/O。先成功建立 Promise 引用，再排队；引用失败不排队，可显式重试。排队后重复 join 返回同一个 Promise。
 
-join 结果有 `joined`（仅 OS 线程已 join）、`apiResult`、`fatalReason`、`retirementError`、`ownerQuarantined:true` 和 `joinError`。pthread_join 失败或 async work 取消时，不读取机器线程字段，apiResult/fatalReason/retirementError 为 null，joined 为 false，保留 unknown/quarantine。`joined:true` 不是作业成功或环境可复用。-4 为明确停止，-3 为 HTIF poweroff，-5/-7 为输出/输入错误，-8 为盘 flush/fclose 失败，-9 为捕获的显式 TinyEMU fatal。-1/-2 启动失败仍须保留 native owner，第二次 create 明确拒绝。GC/env cleanup 只请求停止，不伪装 join；VM heap、设备对象、线程 owner 和库寿命保留，库链接 NODELETE。
+join 结果有 `joined`（仅 OS 线程已 join）、`apiResult`、`fatalReason`、`retirementError`、`ownerQuarantined:true` 和 `joinError`。pthread_join 失败或 async work 取消时，不读取机器线程字段，apiResult/fatalReason/retirementError 为 null，joined 为 false，保留 unknown/quarantine。`joined:true` 不是作业成功或环境可复用。-4 为明确停止，-3 为 HTIF poweroff，-5/-7 为输出/输入错误，-8 为盘 seek/write、历史 stream error 或 flush/fclose 失败，-9 为捕获的显式 TinyEMU fatal。-1/-2 启动失败仍须保留 native owner，第二次 create 明确拒绝。GC/env cleanup 只请求停止，不伪装 join；VM heap、设备对象、线程 owner 和库寿命保留，库链接 NODELETE。
+
+RW 写入检查 seek 和完整 fwrite；失败返回给既有 virtio IOERR，并按盘保留错误。退休仍只 flush/close 一次，同时检查先前 ferror，后续调用不会把失败改成成功。stdio 缓冲中的写失败可能到退休时才可见，因此 guest 的 syncfs/closed 不能替代成功的 native 退休结果；这里没有新增逐写 fsync，也不承诺宿主掉电耐久。
 
 ## 已处理的宿主终止边界
 

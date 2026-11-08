@@ -7,7 +7,7 @@ def sha(f):
  with f.open('rb') as stream:return hashlib.file_digest(stream,'sha256').hexdigest()
 assert sha(a.diskimage)=='808ecc1b32efdd76103172129b77b46002a616dff2270664207c291e4fde9e14'
 assert sha(a.alpine)=='010683db6c73b3ad1c334fc8f93f64ae748ef67ae6d69e964929aeaf8517bff3'
-assert sha(a.agent)=='62c27d4451c4e4183487256afd209fe03567a947c964f32d73e39da21e1ca46b'
+assert sha(a.agent)=='d313f9080f7e3e450458dd00f1d9ad45ccdc95c40ded1c1bbb9fc1c2ef5bb74b'
 out=a.output.resolve();out.mkdir(parents=True,exist_ok=False);root=out/'build-root';root.mkdir();image=out/'image';image.mkdir()
 with tarfile.open(a.alpine) as t:t.extractall(root,filter='tar')
 (root/'target').mkdir();shutil.copy2(ROOT/'runtime/ohos/linux/guest/install-init.sh',root/'sbin/dsh-init');(root/'sbin/dsh-init').chmod(0o755)

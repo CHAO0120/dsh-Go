@@ -15,20 +15,21 @@ const owner=new LinuxInstallationOwner({nativeLibraryDirectory,manifest,director
 });
 const timer=setTimeout(()=>{console.error('TEST_DEADLINE');process.exit(90);},180000);
 try{
- if(mode==='unknown-retire'){const install=owner.install({signal:abort.signal});const interval=setInterval(()=>{if(raw)abort.abort();},5);await assert.rejects(install);clearInterval(interval);check('unknown retirement retains images and no active',owner.state==='quarantined'&&!owner.active&&(await readdir(directory)).length===1);const result=await owner.dispose();check('unknown retirement never reports removed',result.filesRemoved===false&&result.native.retirementError===true);}
+ if(mode==='unknown-retire'){const install=owner.install({signal:abort.signal});const interval=setInterval(()=>{if(raw)abort.abort();},5);await assert.rejects(install);clearInterval(interval);check('unknown retirement retains images and no active',owner.state==='quarantined'&&!owner.active&&(await readdir(directory)).filter(name=>name!=='.lock').length===1);const result=await owner.dispose();check('unknown retirement never reports removed',result.filesRemoved===false&&result.native.retirementError===true&&!result.cleanCheckpoint);}
  else if(mode!=='normal'){
   await assert.rejects(owner.install({signal:abort.signal}));const result=await owner.dispose();
-  check('cancel clears all attempt data after actual retirement',(await readdir(directory)).length===0&&(await openFiles()).length===0&&result.filesRemoved);
+  check('cancel clears all attempt data after actual retirement',(await readdir(directory)).filter(name=>name!=='.lock').length===0&&(await openFiles()).length===0&&result.filesRemoved);
   check('cancel never publishes active',!owner.active&&!owner.backend);
   if(mode==='cancel-boot')check('cancel joined real native VM and retains owner quarantine',result.native.joined===true&&result.native.retirementError===false&&result.ownerQuarantined&&joinSawImages,{native:result.native});
  }else{
   const result=await owner.install();check('download/prepare/pivot and real opened precede active',owner.state==='active'&&events.some(e=>e.stage==='download'&&e.done===manifest.archive.bytes)&&events.some(e=>e.step==='pivot')&&events.at(-1).stage==='opened-private-guest');
   check('fresh random epoch reaches guest',result.active.epoch!=='01'.repeat(32)&&/^[a-f0-9]{64}$/.test(result.active.epoch));
-  check('active descriptor recorded while actual disks open',JSON.parse(await readFile(result.active.directory+'/active.json','utf8')).epoch===result.active.epoch&&(await openFiles()).length>=4);
+  check('active descriptor recorded while actual disks open',JSON.parse(await readFile(result.active.directory+'/instance.json','utf8')).epoch===result.active.epoch&&(await openFiles()).length>=4);
   const job=result.backend.spawn({argv:['python3','-c','import os; print("owner917"); print(os.path.exists("/oldroot/etc"))'],cwd:'/workspace',graceMs:5000,stdio:{stdin:'ignore',stdout:{maxBytes:1024},stderr:{maxBytes:1024}}});
   const done=await job.done;check('same VM executes job after pivot with old root detached',done.exitCode===0&&job.collected.stdout.snapshot().bytes.toString()==='owner917\nFalse\n');
-  const retired=await owner.dispose();check('dispose joins and retains published writable instance',retired.resourcesRetired&&retired.filesRemoved===false&&retired.dataRetained&&retired.native.joined&&retired.native.retirementError===false&&joinSawImages&&(await openFiles()).length===0&&(await readdir(directory)).length===1);
-  check('retired descriptor preserves the published target identity',JSON.parse(await readFile(result.active.directory+'/retired.json','utf8')).target===result.active.target);
+  const retired=await owner.dispose();check('dispose joins and retains published writable instance',retired.resourcesRetired&&retired.filesRemoved===false&&retired.dataRetained&&retired.native.joined&&retired.native.retirementError===false&&joinSawImages&&(await openFiles()).length===0&&(await readdir(directory)).filter(name=>name!=='.lock').length===1);
+  const checkpoint=JSON.parse(await readFile(result.active.directory+'/instance.json','utf8'));
+  check('clean descriptor preserves the published target identity',retired.cleanCheckpoint&&checkpoint.state==='clean'&&checkpoint.target.name==='target.ext4'&&checkpoint.persistentInstanceId===result.active.persistentInstanceId&&checkpoint.guestClose.epoch===result.active.epoch);
   await assert.rejects(owner.install(),{code:'ERR_OHOS_LINUX_OWNER_CLOSED'});
   check('disposed owner stays quarantined and cannot start another VM',owner.state==='stopped-quarantined'&&retired.ownerQuarantined);
  }

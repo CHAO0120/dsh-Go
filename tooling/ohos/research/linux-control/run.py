@@ -15,6 +15,7 @@ parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--node', required=True)
 parser.add_argument('--dsh-prefix', type=Path, required=True)
 parser.add_argument('--native-library-dir', type=Path, required=True)
+parser.add_argument('--publication-fixture', type=Path, required=True)
 parser.add_argument('--assets', type=Path, required=True)
 parser.add_argument('--archive', type=Path, required=True)
 parser.add_argument('--output', type=Path, required=True)
@@ -41,7 +42,7 @@ archive = args.archive.resolve()
 assert archive.stat().st_size == manifest['archive']['bytes'] and sha(archive) == manifest['archive']['sha256']
 source = output / 'source/runtime/ohos/linux'
 source.mkdir(parents=True)
-for name in ['control.mjs', 'host-paths.mjs', 'owner.mjs', 'base-download.mjs',
+for name in ['control.mjs', 'host-paths.mjs', 'owner.mjs', 'instance.mjs', 'base-download.mjs',
              'prepare-images.mjs', 'backend.mjs', 'controller.mjs', 'streams.mjs', 'native-session.mjs']:
     shutil.copy2(ROOT / 'runtime/ohos/linux' / name, source / name)
 shutil.copytree(ROOT / 'runtime/ohos/net', output / 'source/runtime/ohos/net')
@@ -56,7 +57,7 @@ auth_source = auth_path.read_text()
 native = args.native_library_dir.resolve() / 'libdsh_linux.so'
 inputs = {
     'source': {str(p.relative_to(output / 'source')): sha(p) for p in (output / 'source').rglob('*') if p.is_file()},
-    'nativeLibrarySha256': sha(native), 'archiveSha256': sha(archive),
+    'nativeLibrarySha256': sha(native), 'publicationFixtureSha256': sha(args.publication_fixture), 'archiveSha256': sha(archive),
     'manifestSha256': sha(assets / 'install-manifest.json'),
     'dependencyLockSha256': sha(args.dsh_prefix / 'package-lock.json'),
     'actualBrowserAuthSha256': sha(auth_path),
@@ -70,12 +71,12 @@ argv = [args.node, '--jitless', '--import', str(ROOT / 'runtime/ohos/sim/preload
         str(source / 'assets'), str(archive), str(output / 'private-linux'), str(output / 'RESULT.json')]
 env = {key: value for key, value in os.environ.items()
        if key not in {'NODE_OPTIONS', 'NODE_PATH', 'LD_PRELOAD'} and not key.startswith('DSH_GO_OHOS_')}
-env.update(DSH_GO_OHOS_SIM_PLATFORM='openharmony', DSH_GO_OHOS_SIM_ADDONS=json.dumps([str(native)]))
+env.update(LD_PRELOAD=str(args.publication_fixture.resolve()), DSH_GO_OHOS_SIM_PLATFORM='openharmony', DSH_GO_OHOS_SIM_ADDONS=json.dumps([str(native)]))
 started = time.monotonic()
 with (output / 'guest.stdout').open('wb') as stdout, (output / 'guest.stderr').open('wb') as stderr:
     result = subprocess.run(argv, env=env, stdout=stdout, stderr=stderr, timeout=360)
 record = {'argv': argv, 'exitCode': result.returncode, 'seconds': time.monotonic() - started,
-          'environment': {key: env[key] for key in ['DSH_GO_OHOS_SIM_PLATFORM', 'DSH_GO_OHOS_SIM_ADDONS']}}
+          'environment': {key: env[key] for key in ['LD_PRELOAD', 'DSH_GO_OHOS_SIM_PLATFORM', 'DSH_GO_OHOS_SIM_ADDONS']}}
 (output / 'COMMAND.json').write_text(json.dumps(record, indent=2) + '\n')
 assert inputs['source'] == {str(p.relative_to(output / 'source')): sha(p)
                             for p in (output / 'source').rglob('*') if p.is_file()}, 'frozen runtime inputs changed'

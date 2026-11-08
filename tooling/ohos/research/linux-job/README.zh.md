@@ -39,6 +39,14 @@ python3 tooling/ohos/research/linux-job/run.py --inputs /tmp/903-inputs --librar
 
 统一门linux-guest-jobs依赖tinyemu-stop-boot，新增配置linux_job_inputs；缺输入BLOCKED_NOT_RUN。本轮没跑完整门。既有core3/CLINT13/低写1由自含904门覆盖，本件作者复用该已验证冻结库。
 
+### 931 下载请求与本机追加3
+
+本机报告 Python 默认 UA 向华为 Alpine 源返回403，而 curl 默认 UA 得到200。准备脚本和 App 的 `downloadLinuxBase` 现在仅为自己的下载请求设置诚实固定的 `User-Agent: dsh-go-ohos-linux/1`；没有伪装 curl，也没有改变公共 fetch 默认值、TLS验证或 SHA 校验。是否被具体镜像接受仍以实际 HTTP 回应为准，不能从设置了请求头推断200。
+
+`tooling/ohos/tests/linux-download-ua.py --inputs <已齐33项的linux_job_inputs> --output <新目录> --node <Node>` 运行请求构造、33份真实预放文件逐项核SHA、坏缓存拒绝，以及生产fetch/HTTP dispatcher通过显式本地测试CA的HTTPS回合（plain/jitless）。新门 `linux-download-user-agent` 登记两个测试文件；TLS私钥仅在测试临时目录生成并结束删除，不进入证据包。
+
+本机可用实际 curl 验证同一个产品 UA：`curl --fail --show-error --proto '=https' --proto-redir '=https' --location --user-agent 'dsh-go-ohos-linux/1' --output <空临时文件> <packages.lock.json或install-manifest.json中的固定HTTPS_URL>`。成功后仍须对照固定SHA；如果采用预放方式，按 `packages.lock.json` 的名称放进 `<linux_job_inputs>/apks/`，随后重跑准备脚本，原有文件同样逐项核SHA，错误不覆盖、不静默重下。App真机首次安装要用未缓存的目标目录，记录实际HTTP状态、下载字节/SHA和最终verified/失败状态；本地HTTPS测到请求头不等于真机华为源已经通过。
+
 ## 基底与来源
 
 累计补丁含904-R2 recipe（来源SHA e56305e4a3094567d88897598ff26851a860d8bb12f8936836735cbd5a2edbd0），不要叠加904。未改Android或TASK禁区。906/908是另一些累计替代包，不可盲目叠加；正式整合应保留最新原生修订并统一注册门。

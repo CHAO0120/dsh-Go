@@ -1,33 +1,37 @@
-# Linux 安装 owner（917，930 接线与数据保留）
+# Linux 安装与恢复 owner（917、930、931）
 
-生产入口是 owner.mjs 的 loadLinuxInstallationManifest({assetsDirectory}) 与 createLinuxInstallationOwner({directory,nativeLibraryDirectory,manifest,onProgress,bootTimeoutMs})。assetsDirectory 与 nativeLibraryDirectory 必须由可信运行时发布根提供，不能来自插件 argv/env。loader 只读取固定 install-manifest.json 与五个固定文件名，不让清单选择任意宿主文件。
+生产入口是 `owner.mjs` 的 `loadLinuxInstallationManifest({assetsDirectory})` 与 `createLinuxInstallationOwner({directory,nativeLibraryDirectory,manifest,onProgress,bootTimeoutMs})`。路径来自可信运行时发布根；清单仅选择固定五个资产名。`owner.install({signal})` 返回 `{backend,active}`，只有实际 guest `opened` 经协议验证且当前 active 记录提交成功后才交出 backend。`opened-private-guest` 与 `workspaceLease:false` 不表示全部 P0、授权目录或所有插件命令已可用。
 
-owner.install({signal}) 返回 Promise<{backend,active}>。下载进度与普通文件 gzip 展开有 done/total；guest 安装报告 begin/base/tools/pivot 阶段。实际 903 opened 帧验证通过后才写 active.json 并交出 914 backend。该状态名是 opened-private-guest，workspaceLease=false，不是整体 P0 READY。正常插件宿主 cwd 仍需后续授权9P，不能偷换为客体 /workspace。
+实际 OHOS subprocess service 在 `/dsh-go/v1/linux` 注册现有 connection 鉴权的 App 数据入口。唯一 host preload 在插件前捕获 `DSH_GO_OHOS_LINUX_DIRECTORY`、`DSH_GO_OHOS_NATIVE_LIBRARY_DIR` 和已链接 publication binding 的 `lockExclusive` 函数。专用目录由可信 `HostOptions.linuxDirectory = filesDir + '/linux-tools'` 提供；普通 profile、argv、后续 env 和 HTTP body 均不能改选路径或锁。缺少真实锁能力时启用明确失败，GET 不因此创建目录、装盘或加载 VM。字段与请求去重见 [CONTROL.zh.md](CONTROL.zh.md)。此入口未给 CommandRouter 注入 Linux，插件路由保持既有能力，宿主 cwd 不静默改成 guest `/workspace`。
 
-930 的实际 OHOS subprocess service 在 `/dsh-go/v1/linux` 注册经现有 connection 鉴权的 App 控制入口。唯一 host preload 在插件前捕获 `DSH_GO_OHOS_LINUX_DIRECTORY` 和 `DSH_GO_OHOS_NATIVE_LIBRARY_DIR`；前者来自可信 `HostOptions.linuxDirectory = filesDir + '/linux-tools'`。普通 profile、argv、后续 env 和 HTTP body 不能选择这些路径。固定 assets 从当前 runtime 模块的 `linux/assets/` 读取。完整字段、请求去重、取消和状态见 [CONTROL.zh.md](CONTROL.zh.md)。此入口没有给 CommandRouter 注入 Linux，插件命令路由保持其既有能力。
+## 首次安装与恢复
 
-## 主机与客体分工
+首次安装仍使用固定 URL、长度和 SHA256 下载归档，宿主只展开普通 gzip 镜像、拷贝归档并补齐512字节边界，不执行 tar/mke2fs/fork，不创建归档内链接。四个盘为只读 bootstrap、只读归档、可写 target、只读工具包；guest 解包、首次初始化私有 `/workspace` 的 UID/GID 60081 与0700权限，随后 pivot_root、卸载 oldroot、启动 agent。
 
-902 使用固定 URL/长度/SHA256 下载归档，失败清理下载暂存。906 在 App 仅解压普通 gzip 镜像、拷贝归档并补齐512字节边界；不在宿主创建 tar 内的链接，也不执行 mke2fs、fork 或 shell。4个 virtio 盘为只读 bootstrap、只读下载归档、可写空ext4、只读工具归档。客体 tar 展开到 ext4，再 pivot_root，卸载 oldroot，exec 903 Python controller。epoch 每次为32随机字节，从可信kernel cmdline传入；wall clock也由宿主传入。普通作业不继承控制FD。
+931 将可写盘固定为实例内 `target.ext4`。恢复只接受当前固定 `instance.json` 的 v2 clean 记录；旧930的 v1/retired 描述符没有 guest 同步事实，绝不自动升级。已有记录损坏、丢失、脏状态、多实例、资产代际不符、路径/链接/磁盘身份不符时，明确拒绝，既不另装一套来掩盖错误，也不覆盖或清理旧盘。
 
-## 取消与发布
+恢复建立独立 `resume.cfg`：同一个 target 是唯一可写 `drive0`，kernel `root=/dev/vda rw init=/sbin/dsh-init`。它跳过下载、镜像准备、解包和首次工作区权限初始化。持久 `persistentInstanceId` 不变；每个新 owner 产生新的32随机字节 epoch，经 kernel cmdline 传入新 guest。配置不从持久记录接受任意绝对路径。不可变 bios/kernel/tools 副本重新核实际字节；用户可变 target 核固定角色、dev/ino、普通文件、nlink=1、私有权限和固定尺寸，不拿空模板 SHA 校验用户数据。
 
-下载/准备取消在未创建VM时清理本次私有目录。VM开始后，未发布的取消或失败先 stop/join；只有 joined=true、retirementError=false 且无未结算transport FD债务，才删除该未发布 attempt。已发布的可写 instance 属于用户，正常停止与故障收尾均保留其数据。`resourcesRetired`、`filesRemoved` 和 `dataRetained` 分别报告资源退出、删除和数据保留；没有以 unlink 或目录消失替代关闭证明。已发布目录用 retired.json 或 quarantined.json 代替 active.json，保留目标身份。若元数据更新失败，错误与保留目录仍存在，不把它改成资源释放成功的证据。
+## 锁、持久状态和退出顺序
 
-普通开关 false 只关准入并取消/等候本 service 的 job，保留同一个已打开的空闲 VM；再次 true 复用同 owner。最终 App shutdown 才调用 dispose 并等待真实资源退休。VM设备堆仍未全部释放，干净停止同样 stopped-quarantined，不支持同 Node 再建 VM；install 在 dispose 后明确拒绝。主进程不能因 HTTP 202、超时、socket close 或 Node exited 而宣称 joined。历史 job UNKNOWN 即使 native 后来退出也仍 UNKNOWN。
+启用时打开真实目录 FD，核对规范路径、名称与 FD 身份，仅收紧该专用根至0700。固定 `.lock` inode 从不删除或替换，实际 `flock(LOCK_EX | LOCK_NB)` 排除其他活 owner。根、实例、锁与 target 的名称/FD 身份在关键操作前复核。普通文件与目录 sync 的测试替换仅在构造器内部第二参数中可注入，生产 factory 不公开该参数。
 
-active.json 的原子 rename 发生在真实 opened 之后。跨 App 恢复尚未实现；新 owner 遇到已有 `.installation-*` 目录会明确拒绝，而不会下载新副本掩盖、覆盖或清理旧数据。因此 705 的长期可恢复实例仍是 P0 待完成项。owner 依赖 912 固定库；测试第二参数可注入归档传输/会话，生产 factory 不公开该参数。进度观察回调抛错被隔离，不能把安装成功改判为失败。
+`instance.json` 记录版本、持久ID、本轮 epoch、资产身份、根/实例/target 身份与状态。写入使用同目录排他 pending 文件、文件 sync、rename、目录 sync。任何 VM 可能打开可写盘之前，必须先确认把 clean 消费为本轮 booting；实际 opened 后提交 active。进程死亡会释放 FD 锁，因此持久 booting/active 是下次拒绝自动恢复的依据，不能声称死亡进程仍持锁。
 
-`retired.json` 只记录已确认的宿主 native thread/drive 退休。当前 guest-agent 的 closed 帧没有另行提供 `sync`/`syncfs` 事实；宿主 `fflush` 只处理已经送达的块写。因此保留文件不证明客体文件系统干净或可安全恢复，后续必须另补客体 flush 屏障与恢复验证，不能据此把 705 宣称完成。
+只有**本轮 fulfilled `backend.dispose()`** 返回 `closed:true`、当前 epoch 的 `guestClose:{epoch,rootfsSync:true,syncMethod:'syncfs',syncScope:'rootfs'}`，且实际 native `joined:true`、`retirementError:false`、`apiResult` 为既定 -3/-4，owner 才尝试提交 clean。guest 成功 closed 前必须实际完成根文件系统 `syncfs`。dispose 抛错后，即使 backend getter 保留旧同步帧、稍后 join 成功，也不以这些片段补授 clean。
 
-## 构建与打包输入
+`cleanCheckpoint:true` 表示当前 owner 已确认完整 clean 文件和目录提交，同时 `resourcesRetired:true`、`dataRetained:true`、`filesRemoved:false`。rename 已可见而最后目录 sync 失败时，当前调用返回 `cleanCheckpoint:false` 和真实错误；catch 没有撤销 rename。下一独立进程持锁后，若实际读到完整且身份有效的当前 clean，可以恢复；若读到 dirty、缺失或损坏则拒绝，不搜索旧备份。该规则依赖写盘前 dirty 提交成功，以及新 clean 仅在真实同步/退休后产生。它不声称掉电耐久或旧内核能完整报告所有写回错误。
 
-构建机运行 tooling/ohos/build-linux-assets.py --diskimage <固定Bellard包> --alpine <固定3.24.4包> --tools-root <固定工具树> --agent <903-R2源> --output <新目录>。脚本验证固定上游包与 guest-agent SHA，在构建机 mke2fs，不需要 mount；930 增加干净的 `<output>/assets/` 六件目录，`image/` 只保留诊断与构建中间产物。六件为 install-manifest.json、bbl64.bin、kernel-riscv64.bin、tools.block、bootstrap.ext4.gz、empty.ext4.gz。不要把 512MiB 未压缩构建盘装入 App。
+未发布的首次 attempt 仅在 native 退休、transport FD 无债务后可清理。已发布实例以及任何恢复尝试从一开始就保留原盘；失败不进入新安装的删除分支。锁覆盖 VM 生命周期和最终元数据处理；native 退休未确认时，活 owner 保留锁与文件。`resourcesRetired`、`filesRemoved`、`dataRetained`、`guestClose`、`cleanCheckpoint` 分开表达，HTTP202、超时、socket关闭和 Node退出均不替代 join。
 
-composer 可选 `--linux-assets <output>/assets`，固定发布 `runtime/ohos/linux/assets/`，核对实际 bytes/SHA 与展开 SHA，并纳入 runtimeVersion、manifest 和 ZIP32 回读。资产存在时 HAP 固定库配对检查必须要求 libdsh_linux.so；library-only 可保留诊断兼容，但运行时缺资产仍 unavailable。构建细节见 `runtime/ohos/package/LINUX-ASSETS.zh.md`。工具树输入来源沿用固定 903 材料，不冒称独立可复现 APK 获取流水线；本执行器没有 SDK/HAP 构建或手机实测。
+普通开关 false 仅关准入并取消/等候本 service 的作业，保留同一个 VM；再次 true 复用该 owner。App 最终 shutdown 才 dispose。native VM 堆仍隔离，状态可为 stopped-quarantined；同一 Node 不能解除 native claimed 后再建 VM，恢复只在新的 Node/App 生命周期进行。历史作业 UNKNOWN 不会因资源后来退休而变为成功。
 
-## 验证
+## 构建与验证入口
 
-research/linux-owner/run.py 固定输入 SHA，运行 strict 生产 owner：下载取消、展开取消、故意注入退役失败且保留数据、真实 guest 安装中取消、真实随机 epoch 安装/pivot 后任务及关闭。930 更新正常关闭断言为发布数据保留与 retired 描述符。归档经显式 fetch fixture 流入，不能据此声称本环境华为云 HTTP 成功；原生库、guest 与退休事实须来自真实 driver 结果。
+`tooling/ohos/build-linux-assets.py` 校验固定上游包与 agent SHA，产出干净 `<output>/assets/` 六件目录；`image/` 为构建中间产物。六件为 install-manifest.json、bbl64.bin、kernel-riscv64.bin、tools.block、bootstrap.ext4.gz、empty.ext4.gz。931须使用匹配同步 agent 的资产代际，不能沿用930无同步 agent 的301f…清单。
 
-`linux-control-entry.test.mjs`、`linux-owner-control.test.mjs`、`linux-control.test.mjs` 登记为 `linux-app-control-plain/strict`：真实 Cordis 入口、锁定 BrowserAuth、HTTP 与 TCP socket、生产 owner/backend、真实文件字节；createSession/requestStop/join 为明确的原生边界替身，不能把这组称为真实 VM join。既有 host-startup 组增加插件阶段修改 env 后的封存路径检查与 Worker 无 owner 路径检查。跨 App 恢复、生产每任务 grant、SDK/HAP/手机不在这些通过项内。
+composer 的 `--linux-assets <output>/assets` 固定发布 `runtime/ohos/linux/assets/`，核 bytes/SHA/展开 SHA，纳入 runtimeVersion、manifest 与 ZIP32 回读。资产存在时 HAP 配对要求 libdsh_linux.so；library-only 保留诊断兼容，运行时缺资产仍失败。构建详情见 `runtime/ohos/package/LINUX-ASSETS.zh.md`；工具归档来源沿用已核材料，不声称另有独立 APK 提取流水线。
+
+`linux-app-control-plain/strict` 覆盖真实 Cordis/BrowserAuth/HTTP、生产 owner/backend、真实 TCP/文件和 linked flock；native session/guest 为明确受控边界。`linux-instance-process` 在外部协调器启动严格独立 Node，检查真实锁、SIGKILL后的脏记录、晚期 env/binding 替换及实际链接负例；其模拟 session 不证明真实 VM join。`research/linux-owner/run.py` 与 `research/linux-control/run.py` 需显式 `--publication-fixture`，保留同源真实内核锁，并使用新记录断言。跨进程恢复须另以两个实际 Node/VM、同一 target、未手动sync的写入/正常同步关闭/重新读回共同证明。
+
+各组是否执行、输入 SHA 和边界以对应报告原件为准。归档传输夹具不证明华为云网络可达；宿主与 guest 结果不替代 SDK/HAP、手机、真实账号或设备掉电测试。

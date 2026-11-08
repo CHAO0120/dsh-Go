@@ -3,15 +3,23 @@ import http from '@ohos.net.http';
 import { RuntimeChannelError } from './RuntimeCore';
 
 interface LinuxNativeRetirement { joined: boolean; retirementError: boolean | null; apiResult: number | null; }
+interface LinuxGuestClose { epoch: string; rootfsSync: boolean; syncMethod: string; syncScope: string; }
+export interface LinuxProxyConfiguration { mode: string; httpProxy?: string; httpsProxy?: string; noProxy?: string; }
+export interface LinuxProxyStatus { source: string; revision: number; httpConfigured: boolean; httpsConfigured: boolean; }
+interface LinuxJobProxyFact { proxyRevision?: number; }
 interface LinuxRetirement {
   resourcesRetired: boolean; filesRemoved: boolean; dataRetained: boolean;
   ownerQuarantined: boolean; native: LinuxNativeRetirement | null; releaseErrorCode: string | null;
+  guestClose?: LinuxGuestClose | null; cleanCheckpoint?: boolean;
 }
 export interface LinuxStatus {
   v: number; instanceId: string; attemptId: string | null; state: string;
+  persistentInstanceId?: string | null; bootMode?: string | null;
+  nativeMemoryRelease?: string | null;
   enabled: boolean; admission: boolean; guestOpened: boolean; ownerRetained: boolean;
   workspaceLease: boolean; restartRequired: boolean; shutdownComplete: boolean; nextRequestId: number;
   retirement: LinuxRetirement | null;
+  proxy?: LinuxProxyStatus; job?: LinuxJobProxyFact | null;
 }
 export interface LinuxRunRequest {
   v: number; instanceId: string; attemptId: string; action: string; requestId: number;
@@ -19,6 +27,7 @@ export interface LinuxRunRequest {
 }
 interface LinuxRequest {
   v: number; instanceId: string; attemptId: string | null; action: string; enabled?: boolean;
+  proxy?: LinuxProxyConfiguration;
 }
 interface LinuxErrorDetail { code: string; }
 interface LinuxErrorResponse { error: LinuxErrorDetail; }
@@ -47,6 +56,23 @@ function decodeStatus(text: string): LinuxStatus {
       value.workspaceLease !== false || !Number.isSafeInteger(value.nextRequestId) || value.nextRequestId < 1) {
     throw failure('ohos_linux_protocol');
   }
+  if (!(value.persistentInstanceId === undefined || value.persistentInstanceId === null ||
+      typeof value.persistentInstanceId === 'string' && /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/.test(value.persistentInstanceId)) ||
+      !(value.bootMode === undefined || value.bootMode === null || value.bootMode === 'install' || value.bootMode === 'resume') ||
+      ((value.persistentInstanceId ?? null) === null) !== ((value.bootMode ?? null) === null)) {
+    throw failure('ohos_linux_protocol');
+  }
+  if (value.nativeMemoryRelease !== undefined && value.nativeMemoryRelease !== null &&
+      value.nativeMemoryRelease !== 'process-exit') throw failure('ohos_linux_protocol');
+  const proxy = value.proxy;
+  if (proxy !== undefined && (proxy === null ||
+      Object.keys(proxy).some((key: string): boolean => !['source', 'revision', 'httpConfigured', 'httpsConfigured'].includes(key)) ||
+      !['inherit', 'direct', 'manual'].includes(proxy.source) || !Number.isSafeInteger(proxy.revision) || proxy.revision < 0 ||
+      typeof proxy.httpConfigured !== 'boolean' || typeof proxy.httpsConfigured !== 'boolean' ||
+      (proxy.source === 'direct' && (proxy.httpConfigured || proxy.httpsConfigured)) ||
+      (proxy.source === 'manual' && !proxy.httpConfigured && !proxy.httpsConfigured))) throw failure('ohos_linux_protocol');
+  const proxyRevision = value.job?.proxyRevision;
+  if (proxyRevision !== undefined && (!Number.isSafeInteger(proxyRevision) || proxyRevision < 0)) throw failure('ohos_linux_protocol');
   const retired = value.retirement;
   if (retired !== null) {
     if (retired === undefined || ![retired.resourcesRetired, retired.filesRemoved, retired.dataRetained, retired.ownerQuarantined]
@@ -55,6 +81,14 @@ function decodeStatus(text: string): LinuxStatus {
     if (native !== null && (native === undefined || typeof native.joined !== 'boolean' ||
       !(native.retirementError === null || typeof native.retirementError === 'boolean') ||
       !(native.apiResult === null || Number.isInteger(native.apiResult)))) throw failure('ohos_linux_protocol');
+    const close = retired.guestClose;
+    if (close !== undefined && close !== null && (typeof close.epoch !== 'string' ||
+      !/^[a-f0-9]{64}$/.test(close.epoch) || close.rootfsSync !== true ||
+      close.syncMethod !== 'syncfs' || close.syncScope !== 'rootfs')) throw failure('ohos_linux_protocol');
+    if (retired.cleanCheckpoint !== undefined && typeof retired.cleanCheckpoint !== 'boolean') throw failure('ohos_linux_protocol');
+    if (retired.cleanCheckpoint === true && (!value.persistentInstanceId || !retired.resourcesRetired || !retired.dataRetained || retired.filesRemoved ||
+      close === undefined || close === null || native === null || !native.joined || native.retirementError !== false ||
+      (native.apiResult !== -3 && native.apiResult !== -4))) throw failure('ohos_linux_protocol');
   }
   if (value.shutdownComplete && (retired === null || !retired.resourcesRetired ||
     (retired.native === null ? retired.ownerQuarantined : !retired.native.joined || retired.native.retirementError !== false))) {
@@ -144,6 +178,15 @@ export class LinuxControl {
     const current = decodeStatus(await this.getStatus(baseUrl, token));
     const request: LinuxRequest = { v: 1, instanceId: current.instanceId, attemptId: current.attemptId,
       action: 'setEnabled', enabled: enabled };
+    return this.exchange(baseUrl, token, JSON.stringify(request));
+  }
+
+  async setProxy(baseUrl: string, token: string, proxy: LinuxProxyConfiguration): Promise<string> {
+    const current = decodeStatus(await this.getStatus(baseUrl, token));
+    const request: LinuxRequest = { v: 1, instanceId: current.instanceId, attemptId: current.attemptId,
+      action: 'setProxy', proxy: proxy };
+    // Session-only settings are sent directly to the trusted Node endpoint.
+    // They are never persisted or included in status/error messages.
     return this.exchange(baseUrl, token, JSON.stringify(request));
   }
 

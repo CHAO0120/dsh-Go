@@ -50,7 +50,7 @@ export async function downloadLinuxBase({ directory, artifact, signal, onProgres
   } catch (error) { if (error.code !== 'ENOENT') throw error; }
   const staging = await mkdtemp(join(directory, '.download-'));
   try {
-    const response = await request(url.href, { signal, redirect: 'error' });
+    const response = await request(url.href, { headers: { 'user-agent': 'dsh-go-ohos-linux/1' }, signal, redirect: 'error' });
     if (!response.ok || !response.body) {
       await response.body?.cancel();
       throw failure('ERR_OHOS_LINUX_DOWNLOAD', `Linux image download failed (HTTP ${response.status})`);

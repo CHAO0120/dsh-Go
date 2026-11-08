@@ -1010,6 +1010,28 @@ test('930 Linux MethodChannel preserves request identity and uses only NativeHos
   } finally { c.close(); }
 });
 
+test('Linux proxy MethodChannel validates the codec map without starting installation', async () => {
+  const c = await managedChannelCase('linux-channel-proxy');
+  const calls = [];
+  c.controller.linux = {
+    async setProxy(url, token, proxy) { calls.push([url, token, proxy]); return '{"fixture":"proxy-accepted"}'; },
+  };
+  c.controller.initialize = () => { throw Error('proxy configuration must not initialize runtime'); };
+  const proxy = new Map([['mode', 'manual'], ['httpProxy', 'http://127.0.0.1:3128'], ['noProxy', 'fixture.invalid']]);
+  try {
+    assert.equal(await c.invoke('setLinuxProxy', { proxy, baseUrl: 'http://untrusted.invalid', token: 'untrusted' }), '{"fixture":"proxy-accepted"}');
+    assert.deepEqual(calls, [['http://127.0.0.1:3080', 'fixture-managed-token', Object.fromEntries(proxy)]]);
+    for (const invalid of [null, {}, new Map([['mode', true]]), new Map([['mode', 'direct'], ['extra', 'ignored']]),
+      new Map([['mode', 'manual'], ['httpProxy', 4]])]) {
+      assert.equal((await c.invoke('setLinuxProxy', { proxy: invalid })).code, 'ohos_linux_arguments');
+    }
+    assert.equal(calls.length, 1);
+    c.controller.requestedStop = true;
+    assert.equal((await c.invoke('setLinuxProxy', { proxy: new Map([['mode', 'direct']]) })).code, 'ohos_linux_stopping');
+    assert.equal(calls.length, 1);
+  } finally { c.close(); }
+});
+
 test('P2 v6: 旧owner取消/迟到detach不伤新owner，同id新任务等待真实IO退出', { timeout: 15000 }, async () => {
   const c = await managedChannelCase('v6-managed-owner');
   const entered = Promise.withResolvers(), release = Promise.withResolvers();

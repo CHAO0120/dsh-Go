@@ -8,6 +8,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { LinuxRuntimeBackend } from './source/runtime/ohos/linux/backend.mjs';
 const epoch='01'.repeat(32);
+const cleanClose={rootfsSync:true,syncMethod:'syncfs',syncScope:'rootfs'};
 class Transport extends Duplex {
  commands=[];sequence=0;
  _read(){}
@@ -66,10 +67,10 @@ for(const bad of ['epoch','seq','job','credit','early-complete','early-closed','
  await assert.rejects(job.done,{code:'ERR_OHOS_LINUX_UNKNOWN'});assert.equal(f.backend.live.size,1);
 }));
 test('dispose cannot close/native-stop before true guest job and closed facts',()=>fixture(async f=>{
- await open(f);const {job,id}=await started(f);const disposed=f.backend.dispose();await delay(0);assert.deepEqual(f.counts(),{stops:0,joins:0});assert.equal(f.socket.commands.at(-1).op,'cancel');f.socket.frame('cancel-requested',{job:id});await complete(f,id,undefined,{exitCode:null,signal:'SIGKILL',cancelled:true});await job.done;await delay(0);assert.equal(f.socket.commands.at(-1).op,'close');assert.deepEqual(f.counts(),{stops:0,joins:0});f.socket.frame('closed');assert.equal((await disposed).closed,true);assert.deepEqual(f.counts(),{stops:1,joins:1});assert.equal(f.backend.state,'closed');
+ await open(f);const {job,id}=await started(f);const disposed=f.backend.dispose();await delay(0);assert.deepEqual(f.counts(),{stops:0,joins:0});assert.equal(f.socket.commands.at(-1).op,'cancel');f.socket.frame('cancel-requested',{job:id});await complete(f,id,undefined,{exitCode:null,signal:'SIGKILL',cancelled:true});await job.done;await delay(0);assert.equal(f.socket.commands.at(-1).op,'close');assert.deepEqual(f.counts(),{stops:0,joins:0});f.socket.frame('closed',cleanClose);assert.equal((await disposed).closed,true);assert.deepEqual(f.counts(),{stops:1,joins:1});assert.equal(f.backend.state,'closed');
 }));
 test('duplicate closed cannot promote a quarantined owner to clean disposal',()=>fixture(async f=>{
- await open(f);const disposed=f.backend.dispose();await delay(0);f.socket.frame('closed');f.socket.frame('closed');await assert.rejects(disposed,{code:'ERR_OHOS_LINUX_UNKNOWN'});assert.equal(f.backend.state,'quarantined');
+ await open(f);const disposed=f.backend.dispose();await delay(0);f.socket.frame('closed',cleanClose);f.socket.frame('closed',cleanClose);await assert.rejects(disposed,{code:'ERR_OHOS_LINUX_UNKNOWN'});assert.equal(f.backend.state,'quarantined');
 }));
 test('queued pipe EOF stays behind start and signal rejection is explicit',()=>fixture(async f=>{
  const job=f.backend.spawn(spec({stdio:{stdin:'pipe',stdout:'ignore',stderr:'ignore'}}));job.stdin.end();await delay(0);assert.equal(f.socket.commands.length,0);await open(f);await delay(0);assert.deepEqual(f.socket.commands.map(c=>c.op),['start','stdin-end']);assert.throws(()=>job.terminate('SIGINT'),{code:'ERR_OHOS_LINUX_SIGNAL'});

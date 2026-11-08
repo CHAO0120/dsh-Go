@@ -13,7 +13,7 @@ for item in items:
   if hashlib.sha256(target.read_bytes()).hexdigest()!=item['sha256']:raise ValueError('existing input hash mismatch: '+str(target))
   continue
  try:
-  with urllib.request.urlopen(item['url'],timeout=45) as source,part.open('xb') as sink:
+  with urllib.request.urlopen(urllib.request.Request(item['url'],headers={'User-Agent':'dsh-go-ohos-linux/1'}),timeout=45) as source,part.open('xb') as sink:
    h=hashlib.sha256();count=0
    while raw:=source.read(65536):
     count+=len(raw)
