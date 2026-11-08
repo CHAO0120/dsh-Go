@@ -1735,6 +1735,18 @@
           "after": "b8b87360ebc67df2d0aabea214b8ed30d4bde3767e354ebb1b85fc6c15b45a05"
         }
       }
+    },
+    "ohos-plugin-linkless.diff": {
+      "0.2.2-rc.1": {
+        "node_modules/@deepseek-ai/dsh-app-boot/lib/index.js": {
+          "before": "55d3674947850069069733aafa2975982c77e0b743dc59527173f382c0ce77db",
+          "after": "4fe63479a0bfa026c578b3e3acc2b775aa3d027b6502a9d72a9135513b3e2cad"
+        },
+        "node_modules/@deepseek-ai/dsh-app-boot/lib/worker/profile-resolution-bootstrap.js": {
+          "before": "4ccdf0cb1177a6fc9442f0392fbba88ea1b80b6738f3cae80d34be8d5b521b7d",
+          "after": "82e895216414eaa3a8f29d5d7aad31366272c8a6382e2ab4fe00fe30601e13c4"
+        }
+      }
     }
   },
   "schema": 2,
@@ -1974,7 +1986,8 @@
       "ohos-plugin-remove-rollback.diff",
       "ohos-plugin-manifest-bom.diff",
       "ohos-plugin-locale-bom.diff",
-      "ohos-effect-dispose-completion.diff"
+      "ohos-effect-dispose-completion.diff",
+      "ohos-plugin-linkless.diff"
     ]
   }
 }
