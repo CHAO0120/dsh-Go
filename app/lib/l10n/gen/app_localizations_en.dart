@@ -9000,7 +9000,7 @@ class L10nEn extends L10n {
 
   @override
   String get iosPhoneLinkFaultedHint =>
-      'So two connections never drive the phone at once, the app won\'t connect again until it restarts. Close it from the app switcher and open it again.';
+      'So two connections never drive the phone at once, the app won\'t connect for now. If the last connection confirms it closed, this clears by itself; if it doesn\'t, close the app from the app switcher and open it again.';
 
   @override
   String iosPhoneLinkErrorOther(String code) {

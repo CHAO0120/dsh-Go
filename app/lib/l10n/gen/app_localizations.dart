@@ -15743,7 +15743,7 @@ abstract class L10n {
   /// No description provided for @iosPhoneLinkFaultedHint.
   ///
   /// In zh, this message translates to:
-  /// **'为了不让两条连接同时操作手机，App 这次打开期间不会再连。在后台彻底关掉 App，再重新打开就好。'**
+  /// **'为了不让两条连接同时操作手机，先不再连接。如果上一次连接稍后确认关掉了，这里会自动恢复；一直没恢复的话，在后台彻底关掉 App 再重新打开。'**
   String get iosPhoneLinkFaultedHint;
 
   /// No description provided for @iosPhoneLinkErrorOther.
