@@ -5,22 +5,23 @@ import Flutter
 import Foundation
 
 /// The existing dsh/companion_voice contract. Text-to-speech and fetched clips
-/// are separate output domains, as on Android. All admission, events and audio
-/// ownership run on MainActor; bounded file reading and decoder construction
-/// run away from it. No microphone, network, file writes or deletion are involved.
+/// are separate output domains, as on Android. Admission and events run on
+/// MainActor and use the App's main-thread audio coordinator. Bounded file
+/// reading and decoder construction run away from it. No microphone, network,
+/// file writes or deletion are involved.
 @MainActor
 final class IOSCompanionVoice {
   private let channel: FlutterMethodChannel
   private let engine: IOSCompanionVoiceEngine
-  private var observers: [NSObjectProtocol] = []
   private var timer: Timer?
   private var disposed = false
 
   init(messenger: any FlutterBinaryMessenger,
-       pipAudioConfigured: @escaping @MainActor () -> Bool) {
+       pipAudioConfigured _: @escaping @MainActor () -> Bool) {
     channel = FlutterMethodChannel(name: "dsh/companion_voice", binaryMessenger: messenger)
-    let lease = IOSCompanionAudioLease(session: IOSCompanionSystemAudioSession(),
-      pipAudioConfigured: pipAudioConfigured)
+    // Keep the old initializer label for AppDelegate source compatibility.
+    // A snapshot predicate no longer grants or revokes a shared audio lease.
+    let lease = IOSCompanionAudioLease(coordinator: .shared)
     engine = IOSCompanionVoiceEngine(speech: IOSCompanionSystemSpeech(),
       loader: IOSCompanionFileLoader(), audio: lease, now: IOSCompanionVoiceClock.now)
     engine.emit = { [weak self] event in
@@ -39,25 +40,6 @@ final class IOSCompanionVoice {
       default: result(FlutterMethodNotImplemented)
       }
     }
-    observe(AVAudioSession.interruptionNotification) { [weak self] note in
-      guard let raw = note.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt,
-        raw == AVAudioSession.InterruptionType.began.rawValue else { return }
-      self?.engine.interrupt(code: "interrupted")
-    }
-    observe(AVAudioSession.mediaServicesWereResetNotification) { [weak self] _ in
-      self?.engine.interrupt(code: "media-reset")
-    }
-    observe(AVAudioSession.routeChangeNotification) { [weak self] note in
-      guard let self else { return }
-      if let raw = note.userInfo?[AVAudioSessionRouteChangeReasonKey] as? UInt,
-        raw == AVAudioSession.RouteChangeReason.oldDeviceUnavailable.rawValue {
-        self.engine.interrupt(code: "route-lost")
-      } else {
-        // Our own setCategory also posts this notification. A still-valid
-        // lease is not an interruption. Borrowed PiP ownership is checked too.
-        self.engine.poll()
-      }
-    }
   }
 
   /// Call before replacing the Flutter messenger. Terminal events are sent to
@@ -69,18 +51,6 @@ final class IOSCompanionVoice {
     channel.setMethodCallHandler(nil)
     timer?.invalidate()
     timer = nil
-    observers.forEach(NotificationCenter.default.removeObserver)
-    observers.removeAll()
-  }
-
-  private func observe(_ name: Notification.Name,
-                       _ body: @escaping @MainActor (Notification) -> Void) {
-    observers.append(NotificationCenter.default.addObserver(forName: name, object: nil,
-      queue: .main) { note in
-        // NotificationCenter's queue is a runtime guarantee, not actor typing.
-        // Dispatching explicitly also prevents reentry from setCategory.
-        DispatchQueue.main.async { body(note) }
-      })
   }
 
   private func updateTimer() {
@@ -200,10 +170,11 @@ final class IOSCompanionVoiceEngine {
   }
   private final class Load {
     let token = UUID()
-    let id: String, generation: UUID, deadline: TimeInterval, reply: Reply
+    let id: String, generation: UUID, audioEnvironment: UUID, deadline: TimeInterval, reply: Reply
     let cancellation = IOSCompanionVoiceCancellation()
-    init(id: String, generation: UUID, deadline: TimeInterval, reply: Reply) {
-      self.id = id; self.generation = generation; self.deadline = deadline; self.reply = reply
+    init(id: String, generation: UUID, audioEnvironment: UUID, deadline: TimeInterval, reply: Reply) {
+      self.id = id; self.generation = generation; self.audioEnvironment = audioEnvironment
+      self.deadline = deadline; self.reply = reply
     }
   }
 
@@ -211,6 +182,7 @@ final class IOSCompanionVoiceEngine {
        audio: IOSCompanionAudioLease, now: @escaping () -> TimeInterval?) {
     self.speech = speech; self.loader = loader; self.audio = audio; self.now = now
     speech.onEvent = { [weak self] utterance, event in self?.heard(utterance, event) }
+    audio.onRevoked = { [weak self] code in self?.interrupt(code: code) }
   }
 
   var hasWork: Bool { speaking != nil || !queue.isEmpty || playing != nil || pending != nil }
@@ -253,8 +225,9 @@ final class IOSCompanionVoiceEngine {
     guard !disposed, !retiring, loadingID == nil,
       let id = Self.identifier(args["id"]), !uses(id),
       let path = args["path"] as? String, Self.validPathText(path),
-      let instant = now(), validLeaseOrEnd() else { reply(false); return }
-    let load = Load(id: id, generation: clipGeneration, deadline: instant + Self.loadSeconds,
+      let instant = now(), validLeaseOrEnd(), audio.mayAcquire else { reply(false); return }
+    let load = Load(id: id, generation: clipGeneration, audioEnvironment: audio.environmentGeneration,
+      deadline: instant + Self.loadSeconds,
       reply: Reply(reply))
     pending = load
     loadingID = load.token
@@ -277,6 +250,7 @@ final class IOSCompanionVoiceEngine {
     endAll("stopped", code: "disposed")
     disposed = true
     speech.onEvent = nil
+    audio.onRevoked = nil
     emit = nil
     activityChanged?()
     activityChanged = nil
@@ -287,6 +261,11 @@ final class IOSCompanionVoiceEngine {
   /// after it can run again, stale work is rejected before accepting callbacks.
   func poll() {
     guard !disposed, !retiring, hasWork else { return }
+    if let load = pending, load.audioEnvironment != audio.environmentGeneration {
+      pending = nil
+      load.cancellation.cancel()
+      load.reply.finish(false)
+    }
     guard validLeaseOrEnd() else { return }
     guard let instant = now() else { endAll("error", code: "clock"); return }
     if let load = pending, instant >= load.deadline {
@@ -365,6 +344,7 @@ final class IOSCompanionVoiceEngine {
     }
     loadingID = nil
     guard !disposed, !retiring, pending === load, load.generation == clipGeneration,
+      load.audioEnvironment == audio.environmentGeneration,
       !load.cancellation.isCancelled, let instant = now(), instant < load.deadline else {
       if pending === load { pending = nil }
       if case .success(let clip) = result { clip.stop() }
@@ -481,85 +461,27 @@ private extension IOSCompanionSpeechEvent {
   var isDone: Bool { if case .done = self { return true }; return false }
 }
 
-// MARK: - Shared audio configuration; no claim of a public "is active" query
-
-struct IOSCompanionAudioConfiguration: Equatable {
-  let category: AVAudioSession.Category
-  let mode: AVAudioSession.Mode
-  let options: AVAudioSession.CategoryOptions
-  static let companion = Self(category: .playback, mode: .default, options: .mixWithOthers)
-  static let pet = Self(category: .playback, mode: .moviePlayback, options: .mixWithOthers)
-}
-
-@MainActor
-protocol IOSCompanionAudioSession: AnyObject {
-  var configuration: IOSCompanionAudioConfiguration { get }
-  func configure(_ value: IOSCompanionAudioConfiguration) throws
-  func activate(_ value: Bool) throws
-}
+// MARK: - Membership in the App's shared audio session
 
 @MainActor
 final class IOSCompanionAudioLease {
-  private enum Holding { case owned(IOSCompanionAudioConfiguration), borrowed }
-  private let session: IOSCompanionAudioSession
-  private let pipAudioConfigured: @MainActor () -> Bool
-  private var holding: Holding?
+  var onRevoked: ((String) -> Void)?
+  private let coordinator: IOSAudioSessionCoordinator
+  private let lease: IOSAudioSessionLease
 
-  init(session: IOSCompanionAudioSession, pipAudioConfigured: @escaping @MainActor () -> Bool) {
-    self.session = session; self.pipAudioConfigured = pipAudioConfigured
+  init(coordinator: IOSAudioSessionCoordinator) {
+    self.coordinator = coordinator
+    lease = IOSAudioSessionLease(role: .companion, coordinator: coordinator)
+    lease.onRevoked = { [weak self] reason in self?.onRevoked?(reason.companionCode) }
   }
-  var isHeld: Bool { holding != nil }
-  var isValid: Bool {
-    switch holding {
-    case .owned: return session.configuration == .companion
-    case .borrowed: return pipAudioConfigured() && session.configuration == .pet
-    case nil: return false
-    }
-  }
+  var isHeld: Bool { lease.isHeld }
+  var isValid: Bool { lease.isValid }
+  var mayAcquire: Bool { coordinator.blocker(for: .companion) == nil }
+  var environmentGeneration: UUID { coordinator.environmentGeneration }
   func acquire() -> Bool {
-    if holding != nil { return isValid }
-    let prior = session.configuration
-    if pipAudioConfigured() {
-      guard prior == .pet else { return false }
-      holding = .borrowed
-      return true
-    }
-    guard prior.category != .record, prior.category != .playAndRecord,
-      !(prior.category == .playback && (prior.mode == .spokenAudio || prior.mode == .moviePlayback))
-    else { return false }
-    holding = .owned(prior)
-    do {
-      try session.configure(.companion)
-      try session.activate(true)
-      guard isValid else { release(); return false }
-      return true
-    } catch {
-      release()
-      return false
-    }
+    do { try lease.acquire(); return lease.isValid } catch { return false }
   }
-  func release() {
-    let previous = holding
-    holding = nil
-    guard case .owned(let prior) = previous, session.configuration == .companion else { return }
-    try? session.activate(false)
-    // Recheck after the setter as well: do not restore over a later owner.
-    if session.configuration == .companion { try? session.configure(prior) }
-  }
-}
-
-@MainActor
-private final class IOSCompanionSystemAudioSession: IOSCompanionAudioSession {
-  private let audio = AVAudioSession.sharedInstance()
-  var configuration: IOSCompanionAudioConfiguration {
-    IOSCompanionAudioConfiguration(category: audio.category, mode: audio.mode, options: audio.categoryOptions)
-  }
-  func configure(_ value: IOSCompanionAudioConfiguration) throws {
-    try audio.setCategory(value.category, mode: value.mode, options: value.options)
-  }
-  func activate(_ value: Bool) throws {
-    try audio.setActive(value, options: value ? [] : .notifyOthersOnDeactivation)
-  }
+  func release() { lease.release() }
 }
 
 // MARK: - AVFoundation adapters
@@ -630,7 +552,7 @@ private final class IOSCompanionSystemClip: NSObject, IOSCompanionClip, AVAudioP
     player.delegate = self
     // play() implicitly prepares and may activate the shared session. It is
     // deliberately AFTER generation and lease admission, never in the loader.
-    // Borrowing PiP means zero explicit setters, not zero framework activation.
+    // Sharing PiP's lease means zero new explicit setters, not zero framework activation.
     return player.play()
   }
   @MainActor func stop() { onEnd = nil; player.delegate = nil; player.stop() }

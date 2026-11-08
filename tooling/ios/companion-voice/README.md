@@ -21,8 +21,10 @@ companionVoice = IOSCompanionVoice(messenger: registrar.messenger(), pipAudioCon
 
 AppDelegate 的持有属性、Runner / RunnerTests 的 Xcode 注册和现有 iOS compile job
 测试条目由同一交付的集成改动负责。再次初始化 Flutter engine 时先 `dispose()` 旧对象，
-再绑定新 messenger。该方法返回前结清旧工作，移除通道 handler、通知 observer 和 timer；
-迟到的旧读取或 delegate 结果不能发事件或启动新声音。
+再绑定新 messenger。该方法返回前结清旧工作，移除通道 handler 和 timer；
+迟到的旧读取或 delegate 结果不能发事件或启动新声音。系统音频通知由共享协调器集中处理。
+`pipAudioConfigured` 初始化标签仅为现有 AppDelegate 保留源码兼容，闭包结果不再授予
+借用权。PiP 与配音分别取得协调器中的成员 token，不能用一份状态快照代替成员身份。
 
 不需要新增麦克风用途声明或请求麦克风权限。`ready` 路径只查询系统当前可用的 voice，
 不创建朗读请求，不调用音频会话 setter、`prepareToPlay` 或 `play`。
@@ -105,57 +107,136 @@ ID 必须是 1–128 个 ASCII 字母、数字、下划线或连字符，保留�
 已接受 clip 超过其声明 duration + 3 秒仍无有效完成时结清 error；该界限最多 58 秒，
 在 Dart 外部音频泵的 1 分钟等待前留余量。
 
-## 音频会话交接
+## 音频会话交接（ADDENDUM-09 §2.2）
 
-`IOSCompanionAudioLease` 协调两个配音输出域，只有两域都空才释放自有会话。
-它不新增全 App 音频仲裁协议，也没有可证明当前 OS active 的公共查询。
+本轮以 `3302d3a791d39ccac1327b8915b6f517217a92df` 为基底独立重交 16，
+不依赖退回的 24。`IOSAudioSessionCoordinator` 收拢 Runner 中显式的 category / active
+setter；PiP、配音、Voice、NativeMedia 和静音启动片都通过成员 token 协作。
+`IOSCompanionAudioLease` 供配音的两个输出域共同持有，只有 TTS 与 clip 都空才释放它。
+尚在读取的 clip 不预先占用音频成员，但记录音频环境代际。
 
-| 当前情形 | 配音行为 |
+| 角色 | 取得配置与优先级 | 加入 / 撤销规则 |
+|---|---|---|
+| PiP、companion | playback / default / mixWithOthers | 可加入同一输出组；后加入不再 configure / activate；任何一方正常离开只删自己的成员。 |
+| silentVideo | 独自使用 ambient / default；不显式 activate | 加入已激活的输出组不降级配置；录音或独占媒体占用时可拒绝播放启动片。 |
+| nativeMedia | playback / spokenAudio / duckOthers + mixWithOthers | 可抢占共享输出组，先撤销旧成员并停输出；已有录音时拒绝。 |
+| recording | record / measurement，无 duckOthers | 可抢占协调器管理的共享组或媒体组；外来 playback / default、spokenAudio、moviePlayback 也允许新录音尝试。已有外来 record / playAndRecord 仍拒绝。 |
+
+相同 category / mode / options 不是成员身份，也不是 OS 当前 active 的证明。首次取得
+非静音成员仍须成功 activate；当前 token、可观察配置与组激活记录共同构成本地准入。
+PiP 已开始之后，配音不再为自己显式激活；`AVAudioPlayer.play()` 仍可能隐式准备/激活，
+不能把零新增显式 setter 写成框架零激活。[5][6] 外来配置若无法区分于本组完全相同的
+tuple，公开 API 也不能证明是否发生了同 tuple 接管。
+
+抢占时，协调器先使旧 token 失效，再同步通知客户端停止输出，随后才安装新配置。
+所有 token 都离开时才尝试 deactivate / restore，恢复的是这条合作链最初的 baseline，
+不把中途 PiP 或录音 tuple 当成新的原始配置。恢复前和 deactivate 后均核对仍属本组。
+deactivate 抛错时保留 residual，不把可能仍 active 的会话改回 soloAmbient；后续只有
+原 tuple 仍在才沿用 residual 的真实 baseline。过渡期释放最后一个成员由过渡结束的
+统一清理处理；同一次准入若已接纳新成员，不错误地释放它。
+
+### 拔耳机、重置与恢复
+
+`oldDeviceUnavailable` 只撤销 companion、nativeMedia、recording。PiP 与 silentVideo
+成员、配置及激活仍可用时继续保留；这一路由变化本身不令 PiP fail，也不由 overlay
+触发手机任务暂停。配音正在说的句子、排队项和已接受 clip 各结清一个
+`stopped / route-lost`。待加载但尚未接受的 clip 返回 false，无终态。
+过渡中的同步 route-loss 也必须保留仍可用的安静成员，不经全组失败路径将其撤销。
+若系统同时改变了配置，则仍按可观察的真正所有权丢失处理；本合同不保证系统持续运行。
+
+来电 interruption、媒体服务 reset 或配置被其他 owner 改变仍可撤销整个组。旧工作
+不会因 interruption ended、重新前台或后续可用性通知自动重播。解码中的工作记录
+`environmentGeneration`；短暂录音即使已经结束、配置已经恢复，旧 decoder 回调也不能
+重新开始。一个从未占用音频成员的 pending decoder 也受 reset / route-loss 代际保护。
+
+reset 后，自动配音、静音启动片、状态/能力查询、普通 foreground 回调和 NativeMedia
+pause/resume 都不清 `requiresUserAction`。有效、前台且 protected data 可用的 Voice
+`startRecognizer` / `startRecorder`，以及已经通过当前 owner、path、hint 等既有校验的
+NativeMedia 新 `play` 入口，才按本轮维护者要求调用 `retry(userInitiated: true)`。
+PiP 的原生启用/恢复确认也可调用。无效参数、能力查询和恢复旧播放器不能替代新准入。
+
+**这里是入口 / 角色级恢复策略，不是每次都证明新发生了物理用户点击。**
+现有 Dart 系统听写失败后的自动 fallback 会调用 `startRecorder`，可能另取一个
+sessionId；该 ABI 没有可信的发起来源字段。因此不能将每个 startRecorder 都描述为
+新的用户手势。Apple 要求媒体服务 reset 后由用户动作发起重新录播，[9] 本包按现有
+合同恢复合法新入口，严格到物理手势的端到端证明仍需维护者调整发起来源或交互协议。
+本包未改 Dart。新请求也仍需经过权限、所有权、前台条件和音频取得，不能复活旧 token。
+
+### 析构与 PiP 可用性
+
+NativeMedia 用显式 `storedCaption` 保存已创建的字幕。deinit 只捕获既有 player、
+caption 和 lease，转到主线程停止、释放、隐藏；不访问会创建字幕的 getter，不在
+NSObject 析构中建立新 weak self。普通 hide/dispose 也不为了清理创建字幕。
+
+Voice / Microphone 的非主线程析构使用一次性 cleanup 转移既有资源。lease 的
+resource-only stop 闭包还由协调器独立保留：主线程 cleanup 尚未执行时若发生抢占，
+仍先停止旧输出，再安装后继配置；迟到的旧 release 只能删旧成员，不影响新 token。
+`@unchecked Sendable` 只覆盖这个运行时主线程约束和加锁的一次性转移，不宣称整个
+Flutter / AVFoundation 层已经获得 Swift 6 编译器验证。
+
+PiP availability 代际根据 PiP blocker 或实际 PiP 成员丢失变化。普通一句配音的
+加入、完成、释放不触发 recover；一轮短暂录音的 busy→ready 即使通知合并也有新代际。
+
+AVSpeechSynthesizer 保持 `usesApplicationAudioSession=true`。[7] 活动期间每 250 ms
+检查租约，补充 mode/options-only 替换没有 categoryChange 通知的情况。App 挂起时
+timer 没有实时保证；再次可运行时先按跨睡眠单调时钟检查期限和身份。
+
+### Dart 可见变化清单
+
+本包没有新增方法名、状态键、phase 或错误码枚举值；下表列出既有值的新触发条件。
+
+| 通道 | 变化及现有消费者行为 |
 |---|---|
-| VoiceChannel 的 record 或 playAndRecord | 新工作拒绝，零会话 setter。 |
-| NativeMedia 的 playback / spokenAudio | 新工作拒绝，零会话 setter。 |
-| PiP 的真实 owner/configured closure 为 true 且配置匹配 moviePlayback / mixWithOthers | 可撤销借用；本插件零**显式** category/active setter，结束也不释放借来的会话。 |
-| 配置像 PiP、但其 owner closure 为 false | 拒绝；不能仅凭相同 tuple 宣称有借用权。 |
-| 普通可接管配置 | 配音设置 playback / default / mixWithOthers，成功激活后使用。仅保留自身所有权且配置仍匹配时 deactivate/恢复旧配置。 |
-
-借用只表示本地协作许可；`audioSessionConfigured`、一次 setActive 成功、category/mode/options
-相同都不是 OS 此刻 active 的证明。借用路径也不能宣称框架零隐式激活，因为 player.play()
-仍有上面的 prepare 行为。[5][6]
-
-AVSpeechSynthesizer 显式使用 `usesApplicationAudioSession=true`，避免创建另一套由系统
-独立管理的朗读会话。[7] 每个启动、有效事件和活动期间每 250ms 检查当前租用状态。
-PiP 即使 tuple 未变，只要 owner closure 撤销也停止两个域，不擅自 deactivate。
-自身 setCategory 的通知在配置仍匹配时不会把新请求误停。
-
-来电等 interruption began、旧输出设备消失、媒体服务 reset，或者可观察的会话接管，
-会结清工作，不在 interruption ended 时自动重播。周期检查补充 mode/options-only
-变化没有 categoryChange 通知的情况。系统暂停 App 时 timer 无实时保证，重新可运行时
-先检查跨睡眠的单调期限与租用状态。MainActor 串行化是应用内调用顺序，不是 OS 全局事务。
+| `dsh/companion_voice` | route loss、reset、录音/媒体抢占结清已接受项，仍使用既有 `stopped` 与 `route-lost / media-reset / audio-replaced`；未接受 play 只返回 false，同 ID TTS fallback 仍可尝试新准入。 |
+| `dsh/native-media` | play 在音频取得失败或读取期间环境失效时返回既有 `audio`；pause/resume 租约无效也返回 `audio`。正在持有 player 的成员撤销时发送既有 `audio.stopped`、reason=`interrupted`，先停止输出再释放。Dart 的 play 异常分支归为 `audio.error` / media；pause/resume 异常可撤销 owner，终态可隐藏字幕。 |
+| `dsh/voice` / `voice/events` | 路由丢失、reset、音频撤销触发当前 session 的 error 后 end：系统识别仍用 3，recorder 仍用 100。开始时取得失败仍返回既有 `FlutterError("audio")` 与对应数值。旧 sessionId 的迟到事件被丢弃；Dart 可走既有自动 fallback。 |
+| `dsh/pet_overlay` | 仅 oldDeviceUnavailable 不再生成 `overlay_audio_interrupted`；真正 interruption 仍映射该码，reset 为 `overlay_media_reset`，抢占/可观察替换为 `overlay_audio_replaced`，外来 spokenAudio/moviePlayback 阻塞新 PiP 为 `overlay_audio_busy`。 |
+| `dsh/launch_clip` | 音频协调器拒绝时启动片可直接 `done`，可能没有一帧 `showing`；Dart 既有海报路径须验收。没有新增结果键或事件。 |
 
 ## 回归与 Apple 验收
 
-`IOSCompanionVoiceTests` 调用生产 engine、audio lease、file loader，不复制另一套队列实现。
-记录适配器覆盖两个域的独立生命周期、FIFO/flush/stop、准确 ID、同 ID 旧对象、
-UTF-16 范围、false play 的 inline/late 回调、读取取消/超时、dispose、双域最后释放、
-PiP owner 撤销且 tuple 不变、自己通知不误停、后继配置不被覆盖、队列预算和无进展期限。
-实际文件读取测试只生成自己的合成缓存文件；两个播放器构造测试只用合成无效 bytes
-或 50ms 静音 PCM，不调用 play。跨实例 loader 测试用受控队列验证实际物理槽释放时机。
+当前源码有 `IOSCompanionVoiceTests` **45** 个 test 方法与
+`IOSAudioSessionCoordinatorTests` **43** 个 test 方法，共 **88 authored / 0 executed**。
+这是对当前新候选逐个方法名计数，不是旧环境测试结果的转移。测试调用生产 engine、
+coordinator、lease 和 file loader；录制适配器不发声，也不访问真实麦克风。
 
-Apple CI 接入既有 RunnerTests，选择 `-only-testing:RunnerTests/IOSCompanionVoiceTests`。
-本机无 Apple 工具链，全部是**已编写、尚未执行**的 XCTest；静态源码/补丁适用性检查
-不转写为 XCTest PASS，也不把录制适配器行为说成真实音频输出。
+配音夹具覆盖独立输出域、FIFO/flush/stop、准确 ID、同 ID 旧对象、UTF-16 范围、
+false play 的 inline/late 回调、读取取消/超时、dispose、双域最后释放、PiP 两种
+加入次序和独立离开、route loss 保留安静成员、同步录音抢占先停输出、无成员的
+pending decoder 代际、短暂录音与 reset 后的迟到回调，以及恢复策略的模型入口。
+实际文件读取测试只生成自己的合成缓存文件；播放器构造只用合成无效 bytes 或
+50 ms 静音 PCM，不调用真实 play。跨实例 loader 用受控队列检查物理槽的释放时机。
 
+协调器夹具覆盖两种释放顺序、过渡重入、partial setter failure、deactivate failure
+residual、外来会话、route-loss 同步回调、PiP availability 代际、后台资源转移；
+NativeMedia 的未用/已用字幕析构与无效 play 采用实际 Flutter method codec / channel
+和假的 messenger、caption。合法 Voice/Media 新入口的正向恢复夹具调用协调器，
+**没有**执行真实 Voice 权限 UI 或真实 NativeMedia 音频解码/播放全链路。
+off-main 夹具用 async 工作加两秒有界 semaphore 确认真正不在主线程；不执行旧版 fatal
+重现，也不运行设备崩溃、高 fd 或用户音频 probe。
+
+Apple CI 在原 12 个 `-only-testing` selector（其中含 Companion）基础上新增
+`-only-testing:RunnerTests/IOSAudioSessionCoordinatorTests`，共 13 个。
+所有 XCTest 均为**已编写、尚未执行**；静态源码、shell 语法和真实 Git apply 检查
+不计为 XCTest PASS。当前修复仍等待 Apple SDK 编译和独立审查。
+
+首次 Apple 验收还须记录：
 首次 Apple 验收还须记录：
 
 1. 新装默认静音；ready 中文/英文不发声、不出现麦克风提示；不存在的语言明确 false。
 2. 用户开启后，实际可听的中英文 FIFO、flush、stop；emoji/组合字符 range 与 Dart 嘴型对齐。
 3. Dart 真实本地 WAV/MP3/M4A 与实际不支持的样本；失败后同 ID TTS 回退只有自身终态。
    不把一次成功扩大成全部后缀/编码支持。
-4. 录音、NativeMedia、PiP 分别先开始/后开始；旧会话停止后不覆盖新 owner；PiP 关闭后
-   借用配音结束。对同一时刻的系统音频行为保持结果记录，不能由 tuple 替代。
-5. 来电、拔耳机、后台/锁屏、媒体 reset 后无自动重播；重新前台后新的显式请求可恢复。
+4. 配音 / PiP 两种先后与离开次序；PiP 离开不结束仍在播的配音，配音结束不触发 PiP recover。
+   录音 / NativeMedia 抢占先停旧输出；旧释放不覆盖后继 owner；拔耳机保留实际 PiP 和手机任务。
+5. 来电、后台/锁屏、媒体 reset 后无旧工作自动重播；不用 PiP 也可从合法 Voice / Media 新入口恢复。
+   分别测用户开始和 Dart 自动 recorder fallback，记录真实手势来源，不能仅从 sessionId 推断。
 6. 连续读取期间 stop、同 ID 复用和 messenger 更换；测实际加载/启动延迟与内存。
    记录失败和未知，不把停止请求等同于 OS 立即物理静音。
+7. 录音去掉 duckOthers 后，其他 App 音乐可能被打断而非压低；record 类别不允许该选项。[8]
+   PiP 改 default mode 的实际兼容性、静音启动片被拒绝时的海报/首帧行为，均为真机 UNRUN。
+8. 未 activate 的 NativeMedia 被 messenger/插件替换、已显示字幕后的销毁、非主线程 Voice
+   teardown 与重入抢占；验证无崩溃、无孤立声音、无旧回调影响后继。新代码夹具不替代设备观察。
 
 ## 公开 API 依据
 
@@ -174,3 +255,7 @@ Apple CI 接入既有 RunnerTests，选择 `-only-testing:RunnerTests/IOSCompani
    [setActive](https://developer.apple.com/documentation/avfaudio/avaudiosession/setactive(_:options:))。
 7. [Apple usesApplicationAudioSession](https://developer.apple.com/documentation/avfaudio/avspeechsynthesizer/usesapplicationaudiosession)、
    [speechVoices](https://developer.apple.com/documentation/avfaudio/avspeechsynthesisvoice/speechvoices())。
+
+8. [Apple duckOthers](https://developer.apple.com/documentation/avfaudio/avaudiosession/categoryoptions-swift.struct/duckothers)、
+   [mixWithOthers](https://developer.apple.com/documentation/avfaudio/avaudiosession/categoryoptions-swift.struct/mixwithothers)。
+9. [Apple mediaServicesWereResetNotification](https://developer.apple.com/documentation/avfaudio/avaudiosession/mediaserviceswereresetnotification)。

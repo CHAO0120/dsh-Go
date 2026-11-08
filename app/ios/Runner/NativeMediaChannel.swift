@@ -43,6 +43,15 @@ private struct MediaFailure: Error {
   let code: String
 }
 
+/// The caption dependency is created only for an actual overlay request.
+/// Disposal can hide an existing instance without constructing one.
+protocol IOSNativeMediaCaption: AnyObject {
+  func setTop(_ value: CGFloat)
+  func show(_ value: String) -> Bool
+  func update(_ value: String) -> Bool
+  func hide()
+}
+
 final class NativeMediaChannel: NSObject, FlutterStreamHandler, AVAudioPlayerDelegate {
   private static let methodsNamingAnOwner: Set<String> = [
     "play", "pause", "resume", "stop", "disposeOwner",
@@ -57,18 +66,35 @@ final class NativeMediaChannel: NSObject, FlutterStreamHandler, AVAudioPlayerDel
   private var sink: FlutterEventSink?
   private var owner: MediaOwner?
   private var player: AVAudioPlayer?
-  private var session: (AVAudioSession.Category, AVAudioSession.Mode, AVAudioSession.CategoryOptions)?
+  private let audioCoordinator: IOSAudioSessionCoordinator
+  private let audio: IOSAudioSessionLease
 
   /// Bumped by anything that ends the clip: one still being read must not start after that.
   private var clipGeneration = 0
   private var clipLoading = false
   private var wantPlaying = true
-  private lazy var caption: MediaCaption = MediaCaption { [weak self] in self?.captionClosed() }
+  private let captionFactory: (@escaping () -> Void) -> IOSNativeMediaCaption
+  private var storedCaption: IOSNativeMediaCaption?
+  private var caption: IOSNativeMediaCaption {
+    if let storedCaption { return storedCaption }
+    let next = captionFactory { [weak self] in self?.captionClosed() }
+    storedCaption = next
+    return next
+  }
 
-  init(messenger: any FlutterBinaryMessenger) {
+  init(messenger: any FlutterBinaryMessenger, audioCoordinator: IOSAudioSessionCoordinator = .shared,
+       captionFactory: @escaping (@escaping () -> Void) -> IOSNativeMediaCaption = { MediaCaption(onClose: $0) }) {
+    precondition(Thread.isMainThread)
+    self.captionFactory = captionFactory
+    self.audioCoordinator = audioCoordinator
+    audio = IOSAudioSessionLease(role: .nativeMedia, coordinator: audioCoordinator)
     methods = FlutterMethodChannel(name: "dsh/native-media", binaryMessenger: messenger)
     events = FlutterEventChannel(name: "dsh/native-media/events", binaryMessenger: messenger)
     super.init()
+    audio.onRevoked = { [weak self] _ in
+      guard let self, self.player != nil else { return }
+      self.clipOver("audio.stopped", reason: "interrupted")
+    }
     events.setStreamHandler(self)
     methods.setMethodCallHandler { [weak self] call, result in
       guard let self else { return result(FlutterMethodNotImplemented) }
@@ -76,8 +102,20 @@ final class NativeMediaChannel: NSObject, FlutterStreamHandler, AVAudioPlayerDel
     }
     let center = NotificationCenter.default
     center.addObserver(self, selector: #selector(wentAway), name: UIApplication.didEnterBackgroundNotification, object: nil)
-    center.addObserver(self, selector: #selector(interrupted), name: AVAudioSession.interruptionNotification, object: nil)
-    center.addObserver(self, selector: #selector(routeChanged), name: AVAudioSession.routeChangeNotification, object: nil)
+  }
+
+  deinit {
+    // No call to caption or disposeLocal here: lazy construction during
+    // NSObject deinit must not try to create a new weak reference to self.
+    let oldPlayer = player
+    let oldCaption = storedCaption
+    let audio = audio
+    IOSAudioMainThreadCleanup {
+      oldPlayer?.delegate = nil
+      oldPlayer?.stop()
+      audio.release()
+      oldCaption?.hide()
+    }.perform()
   }
 
   func onListen(withArguments arguments: Any?, eventSink events: @escaping FlutterEventSink) -> FlutterError? {
@@ -125,7 +163,7 @@ final class NativeMediaChannel: NSObject, FlutterStreamHandler, AVAudioPlayerDel
     case "showOverlay": showCaption(args, update: false, result: result)
     case "updateOverlay": showCaption(args, update: true, result: result)
     case "hideOverlay":
-      caption.hide()
+      storedCaption?.hide()
       result(nil)
     default: result(Self.failure("unsupported"))
     }
@@ -157,7 +195,14 @@ final class NativeMediaChannel: NSObject, FlutterStreamHandler, AVAudioPlayerDel
       Self.isClipPath(path, of: current)
     else { return result(Self.failure("media-invalid")) }
     releaseClip()
+    // A valid new foreground play request can recover after media reset.
+    // This is the existing authorized plugin effect entry, not proof that
+    // Swift observed a separate physical tap for each effect.
+    let activeRequest = UIApplication.shared.applicationState == .active
+      && UIApplication.shared.isProtectedDataAvailable
+    if activeRequest { audioCoordinator.retry(userInitiated: true) }
     let mine = clipGeneration
+    let audioEnvironment = audioCoordinator.environmentGeneration
     clipLoading = true
     wantPlaying = true
     DispatchQueue.global(qos: .userInitiated).async {
@@ -166,14 +211,20 @@ final class NativeMediaChannel: NSObject, FlutterStreamHandler, AVAudioPlayerDel
         guard let self else { return }
         guard mine == self.clipGeneration, self.owner === current else { return result(Self.failure("stale-owner")) }
         self.clipLoading = false
+        guard self.onScreen, self.audioCoordinator.environmentGeneration == audioEnvironment else {
+          return result(Self.failure("audio"))
+        }
         switch loaded {
         case .failure(let error): result(Self.failure((error as? MediaFailure)?.code ?? "media-invalid"))
         case .success(let clip):
           do {
             try self.start(clip)
+            guard mine == self.clipGeneration, self.owner === current else {
+              return result(Self.failure("stale-owner"))
+            }
             result(nil)
           } catch {
-            self.releaseClip()
+            if mine == self.clipGeneration, self.owner === current { self.releaseClip() }
             result(Self.failure((error as? MediaFailure)?.code ?? "audio"))
           }
         }
@@ -230,52 +281,49 @@ final class NativeMediaChannel: NSObject, FlutterStreamHandler, AVAudioPlayerDel
   }
 
   private func start(_ clip: AVAudioPlayer) throws {
-    let audio = AVAudioSession.sharedInstance()
-    // Dictation has the session: taking it would silence the microphone under it.
-    guard audio.category != .record else { throw MediaFailure(code: "busy") }
-    session = (audio.category, audio.mode, audio.categoryOptions)
     do {
-      try audio.setCategory(.playback, mode: .spokenAudio, options: .duckOthers)
-      try audio.setActive(true)
+      // Recording outranks media. Other outputs are synchronously stopped by
+      // the coordinator before this exclusive configuration is installed.
+      audio.setOutputStop { [clip] in clip.delegate = nil; clip.stop() }
+      try audio.acquire()
     } catch {
-      throw MediaFailure(code: "audio")
+      throw MediaFailure(code: (error as? IOSAudioSessionFailure) == .busy ? "busy" : "audio")
     }
     clip.delegate = self
     player = clip
     guard wantPlaying else { return }
-    guard clip.play() else { throw MediaFailure(code: "audio") }
+    guard clip.play(), player === clip, audio.isValid else { throw MediaFailure(code: "audio") }
   }
 
   /// A pause while the clip is still being read holds until it's there.
   private func setPlaying(_ wanted: Bool) -> Bool {
     wantPlaying = wanted
     guard let player else { return clipLoading }
+    guard audio.isValid else {
+      clipOver("audio.stopped", reason: "interrupted")
+      return false
+    }
     if !wanted {
       player.pause()
       return true
     }
-    return player.isPlaying || player.play()
+    return (player.isPlaying || player.play()) && self.player === player && audio.isValid
   }
 
-  /// Stops and frees the clip. `keepSession`: someone else has taken the audio session already.
-  private func releaseClip(keepSession: Bool = false) {
+  /// Stop the actual output before releasing our exact coordinator token.
+  private func releaseClip() {
     clipGeneration += 1
     clipLoading = false
     player?.delegate = nil
     player?.stop()
     player = nil
-    guard let previous = session else { return }
-    session = nil
-    guard !keepSession else { return }
-    let audio = AVAudioSession.sharedInstance()
-    try? audio.setActive(false, options: .notifyOthersOnDeactivation)
-    try? audio.setCategory(previous.0, mode: previous.1, options: previous.2)
+    audio.release()
   }
 
   /// Ended by itself: nothing more of it, then the event.
-  private func clipOver(_ kind: String, reason: String? = nil, keepSession: Bool = false) {
+  private func clipOver(_ kind: String, reason: String? = nil) {
     guard let current = owner else { return }
-    releaseClip(keepSession: keepSession)
+    releaseClip()
     emit(current, kind, reason: reason)
   }
 
@@ -301,36 +349,6 @@ final class NativeMediaChannel: NSObject, FlutterStreamHandler, AVAudioPlayerDel
 
   @objc private func wentAway() {
     onMain { [weak self] in self?.revoke("background") }
-  }
-
-  /// A call or an alarm: the clip ends rather than coming back by itself.
-  @objc private func interrupted(_ note: Notification) {
-    guard
-      let raw = note.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt,
-      AVAudioSession.InterruptionType(rawValue: raw) == .began
-    else { return }
-    onMain { [weak self] in
-      guard let self, self.player != nil else { return }
-      self.clipOver("audio.stopped", reason: "interrupted")
-    }
-  }
-
-  /// Headphones gone: AVAudioPlayer would carry on through the speaker, unlike AVPlayer.
-  /// A category change is dictation setting its own over the clip's, which leaves it silent.
-  @objc private func routeChanged(_ note: Notification) {
-    guard
-      let raw = note.userInfo?[AVAudioSessionRouteChangeReasonKey] as? UInt,
-      let reason = AVAudioSession.RouteChangeReason(rawValue: raw),
-      reason == .oldDeviceUnavailable || reason == .categoryChange
-    else { return }
-    onMain { [weak self] in
-      guard let self else { return }
-      if reason == .oldDeviceUnavailable {
-        if self.player != nil || self.clipLoading { self.clipOver("audio.stopped", reason: "interrupted") }
-      } else if self.player != nil, AVAudioSession.sharedInstance().category != .playback {
-        self.clipOver("audio.stopped", reason: "interrupted", keepSession: true)
-      }
-    }
   }
 
   // MARK: The caption
@@ -360,7 +378,7 @@ final class NativeMediaChannel: NSObject, FlutterStreamHandler, AVAudioPlayerDel
   private func disposeLocal() {
     owner = nil
     releaseClip()
-    caption.hide()
+    storedCaption?.hide()
   }
 
   private func revoke(_ reason: String) {
@@ -385,7 +403,7 @@ final class NativeMediaChannel: NSObject, FlutterStreamHandler, AVAudioPlayerDel
 
 /// The one line a plugin may float over the app, under the chat header; the × is the app's. In
 /// the window rather than Flutter's view, which reorders its own subviews around platform views.
-private final class MediaCaption {
+private final class MediaCaption: IOSNativeMediaCaption {
   private var top: CGFloat = 96
   private var text: String?
   private var pill: CaptionPill?

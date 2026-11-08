@@ -33,12 +33,13 @@ final class VoiceChannel: NSObject, FlutterStreamHandler {
       guard let self else { return result(FlutterMethodNotImplemented) }
       self.handle(call, result: result)
     }
-    NotificationCenter.default.addObserver(
-      self,
-      selector: #selector(interrupted),
-      name: AVAudioSession.interruptionNotification,
-      object: nil
-    )
+  }
+
+  deinit {
+    // Keep the already-created session alive until main-thread discard. Its
+    // microphone's revocation handler remains effective while cleanup waits.
+    let old = session
+    IOSAudioMainThreadCleanup { old?.discard() }.perform()
   }
 
   func onListen(withArguments arguments: Any?, eventSink events: @escaping FlutterEventSink) -> FlutterError? {
@@ -127,6 +128,13 @@ final class VoiceChannel: NSObject, FlutterStreamHandler {
     guard AVAudioSession.sharedInstance().recordPermission == .granted else {
       return result(Self.failure("permission", code: 9))
     }
+    // A valid foreground start entry may retry after reset. Dart's existing
+    // system->recorder fallback also calls startRecorder; this ABI has no
+    // origin field and cannot prove a new physical tap. Queries and automatic
+    // foreground callbacks do not clear reset; invalid input returns above.
+    let activeStartEntry = UIApplication.shared.applicationState == .active
+      && UIApplication.shared.isProtectedDataAvailable
+    if activeStartEntry { IOSAudioSessionCoordinator.shared.retry(userInitiated: true) }
     let next = make { [weak self] event in self?.send(event, from: id) }
     do {
       try next.start()
@@ -154,19 +162,6 @@ final class VoiceChannel: NSObject, FlutterStreamHandler {
     session?.discard()
     session = nil
     sessionId = nil
-  }
-
-  /// A call or an alarm took the microphone.
-  @objc private func interrupted(_ note: Notification) {
-    guard let raw = note.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt,
-      AVAudioSession.InterruptionType(rawValue: raw) == .began
-    else { return }
-    onMain { [weak self] in
-      guard let self, let session = self.session, let id = self.sessionId else { return }
-      session.discard()
-      self.send(["type": "error", "code": session.audioFailure], from: id)
-      self.send(["type": "end"], from: id)
-    }
   }
 
   /// The phone's language, then the others the person reads: `en_CN` and the like
@@ -197,6 +192,12 @@ private final class RecognizerSession: VoiceSession {
   init(recognizer: SFSpeechRecognizer, emit: @escaping VoiceEmit) {
     self.recognizer = recognizer
     self.emit = emit
+    microphone.onRevoked = { [weak self] in
+      guard let self, !self.over else { return }
+      self.discard()
+      self.emit(["type": "error", "code": self.audioFailure])
+      self.emit(["type": "end"])
+    }
   }
 
   func start() throws {
@@ -271,6 +272,12 @@ private final class RecorderSession: VoiceSession {
   init(maxSeconds: Int, emit: @escaping VoiceEmit) {
     maxBytes = maxSeconds * Self.sampleRate * Self.bytesPerSample
     self.emit = emit
+    microphone.onRevoked = { [weak self] in
+      guard let self, !self.over else { return }
+      self.discard()
+      self.emit(["type": "error", "code": self.audioFailure])
+      self.emit(["type": "end"])
+    }
   }
 
   func start() throws {
@@ -367,35 +374,69 @@ private final class RecorderSession: VoiceSession {
 
 private struct NoMicrophone: Error {}
 
-/// Holds the audio session for one voice session, and gives it back as it was: left
-/// on `.record`, the rest of the app's sound would stay silent.
+/// A main-thread recording lease. The coordinator retains the original App
+/// baseline; a preempted PiP tuple is never saved here and later resurrected.
 private final class Microphone {
+  var onRevoked: (() -> Void)?
   private let engine = AVAudioEngine()
-  private var previous: (AVAudioSession.Category, AVAudioSession.Mode, AVAudioSession.CategoryOptions)?
+  private let audio = IOSAudioSessionLease(role: .recording)
+  private var tapInstalled = false
+  private var running = false
+
+  init() {
+    audio.onRevoked = { [weak self] _ in
+      guard let self else { return }
+      let wasRunning = self.running
+      self.stop()
+      if wasRunning { self.onRevoked?() }
+    }
+  }
 
   /// [tap] runs on the audio thread.
   func start(tap: @escaping (AVAudioPCMBuffer) -> Void) throws {
-    let audio = AVAudioSession.sharedInstance()
-    previous = (audio.category, audio.mode, audio.categoryOptions)
-    try audio.setCategory(.record, mode: .measurement, options: .duckOthers)
-    try audio.setActive(true, options: .notifyOthersOnDeactivation)
-    let input = engine.inputNode
-    let format = input.outputFormat(forBus: 0)
-    // installTap raises on a format like this, with nothing to catch it.
-    guard format.sampleRate > 0, format.channelCount > 0 else { throw NoMicrophone() }
-    input.installTap(onBus: 0, bufferSize: 4096, format: format) { buffer, _ in tap(buffer) }
-    engine.prepare()
-    try engine.start()
+    precondition(Thread.isMainThread)
+    guard !running, !audio.isHeld else { throw NoMicrophone() }
+    do {
+      // Kept by the coordinator independently of this object's weak callback.
+      // It stops capture before reconfiguration even while deinit is queued.
+      audio.setOutputStop { [engine] in engine.stop() }
+      try audio.acquire()
+      let input = engine.inputNode
+      let format = input.outputFormat(forBus: 0)
+      // installTap raises on a format like this, with nothing to catch it.
+      guard format.sampleRate > 0, format.channelCount > 0 else { throw NoMicrophone() }
+      input.installTap(onBus: 0, bufferSize: 4096, format: format) { buffer, _ in tap(buffer) }
+      tapInstalled = true
+      engine.prepare()
+      try engine.start()
+      guard audio.isValid else { throw NoMicrophone() }
+      running = true
+    } catch {
+      stop()
+      throw error
+    }
   }
 
   func stop() {
-    guard let previous else { return }
-    self.previous = nil
-    engine.inputNode.removeTap(onBus: 0)
+    precondition(Thread.isMainThread)
+    running = false
+    if tapInstalled {
+      tapInstalled = false
+      engine.inputNode.removeTap(onBus: 0)
+    }
     engine.stop()
-    let audio = AVAudioSession.sharedInstance()
-    try? audio.setActive(false, options: .notifyOthersOnDeactivation)
-    try? audio.setCategory(previous.0, mode: previous.1, options: previous.2)
+    audio.release()
+  }
+
+  deinit {
+    let engine = engine
+    let audio = audio
+    let installed = tapInstalled
+    IOSAudioMainThreadCleanup {
+      engine.stop()
+      if installed { engine.inputNode.removeTap(onBus: 0) }
+      audio.release()
+    }.perform()
   }
 }
 

@@ -225,7 +225,7 @@ private final class LaunchClip: NSObject, FlutterTexture {
   private var statusWatch: NSKeyValueObservation?
   private var link: CADisplayLink?
   private var answer: ((Bool) -> Void)?
-  private var session: (AVAudioSession.Category, AVAudioSession.Mode, AVAudioSession.CategoryOptions)?
+  private let audio = IOSAudioSessionLease(role: .silentVideo)
   private var prepared = false
   private var wantPlay = false
   private var started = false
@@ -235,6 +235,7 @@ private final class LaunchClip: NSObject, FlutterTexture {
   init(url: URL) {
     asset = AVURLAsset(url: url)
     super.init()
+    audio.onRevoked = { [weak self] _ in self?.finish() }
   }
 
   func copyPixelBuffer() -> Unmanaged<CVPixelBuffer>? {
@@ -303,14 +304,18 @@ private final class LaunchClip: NSObject, FlutterTexture {
   private func start() {
     guard !started, !over else { return }
     started = true
-    // Without this the app's default audio session stops other apps' music, muted or not.
-    let audio = AVAudioSession.sharedInstance()
-    session = (audio.category, audio.mode, audio.categoryOptions)
-    try? audio.setCategory(.ambient)
+    // With no other user this is ambient. When speech/PiP already owns an
+    // output group, join without changing its configuration or activation.
+    // Recording/exclusive media wins; this muted startup clip may be skipped.
+    do {
+      audio.setOutputStop { [player] in player.pause() }
+      try audio.acquire()
+    } catch { finish(); return }
     let link = CADisplayLink(target: self, selector: #selector(tick))
     link.add(to: .main, forMode: .common)
     self.link = link
     player.play()
+    if !audio.isValid || over { player.pause(); finish() }
   }
 
   @objc private func tick() {
@@ -344,9 +349,9 @@ private final class LaunchClip: NSObject, FlutterTexture {
     over = true
     link?.invalidate()
     link = nil
-    guard let session else { return }
-    self.session = nil
-    try? AVAudioSession.sharedInstance().setCategory(session.0, mode: session.1, options: session.2)
+    // Stop the output before releasing the session membership.
+    player.pause()
+    audio.release()
   }
 
   func close() {

@@ -385,6 +385,7 @@ jobs:
             -only-testing:RunnerTests/IOSPhoneTaskConsentTests \
             -only-testing:RunnerTests/IOSPhoneResultEnvelopeTests \
             -only-testing:RunnerTests/IOSCompanionVoiceTests \
+            -only-testing:RunnerTests/IOSAudioSessionCoordinatorTests \
             -parallel-testing-enabled NO CODE_SIGNING_ALLOWED=NO
 
       - name: Capture the native pet renderer in the simulator

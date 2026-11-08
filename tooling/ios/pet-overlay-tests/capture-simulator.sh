@@ -31,6 +31,7 @@ xcrun swiftc -swift-version 5 -parse-as-library -sdk "$sdk" -target "$target" \
   -Xlinker -rpath -Xlinker '@executable_path/Frameworks' \
   "$sources/PetOverlayState.swift" "$sources/PetOverlayPack.swift" \
   "$sources/PetOverlayFrameRenderer.swift" "$sources/PetOverlayPictureInPicture.swift" \
+  "$root/app/ios/Runner/IOSAudioSessionCoordinator.swift" \
   "$sources/IOSPetOverlay.swift" "$fixture/CaptureApp.swift" -o "$app/PetOverlayCapture"
 python3 - "$root" "$app" "$output" <<'PY'
 import hashlib, json, plistlib, shutil, sys
@@ -52,6 +53,7 @@ plist = {
 }))
 shutil.copytree(root / 'app/assets/pets', app / 'assets/pets')
 sources = list((root / 'app/ios/Runner/PetOverlay').glob('*.swift'))
+sources += [root / 'app/ios/Runner/IOSAudioSessionCoordinator.swift']
 sources += [root / 'tooling/ios/pet-overlay-tests/CaptureApp.swift', root / 'tooling/ios/pet-overlay-tests/Flutter.swift']
 receipt = {str(p.relative_to(root)): hashlib.sha256(p.read_bytes()).hexdigest() for p in sorted(sources)}
 (output / 'capture-source-sha256.json').write_text(json.dumps(receipt, indent=2) + '\n')

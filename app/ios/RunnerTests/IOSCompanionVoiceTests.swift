@@ -4,6 +4,29 @@ import Foundation
 import XCTest
 @testable import Runner
 
+private final class CompanionTestAudioBackend: IOSAudioSessionBackend {
+  enum Failure: Error { case synthetic }
+  var configuration = IOSAudioSessionConfiguration(category: .ambient, mode: .default, options: [])
+  var configurations: [IOSAudioSessionConfiguration] = []
+  var activations: [Bool] = []
+  var failConfigure = false, failActivation = false
+  var onConfigure: ((IOSAudioSessionConfiguration) -> Void)?
+  var onDeactivate: (() -> Void)?
+  func configure(_ value: IOSAudioSessionConfiguration) throws {
+    precondition(Thread.isMainThread)
+    configurations.append(value)
+    if failConfigure { throw Failure.synthetic }
+    configuration = value
+    onConfigure?(value)
+  }
+  func activate(_ value: Bool) throws {
+    precondition(Thread.isMainThread)
+    activations.append(value)
+    if value && failActivation { throw Failure.synthetic }
+    if !value { onDeactivate?() }
+  }
+}
+
 /// The production engine and audio lease, with recording output/session
 /// adapters. Utterances are real AVSpeechUtterance objects, never spoken by
 /// these adapters. Two loader tests construct a player from synthetic bytes but
@@ -73,28 +96,9 @@ final class IOSCompanionVoiceTests: XCTestCase {
   }
 
   @MainActor
-  private final class Audio: IOSCompanionAudioSession {
-    var configuration = IOSCompanionAudioConfiguration(category: .ambient, mode: .default, options: [])
-    var configurations: [IOSCompanionAudioConfiguration] = []
-    var activations: [Bool] = []
-    var failConfigure = false, failActivation = false
-    var onDeactivate: (() -> Void)?
-    func configure(_ value: IOSCompanionAudioConfiguration) throws {
-      configurations.append(value)
-      if failConfigure { throw Failure.synthetic }
-      configuration = value
-    }
-    func activate(_ value: Bool) throws {
-      activations.append(value)
-      if value && failActivation { throw Failure.synthetic }
-      if !value { onDeactivate?() }
-    }
-  }
-
-  @MainActor
   private final class Fixture {
-    let speech = Speech(), loader = Loader(), session = Audio()
-    var pip = false
+    let speech = Speech(), loader = Loader(), session = CompanionTestAudioBackend()
+    let coordinator: IOSAudioSessionCoordinator
     var time: TimeInterval? = 100
     var events: [IOSCompanionVoiceEvent] = []
     var answers: [(String, Bool)] = []
@@ -102,7 +106,8 @@ final class IOSCompanionVoiceTests: XCTestCase {
     var engine: IOSCompanionVoiceEngine!
     var onEvent: ((IOSCompanionVoiceEvent) -> Void)?
     init() {
-      let audio = IOSCompanionAudioLease(session: session, pipAudioConfigured: { [weak self] in self?.pip == true })
+      coordinator = IOSAudioSessionCoordinator(session: session)
+      let audio = IOSCompanionAudioLease(coordinator: coordinator)
       engine = IOSCompanionVoiceEngine(speech: speech, loader: loader, audio: audio, now: { [weak self] in self?.time })
       engine.emit = { [weak self] event in
         guard let self else { return }
@@ -437,18 +442,18 @@ final class IOSCompanionVoiceTests: XCTestCase {
 
   func testRecordingNativeMediaAndUnownedPiPConfigurationsAreNotTakenOver() {
     let values = [
-      IOSCompanionAudioConfiguration(category: .record, mode: .measurement, options: .duckOthers),
-      IOSCompanionAudioConfiguration(category: .playAndRecord, mode: .default, options: []),
-      IOSCompanionAudioConfiguration(category: .playback, mode: .spokenAudio, options: .duckOthers),
-      IOSCompanionAudioConfiguration.pet,
+      IOSAudioSessionConfiguration(category: .record, mode: .measurement, options: []),
+      IOSAudioSessionConfiguration(category: .playAndRecord, mode: .default, options: []),
+      IOSAudioSessionConfiguration(category: .playback, mode: .spokenAudio, options: .duckOthers),
+      IOSAudioSessionConfiguration(category: .playback, mode: .moviePlayback, options: .mixWithOthers),
     ]
     for configuration in values {
       let f = Fixture(); defer { f.engine.dispose() }
       f.session.configuration = configuration
       f.ready(); XCTAssertFalse(f.say("voice"))
-      f.play("clip"); let clip = Clip(); f.loader.finish(0, clip)
+      f.play("clip")
       XCTAssertEqual(f.answers.last?.1, false)
-      XCTAssertEqual(clip.plays, 0)
+      XCTAssertTrue(f.loader.requests.isEmpty) // Admission precedes even decoder construction.
       XCTAssertEqual(f.session.configuration, configuration)
       XCTAssertTrue(f.session.configurations.isEmpty)
       XCTAssertTrue(f.session.activations.isEmpty)
@@ -456,62 +461,24 @@ final class IOSCompanionVoiceTests: XCTestCase {
     }
   }
 
-  func testPiPBorrowUsesNoExplicitSettersAndRevocationStopsBothDomains() {
-    let f = Fixture(); defer { f.engine.dispose() }
-    f.session.configuration = .pet; f.pip = true
-    f.ready(); XCTAssertTrue(f.say("voice")); XCTAssertTrue(f.say("queued"))
-    f.play("clip"); let clip = Clip(); f.loader.finish(0, clip)
-    f.engine.poll() // Own notifications and unchanged authorized tuple are harmless.
-    XCTAssertTrue(f.terminals("voice").isEmpty)
-    f.pip = false // Critically, the shared tuple remains exactly the same.
-    f.engine.poll()
-    for id in ["voice", "queued", "clip"] {
-      XCTAssertEqual(f.terminals(id).map(\.type), ["stopped"])
-      XCTAssertEqual(f.terminals(id).first?.code, "audio-replaced")
-    }
-    XCTAssertEqual(f.session.configuration, .pet)
-    XCTAssertTrue(f.session.configurations.isEmpty)
-    XCTAssertTrue(f.session.activations.isEmpty)
-  }
-
-  func testBorrowedInterruptionDoesNotDeactivatePiPOrRestartAcceptedWork() {
-    let f = Fixture(); defer { f.engine.dispose() }
-    f.session.configuration = .pet; f.pip = true
-    f.ready(); XCTAssertTrue(f.say("voice"))
-    f.engine.interrupt(code: "interrupted"); f.engine.poll()
-    f.speech.send(0, .done)
-    XCTAssertEqual(f.terminals("voice").map(\.type), ["stopped"])
-    XCTAssertEqual(f.speech.submitted.count, 1)
-    XCTAssertTrue(f.session.activations.isEmpty)
-    XCTAssertTrue(f.session.configurations.isEmpty)
-  }
-
-  func testBorrowedAdmissionRequiresBothOwnerPermissionAndThePiPConfiguration() {
-    let f = Fixture(); defer { f.engine.dispose() }
-    f.pip = true // A true owner flag does not excuse a mismatched session.
-    f.ready(); XCTAssertFalse(f.say("voice"))
-    XCTAssertTrue(f.session.configurations.isEmpty)
-    XCTAssertTrue(f.session.activations.isEmpty)
-  }
-
   func testOurOwnCategoryNotificationDoesNotCancelButModeChangeDoes() {
     let f = Fixture(); defer { f.engine.dispose() }
     f.ready(); XCTAssertTrue(f.say("voice"))
     f.engine.poll()
     XCTAssertTrue(f.terminals("voice").isEmpty)
-    f.session.configuration = IOSCompanionAudioConfiguration(category: .playback,
+    f.session.configuration = IOSAudioSessionConfiguration(category: .playback,
       mode: .spokenAudio, options: .duckOthers)
     f.engine.poll()
     XCTAssertEqual(f.terminals("voice").map(\.type), ["stopped"])
     XCTAssertEqual(f.session.activations, [true]) // Never deactivate the newer media owner.
-    XCTAssertEqual(f.session.configurations, [.companion])
+    XCTAssertEqual(f.session.configurations, [.sharedOutput])
     XCTAssertEqual(f.session.configuration.mode, .spokenAudio)
   }
 
   func testOptionsOnlyTakeoverIsDetectedWithoutDependingOnANotification() {
     let f = Fixture(); defer { f.engine.dispose() }
     f.ready(); XCTAssertTrue(f.say("voice"))
-    f.session.configuration = IOSCompanionAudioConfiguration(category: .playback, mode: .default, options: [])
+    f.session.configuration = IOSAudioSessionConfiguration(category: .playback, mode: .default, options: [])
     f.engine.poll()
     XCTAssertEqual(f.terminals("voice").first?.code, "audio-replaced")
     XCTAssertEqual(f.session.activations, [true])
@@ -523,7 +490,7 @@ final class IOSCompanionVoiceTests: XCTestCase {
     f.session.failActivation = true; f.ready()
     XCTAssertFalse(f.say("voice"))
     XCTAssertEqual(f.session.configuration, prior)
-    XCTAssertEqual(f.session.configurations, [.companion, prior])
+    XCTAssertEqual(f.session.configurations, [.sharedOutput, prior])
     XCTAssertEqual(f.session.activations, [true, false])
     XCTAssertTrue(f.events.isEmpty)
     XCTAssertTrue(f.speech.submitted.isEmpty)
@@ -540,11 +507,11 @@ final class IOSCompanionVoiceTests: XCTestCase {
   func testReleaseRechecksConfigurationAfterDeactivationBeforeRestoring() {
     let f = Fixture(); defer { f.engine.dispose() }
     f.ready(); XCTAssertTrue(f.say("voice"))
-    let replacement = IOSCompanionAudioConfiguration(category: .record, mode: .measurement, options: .duckOthers)
+    let replacement = IOSAudioSessionConfiguration(category: .record, mode: .measurement, options: [])
     f.session.onDeactivate = { f.session.configuration = replacement }
     f.engine.stop()
     XCTAssertEqual(f.session.configuration, replacement)
-    XCTAssertEqual(f.session.configurations, [.companion])
+    XCTAssertEqual(f.session.configurations, [.sharedOutput])
   }
 
   func testTakeoverDuringProvisionalPlayRejectsItAndRetiresPriorSpeech() {
@@ -552,7 +519,7 @@ final class IOSCompanionVoiceTests: XCTestCase {
     f.ready(); XCTAssertTrue(f.say("voice")); f.play("clip")
     let clip = Clip()
     clip.onPlay = {
-      f.session.configuration = IOSCompanionAudioConfiguration(category: .record, mode: .measurement, options: .duckOthers)
+      f.session.configuration = IOSAudioSessionConfiguration(category: .record, mode: .measurement, options: [])
     }
     f.loader.finish(0, clip)
     XCTAssertEqual(f.answers.last?.1, false)
@@ -589,6 +556,214 @@ final class IOSCompanionVoiceTests: XCTestCase {
     f.engine.stop()
     XCTAssertEqual(f.speech.submitted.count, 1)
     XCTAssertFalse(f.engine.hasWork)
+  }
+
+  func testPiPJoiningEitherBeforeOrAfterSpeechDoesNotOwnTheOtherMember() throws {
+    for pictureFirst in [true, false] {
+      let f = Fixture(); defer { f.engine.dispose() }
+      let picture = IOSAudioSessionLease(role: .pictureInPicture, coordinator: f.coordinator)
+      defer { picture.release() }
+      if pictureFirst { try picture.acquire() }
+      f.ready(); XCTAssertTrue(f.say("voice")); XCTAssertTrue(f.say("queued"))
+      f.play("clip"); let clip = Clip(); f.loader.finish(0, clip)
+      if !pictureFirst { try picture.acquire() }
+      XCTAssertEqual(f.session.configurations, [.sharedOutput])
+      XCTAssertEqual(f.session.activations, [true])
+      picture.release()
+      f.engine.poll()
+      XCTAssertEqual(clip.stops, 0)
+      XCTAssertTrue(f.events.filter { ["done", "stopped", "error"].contains($0.type) }.isEmpty)
+      f.speech.send(0, .done); f.speech.send(1, .done); clip.end()
+      XCTAssertEqual(f.session.activations, [true, false])
+      for id in ["voice", "queued", "clip"] { XCTAssertEqual(f.terminals(id).map(\.type), ["done"]) }
+    }
+  }
+
+  func testOrdinarySpeechCompletionDoesNotVersionPiPReadinessOrReleaseItsLease() throws {
+    let f = Fixture(); defer { f.engine.dispose() }
+    let picture = IOSAudioSessionLease(role: .pictureInPicture, coordinator: f.coordinator)
+    try picture.acquire(); defer { picture.release() }
+    let generation = f.coordinator.availabilityGeneration
+    f.ready()
+    for index in 0..<3 {
+      XCTAssertTrue(f.say("voice\(index)"))
+      f.speech.send(index, .done)
+      XCTAssertEqual(f.coordinator.availabilityGeneration, generation)
+      XCTAssertTrue(picture.isValid)
+      XCTAssertEqual(f.session.activations, [true])
+    }
+    picture.release()
+    XCTAssertEqual(f.session.activations, [true, false])
+  }
+
+  func testRouteLossRetiresAudibleWorkButKeepsPiPAndSilentVideoMembers() throws {
+    let f = Fixture(); defer { f.engine.dispose() }
+    let picture = IOSAudioSessionLease(role: .pictureInPicture, coordinator: f.coordinator)
+    let silent = IOSAudioSessionLease(role: .silentVideo, coordinator: f.coordinator)
+    try picture.acquire(); try silent.acquire()
+    defer { picture.release(); silent.release() }
+    let availability = f.coordinator.availabilityGeneration
+    f.ready(); XCTAssertTrue(f.say("voice")); XCTAssertTrue(f.say("queued"))
+    f.play("clip"); let clip = Clip(); f.loader.finish(0, clip)
+    let late = clip.onEnd
+    f.play("pending")
+    f.coordinator.routeLost()
+    for id in ["voice", "queued", "clip"] {
+      XCTAssertEqual(f.terminals(id), [IOSCompanionVoiceEvent(type: "stopped", id: id, code: "route-lost")])
+    }
+    XCTAssertEqual(f.answers.last?.0, "pending")
+    XCTAssertEqual(f.answers.last?.1, false)
+    XCTAssertTrue(f.loader.requests[1].cancellation.isCancelled)
+    XCTAssertEqual(clip.stops, 1)
+    XCTAssertTrue(picture.isValid && silent.isValid)
+    XCTAssertEqual(f.coordinator.availabilityGeneration, availability)
+    XCTAssertEqual(f.session.configurations, [.sharedOutput])
+    XCTAssertEqual(f.session.activations, [true])
+    let events = f.events
+    f.speech.send(0, .done); late?(clip, .done)
+    let pending = Clip(); f.loader.finish(1, pending)
+    XCTAssertEqual(pending.plays, 0)
+    XCTAssertEqual(f.events, events)
+    picture.release()
+    XCTAssertEqual(f.session.activations, [true])
+    silent.release()
+    XCTAssertEqual(f.session.activations, [true, false])
+  }
+
+  func testRecordingPreemptionStopsAcceptedOutputsBeforeItsFirstSetter() throws {
+    let f = Fixture(); defer { f.engine.dispose() }
+    f.ready(); XCTAssertTrue(f.say("voice")); XCTAssertTrue(f.say("queued"))
+    f.play("clip"); let clip = Clip(); f.loader.finish(0, clip)
+    let late = clip.onEnd
+    let stops = f.speech.stops
+    var checkedRecordingSetter = false
+    f.session.onConfigure = { value in
+      guard value == .recording else { return }
+      checkedRecordingSetter = true
+      XCTAssertGreaterThan(f.speech.stops, stops)
+      XCTAssertEqual(clip.stops, 1)
+      for id in ["voice", "queued", "clip"] {
+        XCTAssertEqual(f.terminals(id).map(\.code), ["audio-replaced"])
+      }
+    }
+    let recording = IOSAudioSessionLease(role: .recording, coordinator: f.coordinator)
+    try recording.acquire(); defer { recording.release() }
+    XCTAssertTrue(checkedRecordingSetter)
+    let events = f.events
+    f.speech.send(0, .done); late?(clip, .error)
+    recording.release(); f.engine.poll()
+    XCTAssertEqual(f.events, events)
+    XCTAssertEqual(f.speech.submitted.count, 1)
+    XCTAssertEqual(clip.plays, 1)
+    f.session.onConfigure = nil
+  }
+
+  func testHeldRecordingRejectsNewSpeechAndClipBeforeDecode() throws {
+    let f = Fixture(); defer { f.engine.dispose() }
+    let recording = IOSAudioSessionLease(role: .recording, coordinator: f.coordinator)
+    try recording.acquire(); defer { recording.release() }
+    let configurations = f.session.configurations, activations = f.session.activations
+    f.ready()
+    XCTAssertFalse(f.say("voice"))
+    f.play("clip")
+    XCTAssertEqual(f.answers.map { $0.1 }, [false, false])
+    XCTAssertTrue(f.loader.requests.isEmpty)
+    XCTAssertTrue(f.speech.submitted.isEmpty)
+    XCTAssertTrue(f.events.isEmpty)
+    XCTAssertEqual(f.session.configurations, configurations)
+    XCTAssertEqual(f.session.activations, activations)
+    recording.release()
+    XCTAssertTrue(f.say("fresh"))
+  }
+
+  func testResetWithoutAnyLeaseRequiresExplicitEntryRecoveryBeforeAutomaticWork() {
+    let f = Fixture(); defer { f.engine.dispose() }
+    f.coordinator.mediaServicesReset()
+    f.ready() // Capability/voice readiness never clears the audio reset gate.
+    XCTAssertFalse(f.say("before"))
+    f.play("beforeClip")
+    f.coordinator.retry(userInitiated: false)
+    f.coordinator.interruptionEnded()
+    XCTAssertFalse(f.say("afterForeground"))
+    XCTAssertTrue(f.loader.requests.isEmpty)
+    XCTAssertTrue(f.session.activations.isEmpty)
+    XCTAssertEqual(f.coordinator.blocker(for: .companion), .userActionRequired)
+    // This models the policy used after valid native Voice/Media entry guards.
+    // It is not a Flutter permission-flow or physical-user-tap test.
+    f.coordinator.retry(userInitiated: true)
+    XCTAssertTrue(f.say("newEntry"))
+    XCTAssertEqual(f.speech.submitted.count, 1)
+  }
+
+  func testRouteLossInvalidatesPendingDecodeEvenWhenNoAudioMemberExisted() {
+    let f = Fixture(); defer { f.engine.dispose() }
+    f.play("old")
+    XCTAssertTrue(f.session.activations.isEmpty)
+    f.coordinator.routeLost()
+    f.engine.poll()
+    XCTAssertEqual(f.answers.map { $0.1 }, [false])
+    XCTAssertTrue(f.loader.requests[0].cancellation.isCancelled)
+    let old = Clip(); f.loader.finish(0, old)
+    XCTAssertEqual(old.plays, 0)
+    XCTAssertEqual(old.stops, 1)
+    XCTAssertTrue(f.events.isEmpty)
+    XCTAssertTrue(f.session.activations.isEmpty)
+    f.play("new"); let fresh = Clip(); f.loader.finish(1, fresh)
+    XCTAssertEqual(f.answers.map { $0.1 }, [false, true])
+    XCTAssertEqual(fresh.plays, 1)
+  }
+
+  func testBriefRecordingInvalidatesPendingDecodeBeforeItsCallback() throws {
+    let f = Fixture(); defer { f.engine.dispose() }
+    f.play("old")
+    let recording = IOSAudioSessionLease(role: .recording, coordinator: f.coordinator)
+    try recording.acquire(); recording.release()
+    let activations = f.session.activations
+    let old = Clip(); f.loader.finish(0, old) // No engine.poll() was needed.
+    XCTAssertEqual(f.answers.map { $0.1 }, [false])
+    XCTAssertEqual(old.plays, 0)
+    XCTAssertEqual(old.stops, 1)
+    XCTAssertTrue(f.events.isEmpty)
+    XCTAssertEqual(f.session.activations, activations)
+    f.play("new"); let fresh = Clip(); f.loader.finish(1, fresh)
+    XCTAssertEqual(f.answers.map { $0.1 }, [false, true])
+  }
+
+  func testInterruptionRetiresBothDomainsAndEndedNeverReplaysOldWork() throws {
+    let f = Fixture(); defer { f.engine.dispose() }
+    let picture = IOSAudioSessionLease(role: .pictureInPicture, coordinator: f.coordinator)
+    try picture.acquire(); defer { picture.release() }
+    f.ready(); XCTAssertTrue(f.say("voice")); XCTAssertTrue(f.say("queued"))
+    f.play("clip"); let clip = Clip(); f.loader.finish(0, clip)
+    let late = clip.onEnd
+    f.coordinator.interruptionBegan()
+    XCTAssertFalse(picture.isValid)
+    for id in ["voice", "queued", "clip"] {
+      XCTAssertEqual(f.terminals(id), [IOSCompanionVoiceEvent(type: "stopped", id: id, code: "interrupted")])
+    }
+    XCTAssertFalse(f.say("during"))
+    f.coordinator.interruptionEnded(); f.engine.poll()
+    let events = f.events
+    f.speech.send(0, .done); late?(clip, .done)
+    XCTAssertEqual(f.events, events)
+    XCTAssertEqual(f.speech.submitted.count, 1)
+    XCTAssertEqual(clip.plays, 1)
+    XCTAssertTrue(f.say("new"))
+  }
+
+  func testResetPendingDecodeCannotReviveAfterAnExplicitRecoveryEntry() {
+    let f = Fixture(); defer { f.engine.dispose() }
+    f.play("old")
+    f.coordinator.mediaServicesReset()
+    f.coordinator.retry(userInitiated: true)
+    let old = Clip(); f.loader.finish(0, old)
+    XCTAssertEqual(f.answers.map { $0.1 }, [false])
+    XCTAssertEqual(old.plays, 0)
+    XCTAssertTrue(f.events.isEmpty)
+    XCTAssertTrue(f.session.activations.isEmpty)
+    f.play("new"); let fresh = Clip(); f.loader.finish(1, fresh)
+    XCTAssertEqual(f.answers.map { $0.1 }, [false, true])
+    XCTAssertEqual(fresh.plays, 1)
   }
 
   private func cache() throws -> URL {
