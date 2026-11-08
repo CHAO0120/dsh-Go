@@ -1,5 +1,6 @@
 import Foundation
 import Darwin
+import UIKit
 
 struct IOSPhoneCoreFailure: Error {
   let code: String
@@ -75,7 +76,7 @@ private func phoneCoreResultCallback(_ handle: UInt64, _ requestID: UInt64, _ st
 /// Swift owner of the CoreDevice branch of the EXISTING Rust singleton. It does
 /// not create another pairing/tunnel stack or replay uncertain input on XCTest.
 @MainActor
-final class IOSPhoneCoreDevice {
+final class IOSPhoneCoreDevice: NSObject {
   typealias EventSink = @MainActor (UInt64, String, Int32, String) -> Void
   typealias ResultSink = @MainActor (UInt64, UInt64, Int32, String, Data?) -> Void
   struct NativeClient {
@@ -97,6 +98,8 @@ final class IOSPhoneCoreDevice {
     init(id: UInt64, mutating: Bool) { self.id = id; self.mutating = mutating }
   }
 
+  private enum FaultOrigin: Equatable { case stopTimeout, native, protocolMismatch }
+
   private final class Run {
     let id = UUID().uuidString.lowercased()
     let ownerID: String
@@ -108,10 +111,14 @@ final class IOSPhoneCoreDevice {
     var failure: IOSPhoneCoreFailure?
     var stopping = false
     var terminal = false
-    var faulted = false
+    var fault: FaultOrigin?
+    var faulted: Bool { fault != nil }
     var pending: Request?
     var nextRequest: UInt64 = 1
-    var stopDeadline: Date?
+    var stopElapsed: TimeInterval = 0
+    var stopAnchor: TimeInterval?
+    var stopLastSample: TimeInterval?
+    var stopWatcher: Task<Void, Never>?
     init(ownerID: String, pairingGeneration: UUID, deadline: Date) {
       self.ownerID = ownerID; self.pairingGeneration = pairingGeneration; self.deadline = deadline
     }
@@ -122,12 +129,16 @@ final class IOSPhoneCoreDevice {
   private let cache: IOSPhoneDDICache
   private let port: () async -> UInt16
   private let now: () -> Date
+  private let stopNow: () -> TimeInterval?
+  private let foreground: () -> Bool
+  private let notifications: NotificationCenter
+  private var applicationActive: Bool
   private var active: Run?
   private var starter: Task<Void, Never>?
   private(set) var state: [String: Any] = ["phase": "idle", "code": "OK"]
   var onStateChanged: (() -> Void)?
 
-  convenience init() {
+  override convenience init() {
     self.init(native: Self.makeNativeClient(), pairing: .shared, cache: .shared,
       port: {
         let raw = Bundle.main.object(forInfoDictionaryKey: "DSHPhoneRemotePairingPort")
@@ -140,13 +151,28 @@ final class IOSPhoneCoreDevice {
   }
 
   init(native: NativeClient?, pairing: IOSPhonePairingStore, cache: IOSPhoneDDICache,
-       port: @escaping () async -> UInt16, now: @escaping () -> Date = Date.init) {
+       port: @escaping () async -> UInt16, now: @escaping () -> Date = Date.init,
+       stopNow: @escaping () -> TimeInterval? = IOSPhoneContinuousTime.now,
+       foreground: @escaping () -> Bool = { UIApplication.shared.applicationState == .active },
+       notifications: NotificationCenter = .default) {
     self.native = native; self.pairing = pairing; self.cache = cache; self.port = port; self.now = now
+    self.stopNow = stopNow; self.foreground = foreground; self.notifications = notifications
+    self.applicationActive = foreground()
+    super.init()
+    notifications.addObserver(self, selector: #selector(stopClockWillPause),
+      name: UIApplication.willResignActiveNotification, object: nil)
+    notifications.addObserver(self, selector: #selector(stopClockDidEnterBackground),
+      name: UIApplication.didEnterBackgroundNotification, object: nil)
+    notifications.addObserver(self, selector: #selector(stopClockDidResume),
+      name: UIApplication.didBecomeActiveNotification, object: nil)
   }
 
+  deinit { notifications.removeObserver(self) }
+
   var isAvailable: Bool { native != nil }
-  var maySwitchBackend: Bool { active == nil || active?.terminal == true }
+  var maySwitchBackend: Bool { active == nil || (active?.terminal == true && active?.faulted != true) }
   var isReady: Bool { active?.capabilities != nil && active?.stopping == false && active?.faulted == false }
+  var isFaulted: Bool { active?.faulted == true }
 
   /// An observation must bind to this native generation, not just the reusable
   /// application-level owner string. This ID contains no credential.
@@ -177,8 +203,8 @@ final class IOSPhoneCoreDevice {
         if run.terminal { active = nil; continue }
         if run.ownerID != ownerID || run.pairingGeneration != pairing.generation { stop(run) }
         if run.stopping {
-          if let deadline = run.stopDeadline, now() >= deadline {
-            return .failure(.init(code: "ERR_PHONE_STOPPING"))
+          if expireStopIfNeeded(run) || run.faulted {
+            return .failure(.init(code: "ERR_PHONE_STOP_UNCONFIRMED"))
           }
         } else { observed = run }
       } else {
@@ -243,15 +269,103 @@ final class IOSPhoneCoreDevice {
   private func stop(_ run: Run) {
     guard active === run, !run.stopping, !run.terminal, !run.faulted else { return }
     run.stopping = true; run.capabilities = nil
-    run.stopDeadline = now().addingTimeInterval(12)
     starter?.cancel(); starter = nil
     if run.handle == 0 {
       run.terminal = true; active = nil
       setState(["phase": "idle", "code": "OK"])
     } else {
       setState(["phase": "stopping", "code": "ERR_PHONE_STOPPING"])
+      guard active === run, !run.terminal, !run.faulted else { return }
+      // Start the foreground-only budget before calling native: an adapter can
+      // report cleanup inline or synchronously notify a lifecycle transition.
+      let validClock = !(applicationActive && foreground()) || advanceStopClock(run)
       native?.stop(run.handle)
+      guard active === run, !run.terminal, !run.faulted else { return }
+      if !validClock { faultStopTimeout(run); return }
+      run.stopWatcher = Task { [weak self, weak run] in
+        while !Task.isCancelled {
+          do { try await Task.sleep(nanoseconds: 100_000_000) } catch { return }
+          guard !Task.isCancelled, let self, let run, self.active === run,
+            run.stopping, !run.terminal, !run.faulted else { return }
+          if self.expireStopIfNeeded(run) { return }
+        }
+      }
     }
+  }
+
+  /// Accumulate only intervals whose start and end are in the same active
+  /// lifecycle segment. The 45 seconds exceeds Rust's 5+5+5+15 cleanup budget;
+  /// scheduling and background suspension are not native cleanup evidence.
+  private func advanceStopClock(_ run: Run) -> Bool {
+    guard let sample = stopNow(), sample.isFinite, sample >= 0 else { return false }
+    if let last = run.stopLastSample, sample < last { return false }
+    if let previous = run.stopAnchor {
+      guard sample >= previous else { return false }
+      let elapsed = run.stopElapsed + (sample - previous)
+      guard elapsed.isFinite else { return false }
+      run.stopElapsed = elapsed
+    }
+    run.stopAnchor = sample
+    run.stopLastSample = sample
+    return true
+  }
+
+  @discardableResult
+  private func expireStopIfNeeded(_ run: Run) -> Bool {
+    guard active === run, run.stopping, !run.terminal, !run.faulted else { return false }
+    guard applicationActive, foreground() else {
+      // A missing/late pause notification must not make an inactive poll add
+      // an uncertain interval. The normal willResignActive hook settles it.
+      run.stopAnchor = nil
+      return false
+    }
+    guard advanceStopClock(run), run.stopElapsed < 45 else {
+      faultStopTimeout(run)
+      return true
+    }
+    return false
+  }
+
+  @objc private func stopClockWillPause(_ notification: Notification) {
+    guard applicationActive else { return }
+    applicationActive = false
+    guard let run = active, run.stopping, !run.terminal, !run.faulted else { return }
+    // UIKit delivers this before leaving the active lifecycle segment. Settle
+    // only an existing anchor, then discard it before the app can be suspended.
+    if run.stopAnchor != nil, (!advanceStopClock(run) || run.stopElapsed >= 45) {
+      faultStopTimeout(run)
+    }
+    run.stopAnchor = nil
+  }
+
+  @objc private func stopClockDidEnterBackground(_ notification: Notification) {
+    applicationActive = false
+    active?.stopAnchor = nil
+  }
+
+  @objc private func stopClockDidResume(_ notification: Notification) {
+    let wasActive = applicationActive
+    applicationActive = foreground()
+    guard !wasActive, applicationActive else { return }
+    guard let run = active, run.stopping, !run.terminal, !run.faulted else { return }
+    run.stopAnchor = nil
+    _ = expireStopIfNeeded(run)
+  }
+
+  private func faultStopTimeout(_ run: Run) {
+    guard active === run, run.stopping, !run.terminal, !run.faulted else { return }
+    run.stopWatcher?.cancel(); run.stopWatcher = nil; run.stopAnchor = nil
+    run.fault = .stopTimeout; run.capabilities = nil
+    run.failure = .init(code: "ERR_PHONE_STOP_UNCONFIRMED", mayHaveActed: run.pending?.mutating ?? false)
+    if let pending = run.pending, pending.reply == nil {
+      pending.reply = .failure(.init(code: "ERR_PHONE_ACTION_UNCONFIRMED", mayHaveActed: pending.mutating))
+    }
+    run.pending = nil
+    Self.resultCallbacks = Self.resultCallbacks.filter { !$0.key.hasPrefix("\(run.handle):") }
+    // Keep this exact run's event callback. Only a matching native kind 2/3
+    // with cleanupConfirmed=true may remove this local timeout barrier later.
+    // Old requests remain retired; neither ready nor a result revives them.
+    setState(["phase": "faulted", "code": "ERR_PHONE_STOP_UNCONFIRMED", "checks": run.checks])
   }
 
   private func begin(_ run: Run, allowDDIMount: Bool) {
@@ -288,7 +402,7 @@ final class IOSPhoneCoreDevice {
           }
         }()
         if run.handle != 0, run.handle != handle {
-          run.faulted = true; run.failure = .init(code: "ERR_PHONE_CORE_PROTOCOL")
+          run.fault = .protocolMismatch; run.failure = .init(code: "ERR_PHONE_CORE_PROTOCOL")
         } else { run.handle = handle }
         if status != 0 || handle == 0 {
           run.failure = .init(code: Self.acceptanceCode(status)); run.terminal = true
@@ -303,10 +417,20 @@ final class IOSPhoneCoreDevice {
   }
 
   private func receive(_ run: Run, handle: UInt64, runID: String, kind: Int32, text: String) {
-    guard active === run, run.id == runID, handle != 0, !run.terminal, !run.faulted else { return }
+    guard active === run, run.id == runID, handle != 0, !run.terminal,
+      !run.faulted || run.fault == .stopTimeout else { return }
     if run.handle == 0 { run.handle = handle } // Native callbacks may precede start's return.
     guard run.handle == handle, text.utf8.count <= 8192,
       let event = try? JSONDecoder().decode(IOSPhoneCoreEvent.self, from: Data(text.utf8)) else {
+      if run.faulted { return }
+      run.failure = .init(code: "ERR_PHONE_CORE_PROTOCOL"); stop(run); return
+    }
+    let confirmedTerminal = (kind == 2 || kind == 3) && event.cleanupConfirmed == true
+    if run.fault == .stopTimeout, !confirmedTerminal, kind != 4 { return }
+    // A valid terminal ACK wins even at the deadline or before a delayed tick.
+    // Native kind 4 is a different, irreversible fault and is never downgraded.
+    if !confirmedTerminal, kind != 4, expireStopIfNeeded(run) { return }
+    if (kind == 2 || kind == 3), !confirmedTerminal {
       run.failure = .init(code: "ERR_PHONE_CORE_PROTOCOL"); stop(run); return
     }
     if let value = event.vpnReachable { run.checks["vpnReachable"] = value }
@@ -327,12 +451,13 @@ final class IOSPhoneCoreDevice {
       run.capabilities = capabilities
       setState(["phase": "ready", "code": "OK", "capabilities": capabilities, "checks": run.checks])
     case 2, 3, 4:
+      run.stopWatcher?.cancel(); run.stopWatcher = nil; run.stopAnchor = nil
       let code = Self.safeCode(event.code) ?? (kind == 2 ? "OK" : "ERR_PHONE_CORE_PROTOCOL")
       run.capabilities = nil
       run.failure = .init(code: kind == 2 ? "ERR_PHONE_CANCELLED" : code,
         variant: ["personalized", "cryptex"].contains(event.variant ?? "") ? event.variant : nil,
         mayHaveActed: event.mayHaveActed ?? (kind == 4))
-      run.faulted = kind == 4
+      run.fault = kind == 4 ? .native : nil
       run.terminal = kind != 4
       if let pending = run.pending, pending.reply == nil {
         pending.reply = .failure(.init(code: "ERR_PHONE_ACTION_UNCONFIRMED", mayHaveActed: pending.mutating))

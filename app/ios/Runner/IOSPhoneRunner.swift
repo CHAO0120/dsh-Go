@@ -10,6 +10,8 @@ final class IOSPhoneRunner {
   private static let group = "group.io.github.ccch1mneyyy.dshgo"
   private static let missing =
     "手机操控没有运行，所以这一步没有执行。请告诉用户：先在 Mac 上运行 tooling/ios/phone-runner.sh，让手机操控的测试进程跑起来，再重试。不要自动反复重试。"
+  static let coreStopUnconfirmed =
+    "ERR_PHONE_STOP_UNCONFIRMED：开发者连接的清理尚未确认，不能继续操控或切换到 XCTest。请告诉用户：彻底关闭 DSH Go 后重新打开，再由用户发起；不要自动重试。"
 
   private typealias Endpoint = PhoneRunnerEndpoint
 
@@ -158,6 +160,9 @@ final class IOSPhoneRunner {
         progress(.executing)
         return await coreActions.run(plan, request: request, ownerID: ownerID, consent: consent, current: live)
       case .failure(let failure):
+        if failure.code == "ERR_PHONE_STOP_UNCONFIRMED" || core.isFaulted {
+          return .failure(Self.coreStopUnconfirmed)
+        }
         // Preparing transport is the ONLY automatic fallback point. A screen
         // sharing start or any input is never retried on another backend.
         guard !mustCore, !failure.mayHaveActed, core.maySwitchBackend,
@@ -175,12 +180,16 @@ final class IOSPhoneRunner {
     if explicitApp == nil, link.appRoutes.values.contains("coredevice"), lastRoute != .xctest {
       return .failure("当前应用身份未核实，不能保证遵守 CoreDevice 专用规则；请先用 CoreDevice，或按准确包名打开目标。")
     }
-    core.stop(ownerID: ownerID)
-    let stopDeadline = Date().addingTimeInterval(12)
-    while !core.maySwitchBackend, live(), Date() < stopDeadline {
-      do { try await Task.sleep(nanoseconds: 50_000_000) } catch { return .failure(IOSPhoneSelfRunnerError.cancelled.message) }
+    switch await Self.stopCoreForXCTest(core, ownerID: ownerID, current: live) {
+    case .success: break
+    case .failure(let failure):
+      if failure.code == "ERR_PHONE_STOP_UNCONFIRMED" { return .failure(Self.coreStopUnconfirmed) }
+      if failure.code == "ERR_PHONE_CANCELLED" { return .failure(IOSPhoneSelfRunnerError.cancelled.message) }
+      return .failure("开发者连接尚未确认停止，不启动 XCTest。")
     }
-    guard live(), core.maySwitchBackend else { return .failure("开发者连接尚未确认停止，不启动 XCTest。") }
+    guard live(), core.maySwitchBackend else {
+      return .failure(core.isFaulted ? Self.coreStopUnconfirmed : "开发者连接尚未确认停止，不启动 XCTest。")
+    }
     let useSelfRunner = link.enabled && selfRunner.isConfigured
     var endpoint = useSelfRunner ? nil : readEndpoint()
     if useSelfRunner {
@@ -219,6 +228,25 @@ final class IOSPhoneRunner {
       lastXCTestScreen = nil
     }
     return await call(endpoint, request: request, current: live, parameters: arguments)
+  }
+
+  /// The short route-selection wait never creates a fault. A native or local
+  /// cleanup fault already blocks switching, so fail before sleeping and on
+  /// every iteration rather than spending another twelve seconds on it.
+  static func stopCoreForXCTest(_ core: IOSPhoneCoreDevice, ownerID: String,
+                               current: () -> Bool) async -> Result<Void, IOSPhoneCoreFailure> {
+    guard !Task.isCancelled, current() else { return .failure(.init(code: "ERR_PHONE_CANCELLED")) }
+    guard !core.isFaulted else { return .failure(.init(code: "ERR_PHONE_STOP_UNCONFIRMED")) }
+    core.stop(ownerID: ownerID)
+    let deadline = Date().addingTimeInterval(12)
+    while true {
+      guard !Task.isCancelled, current() else { return .failure(.init(code: "ERR_PHONE_CANCELLED")) }
+      if core.isFaulted { return .failure(.init(code: "ERR_PHONE_STOP_UNCONFIRMED")) }
+      if core.maySwitchBackend { return .success(()) }
+      if Date() >= deadline { return .failure(.init(code: "ERR_PHONE_STOPPING")) }
+      do { try await Task.sleep(nanoseconds: 50_000_000) }
+      catch { return .failure(.init(code: "ERR_PHONE_CANCELLED")) }
+    }
   }
 
   private func readEndpoint() -> Endpoint? {

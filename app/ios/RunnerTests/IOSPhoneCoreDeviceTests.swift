@@ -1,6 +1,7 @@
 import Foundation
 import CryptoKit
 import XCTest
+import UIKit
 @testable import Runner
 
 /// The real Swift owner with a recording transport and fresh synthetic keys.
@@ -50,6 +51,7 @@ final class IOSPhoneCoreDeviceTests: XCTestCase {
     var inspectStart: ((Data, Data) -> Void)?
     var beforeStartReturns: ((Launch) -> Void)?
     var beforeRequestReturns: ((Invocation) -> Void)?
+    var beforeStopReturns: ((UInt64) -> Void)?
     var client: IOSPhoneCoreDevice.NativeClient {
       IOSPhoneCoreDevice.NativeClient(start: { [self] runID, metadata, pairing, callback in
         inspectStart?(metadata, pairing)
@@ -65,10 +67,10 @@ final class IOSPhoneCoreDeviceTests: XCTestCase {
         beforeRequestReturns?(call)
         return 0
       }, cancel: { [self] handle, id in cancellations.append((handle, id)) },
-      stop: { [self] in stops.append($0) })
+      stop: { [self] handle in stops.append(handle); beforeStopReturns?(handle) })
     }
     func finishFixture() {
-      beforeStartReturns = nil; beforeRequestReturns = nil; inspectStart = nil
+      beforeStartReturns = nil; beforeRequestReturns = nil; beforeStopReturns = nil; inspectStart = nil
       for launch in launches { launch.stopped() }
     }
   }
@@ -77,6 +79,20 @@ final class IOSPhoneCoreDeviceTests: XCTestCase {
     let owner: IOSPhoneCoreDevice
     let pairing: IOSPhonePairingStore
     let native: Recorder
+    let lifecycle: Lifecycle
+  }
+
+  @MainActor
+  private final class StopClock {
+    var value: TimeInterval? = 1_000
+    private(set) var reads = 0
+    func read() -> TimeInterval? { reads += 1; return value }
+  }
+
+  @MainActor
+  private final class Lifecycle {
+    var active = true
+    let notifications = NotificationCenter()
   }
 
   private func syntheticRecord() throws -> Data {
@@ -87,20 +103,24 @@ final class IOSPhoneCoreDeviceTests: XCTestCase {
     ], format: .binary, options: 0)
   }
 
-  private func fixture(_ native: Recorder, port: @escaping () async -> UInt16 = { 49152 }) throws -> Fixture {
+  private func fixture(_ native: Recorder, port: @escaping () async -> UInt16 = { 49152 },
+                       stopNow: @escaping () -> TimeInterval? = IOSPhoneContinuousTime.now,
+                       lifecycle suppliedLifecycle: Lifecycle? = nil) throws -> Fixture {
     let directory = FileManager.default.temporaryDirectory.appendingPathComponent("core-device-tests-" + UUID().uuidString)
     try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false)
     let pairing = IOSPhonePairingStore(keychain: MemoryKeychain())
     try pairing.replace(syntheticRecord(), storage: .session)
+    let lifecycle = suppliedLifecycle ?? Lifecycle()
     let owner = IOSPhoneCoreDevice(native: native.client, pairing: pairing,
-      cache: IOSPhoneDDICache(root: directory), port: port)
+      cache: IOSPhoneDDICache(root: directory), port: port, stopNow: stopNow,
+      foreground: { lifecycle.active }, notifications: lifecycle.notifications)
     addTeardownBlock {
       await MainActor.run {
         pairing.willChange = nil; owner.stop(); native.finishFixture(); pairing.clearSession()
       }
       try? FileManager.default.removeItem(at: directory)
     }
-    return Fixture(owner: owner, pairing: pairing, native: native)
+    return Fixture(owner: owner, pairing: pairing, native: native, lifecycle: lifecycle)
   }
 
   private func wait(until predicate: () -> Bool) async throws {
@@ -132,10 +152,11 @@ final class IOSPhoneCoreDeviceTests: XCTestCase {
     }
   }
 
-  private func readyFixture() async throws -> Fixture {
+  private func readyFixture(stopNow: @escaping () -> TimeInterval? = IOSPhoneContinuousTime.now,
+                            lifecycle: Lifecycle? = nil) async throws -> Fixture {
     let native = Recorder()
     native.beforeStartReturns = { $0.ready() }
-    let value = try fixture(native)
+    let value = try fixture(native, stopNow: stopNow, lifecycle: lifecycle)
     let result = await bounded(Task { await value.owner.prepare(ownerID: "owner-a", current: { true }) })
     XCTAssertEqual(try result.get(), ["screenshot": true, "tap": true])
     return value
@@ -443,5 +464,363 @@ final class IOSPhoneCoreDeviceTests: XCTestCase {
     try await Task.sleep(nanoseconds: 60_000_000)
     XCTAssertTrue(native.launches.isEmpty)
     XCTAssertTrue(value.owner.maySwitchBackend)
+  }
+
+  func testStopUsesFortyFiveActiveSecondsWithoutAnotherCall() async throws {
+    let clock = StopClock()
+    let value = try await readyFixture(stopNow: { clock.read() })
+    var phases: [String] = []
+    value.owner.onStateChanged = { [weak owner = value.owner] in
+      if let phase = owner?.state["phase"] as? String { phases.append(phase) }
+    }
+    value.owner.stop(ownerID: "owner-a")
+    clock.value = 1_044.999
+    try await wait { clock.reads >= 2 }
+    XCTAssertEqual(value.owner.state["phase"] as? String, "stopping")
+    XCTAssertEqual(phases, ["stopping"])
+    clock.value = 1_045
+    try await wait { value.owner.isFaulted }
+    XCTAssertEqual(phases, ["stopping", "faulted"])
+    XCTAssertEqual(value.owner.state["code"] as? String, "ERR_PHONE_STOP_UNCONFIRMED")
+    XCTAssertFalse(value.owner.isReady)
+    XCTAssertFalse(value.owner.maySwitchBackend)
+    XCTAssertEqual(value.native.stops, [101])
+  }
+
+  func testLifecyclePauseExcludesSleepAndResumesTheRemainingBudget() async throws {
+    let clock = StopClock()
+    let value = try await readyFixture(stopNow: { clock.read() })
+    let lifecycle = value.lifecycle
+    value.owner.stop(ownerID: "owner-a")
+    clock.value = 1_010
+    // The notification itself must pause accounting, even while the injected
+    // applicationState query still says active during willResignActive.
+    lifecycle.notifications.post(name: UIApplication.willResignActiveNotification, object: nil)
+    let pausedReads = clock.reads
+    clock.value = 1_000_000
+    try await Task.sleep(nanoseconds: 250_000_000)
+    XCTAssertEqual(clock.reads, pausedReads)
+    XCTAssertEqual(value.owner.state["phase"] as? String, "stopping")
+    lifecycle.active = false
+    lifecycle.notifications.post(name: UIApplication.didEnterBackgroundNotification, object: nil)
+    lifecycle.notifications.post(name: UIApplication.willResignActiveNotification, object: nil)
+    clock.value = nil
+    try await Task.sleep(nanoseconds: 150_000_000)
+    XCTAssertEqual(clock.reads, pausedReads, "background time and unavailable samples are not charged")
+    XCTAssertFalse(value.owner.isFaulted)
+    lifecycle.active = true
+    clock.value = 2_000
+    lifecycle.notifications.post(name: UIApplication.didBecomeActiveNotification, object: nil)
+    let resumedReads = clock.reads
+    clock.value = 2_034.999
+    try await wait { clock.reads > resumedReads }
+    XCTAssertEqual(value.owner.state["phase"] as? String, "stopping")
+    clock.value = 2_035
+    // A duplicate active notification must not throw away the last interval.
+    lifecycle.notifications.post(name: UIApplication.didBecomeActiveNotification, object: nil)
+    try await wait { value.owner.isFaulted }
+    XCTAssertFalse(value.owner.maySwitchBackend)
+    XCTAssertEqual(value.native.stops, [101])
+  }
+
+  func testStopStartedInactiveDoesNotReadClockUntilResume() async throws {
+    let clock = StopClock()
+    let lifecycle = Lifecycle()
+    let value = try await readyFixture(stopNow: { clock.read() }, lifecycle: lifecycle)
+    lifecycle.notifications.post(name: UIApplication.willResignActiveNotification, object: nil)
+    lifecycle.active = false
+    clock.value = nil
+    value.owner.stop(ownerID: "owner-a")
+    try await Task.sleep(nanoseconds: 250_000_000)
+    XCTAssertEqual(clock.reads, 0)
+    XCTAssertEqual(value.owner.state["phase"] as? String, "stopping")
+    clock.value = 5_000
+    lifecycle.active = true
+    lifecycle.notifications.post(name: UIApplication.didBecomeActiveNotification, object: nil)
+    clock.value = 5_045
+    try await wait { value.owner.isFaulted }
+    XCTAssertFalse(value.owner.maySwitchBackend)
+  }
+
+  func testLateConfirmedKindTwoOrThreeReleasesOnlyTheTimedOutOwner() async throws {
+    for kind in [Int32(2), Int32(3)] {
+      let clock = StopClock()
+      let value = try await readyFixture(stopNow: { clock.read() })
+      let first = value.native.launches[0]
+      value.owner.stop(ownerID: "owner-a")
+      clock.value = 1_045
+      try await wait { value.owner.isFaulted }
+      first.ready()
+      first.event(first.handle + 1, first.runID, kind, "{\"cleanupConfirmed\":true}")
+      first.event(first.handle, UUID().uuidString.lowercased(), kind, "{\"cleanupConfirmed\":true}")
+      first.event(first.handle, first.runID, kind, "{\"cleanupConfirmed\":false}")
+      first.event(first.handle, first.runID, kind, "{}")
+      XCTAssertTrue(value.owner.isFaulted)
+      XCTAssertFalse(value.owner.isReady)
+      XCTAssertFalse(value.owner.maySwitchBackend)
+      XCTAssertEqual(value.native.launches.count, 1)
+      first.event(first.handle, first.runID, kind,
+        "{\"code\":\"ERR_PHONE_CANCELLED\",\"cleanupConfirmed\":true}")
+      XCTAssertFalse(value.owner.isFaulted)
+      XCTAssertFalse(value.owner.isReady, "a terminal ACK is not new readiness")
+      XCTAssertTrue(value.owner.maySwitchBackend)
+      XCTAssertEqual(value.owner.state["phase"] as? String, kind == 2 ? "idle" : "failed")
+      XCTAssertEqual(value.native.launches.count, 1, "cleanup must not automatically restart")
+      if kind == 3 { XCTAssertEqual(value.owner.state["code"] as? String, "ERR_PHONE_CANCELLED") }
+      let next = await bounded(Task { await value.owner.prepare(ownerID: "owner-b", current: { true }) })
+      XCTAssertEqual(try next.get(), ["screenshot": true, "tap": true])
+      let nextID = value.owner.currentRunID(ownerID: "owner-b")
+      first.ready()
+      first.stopped()
+      XCTAssertTrue(value.owner.isReady)
+      XCTAssertEqual(value.owner.currentRunID(ownerID: "owner-b"), nextID)
+      XCTAssertEqual(value.native.launches.count, 2)
+    }
+  }
+
+  func testValidTerminalAtDeadlineWinsBeforeDelayedWatchdogTick() async throws {
+    for kind in [Int32(2), Int32(3)] {
+      let clock = StopClock()
+      let value = try await readyFixture(stopNow: { clock.read() })
+      var phases: [String] = []
+      value.owner.onStateChanged = { [weak owner = value.owner] in
+        if let phase = owner?.state["phase"] as? String { phases.append(phase) }
+      }
+      value.owner.stop(ownerID: "owner-a")
+      clock.value = 1_045
+      // No await: the watcher has not had a turn at the boundary.
+      let first = value.native.launches[0]
+      first.event(first.handle, first.runID, kind, "{\"cleanupConfirmed\":true}")
+      XCTAssertTrue(value.owner.maySwitchBackend)
+      XCTAssertFalse(value.owner.isFaulted)
+      XCTAssertFalse(phases.contains("faulted"))
+    }
+  }
+
+  func testNativeKindFourPermanentlyUpgradesATimeoutFault() async throws {
+    for confirmed in [false, true] {
+      let clock = StopClock()
+      let value = try await readyFixture(stopNow: { clock.read() })
+      value.owner.stop(ownerID: "owner-a")
+      clock.value = 1_045
+      try await wait { value.owner.isFaulted }
+      let first = value.native.launches[0]
+      let text = "{\"code\":\"ERR_PHONE_STOP_UNCONFIRMED\",\"cleanupConfirmed\":\(confirmed)}"
+      first.event(first.handle, first.runID, 4, text)
+      first.stopped()
+      first.event(first.handle, first.runID, 3, "{\"cleanupConfirmed\":true}")
+      first.ready()
+      XCTAssertTrue(value.owner.isFaulted)
+      XCTAssertFalse(value.owner.maySwitchBackend)
+      XCTAssertFalse(value.owner.isReady)
+      let next = await bounded(Task { await value.owner.prepare(ownerID: "owner-b", current: { true }) })
+      assertFailure(next, code: "ERR_PHONE_STOP_UNCONFIRMED")
+      XCTAssertEqual(value.native.launches.count, 1)
+      XCTAssertTrue(value.native.requests.isEmpty)
+    }
+  }
+
+  func testRepeatedStopAndWaitingPrepareDoNotRenewTheBudget() async throws {
+    let clock = StopClock()
+    let value = try await readyFixture(stopNow: { clock.read() })
+    value.owner.stop(ownerID: "owner-a")
+    clock.value = 1_030
+    value.owner.stop(ownerID: "owner-a")
+    let next = Task { await value.owner.prepare(ownerID: "owner-b", current: { true }) }
+    defer { next.cancel() }
+    try await wait { clock.reads >= 2 }
+    clock.value = 1_045
+    let result = await bounded(next)
+    assertFailure(result, code: "ERR_PHONE_STOP_UNCONFIRMED")
+    XCTAssertEqual(value.native.stops, [101])
+    XCTAssertEqual(value.native.launches.count, 1)
+    XCTAssertFalse(value.owner.maySwitchBackend)
+  }
+
+  func testInvalidActiveClockFaultsButStillAcceptsConfirmedCleanup() async throws {
+    let readings: [TimeInterval?] = [nil, Double.nan, Double.infinity, -Double.infinity, -1]
+    for reading in readings {
+      let value = try await readyFixture(stopNow: { reading })
+      value.owner.stop(ownerID: "owner-a")
+      XCTAssertEqual(value.native.stops, [101])
+      XCTAssertTrue(value.owner.isFaulted)
+      XCTAssertFalse(value.owner.maySwitchBackend)
+      value.native.launches[0].ready()
+      XCTAssertFalse(value.owner.isReady)
+      value.native.launches[0].stopped()
+      XCTAssertFalse(value.owner.isFaulted)
+      XCTAssertTrue(value.owner.maySwitchBackend)
+    }
+  }
+
+  func testBackwardsClockInActiveSegmentOrAtResumeCannotReleaseBarrier() async throws {
+    for atResume in [false, true] {
+      let clock = StopClock()
+      let value = try await readyFixture(stopNow: { clock.read() })
+      value.owner.stop(ownerID: "owner-a")
+      clock.value = 1_010
+      try await wait { clock.reads >= 2 }
+      if atResume {
+        value.lifecycle.notifications.post(name: UIApplication.willResignActiveNotification, object: nil)
+        value.lifecycle.active = false
+        value.lifecycle.notifications.post(name: UIApplication.didEnterBackgroundNotification, object: nil)
+      }
+      clock.value = 1_009
+      if atResume {
+        value.lifecycle.active = true
+        value.lifecycle.notifications.post(name: UIApplication.didBecomeActiveNotification, object: nil)
+      }
+      try await wait { value.owner.isFaulted }
+      XCTAssertFalse(value.owner.maySwitchBackend)
+      XCTAssertEqual(value.native.stops, [101])
+    }
+  }
+
+  func testConfirmedStopCancelsOldWatcherBeforeANewRun() async throws {
+    let clock = StopClock()
+    let value = try await readyFixture(stopNow: { clock.read() })
+    let first = value.native.launches[0]
+    value.owner.stop(ownerID: "owner-a")
+    clock.value = 1_005
+    first.stopped()
+    let second = await bounded(Task { await value.owner.prepare(ownerID: "owner-b", current: { true }) })
+    XCTAssertEqual(try second.get(), ["screenshot": true, "tap": true])
+    let nextID = value.owner.currentRunID(ownerID: "owner-b")
+    clock.value = 50_000
+    first.ready()
+    first.stopped()
+    value.lifecycle.notifications.post(name: UIApplication.willResignActiveNotification, object: nil)
+    value.lifecycle.active = false
+    value.lifecycle.notifications.post(name: UIApplication.didEnterBackgroundNotification, object: nil)
+    value.lifecycle.active = true
+    value.lifecycle.notifications.post(name: UIApplication.didBecomeActiveNotification, object: nil)
+    try await Task.sleep(nanoseconds: 250_000_000)
+    XCTAssertTrue(value.owner.isReady)
+    XCTAssertEqual(value.owner.currentRunID(ownerID: "owner-b"), nextID)
+    XCTAssertEqual(value.native.stops, [101])
+  }
+
+  func testTimeoutAndLateCleanupNeverReviveAnOldRequest() async throws {
+    let clock = StopClock()
+    let value = try await readyFixture(stopNow: { clock.read() })
+    let request = Task { await value.owner.request(["op": "tap"], ownerID: "owner-a", current: { true }) }
+    defer { request.cancel() }
+    try await wait { value.native.requests.count == 1 }
+    let oldRequest = value.native.requests[0]
+    let oldRun = value.native.launches[0]
+    value.owner.stop(ownerID: "owner-a")
+    clock.value = 1_045
+    try await wait { value.owner.isFaulted }
+    oldRequest.dispatched()
+    let result = await bounded(request)
+    assertFailure(result, code: "ERR_PHONE_ACTION_UNCONFIRMED", acted: true)
+    oldRun.stopped()
+    XCTAssertTrue(value.owner.maySwitchBackend)
+    XCTAssertFalse(value.owner.isReady)
+    XCTAssertEqual(value.native.requests.count, 1, "cleanup must not replay the input")
+    let next = await bounded(Task { await value.owner.prepare(ownerID: "owner-b", current: { true }) })
+    XCTAssertEqual(try next.get(), ["screenshot": true, "tap": true])
+    oldRequest.dispatched()
+    XCTAssertEqual(value.native.requests.count, 1)
+    XCTAssertEqual(value.native.launches.count, 2)
+  }
+
+  func testInlineCleanupAndReentrantStopDoNotArmAnotherWatcher() async throws {
+    let clock = StopClock()
+    let value = try await readyFixture(stopNow: { clock.read() })
+    let first = value.native.launches[0]
+    value.native.beforeStopReturns = { _ in first.stopped() }
+    value.owner.onStateChanged = { [weak owner = value.owner] in
+      if owner?.state["phase"] as? String == "stopping" { owner?.stop(ownerID: "owner-a") }
+    }
+    value.owner.stop(ownerID: "owner-a")
+    XCTAssertTrue(value.owner.maySwitchBackend)
+    XCTAssertFalse(value.owner.isFaulted)
+    let reads = clock.reads
+    clock.value = 50_000
+    try await Task.sleep(nanoseconds: 250_000_000)
+    XCTAssertEqual(clock.reads, reads)
+    XCTAssertEqual(value.native.stops, [101])
+    XCTAssertEqual(value.owner.state["phase"] as? String, "idle")
+  }
+
+  func testRunnerRejectsAnExistingNativeFaultWithoutItsRouteWait() async throws {
+    let value = try await readyFixture()
+    let first = value.native.launches[0]
+    first.event(first.handle, first.runID, 4,
+      "{\"code\":\"ERR_PHONE_STOP_UNCONFIRMED\",\"cleanupConfirmed\":false}")
+    // The four-second harness bound would fail if the production function
+    // spent its twelve-second transition wait on an already faulted owner.
+    let result = await bounded(Task {
+      await IOSPhoneRunner.stopCoreForXCTest(value.owner, ownerID: "owner-a", current: { true })
+    })
+    assertFailure(result, code: "ERR_PHONE_STOP_UNCONFIRMED")
+    XCTAssertTrue(value.native.stops.isEmpty)
+    XCTAssertEqual(value.native.launches.count, 1)
+    XCTAssertTrue(IOSPhoneRunner.coreStopUnconfirmed.contains("彻底关闭 DSH Go"))
+    XCTAssertTrue(IOSPhoneRunner.coreStopUnconfirmed.contains("不要自动重试"))
+  }
+
+  func testRunnerStopsWaitingAsSoonAsLocalOrNativeFaultAppears() async throws {
+    for nativeFault in [false, true] {
+      let clock = StopClock()
+      let value = try await readyFixture(stopNow: { clock.read() })
+      let task = Task {
+        await IOSPhoneRunner.stopCoreForXCTest(value.owner, ownerID: "owner-a", current: { true })
+      }
+      defer { task.cancel() }
+      try await wait { value.native.stops == [101] }
+      if nativeFault {
+        let first = value.native.launches[0]
+        first.event(first.handle, first.runID, 4,
+          "{\"code\":\"ERR_PHONE_STOP_UNCONFIRMED\",\"cleanupConfirmed\":false}")
+      } else {
+        clock.value = 1_045
+      }
+      let result = await bounded(task)
+      assertFailure(result, code: "ERR_PHONE_STOP_UNCONFIRMED")
+      XCTAssertFalse(value.owner.maySwitchBackend)
+      XCTAssertEqual(value.native.launches.count, 1)
+      XCTAssertTrue(value.native.requests.isEmpty)
+    }
+  }
+
+  func testInlineConfirmedCleanupWinsOverAnInvalidInitialClock() async throws {
+    let readings: [TimeInterval?] = [nil, Double.nan]
+    for reading in readings {
+      let value = try await readyFixture(stopNow: { reading })
+      let first = value.native.launches[0]
+      var phases: [String] = []
+      value.owner.onStateChanged = { [weak owner = value.owner] in
+        if let phase = owner?.state["phase"] as? String { phases.append(phase) }
+      }
+      value.native.beforeStopReturns = { _ in first.stopped() }
+      value.owner.stop(ownerID: "owner-a")
+      XCTAssertEqual(phases, ["stopping", "idle"])
+      XCTAssertFalse(value.owner.isFaulted)
+      XCTAssertTrue(value.owner.maySwitchBackend)
+      XCTAssertEqual(value.native.stops, [101])
+    }
+  }
+
+  func testSynchronousStateNotificationPausesBeforeNativeStop() async throws {
+    let clock = StopClock()
+    clock.value = nil
+    let value = try await readyFixture(stopNow: { clock.read() })
+    let notifications = value.lifecycle.notifications
+    value.owner.onStateChanged = { [weak owner = value.owner] in
+      if owner?.state["phase"] as? String == "stopping" {
+        notifications.post(name: UIApplication.willResignActiveNotification, object: nil)
+      }
+    }
+    value.owner.stop(ownerID: "owner-a")
+    XCTAssertEqual(value.native.stops, [101])
+    XCTAssertEqual(clock.reads, 0)
+    XCTAssertFalse(value.owner.isFaulted)
+    XCTAssertEqual(value.owner.state["phase"] as? String, "stopping")
+    // An ACK is accepted while inactive without consulting a broken clock.
+    value.native.launches[0].stopped()
+    XCTAssertTrue(value.owner.maySwitchBackend)
+    XCTAssertEqual(value.owner.state["phase"] as? String, "idle")
   }
 }
