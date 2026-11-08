@@ -19,6 +19,7 @@ import { PersistedRuntimeLog } from './PersistedRuntimeLog';
 import { TransientTaskOwner } from './TransientTaskOwner';
 import { RuntimeLifecycle, HostLifecycleAck } from './RuntimeLifecycle';
 import { OhosLifecycleTransport } from './OhosLifecycleTransport';
+import { LinuxControl, LinuxRunRequest } from './LinuxControl';
 import { agentReminderAccess, backgroundComputePermission } from './BackgroundCompute';
 
 type RuntimeSink = (event: Map<string, Object | null>) => void;
@@ -58,6 +59,8 @@ export class RuntimeController {
   private startCancelled: boolean = false;
   private startBegan: number = 0;
   private requestedStop: boolean = false;
+  private stopping: Promise<void> | null = null;
+  private linux: LinuxControl = new LinuxControl();
   private timer: number | null = null;
   private lastNative: HostState | null = null;
   private runtimeGeneration: number = 0;
@@ -508,6 +511,7 @@ export class RuntimeController {
       await this.storage.ensureDirectory(dshHome);
       await this.storage.ensureDirectory(this.paths.agentsHome);
       await this.storage.ensureDirectory(this.paths.outputs);
+      await this.storage.ensureDirectory(this.paths.linuxDirectory);
       await new OhosRuntimeStorage(this.context.resourceManager, this.context.cacheDir).ensureDirectory(cache);
       await this.writeInstructions(dshHome, workspace, visualReplies);
       this.traceStart('directories ready');
@@ -517,7 +521,8 @@ export class RuntimeController {
       }
       Object.keys(environment).forEach((key: string) => this.logs.rememberSecret(environment[key]));
       const options: HostOptions = { runtimeRoot: this.installer.root, guestRoot: this.paths.guestRoot, dshHome: dshHome,
-        workspaceRoots: [workspace], cacheDir: cache, nativeLibraryDir: nativeLibraryDir, env: environment, safeMode: selectedMode === 'safe' };
+        workspaceRoots: [workspace], cacheDir: cache, nativeLibraryDir: nativeLibraryDir,
+        linuxDirectory: this.paths.linuxDirectory, env: environment, safeMode: selectedMode === 'safe' };
       this.requestedStop = false;
       this.runtimeGeneration++;
       const host = await loadNativeHost();
@@ -563,7 +568,7 @@ export class RuntimeController {
     if (this.pending === 'install') throw new RuntimeChannelError('reset_busy', '安装进行中，未提交重置。');
     // Stop admission synchronously, including a loader currently awaiting I/O.
     this.resetRequested = true;
-    this.stop();
+    await this.stop();
     await this.recovery.requestReset(keep, util.generateRandomUUID(), reinstall);
     try { this.emitStatus(); }
     finally {
@@ -572,18 +577,60 @@ export class RuntimeController {
     }
   }
 
-  stop(): void {
+  stop(): Promise<void> {
     if (this.pending === 'start') this.startCancelled = true;
     this.requestedStop = true;
-    this.retireOwner();
-    this.lifecycle.runtime(null, null);
     this.managedSkills.stop(this.runtimeGeneration);
+    if (this.stopping !== null) return this.stopping;
+    this.stopping = this.finishStop().finally((): void => { this.stopping = null; });
+    return this.stopping;
+  }
+
+  private async finishStop(): Promise<void> {
     const state = nativeHostState();
-    if (['starting', 'running', 'stopping'].includes(state.phase)) {
+    if (['starting', 'running'].includes(state.phase)) {
+      // Linux can only be enabled through the authenticated, ready Node endpoint.
+      // Keep JS and its native join callbacks alive until that service retires.
+      if (state.baseUrl !== null && state.token !== null) {
+        try { await this.linux.shutdown(state.baseUrl, state.token); }
+        catch (error) {
+          this.lastError = 'Linux 任务或资源收尾未确认，停止操作未完成；请查看 Linux 状态后重试。';
+          this.emitStatus(); throw error as Error;
+        }
+      } else if (state.phase === 'running') {
+        throw new RuntimeChannelError('ohos_linux_shutdown_unconfirmed', '运行中的引擎缺少可信控制入口，未停止 Node。');
+      }
+      this.retireOwner();
+      this.lifecycle.runtime(null, null);
       peekNativeHost()?.stop();
       this.startPolling();
       this.emitStatus();
     }
+  }
+
+  private linuxHost(): HostState {
+    const state = nativeHostState();
+    if (state.phase !== 'running' || state.baseUrl === null || state.token === null) {
+      throw new RuntimeChannelError('ohos_linux_engine_unavailable', '请先启动本机引擎；Linux 状态查询不会启动或安装引擎。');
+    }
+    return state;
+  }
+
+  getLinuxStatus(): Promise<string> {
+    const state = this.linuxHost();
+    return this.linux.getStatus(state.baseUrl as string, state.token as string);
+  }
+
+  setLinuxEnabled(enabled: boolean): Promise<string> {
+    if (this.requestedStop || this.resetRequested) throw new RuntimeChannelError('ohos_linux_stopping', '引擎正在停止，未更改 Linux 开关。');
+    const state = this.linuxHost();
+    return this.linux.setEnabled(state.baseUrl as string, state.token as string, enabled);
+  }
+
+  runLinuxPrivateGuest(request: LinuxRunRequest): Promise<string> {
+    if (this.requestedStop || this.resetRequested) throw new RuntimeChannelError('ohos_linux_stopping', '引擎正在停止，未开始 Linux 作业。');
+    const state = this.linuxHost();
+    return this.linux.runPrivateGuest(state.baseUrl as string, state.token as string, request);
   }
 
   private syncManagedSkills(state: HostState): void {
