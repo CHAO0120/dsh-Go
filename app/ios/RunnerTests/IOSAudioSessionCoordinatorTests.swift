@@ -91,7 +91,7 @@ private final class AudioTestMessenger: NSObject, FlutterBinaryMessenger {
   func retire() { handlers.removeAll() }
   func invoke(_ method: String, arguments: [String: Any], reply: @escaping (Any?) -> Void) {
     let codec = FlutterStandardMethodCodec.sharedInstance()
-    let data = codec.encodeMethodCall(FlutterMethodCall(methodName: method, arguments: arguments))
+    let data = codec.encode(FlutterMethodCall(methodName: method, arguments: arguments))
     guard let handler = handlers["dsh/native-media"]?.1 else { reply(FlutterMethodNotImplemented); return }
     handler(data) { data in
       guard let data else { reply(FlutterMethodNotImplemented); return }
@@ -334,8 +334,13 @@ final class IOSAudioSessionCoordinatorTests: XCTestCase {
     var old: IOSAudioSessionCoordinator.Token?
     old = try coordinator.acquire(.companion) { token, _ in
       coordinator.release(token)
-      XCTAssertThrowsError(try coordinator.acquire(.pictureInPicture) { _, _ in }) {
-        XCTAssertEqual($0 as? IOSAudioSessionFailure, .busy)
+      // A do/catch rather than XCTAssertThrowsError: a `try` in its autoclosure would make this
+      // revocation handler a throwing closure, which acquire doesn't take.
+      do {
+        _ = try coordinator.acquire(.pictureInPicture) { _, _ in }
+        XCTFail("acquired while another member was being preempted")
+      } catch {
+        XCTAssertEqual(error as? IOSAudioSessionFailure, .busy)
       }
     }
     let mic = try coordinator.acquire(.recording) { _, _ in }
