@@ -734,7 +734,9 @@ final class PhoneTools {
     _ = try inputApplication()
     touch(CGPoint(x: target.frame.midX, y: target.frame.midY))
     RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.5))
-    let initial = try preparedTextInput(target)
+    // Seen empty in the observation: a focused field that then reports no value at all is empty too.
+    let seenEmpty = target.shownText.isEmpty
+    let initial = try preparedTextInput(target, unreportedIsEmpty: seenEmpty)
     guard initial.value == target.shownText, initial.value.count <= 1024 else {
       throw ToolError("输入焦点中的原值与观察不一致，没有继续输入；请重新 screen。")
     }
@@ -745,18 +747,35 @@ final class PhoneTools {
       initial.app.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: initial.raw.count))
       try checkTypingResult()
     }
-    let cleared = try preparedTextInput(target)
-    // A nil value or a partly deleted string is not proof of empty; the field's own placeholder is
-    // how XCTest reports an empty field.
+    let cleared = try preparedTextInput(target, unreportedIsEmpty: seenEmpty && initial.value.isEmpty)
+    // A partly deleted string is not proof of empty; the field's own placeholder is how XCTest
+    // reports an empty field. A field that reports no value is only taken as empty where it was
+    // seen empty, and then what it holds afterwards has to be exactly the new text.
     guard cleared.value.isEmpty else {
       throw ToolError("未能确证原内容已清空，没有写入新文字；请核对屏幕并用 handoff。")
     }
     _ = try inputApplication()
     cleared.app.typeText(text)
     try checkTypingResult()
+    var readback: TextRead?
+    if initial.unreported || cleared.unreported {
+      RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.6))
+      let read: TextRead
+      do {
+        read = try preparedTextInput(target, unreportedIsEmpty: false)
+      } catch {
+        // The text has gone in by now. Whatever stops the read, the model must not type it again.
+        print("[phone-runner] no readback after typing: \(error)")
+        throw ToolError("文字已经输入，但没能读回输入框核对；请重新 screen 核对，不要重复输入。")
+      }
+      guard read.value == text else {
+        throw ToolError("文字已经输入，但输入框读回的内容和要输入的不完全一样；请重新 screen 核对，不要重复输入。")
+      }
+      readback = read
+    }
     if params["submit"] as? Bool == true {
-      let readback = try preparedTextInput(target)
-      guard readback.value == text else {
+      let entered = try readback ?? preparedTextInput(target, unreportedIsEmpty: false)
+      guard entered.value == text else {
         throw ToolError("新读屏未能核对完整输入文字，没有按回车／发送；请核对屏幕。")
       }
       _ = try inputApplication()
@@ -771,10 +790,12 @@ final class PhoneTools {
   /// No absence of a sensitive hint proves that an arbitrary field is safe.
   /// Focus moves a field and brings up the keyboard; a picture still moving is read again
   /// rather than refused at once. Every read checks the whole binding again.
-  private func preparedTextInput(_ target: Element) throws -> (app: XCUIApplication, value: String, raw: String) {
+  private typealias TextRead = (app: XCUIApplication, value: String, raw: String, unreported: Bool)
+
+  private func preparedTextInput(_ target: Element, unreportedIsEmpty: Bool) throws -> TextRead {
     for attempt in 1...3 {
       do {
-        return try preparedTextInputOnce(target)
+        return try preparedTextInputOnce(target, unreportedIsEmpty: unreportedIsEmpty)
       } catch PhoneRunnerObservationError.changed where attempt < 3 {
         RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.5))
       }
@@ -782,7 +803,7 @@ final class PhoneTools {
     throw PhoneRunnerObservationError.changed
   }
 
-  private func preparedTextInputOnce(_ target: Element) throws -> (app: XCUIApplication, value: String, raw: String) {
+  private func preparedTextInputOnce(_ target: Element, unreportedIsEmpty: Bool) throws -> TextRead {
     let application = try inputApplication()
     let before = try capture(input: true)
     guard before.application.identifier == application.identifier else { throw PhoneRunnerObservationError.app }
@@ -819,7 +840,19 @@ final class PhoneTools {
         }
       }
     }
-    guard let raw = snapshot.value as? String else {
+    let raw: String
+    let unreported: Bool
+    if let reported = snapshot.value as? String {
+      raw = reported
+      unreported = false
+    } else if snapshot.value == nil, unreportedIsEmpty {
+      // Contacts' search field, focused and empty, reports neither "" nor its placeholder but
+      // no value at all. The caller only allows this for a field it saw empty, and reads back
+      // the whole new text after typing.
+      print("[phone-runner] focused field reports no value (placeholder \(snapshot.placeholderValue?.count ?? 0) characters)")
+      raw = ""
+      unreported = true
+    } else {
       throw ToolError("输入框没有可核对的完整值，没有继续输入；请用 handoff。")
     }
     let placeholder = snapshot.placeholderValue ?? ""
@@ -834,7 +867,7 @@ final class PhoneTools {
     }
     _ = try inputApplication()
     try checkTypingResult()
-    return (app, value, raw)
+    return (app, value, raw, unreported)
   }
 
   private func checkTypingResult() throws {
