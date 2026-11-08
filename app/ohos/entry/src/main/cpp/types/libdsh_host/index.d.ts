@@ -59,3 +59,6 @@ export const phoneAttach: (ownerHash: string, engine: number, owner: number) => 
 export const phoneSnapshot: () => HostPhoneSnapshot;
 export const phoneRetire: (generation: number) => boolean;
 export const phoneOperation: (operation: string, key: HostPhoneKey, result?: string) => string | boolean | null;
+
+export interface WorkspaceGrantStatus { active: boolean; drained: boolean; writable: boolean; leases: number; generation: number; }
+export const workspaceGrant: (operation: string, id: string, generation: number, fd?: number, writable?: boolean) => WorkspaceGrantStatus;

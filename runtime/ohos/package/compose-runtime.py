@@ -269,6 +269,28 @@ class Composer:
             self.add(source, root, label, target, reason)
 
 
+def compose_python(composer, bundle, source_runtime, repo):
+    bundle = bundle.resolve(strict=True)
+    python_manifest = json.loads((bundle / 'manifest.json').read_text())
+    if python_manifest.get('schema') != 1 or python_manifest.get('pythonVersion') != '3.14.7':
+        raise ValueError('Unsupported Python bundle schema/version')
+    seen = set()
+    for row in python_manifest['files']:
+        name = row['path']
+        if not re.fullmatch(r'[A-Za-z0-9_.-]+', name) or name in seen or re.search(r'\.(?:so|node|dll|dylib)(?:\.\d+)*$', name, re.I):
+            raise ValueError('Unsafe or duplicate Python asset')
+        seen.add(name)
+        src = bundle / name
+        if src.is_symlink() or src.stat().st_size != row['size'] or digest(src.read_bytes()) != row['sha256']:
+            raise ValueError('Python asset differs from manifest')
+        composer.add(src, bundle, 'python-bundle', 'runtime/ohos/python/assets/' + name)
+    if not {'stdlib.zip', 'ca.pem'} <= seen:
+        raise ValueError('Python stdlib or CA bundle missing')
+    composer.add(bundle / 'manifest.json', bundle, 'python-bundle', 'runtime/ohos/python/assets/manifest.json')
+    for name in ('host.mjs', 'host-worker.mjs', 'loader.mjs', 'platform.py'):
+        composer.add(source_runtime / 'python' / name, repo, 'repository', 'runtime/ohos/python/' + name)
+
+
 def checked_lock(prefix: Path, expected: str):
     data = (prefix / 'package-lock.json').read_bytes()
     if digest(data) != expected:
@@ -416,13 +438,17 @@ def assemble(args):
         composer.dependencies(process, 'process-dependencies', 'runtime/ohos/process',
                               packages['process'], config['processRemovePackages'], config['processRemoveFiles'])
         source_runtime = repo / 'runtime/ohos'
-        for directory in ('net', 'publication', 'capabilities', 'lifecycle', 'phone', 'process', 'plugins'):
+        for directory in ('net', 'publication', 'capabilities', 'lifecycle', 'phone', 'process', 'process/files', 'plugins', 'linux'):
             for source in sorted((source_runtime / directory).glob('*.mjs')):
                 if source.name.startswith(('build-', 'link-')):
                     continue
                 composer.add(source, repo, 'repository', source.relative_to(repo).as_posix())
+        if args.python_bundle:
+            compose_python(composer, args.python_bundle, source_runtime, repo)
         for name in ('preload.mjs', 'node-version.json'):
             composer.add(source_runtime / name, repo, 'repository', 'runtime/ohos/' + name)
+        composer.add(source_runtime / 'linux/native/THIRD-PARTY-NOTICES.txt', repo, 'repository',
+                     'runtime/ohos/licenses/tinyemu-2019-12-21-NOTICES.txt')
         helper = source_runtime / 'native/hap-loader'
         for name in ('index.cjs', 'package.json'):
             composer.add(helper / name, repo, 'repository', 'node_modules/@dsh-go/ohos-native/' + name)
@@ -515,7 +541,7 @@ def assemble(args):
                   'archiveRoundTrip': True, 'runtimeArchive': container,
                   'rawfileFiles': 1, 'rawfileBytes': container['bytes'],
                   'expandedRetainedForValidation': args.keep_expanded,
-                  'nativeLibraries': config['nativeLibraries'],
+                  'nativeLibraries': {**config['nativeLibraries'], **({'python': 'libdsh_python.so', 'python-runtime': 'libpython3.14.so'} if args.python_bundle else {})},
                   'nativeLibrariesInRawfile': False, 'ohosTargetAbi': 'NOT_RUN', 'hapInstall': 'NOT_RUN',
                   'requiredRuntimeFiles': required,
                   'removed': composer.removed, 'buildCommand': command,
@@ -534,6 +560,7 @@ def main():
     parser.add_argument('--target', choices=['ohos'], required=True)
     for name in ('dsh-prefix', 'process-prefix', 'target-report', 'prepared-inputs', 'regex-artifact', 'esbuild-prefix', 'imports-report', 'out'):
         parser.add_argument('--' + name, type=Path, required=True)
+    parser.add_argument('--python-bundle', type=Path, help='Verified CPython bundle from prepare-bundle.py; optional')
     parser.add_argument('--node', type=Path, required=True)
     parser.add_argument('--runtime-core', type=Path, required=True,
                         help='Actual RuntimeCore.ets consumer; type syntax is erased for Linux validation')

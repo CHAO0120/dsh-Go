@@ -183,7 +183,8 @@ await fs.writeFile(path.join(temp, 'EntryAbility.mts'),
   `const AppLinksPlugin = { onForeground() {}, onBackground() {} };\n` +
   `const PastePlugin = { onForeground() {}, onBackground() {} };\n` +
   `const NativeFilesPlugin = { onForeground() {}, onBackground() {} };\n` +
-  `const NativeMediaPlugin = { onForeground() {}, onBackground() {} };\n` + entryText);
+  `const NativeMediaPlugin = { onForeground() {}, onBackground() {} };\n` +
+  `const AuthorizedWorkspacesPlugin = { onForeground() {}, onBackground() {} };\n` + entryText);
 const { default: EntryAbility } = await import(pathToFileURL(path.join(temp, 'EntryAbility.mts')));
 let phoneText = (await fs.readFile(path.join(source, '../phone/PhoneBridge.ets'), 'utf8'))
   .replace("import common from '@ohos.app.ability.common';", '')

@@ -80,7 +80,7 @@ for (const relative of ['runtime/ohos/preload.mjs','node_modules/@deepseek-ai/ds
   const file=path.join(options.runtimeRoot,relative);fs.mkdirSync(path.dirname(file),{recursive:true});
   fs.writeFileSync(file,'// test substitute\n');
 }
-for (const key of ['start','stop','getState','drainEvents','openUserFile']) assert.equal(typeof host[key],'function');
+for (const key of ['start','stop','getState','drainEvents','openUserFile','workspaceGrant']) assert.equal(typeof host[key],'function');
 assert.equal(host.getState().phase,'idle');assert.equal(host.getState().consumed,false);
 assert.throws(()=>host.start(),{code:'ERR_OHOS_HOST_ARGUMENT'});
 for (const safeMode of [null, 'true', 1, {}])
@@ -94,6 +94,16 @@ assert.throws(()=>host.start({...options,env:{DSH_AGENTS_HOME:'/untrusted'}}),{c
 assert.throws(()=>host.start({...options,workspaceRoots:[]}),{code:'ERR_OHOS_HOST_WORKSPACES'});
 assert.equal(host.getState().consumed,false);
 const workspace=options.workspaceRoots[0];
+const borrowed=fs.openSync(workspace,fs.constants.O_RDONLY|fs.constants.O_DIRECTORY);
+try {
+  const published=host.workspaceGrant('publish','adapter-workspace',1,borrowed,true);
+  assert.equal(published.active,true);assert.equal(published.writable,true);
+  assert.equal(published.generation,1);assert.equal(published.leases,0);
+  assert.deepEqual(host.workspaceGrant('status','adapter-workspace',1),published);
+  const retired=host.workspaceGrant('retire','adapter-workspace',1);
+  assert.equal(retired.active,false);assert.equal(retired.drained,true);assert.equal(retired.leases,0);
+  assert.ok(fs.fstatSync(borrowed).isDirectory(),'retirement must leave the borrowed descriptor open');
+} finally { fs.closeSync(borrowed); }
 fs.writeFileSync(path.join(workspace,'中文.txt'),'完整中文');
 const fd=host.openUserFile(workspace,'中文.txt');
 assert.equal(fs.readFileSync(fd,'utf8'),'完整中文');fs.closeSync(fd);
@@ -167,7 +177,7 @@ def main():
                str(out/'libnode.cc'),'-o',str(out/'libnode.so')]
     command = [os.environ.get('CXX','clang++'),'-std=c++17','-shared','-fPIC','-pthread','-Wall','-Wextra',
                '-Werror','-Wno-format','-I',str(headers),'-I',str(node_root/'include/node'),
-               str(core/'host_core.cpp'),str(core/'napi_host.cpp'),str(out/'stub.cc'),
+               str(core/'host_core.cpp'),str(core/'napi_host.cpp'),str(core/'workspace_grants.cpp'),str(out/'stub.cc'),
                '-Wl,--no-as-needed','-L',str(out),'-l:libnode.so','-Wl,-rpath,'+str(out),'-o',str(out/'host.node')]
     rows = []
     for argv in (libnode, command):
@@ -183,7 +193,10 @@ def main():
         # Preserve a failed first mode before stopping; each mode is a fresh process.
         (out/'progress.json').write_text(json.dumps(rows,indent=2)+'\n')
         result.check_returncode()
-    inputs = [core/name for name in ['host_core.cpp','host_core.h','napi_host.cpp','file_access.h']]
+    inputs = [core/name for name in ['host_core.cpp','host_core.h','napi_host.cpp','file_access.h',
+        'lifecycle_state.h','phone_state.h','workspace_grants.cpp','workspace_grants.h','workspace_grants_abi.h',
+        'workspace_fids.h','workspace_fids_abi.h']]
+    inputs.append(ROOT/'runtime/ohos/host/phone_contract.h')
     (out/'report.json').write_text(json.dumps({'scope':'desktop Node N-API plus public OH headers, not OH SDK',
         'inputs':{str(p):hashlib.sha256(p.read_bytes()).hexdigest() for p in inputs},'rows':rows},indent=2)+'\n')
     for result in results:

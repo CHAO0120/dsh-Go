@@ -1,0 +1,98 @@
+import { constants, createReadStream, createWriteStream } from 'node:fs';
+import { mkdir, mkdtemp, open, rename, rm } from 'node:fs/promises';
+import { join, isAbsolute } from 'node:path';
+import { createHash, randomBytes } from 'node:crypto';
+import { Transform } from 'node:stream';
+import { pipeline } from 'node:stream/promises';
+import { downloadLinuxBase } from './base-download.mjs';
+import { prepareLinuxImages } from './prepare-images.mjs';
+import { loadLinuxNative } from './native-session.mjs';
+import { LinuxRuntimeBackend } from './backend.mjs';
+
+const error=(code,message)=>Object.assign(new Error(message),{code});
+const deferred=()=>{const d=Promise.withResolvers();d.promise.catch(()=>{});return d;};
+function validAsset(asset){return asset&&isAbsolute(asset.path)&&Number.isSafeInteger(asset.bytes)&&asset.bytes>0&&/^[a-f0-9]{64}$/.test(asset.sha256);}
+async function copyAsset(asset,destination,signal){
+  let count=0;const hash=createHash('sha256');
+  const check=new Transform({transform(chunk,_enc,callback){count+=chunk.length;if(count>asset.bytes)return callback(error('ERR_OHOS_LINUX_IMAGE_INTEGRITY','Asset exceeds pinned size'));hash.update(chunk);callback(null,chunk);},flush(callback){callback(count===asset.bytes&&hash.digest('hex')===asset.sha256?null:error('ERR_OHOS_LINUX_IMAGE_INTEGRITY','Asset SHA256/size mismatch'));}});
+  await pipeline(createReadStream(asset.path,{flags:constants.O_RDONLY|constants.O_NOFOLLOW}),check,createWriteStream(destination,{flags:'wx',mode:0o600}),{signal});
+}
+// One owner, one native VM lifetime. Only the trusted application composition
+// supplies manifests/native paths; ordinary argv/env cannot select these inputs.
+export class LinuxInstallationOwner {
+  state='idle';backend=undefined;active=undefined;nativeRetirement=undefined;
+  #options;#internals;#promise;#session;#backend;#attempt;#abort=new AbortController();#cleanup;#published=false;#disposed=false;#transportDebt=false;
+  constructor(options,internals={}){
+    const {directory,manifest,nativeLibraryDirectory,bootTimeoutMs=180000,onProgress=()=>{}}=options??{};
+    if(!isAbsolute(directory??'')||!isAbsolute(nativeLibraryDirectory??'')||!manifest||!['bios','kernel','tools','bootstrap','empty'].every(key=>validAsset(manifest[key]))||!Number.isFinite(bootTimeoutMs)||bootTimeoutMs<=0||bootTimeoutMs>2147483647||typeof onProgress!=='function')throw new TypeError('Trusted private directory, native directory and pinned Linux assets are required');
+    this.#options={directory,manifest,nativeLibraryDirectory,bootTimeoutMs,onProgress};this.#internals=internals;
+  }
+  #progress(stage,detail={}){this.#options.onProgress({stage,...detail});}
+  install({signal}={}){
+    if(this.#disposed)return Promise.reject(error('ERR_OHOS_LINUX_OWNER_CLOSED','A stopped owner cannot create another VM'));
+    if(this.#promise)return this.#promise;
+    const abort=()=>this.#abort.abort(signal.reason);if(signal?.aborted)abort();else signal?.addEventListener('abort',abort,{once:true});
+    this.#promise=this.#install().finally(()=>signal?.removeEventListener('abort',abort));this.#promise.catch(()=>{});return this.#promise;
+  }
+  async #install(){
+    const signal=this.#abort.signal,{directory,manifest,nativeLibraryDirectory,bootTimeoutMs}=this.#options;
+    try{
+      signal.throwIfAborted();await mkdir(directory,{recursive:true,mode:0o700});this.#attempt=await mkdtemp(join(directory,'.installation-'));
+      this.state='downloading';this.#progress('download-start');
+      const base=await downloadLinuxBase({directory:join(this.#attempt,'download'),artifact:manifest.archive,signal,onProgress:event=>this.#progress(event.stage,event)},this.#internals.download??{});
+      this.state='preparing';this.#progress('prepare-start');
+      const images=await prepareLinuxImages({directory:this.#attempt,bootstrap:manifest.bootstrap,empty:manifest.empty,archive:{path:base.path,bytes:manifest.archive.bytes,sha256:manifest.archive.sha256},signal,onProgress:event=>this.#progress(event.stage,event)});
+      const paths={};for(const name of ['bios','kernel','tools']){paths[name]=join(this.#attempt,name+'.bin');await copyAsset(manifest[name],paths[name],signal);}
+      await mkdir(join(this.#attempt,'spill'),{mode:0o700});const epoch=randomBytes(32).toString('hex');
+      const config={version:1,machine:'riscv64',memory_size:512,bios:paths.bios,kernel:paths.kernel,cmdline:`console=hvc0 root=/dev/vda ro init=/sbin/dsh-init dsh.epoch=${epoch} dsh.time=${Math.floor(Date.now()/1000)}`,drive0:{file:images.bootstrap,readOnly:true},drive1:{file:images.archive,readOnly:true},drive2:{file:images.target},drive3:{file:paths.tools,readOnly:true},eth0:{driver:'user'}};
+      const configPath=join(this.#attempt,'guest.cfg');const file=await open(configPath,'wx',0o600);try{await file.writeFile(JSON.stringify(config)+'\n');await file.sync();}finally{await file.close();}
+      signal.throwIfAborted();this.state='booting';this.#progress('boot-start');
+      let raw;
+      try{raw=(this.#internals.createSession??(path=>loadLinuxNative({nativeLibraryDirectory}).create(path)))(configPath);}
+      catch(cause){this.#transportDebt=cause.linuxUnsettledFd!==undefined;if(cause.linuxJoin){this.#session={socket:{destroy(){}},requestStop(){},join:async()=>{const result=await cause.linuxJoin;this.nativeRetirement=result;return result;}};}throw cause;}
+      let joining;this.#session={socket:raw.socket,requestStop:()=>raw.requestStop(),join:()=>joining??=(async()=>{const result=await raw.join();this.nativeRetirement=result;return result;})()};
+      // Observe only fixed, bounded installer markers; these never imply READY.
+      let line='';const installFailure=deferred();const observe=bytes=>{
+        try{line+=bytes.toString('utf8');let index;while((index=line.indexOf('\n'))>=0){const item=line.slice(0,index).trim();line=line.slice(index+1);if(item==='__DSH_INSTALL_FAILED__')throw error('ERR_OHOS_LINUX_INSTALL_GUEST','Guest installer failed');if(/^__DSH_INSTALL_(BEGIN|BASE|TOOLS|PIVOT)__$/.test(item))this.#progress('guest-install',{step:item.slice(14,-2).toLowerCase()});}if(line.length>131072)line=line.slice(-131072);}catch(cause){installFailure.reject(cause);}
+      };raw.socket.on('data',observe);
+      this.#backend=new LinuxRuntimeBackend({nativeLibraryDirectory,configPath,epoch,temporaryRoot:join(this.#attempt,'spill')},{createSession:()=>this.#session});
+      const cancelled=deferred();const onAbort=()=>cancelled.reject(signal.reason??error('ABORT_ERR','Installation cancelled'));signal.addEventListener('abort',onAbort,{once:true});if(signal.aborted)onAbort();
+      const timer=setTimeout(()=>installFailure.reject(error('ERR_OHOS_LINUX_INSTALL_TIMEOUT','Guest did not confirm opening before install deadline')),bootTimeoutMs);
+      try{await Promise.race([this.#backend.opened,cancelled.promise,installFailure.promise]);}finally{clearTimeout(timer);signal.removeEventListener('abort',onAbort);raw.socket.removeListener('data',observe);}
+      signal.throwIfAborted();
+      // Publication is data, and happens only after actual 903 opened. It does
+      // not authorize workspace mounts or assert full VM deallocation/restart.
+      const descriptor={version:1,epoch,directory:this.#attempt,target:images.target,archiveSha256:manifest.archive.sha256,state:'opened-private-guest',workspaceLease:false};
+      const active=join(this.#attempt,'active.json');const pending=active+'.pending';const publication=await open(pending,'wx',0o600);try{await publication.writeFile(JSON.stringify(descriptor)+'\n');await publication.sync();}finally{await publication.close();}
+      signal.throwIfAborted();await rename(pending,active);this.#published=true;signal.throwIfAborted();
+      this.active=Object.freeze(descriptor);this.backend=this.#backend;this.state='active';this.#progress('opened-private-guest');return {backend:this.backend,active:this.active};
+    }catch(cause){await this.#retireAndClean();throw cause;}
+  }
+  async #retireAndClean(){
+    if(this.#cleanup)return this.#cleanup;
+    this.#cleanup=(async()=>{
+      let fault;this.state='stopping';
+      if(this.#session){try{await this.#backend?.dispose();}catch(cause){fault=cause;}try{this.#session.requestStop();await this.#session.join();}catch(cause){fault??=cause;}this.#session.socket.destroy();}
+      const retired=!this.#transportDebt&&(!this.#session||(this.nativeRetirement?.joined===true&&this.nativeRetirement.retirementError===false));
+      this.backend=undefined;this.active=undefined;this.state='quarantined';
+      // After native join all owned drive FILEs must have retired before rm;
+      // unlinking an open image is never treated as resource release.
+      if(retired){if(this.#attempt)await rm(this.#attempt,{recursive:true,force:true});this.state=this.#session?'stopped-quarantined':'cancelled-before-vm';}
+      else{this.state='quarantined';if(this.#published)await rm(join(this.#attempt,'active.json'),{force:true});}
+      return {filesRemoved:retired,ownerQuarantined:!!this.#session,native:this.nativeRetirement,releaseError:fault};
+    })();return this.#cleanup;
+  }
+  async dispose(){this.#disposed=true;this.#abort.abort(error('ABORT_ERR','Linux owner disposed'));if(this.#promise)await this.#promise.catch(()=>{});return this.#retireAndClean();}
+}
+export const createLinuxInstallationOwner=(options)=>new LinuxInstallationOwner(options);
+
+// Fixed signed-resource layout. Only the host runtime publication supplies this
+// directory; a manifest cannot select arbitrary host files for guest block IO.
+export async function loadLinuxInstallationManifest({assetsDirectory}){
+  if(typeof assetsDirectory!=='string'||!isAbsolute(assetsDirectory)||assetsDirectory.includes('\0'))throw new TypeError('Trusted Linux asset directory required');
+  const file=await open(join(assetsDirectory,'install-manifest.json'),constants.O_RDONLY|constants.O_NOFOLLOW);let manifest;
+  try{const info=await file.stat();if(!info.isFile()||info.size>65536)throw new TypeError('Invalid Linux manifest');manifest=JSON.parse(await file.readFile('utf8'));}finally{await file.close();}
+  const names={bios:'bbl64.bin',kernel:'kernel-riscv64.bin',tools:'tools.block',bootstrap:'bootstrap.ext4.gz',empty:'empty.ext4.gz'};
+  for(const [key,name] of Object.entries(names)){if(manifest[key]?.path!==name)throw new TypeError('Linux manifest asset name is not fixed');manifest[key]={...manifest[key],path:join(assetsDirectory,name)};}
+  return manifest;
+}
