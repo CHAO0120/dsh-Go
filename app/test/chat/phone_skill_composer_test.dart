@@ -39,6 +39,7 @@ const _invocation = 'cccccccccccccccccccccccccccccccc';
 const _text = 'Only replay this reviewed route: $_invocation';
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
   setUp(() => SharedPreferences.setMockInitialValues({}));
   final messenger = TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
   tearDown(() => messenger.setMockMethodCallHandler(_method, null));
