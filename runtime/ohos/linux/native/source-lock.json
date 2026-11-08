@@ -21,6 +21,7 @@
     "patches/0012-embedded-fatal-boundary.patch": "1a7d9bc99285a409faa0961699542da0e71049d86bde4cc98a08b80ed79b85d6",
     "patches/0013-embedded-network-nosigpipe.patch": "439769b843ee36fe1a1753ee842470a74556a23b849c7be6b87cb2a307e42e3a",
     "temu_embed.h": "e6b6da718dd459cee79733c854c3b2a1d55fae2956c9030c7806a7d2dc733485",
-    "patches/0014-grant-fid-decoder.patch": "c356a51798380a59267621884e096e0e7de36b727b3915eb282ff2b868906d27"
+    "patches/0014-grant-fid-decoder.patch": "c356a51798380a59267621884e096e0e7de36b727b3915eb282ff2b868906d27",
+    "patches/0015-block-write-errors.patch": "e6644b787e29c98caeab49b0911a88f88ab120c290dcaf07383c7e228f83d66d"
   }
 }

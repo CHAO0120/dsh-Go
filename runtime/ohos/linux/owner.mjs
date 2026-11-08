@@ -1,13 +1,15 @@
 import { constants, createReadStream, createWriteStream } from 'node:fs';
-import { mkdir, mkdtemp, open, readdir, rename, rm } from 'node:fs/promises';
+import { mkdir, open } from 'node:fs/promises';
 import { join, isAbsolute } from 'node:path';
-import { createHash, randomBytes } from 'node:crypto';
+import { createHash } from 'node:crypto';
 import { Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { downloadLinuxBase } from './base-download.mjs';
 import { prepareLinuxImages } from './prepare-images.mjs';
 import { loadLinuxNative } from './native-session.mjs';
 import { LinuxRuntimeBackend } from './backend.mjs';
+import { linuxHostLock } from './host-paths.mjs';
+import { openLinuxInstance, cleanGuestClose } from './instance.mjs';
 
 const error=(code,message)=>Object.assign(new Error(message),{code});
 const deferred=()=>{const d=Promise.withResolvers();d.promise.catch(()=>{});return d;};
@@ -21,12 +23,16 @@ async function copyAsset(asset,destination,signal){
 // supplies manifests/native paths; ordinary argv/env cannot select these inputs.
 export class LinuxInstallationOwner {
   state='idle';backend=undefined;active=undefined;nativeRetirement=undefined;
-  #options;#internals;#promise;#session;#backend;#attempt;#descriptor;#abort=new AbortController();#cleanup;#published=false;#retainedExisting=false;#disposed=false;#transportDebt=false;
+  #options;#internals;#promise;#session;#backend;#instance;#attempt;#epoch;#persistentId=null;#bootMode=null;#abort=new AbortController();#cleanup;#published=false;#retainedExisting=false;#disposed=false;#transportDebt=false;
   constructor(options,internals={}){
     const {directory,manifest,nativeLibraryDirectory,bootTimeoutMs=180000,onProgress=()=>{}}=options??{};
     if(!isAbsolute(directory??'')||!isAbsolute(nativeLibraryDirectory??'')||!manifest||!['bios','kernel','tools','bootstrap','empty'].every(key=>validAsset(manifest[key]))||!Number.isFinite(bootTimeoutMs)||bootTimeoutMs<=0||bootTimeoutMs>2147483647||typeof onProgress!=='function')throw new TypeError('Trusted private directory, native directory and pinned Linux assets are required');
-    this.#options={directory,manifest,nativeLibraryDirectory,bootTimeoutMs,onProgress};this.#internals=internals;
+    const pinned=Object.freeze(Object.fromEntries(['bios','kernel','tools','bootstrap','empty','archive'].map(key=>[key,Object.freeze({...manifest[key]})])));
+    this.#options={directory,manifest:pinned,nativeLibraryDirectory,bootTimeoutMs,onProgress};this.#internals=internals;
   }
+  get persistentInstanceId(){return this.#persistentId;}
+  get bootMode(){return this.#bootMode;}
+  get nativeOwnerCreated(){return !!this.#session;}
   // Progress is an observation. A display callback cannot invalidate verified
   // image bytes, kill a guest, or turn successful publication into rollback.
   #progress(stage,detail={}){try{this.#options.onProgress({stage,...detail});}catch{}}
@@ -39,20 +45,30 @@ export class LinuxInstallationOwner {
   async #install(){
     const signal=this.#abort.signal,{directory,manifest,nativeLibraryDirectory,bootTimeoutMs}=this.#options;
     try{
-      signal.throwIfAborted();await mkdir(directory,{recursive:true,mode:0o700});
-      // A later App lifetime cannot silently replace user data. Until an
-      // explicit resume implementation exists, retained/orphaned attempts
-      // require recovery rather than a fresh download and a different VM.
-      if((await readdir(directory)).some(name=>name.startsWith('.installation-'))){this.#retainedExisting=true;throw error('ERR_OHOS_LINUX_RETAINED_INSTANCE','Existing Linux instance requires explicit recovery; its data was retained');}
-      signal.throwIfAborted();this.#attempt=await mkdtemp(join(directory,'.installation-'));
-      this.state='downloading';this.#progress('download-start');
-      const base=await downloadLinuxBase({directory:join(this.#attempt,'download'),artifact:manifest.archive,signal,onProgress:event=>this.#progress(event.stage,event)},this.#internals.download??{});
-      this.state='preparing';this.#progress('prepare-start');
-      const images=await prepareLinuxImages({directory:this.#attempt,bootstrap:manifest.bootstrap,empty:manifest.empty,archive:{path:base.path,bytes:manifest.archive.bytes,sha256:manifest.archive.sha256},signal,onProgress:event=>this.#progress(event.stage,event)});
-      const paths={};for(const name of ['bios','kernel','tools']){paths[name]=join(this.#attempt,name+'.bin');await copyAsset(manifest[name],paths[name],signal);}
-      await mkdir(join(this.#attempt,'spill'),{mode:0o700});const epoch=randomBytes(32).toString('hex');
-      const config={version:1,machine:'riscv64',memory_size:512,bios:paths.bios,kernel:paths.kernel,cmdline:`console=hvc0 root=/dev/vda ro init=/sbin/dsh-init dsh.epoch=${epoch} dsh.time=${Math.floor(Date.now()/1000)}`,drive0:{file:images.bootstrap,readOnly:true},drive1:{file:images.archive,readOnly:true},drive2:{file:images.target},drive3:{file:paths.tools,readOnly:true},eth0:{driver:'user'}};
-      const configPath=join(this.#attempt,'guest.cfg');const file=await open(configPath,'wx',0o600);try{await file.writeFile(JSON.stringify(config)+'\n');await file.sync();}finally{await file.close();}
+      signal.throwIfAborted();
+      this.#instance=await openLinuxInstance({directory,manifest,lockExclusive:this.#internals.lockExclusive??linuxHostLock()},this.#internals.instance);
+      const store=this.#instance;
+      this.#retainedExisting=store.existing;this.#attempt=store.directory;this.#persistentId=store.persistentInstanceId;this.#bootMode=store.existing?'resume':'install';
+      const epoch=this.#epoch=store.epoch;let images;
+      const paths=Object.fromEntries(['bios','kernel','tools'].map(name=>[name,join(this.#attempt,name+'.bin')]));
+      signal.throwIfAborted();
+      if(store.existing){this.state='resuming';this.#progress('resume-start');}
+      else{
+        this.state='downloading';this.#progress('download-start');
+        const base=await downloadLinuxBase({directory:join(this.#attempt,'download'),artifact:manifest.archive,signal,onProgress:event=>this.#progress(event.stage,event)},this.#internals.download??{});
+        this.state='preparing';this.#progress('prepare-start');
+        images=await prepareLinuxImages({directory:this.#attempt,bootstrap:manifest.bootstrap,empty:manifest.empty,archive:{path:base.path,bytes:manifest.archive.bytes,sha256:manifest.archive.sha256},signal,onProgress:event=>this.#progress(event.stage,event)});
+        await store.prepared(images.target);
+        for(const name of ['bios','kernel','tools'])await copyAsset(manifest[name],paths[name],signal);
+        await mkdir(join(this.#attempt,'spill'),{mode:0o700});
+      }
+      const config={version:1,machine:'riscv64',memory_size:512,bios:paths.bios,kernel:paths.kernel,cmdline:`console=hvc0 root=/dev/vda ${store.existing?'rw':'ro'} init=/sbin/dsh-init dsh.epoch=${epoch} dsh.time=${Math.floor(Date.now()/1000)}`,
+        ...(store.existing?{drive0:{file:store.target}}:{drive0:{file:images.bootstrap,readOnly:true},drive1:{file:images.archive,readOnly:true},drive2:{file:store.target},drive3:{file:paths.tools,readOnly:true}}),eth0:{driver:'user'}};
+      const configPath=await store.config(store.existing?'resume.cfg':'guest.cfg',config);
+      signal.throwIfAborted();
+      // Consuming clean is a confirmed file+directory commit BEFORE native can
+      // open the writable target. A crashed process leaves booting, never clean.
+      await store.booting(epoch);await store.verify();
       signal.throwIfAborted();this.state='booting';this.#progress('boot-start');
       let raw;
       try{raw=(this.#internals.createSession??(path=>loadLinuxNative({nativeLibraryDirectory}).create(path)))(configPath);}
@@ -69,32 +85,29 @@ export class LinuxInstallationOwner {
       signal.throwIfAborted();
       // Publication is data, and happens only after actual 903 opened. It does
       // not authorize workspace mounts or assert full VM deallocation/restart.
-      const descriptor={version:1,epoch,directory:this.#attempt,target:images.target,archiveSha256:manifest.archive.sha256,state:'opened-private-guest',workspaceLease:false};
-      this.#descriptor=descriptor;
-      const active=join(this.#attempt,'active.json');const pending=active+'.pending';const publication=await open(pending,'wx',0o600);try{await publication.writeFile(JSON.stringify(descriptor)+'\n');await publication.sync();}finally{await publication.close();}
-      signal.throwIfAborted();await rename(pending,active);this.#published=true;signal.throwIfAborted();
+      const descriptor={version:2,persistentInstanceId:this.#persistentId,bootMode:this.#bootMode,epoch,directory:this.#attempt,target:store.target,archiveSha256:manifest.archive.sha256,state:'opened-private-guest',workspaceLease:false};
+      signal.throwIfAborted();await store.active();this.#published=true;signal.throwIfAborted();
       this.active=Object.freeze(descriptor);this.backend=this.#backend;this.state='active';this.#progress('opened-private-guest');return {backend:this.backend,active:this.active};
-    }catch(cause){await this.#retireAndClean();throw cause;}
+    }catch(cause){this.#retainedExisting||=cause.linuxDataRetained===true;await this.#retireAndClean();throw cause;}
   }
   async #retireAndClean(){
     if(this.#cleanup)return this.#cleanup;
     this.#cleanup=(async()=>{
-      let fault;this.state='stopping';
-      if(this.#session){try{await this.#backend?.dispose();}catch(cause){fault=cause;}try{this.#session.requestStop();await this.#session.join();}catch(cause){fault??=cause;}this.#session.socket.destroy();}
-      const retired=!this.#transportDebt&&(!this.#session||(this.nativeRetirement?.joined===true&&this.nativeRetirement.retirementError===false));
+      let fault,closed;this.state='stopping';
+      if(this.#session){try{closed=await this.#backend?.dispose();}catch(cause){fault=cause;}try{this.#session.requestStop();await this.#session.join();}catch(cause){fault??=cause;}this.#session.socket.destroy();}
+      let retired=!this.#transportDebt&&(!this.#session||(this.nativeRetirement?.joined===true&&this.nativeRetirement.retirementError===false));
       this.backend=undefined;this.active=undefined;this.state='quarantined';
       // Unpublished attempts can be removed only after native retirement.
       // Published writable instances belong to the user and survive shutdown.
-      let filesRemoved=false;
+      let filesRemoved=false,cleanCheckpoint=false;
+      const guestClose=closed?.closed===true&&cleanGuestClose(closed.guestClose,this.#epoch)?Object.freeze({...closed.guestClose}):null;
       try{
-        if(this.#published){
-          const name=retired?'retired':'quarantined',path=join(this.#attempt,name+'.json');
-          const file=await open(path+'.pending','wx',0o600);try{await file.writeFile(JSON.stringify({...this.#descriptor,state:name+'-private-guest'})+'\n');await file.sync();}finally{await file.close();}
-          await rename(path+'.pending',path);await rm(join(this.#attempt,'active.json'),{force:true});
-        }else if(retired){if(this.#attempt)await rm(this.#attempt,{recursive:true,force:true});filesRemoved=!this.#retainedExisting;}
+        if(this.#published&&retired&&guestClose){await this.#instance.clean(closed);cleanCheckpoint=true;}
+        else if(this.#instance&&!this.#published&&!this.#retainedExisting&&retired){await this.#instance.removeUnpublished();filesRemoved=true;}
       }catch(cause){fault??=cause;}
+      if(retired&&this.#instance){try{await this.#instance.release();}catch(cause){fault??=cause;retired=false;cleanCheckpoint=false;}}
       if(retired)this.state=this.#session?'stopped-quarantined':'cancelled-before-vm';
-      return {resourcesRetired:retired,filesRemoved,dataRetained:this.#published||this.#retainedExisting,ownerQuarantined:!!this.#session,native:this.nativeRetirement,releaseError:fault};
+      return {resourcesRetired:retired,filesRemoved,dataRetained:this.#published||this.#retainedExisting||!!this.#instance&&!filesRemoved,ownerQuarantined:!!this.#session,native:this.nativeRetirement,guestClose,cleanCheckpoint,releaseError:fault};
     })();return this.#cleanup;
   }
   async dispose(){this.#disposed=true;this.#abort.abort(error('ABORT_ERR','Linux owner disposed'));if(this.#promise)await this.#promise.catch(()=>{});return this.#retireAndClean();}

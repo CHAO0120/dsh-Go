@@ -7,6 +7,7 @@ import { connect } from 'node:net';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
+import { witnessCommands, validateWitnessResult, compareWitnessResults } from './research/linux-resume/guest-witness.mjs';
 
 const ROUTE = '/dsh-go/v1/linux';
 const CAP = 65536;
@@ -21,6 +22,14 @@ const id = value => typeof value === 'string' && /^[A-Za-z0-9._-]{1,128}$/.test(
 const code = value => value === null || typeof value === 'string' && /^[A-Z][A-Z0-9_]{0,127}$/.test(value);
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
+const uuid = value => typeof value === 'string' && /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/.test(value);
+const DIAGNOSTICS = Object.freeze({
+  dns: '命令输出提示域名解析失败。请检查网络、DNS 或代理设置。',
+  connection: '命令输出提示无法建立连接或连接超时。请检查网络以及代理地址和端口。',
+  'tls-interrupted': '命令输出提示 TLS 连接被中途断开。请检查网络或代理；仅凭此输出无法判断断开方。',
+  'tls-certificate': '命令输出提示 TLS 证书校验失败。请检查设备时间、代理证书和证书配置，不要关闭证书验证。',
+  unknown: '命令失败；错误输出不足以确定原因，尚不能归类为 DNS、连接或 TLS 错误。',
+});
 
 export function endpoint(value) {
   const matched = /^http:\/\/127\.0\.0\.1:([0-9]{1,5})\/?$/.exec(value ?? '');
@@ -38,11 +47,11 @@ export function cloneUrl(value) {
   return url.href;
 }
 
-async function readBounded(file, limit) {
+async function readBounded(file, limit, privateFile = false) {
   const handle = await fs.open(file, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0));
   try {
     const stat = await handle.stat();
-    if (!stat.isFile() || stat.size > limit) throw fail('ERR_MEASURE_INPUT_FILE');
+    if (!stat.isFile() || stat.size > limit || privateFile && (stat.mode & 0o077) !== 0) throw fail('ERR_MEASURE_INPUT_FILE');
     const bytes = Buffer.alloc(limit + 1); let length = 0;
     while (length < bytes.length) {
       const result = await handle.read(bytes, length, bytes.length - length, length);
@@ -72,6 +81,47 @@ async function readGuestEnv(file) {
   return env;
 }
 
+async function readProxy(file) {
+  if (!file) return null;
+  try {
+    const value = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(await readBounded(file, 16384, true)));
+    if (!plain(value) || !['inherit', 'direct', 'manual'].includes(value.mode) ||
+        Object.keys(value).some(key => !['mode', 'httpProxy', 'httpsProxy', 'noProxy'].includes(key))) throw fail('ERR_MEASURE_PROXY_FILE');
+    if (value.mode !== 'manual') {
+      if (Object.keys(value).length !== 1) throw fail('ERR_MEASURE_PROXY_FILE');
+    } else if (![value.httpProxy, value.httpsProxy].some(item => typeof item === 'string' && item.length > 0) ||
+      ['httpProxy', 'httpsProxy', 'noProxy'].some(key => value[key] !== undefined && !bounded(value[key], 4096))) throw fail('ERR_MEASURE_PROXY_FILE');
+    // Only the trusted producer normalizes proxy addresses and chooses guest
+    // loopback mapping. This private object is never included in evidence.
+    return value;
+  } catch { throw fail('ERR_MEASURE_PROXY_FILE'); }
+}
+
+function closeProof(value) {
+  if (value === null || value === undefined) return null;
+  if (!plain(value) || typeof value.epoch !== 'string' || !/^[a-f0-9]{64}$/.test(value.epoch) ||
+      value.rootfsSync !== true || value.syncMethod !== 'syncfs' || value.syncScope !== 'rootfs') throw fail('ERR_MEASURE_RETIREMENT_PROTOCOL');
+  return { epoch: value.epoch, rootfsSync: true, syncMethod: 'syncfs', syncScope: 'rootfs' };
+}
+
+function projectRetirement(row, persistentInstanceId) {
+  if (!plain(row) || ![row.resourcesRetired, row.filesRemoved, row.dataRetained, row.ownerQuarantined].every(item => typeof item === 'boolean') ||
+      !code(row.releaseErrorCode)) throw fail('ERR_MEASURE_RETIREMENT_PROTOCOL');
+  let native = null;
+  if (row.native !== null) {
+    const item = row.native;
+    if (!plain(item) || typeof item.joined !== 'boolean' || !(item.retirementError === null || typeof item.retirementError === 'boolean') ||
+        !(item.apiResult === null || Number.isSafeInteger(item.apiResult))) throw fail('ERR_MEASURE_RETIREMENT_PROTOCOL');
+    native = { joined: item.joined, retirementError: item.retirementError, apiResult: item.apiResult };
+  }
+  const guestClose = closeProof(row.guestClose), cleanCheckpoint = row.cleanCheckpoint === undefined ? false : row.cleanCheckpoint;
+  if (typeof cleanCheckpoint !== 'boolean' || cleanCheckpoint && (!uuid(persistentInstanceId) || !row.resourcesRetired ||
+      !row.dataRetained || row.filesRemoved || !guestClose || !native?.joined || native.retirementError !== false ||
+      ![-3, -4].includes(native.apiResult))) throw fail('ERR_MEASURE_RETIREMENT_PROTOCOL');
+  return { resourcesRetired: row.resourcesRetired, filesRemoved: row.filesRemoved, dataRetained: row.dataRetained,
+    ownerQuarantined: row.ownerQuarantined, releaseErrorCode: row.releaseErrorCode, native, guestClose, cleanCheckpoint };
+}
+
 function output(value) {
   if (!plain(value) || value.encoding !== 'base64' || typeof value.data !== 'string' || value.data.length > 21848 ||
       !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(value.data) ||
@@ -92,6 +142,22 @@ export function decodeStatus(value) {
       !code(value.lastErrorCode)) throw fail('ERR_MEASURE_STATUS_PROTOCOL');
   const state = Object.fromEntries(['v', 'instanceId', 'attemptId', 'state', 'enabled', 'admission', 'guestOpened',
     'ownerRetained', 'workspaceLease', 'restartRequired', 'shutdownComplete', 'nextRequestId', 'lastErrorCode'].map(key => [key, value[key]]));
+  state.persistentInstanceId = value.persistentInstanceId ?? null; state.bootMode = value.bootMode ?? null;
+  state.nativeMemoryRelease = value.nativeMemoryRelease ?? null;
+  if (!(state.persistentInstanceId === null || uuid(state.persistentInstanceId)) ||
+      !(state.bootMode === null || ['install', 'resume'].includes(state.bootMode)) ||
+      (state.persistentInstanceId === null) !== (state.bootMode === null) ||
+      ![null, 'process-exit'].includes(state.nativeMemoryRelease)) throw fail('ERR_MEASURE_STATUS_PROTOCOL');
+  state.proxy = null;
+  if (value.proxy !== undefined) {
+    const row = value.proxy;
+    if (!plain(row) || Object.keys(row).length !== 4 || Object.keys(row).some(key => !['source', 'revision', 'httpConfigured', 'httpsConfigured'].includes(key)) ||
+        !['inherit', 'direct', 'manual'].includes(row.source) || !nonnegative(row.revision) ||
+        typeof row.httpConfigured !== 'boolean' || typeof row.httpsConfigured !== 'boolean' ||
+        row.source === 'direct' && (row.httpConfigured || row.httpsConfigured) ||
+        row.source === 'manual' && !row.httpConfigured && !row.httpsConfigured) throw fail('ERR_MEASURE_PROXY_PROTOCOL');
+    state.proxy = { source: row.source, revision: row.revision, httpConfigured: row.httpConfigured, httpsConfigured: row.httpsConfigured };
+  }
   for (const key of ['ownerState', 'backendState']) {
     if (!(value[key] === null || typeof value[key] === 'string' && /^[a-z0-9-]{1,64}$/.test(value[key]))) throw fail('ERR_MEASURE_STATUS_PROTOCOL');
     state[key] = value[key];
@@ -127,21 +193,22 @@ export function decodeStatus(value) {
     if (row.state === 'unknown' && outcome !== null || row.state === 'settled' && outcome === null) throw fail('ERR_MEASURE_JOB_PROTOCOL');
     state.job = { id: row.id, state: row.state, started: row.started, cancelRequested: row.cancelRequested,
       outcome, errorCode: row.errorCode, stdout: output(row.stdout), stderr: output(row.stderr) };
+    if (row.proxyRevision !== undefined && !nonnegative(row.proxyRevision)) throw fail('ERR_MEASURE_PROXY_PROTOCOL');
+    state.job.proxyRevision = row.proxyRevision === undefined ? null : row.proxyRevision;
+    state.job.diagnostic = null;
+    if (row.diagnostic !== undefined && row.diagnostic !== null) {
+      const hint = row.diagnostic;
+      if (!plain(hint) || !Object.hasOwn(DIAGNOSTICS, hint.category) ||
+          hint.evidence !== (hint.category === 'unknown' ? 'none' : 'stderr') || typeof hint.message !== 'string' ||
+          row.state !== 'settled' || !outcome || outcome.cancelled || outcome.signal !== null || outcome.notStarted ||
+          !Number.isInteger(outcome.exitCode) || outcome.exitCode < 1 || outcome.exitCode > 255) throw fail('ERR_MEASURE_DIAGNOSTIC_PROTOCOL');
+      // Reconstruct fixed text, never export arbitrary server messages/fields.
+      state.job.diagnostic = { category: hint.category, evidence: hint.evidence, message: DIAGNOSTICS[hint.category] };
+    }
   }
   state.retirement = null;
   if (value.retirement !== null) {
-    const row = value.retirement;
-    if (!plain(row) || ![row.resourcesRetired, row.filesRemoved, row.dataRetained, row.ownerQuarantined].every(item => typeof item === 'boolean') ||
-        !code(row.releaseErrorCode)) throw fail('ERR_MEASURE_RETIREMENT_PROTOCOL');
-    let native = null;
-    if (row.native !== null) {
-      const item = row.native;
-      if (!plain(item) || typeof item.joined !== 'boolean' || !(item.retirementError === null || typeof item.retirementError === 'boolean') ||
-          !(item.apiResult === null || Number.isSafeInteger(item.apiResult))) throw fail('ERR_MEASURE_RETIREMENT_PROTOCOL');
-      native = { joined: item.joined, retirementError: item.retirementError, apiResult: item.apiResult };
-    }
-    state.retirement = { resourcesRetired: row.resourcesRetired, filesRemoved: row.filesRemoved,
-      dataRetained: row.dataRetained, ownerQuarantined: row.ownerQuarantined, releaseErrorCode: row.releaseErrorCode, native };
+    state.retirement = projectRetirement(value.retirement, state.persistentInstanceId);
   }
   return state;
 }
@@ -152,21 +219,76 @@ export function retirementConfirmed(state) {
     (row.native === null ? row.ownerQuarantined === false : row.native.joined === true && row.native.retirementError === false);
 }
 
+function cleanCheckpointConfirmed(state) {
+  return retirementConfirmed(state) && state.state === 'stopped' && uuid(state.persistentInstanceId) &&
+    ['install', 'resume'].includes(state.bootMode) && state.retirement.cleanCheckpoint === true &&
+    state.retirement.guestClose !== null && [-3, -4].includes(state.retirement.native?.apiResult);
+}
+
+function projectWitness(record, phase) {
+  record = validateWitnessResult({ phase, stdout: record });
+  const metadata = (value, file = false) => {
+    if (!nonnegative(value.bytes)) throw fail('ERR_MEASURE_WITNESS_RECORD');
+    return { path: value.path, bytes: value.bytes, uid: value.uid, gid: value.gid, mode: value.mode,
+      inode: value.inode, mtimeNs: value.mtimeNs, device: { major: value.device.major, minor: value.device.minor },
+      ...(file ? { sha256: value.sha256 } : {}) };
+  };
+  const mount = record.rootMounts.find(row => row.target === '/' && row.type === 'ext4' &&
+    [record.targetDevice.path, '/dev/root'].includes(row.source) && row.options.includes('rw'));
+  if (!bounded(record.pythonVersion, 128) || ['system', 'release', 'version', 'machine'].some(key => !bounded(record.uname[key], 2048)) ||
+      !bounded(mount.raw, 4096) || mount.options.length > 64 || mount.options.some(value => !bounded(value, 128))) throw fail('ERR_MEASURE_WITNESS_RECORD');
+  return { v: 1, phase, uid: record.uid, gid: record.gid, pythonVersion: record.pythonVersion,
+    uname: Object.fromEntries(['system', 'release', 'version', 'machine'].map(key => [key, record.uname[key]])),
+    root: metadata(record.root), rootMounts: [{ source: mount.source, target: '/', type: 'ext4', options: [...mount.options], raw: mount.raw }],
+    targetDevice: { path: record.targetDevice.path, isBlock: true, major: record.targetDevice.major, minor: record.targetDevice.minor },
+    workspace: metadata(record.workspace), configDirectory: metadata(record.configDirectory),
+    agent: metadata(record.agent, true), init: metadata(record.init, true), data: metadata(record.data, true), config: metadata(record.config, true) };
+}
+
+async function readPreviousSummary(file) {
+  if (!file) return null;
+  try {
+    const bytes = await readBounded(file, 262144);
+    const value = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes));
+    const final = value.finalStatus;
+    if (!plain(value) || value.v !== 1 || !plain(final) || !id(value.instanceId) || value.instanceId !== final.instanceId ||
+        !id(value.attemptId) || value.attemptId !== final.attemptId || !uuid(final.persistentInstanceId) ||
+        final.bootMode !== 'install' || value.shutdownConfirmed !== true || value.witnessCleanCheckpoint !== true) throw fail('ERR_MEASURE_RESUME_INPUT');
+    const checked = { state: final.state, shutdownComplete: final.shutdownComplete, persistentInstanceId: final.persistentInstanceId,
+      bootMode: final.bootMode, retirement: projectRetirement(final.retirement, final.persistentInstanceId) };
+    if (!cleanCheckpointConfirmed(checked)) throw fail('ERR_MEASURE_RESUME_INPUT');
+    return { instanceId: value.instanceId, persistentInstanceId: final.persistentInstanceId,
+      guestClose: checked.retirement.guestClose, witness: projectWitness(value.witness, 'write'), summarySha256: hash(bytes) };
+  } catch { throw fail('ERR_MEASURE_RESUME_INPUT'); }
+}
+
 class Evidence {
-  #start = process.hrtime.bigint(); #sequence = 0; #tails = new Map();
-  constructor(directory) { this.directory = directory; }
+  #start = process.hrtime.bigint(); #sequence = 0; #tails = new Map(); #withhold = false;
+  constructor(directory, withhold = false) { this.directory = directory; this.#withhold = withhold; }
+  get outputWithheld() { return this.#withhold; }
   ms() { return Number(process.hrtime.bigint() - this.#start) / 1e6; }
   async event(kind, value = {}) {
     const row = { sequence: ++this.#sequence, at: new Date().toISOString(), monotonicNs: (process.hrtime.bigint() - this.#start).toString(), kind, ...value };
     await fs.appendFile(path.join(this.directory, 'events.jsonl'), JSON.stringify(row) + '\n', { mode: 0o600 });
     return row;
   }
-  async status(label, state) {
+  async status(label, state, ownedJob) {
+    // Proxy/account configuration can reach arbitrary command output. This is
+    // sticky for the entire measurement, before processing this status's job.
+    // Current proxy facts cannot establish the provenance of a historical or
+    // unconfirmed job, even when the current setting has switched to direct.
+    this.#withhold ||= state.job !== null && !ownedJob || state.proxy?.httpConfigured === true || state.proxy?.httpsConfigured === true;
     const value = { ...state };
     if (state.job) {
       value.job = { ...state.job };
       for (const stream of ['stdout', 'stderr']) {
-        const source = state.job[stream]; const sha256 = hash(source.bytes); const key = `${state.job.id}/${stream}`;
+        const source = state.job[stream];
+        if (this.#withhold) {
+          value.job[stream] = { outputWithheld: true, reason: 'OUTPUT_OMITTED_PRIVACY', totalBytes: source.totalBytes,
+            retainedBytes: source.retainedBytes, truncated: source.truncated, startOffset: source.totalBytes - source.retainedBytes };
+          continue;
+        }
+        const sha256 = hash(source.bytes); const key = `${state.job.id}/${stream}`;
         let previous = this.#tails.get(key);
         if (!previous || previous.sha256 !== sha256) {
           const directory = path.join(this.directory, 'jobs', String(state.job.id));
@@ -286,19 +408,24 @@ function cases(suite, env, repository, remote) {
 export async function measure(options) {
   const host = endpoint(options.baseUrl);
   const remote = cloneUrl(options.cloneUrl);
+  if (options.writeWitness && options.resumeFrom || options.observeOnly && (options.proxyFile || options.writeWitness || options.resumeFrom)) throw fail('ERR_MEASURE_ARGUMENT');
+  const witnessPhase = options.writeWitness ? 'write' : options.resumeFrom ? 'read' : null;
   if (options.ghPrList && (!options.envFile || !/^[A-Za-z0-9][A-Za-z0-9-]{0,38}\/[A-Za-z0-9_.-]{1,100}$/.test(options.ghRepo ?? '') ||
       ['.', '..'].includes(options.ghRepo.split('/')[1]))) throw fail('ERR_MEASURE_GH_ARGUMENT');
   await fs.mkdir(options.out, { mode: 0o700 }); // Existing evidence is never overwritten.
-  const evidence = new Evidence(options.out); const suite = randomUUID();
+  const evidence = new Evidence(options.out, !!(options.proxyFile || options.envFile)); const suite = randomUUID();
   const result = { v: 1, suite, scope: 'Measurements of the supplied loopback endpoint; device identity is not attested by this client',
     nodeVersion: process.versions.node, lockedGuestVersions: LOCKED_VERSIONS, cases: [], status: 'INCOMPLETE',
-    requestedChecks: { ghPrList: options.ghPrList === true, remoteClone: remote !== null },
+    requestedChecks: { ghPrList: options.ghPrList === true, remoteClone: remote !== null,
+      proxySetting: !!options.proxyFile, writeWitness: witnessPhase === 'write', resume: witnessPhase === 'read' },
     shutdownConfirmed: false, interruptionRequested: false, errors: [] };
-  let client, state, instance, attempt, lastSaved, ownsControl = false;
+  let client, state, instance, attempt, lastSaved, previous, ownsControl = false;
+  if (witnessPhase) result.witnessCleanCheckpoint = false;
+  if (witnessPhase === 'read') result.resumeConfirmed = false;
   const acceptedRequestIds = new Set();
   const interrupted = () => { result.interruptionRequested = true; };
   process.on('SIGINT', interrupted); process.on('SIGTERM', interrupted);
-  const save = async label => { lastSaved = await evidence.status(label, state); return state; };
+  const save = async label => { lastSaved = await evidence.status(label, state, state.job !== null && acceptedRequestIds.has(state.job.id)); return state; };
   const same = (value, allowFirstAttempt = false) => {
     if (value.instanceId !== instance || value.attemptId !== attempt && !(allowFirstAttempt && attempt === null)) throw fail('ERR_MEASURE_STALE');
     return value;
@@ -319,7 +446,7 @@ export async function measure(options) {
   const control = async (action, values = {}, firstAttempt = false, beforeSend = null) => {
     const body = JSON.stringify({ v: 1, instanceId: instance, attemptId: attempt, action, ...values });
     for (let number = 1; number <= 3; number++) {
-      if (action === 'shutdown' || action === 'setEnabled' && values.enabled === false) {
+      if (action === 'shutdown' || action === 'setProxy' || action === 'setEnabled' && values.enabled === false) {
         // These actions affect the whole owner. A previously observed idle owner
         // is not a lease: another client may have won admission in the meantime.
         await get(action + '-ownership');
@@ -410,21 +537,45 @@ export async function measure(options) {
     const token = await readToken(options.tokenFile);
     if (options.ghPrList && !options.envFile) throw fail('ERR_MEASURE_GH_ENV_REQUIRED');
     const env = options.ghPrList ? await readGuestEnv(options.envFile) : null;
+    const proxy = await readProxy(options.proxyFile);
+    previous = await readPreviousSummary(options.resumeFrom);
     client = new Client(host, token, evidence, options.requestTimeoutMs);
     await evidence.event('start', { suite, baseUrl: host.origin, programSha256: hash(await fs.readFile(fileURLToPath(import.meta.url))),
-      ghPrListRequested: options.ghPrList === true, hasGhEnvironmentFile: env !== null, observationOnly: options.observeOnly, timeBounds: {
+      ghPrListRequested: options.ghPrList === true, hasGhEnvironmentFile: env !== null, proxySettingRequested: proxy !== null,
+      witnessPhase, observationOnly: options.observeOnly, timeBounds: {
         requestMs: options.requestTimeoutMs, pollMs: options.pollMs, installationMs: options.installTimeoutMs,
         jobMs: options.jobTimeoutMs, shutdownMs: options.shutdownTimeoutMs } });
     await get('initial'); instance = state.instanceId; attempt = state.attemptId;
     result.instanceId = instance; result.initialAttemptId = attempt;
     if (options.observeOnly) { result.status = 'OBSERVED_ONLY'; result.shutdownConfirmed = retirementConfirmed(state); return result; }
+    if (previous && previous.instanceId === instance) throw fail('ERR_MEASURE_RESUME_IDENTITY');
+    if (witnessPhase === 'write' && (attempt !== null || state.ownerRetained || state.guestOpened || state.job !== null || state.state !== 'disabled')) {
+      throw fail('ERR_MEASURE_WITNESS_FRESH_INSTALL');
+    }
     if (state.job && state.job.state !== 'settled') throw fail('ERR_MEASURE_EXISTING_JOB');
     ownsControl = true;
+    if (proxy !== null) await control('setProxy', { proxy });
     const installStarted = evidence.ms();
     await control('setEnabled', { enabled: true }, true); attempt = state.attemptId;
     result.attemptId = attempt;
     await waitFor('installation', options.installTimeoutMs, value => value.admission && value.guestOpened && value.state === 'enabled');
     result.enableToOpenedObservedMs = evidence.ms() - installStarted;
+    if (witnessPhase) {
+      if (!uuid(state.persistentInstanceId) || state.bootMode !== (witnessPhase === 'write' ? 'install' : 'resume') ||
+          previous && previous.persistentInstanceId !== state.persistentInstanceId) {
+        throw fail(witnessPhase === 'write' ? 'ERR_MEASURE_WITNESS_FRESH_INSTALL' : 'ERR_MEASURE_RESUME_IDENTITY');
+      }
+      result.persistentInstanceId = state.persistentInstanceId; result.bootMode = state.bootMode;
+      if (previous) result.previousMeasurement = { instanceId: previous.instanceId, persistentInstanceId: previous.persistentInstanceId,
+        summarySha256: previous.summarySha256, guestCloseEpoch: previous.guestClose.epoch };
+      const command = witnessCommands({ phase: witnessPhase })[0];
+      await run({ label: command.name, argv: [...command.argv], check: value => value.job.outcome.exitCode === 0 &&
+        value.job.outcome.signal === null && value.job.outcome.cancelled === false && !value.job.stdout.truncated });
+      if (result.cases.at(-1).status !== 'PASS') throw fail('ERR_MEASURE_WITNESS_FAILED');
+      result.witness = projectWitness(state.job.stdout.bytes, witnessPhase);
+      result.witnessRequestId = state.job.id;
+      if (previous) result.witnessComparison = compareWitnessResults(previous.witness, result.witness);
+    }
     for (const test of cases(suite, env, options.ghRepo, remote)) {
       if (result.interruptionRequested) throw fail('ERR_MEASURE_INTERRUPTED');
       await run(test);
@@ -456,7 +607,24 @@ export async function measure(options) {
       }
       if (!result.shutdownConfirmed && result.status.startsWith('PASS_')) result.status = 'INCOMPLETE';
     }
+    if (witnessPhase && result.witness) {
+      result.witnessCleanCheckpoint = result.shutdownConfirmed && cleanCheckpointConfirmed(state) &&
+        state.persistentInstanceId === result.persistentInstanceId && state.bootMode === result.bootMode;
+      if (!result.witnessCleanCheckpoint) {
+        result.errors.push({ code: 'ERR_MEASURE_WITNESS_CHECKPOINT', completionInferred: false });
+        if (result.status.startsWith('PASS_')) result.status = 'INCOMPLETE';
+      }
+      if (previous && result.witnessComparison) {
+        result.resumeConfirmed = result.witnessCleanCheckpoint && state.instanceId !== previous.instanceId &&
+          state.retirement.guestClose.epoch !== previous.guestClose.epoch;
+        if (!result.resumeConfirmed) {
+          result.errors.push({ code: 'ERR_MEASURE_RESUME_CHECKPOINT', completionInferred: false });
+          if (result.status.startsWith('PASS_')) result.status = 'INCOMPLETE';
+        }
+      }
+    }
     result.finalStatus = lastSaved ?? null;
+    result.outputWithheld = evidence.outputWithheld;
     result.elapsedMs = evidence.ms();
     client?.close();
     process.off('SIGINT', interrupted); process.off('SIGTERM', interrupted);
@@ -474,19 +642,22 @@ function number(values, key, fallback, maximum) {
 async function main() {
   const { values } = parseArgs({ options: {
     'base-url': { type: 'string' }, 'token-file': { type: 'string' }, 'env-file': { type: 'string' }, out: { type: 'string' },
+    'proxy-file': { type: 'string' }, 'resume-from': { type: 'string' }, 'write-witness': { type: 'boolean', default: false },
     'gh-repo': { type: 'string' }, 'clone-url': { type: 'string' },
     'observe-only': { type: 'boolean', default: false }, 'gh-pr-list': { type: 'boolean', default: false }, help: { type: 'boolean', default: false },
     'poll-ms': { type: 'string' }, 'request-timeout-ms': { type: 'string' }, 'install-timeout-ms': { type: 'string' },
     'job-timeout-ms': { type: 'string' }, 'shutdown-timeout-ms': { type: 'string' },
   }, strict: true });
   if (values.help) {
-    process.stdout.write('用法：node tooling/ohos/linux-device-measure.mjs --base-url http://127.0.0.1:PORT --token-file TOKEN_FILE --out NEW_DIRECTORY [--clone-url https://HOST/REPO.git] [--gh-pr-list --gh-repo OWNER/REPO --env-file JSON_FILE] [--observe-only]\n');
+    process.stdout.write('用法：node tooling/ohos/linux-device-measure.mjs --base-url http://127.0.0.1:PORT --token-file TOKEN_FILE --out NEW_DIRECTORY [--proxy-file PRIVATE_JSON] [--write-witness | --resume-from PREVIOUS_SUMMARY] [--clone-url https://HOST/REPO.git] [--gh-pr-list --gh-repo OWNER/REPO --env-file JSON_FILE] [--observe-only]\n');
     return;
   }
   if (!values['base-url'] || !values['token-file'] || !values.out) throw fail('ERR_MEASURE_ARGUMENT');
   if (values['observe-only'] && values['gh-pr-list']) throw fail('ERR_MEASURE_ARGUMENT');
+  if (values['write-witness'] && values['resume-from'] || values['observe-only'] && (values['proxy-file'] || values['write-witness'] || values['resume-from'])) throw fail('ERR_MEASURE_ARGUMENT');
   const result = await measure({ baseUrl: values['base-url'], tokenFile: values['token-file'], envFile: values['env-file'], out: path.resolve(values.out),
     ghRepo: values['gh-repo'], cloneUrl: values['clone-url'],
+    proxyFile: values['proxy-file'], writeWitness: values['write-witness'], resumeFrom: values['resume-from'],
     observeOnly: values['observe-only'], ghPrList: values['gh-pr-list'], pollMs: number(values, 'poll-ms', 250, 10000),
     requestTimeoutMs: number(values, 'request-timeout-ms', 5000, 60000), installTimeoutMs: number(values, 'install-timeout-ms', 600000, 3600000),
     jobTimeoutMs: number(values, 'job-timeout-ms', 120000, 3600000), shutdownTimeoutMs: number(values, 'shutdown-timeout-ms', 180000, 3600000) });

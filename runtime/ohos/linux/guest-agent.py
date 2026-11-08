@@ -30,6 +30,24 @@ def write_all(fd, data):
         data = data[n:]
 
 
+def sync_rootfs():
+    """Wait for the root filesystem's syncfs result, within this kernel's ABI.
+
+    This is a guest writeback barrier, not a host fsync/power-loss guarantee.
+    Older kernels have limited writeback-error reporting even on return zero.
+    """
+    fd = os.open('/', os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)
+    try:
+        syncfs = ctypes.CDLL(None, use_errno=True).syncfs
+        syncfs.argtypes = [ctypes.c_int]
+        syncfs.restype = ctypes.c_int
+        ctypes.set_errno(0)
+        if syncfs(fd) != 0:
+            raise OSError(ctypes.get_errno() or errno.EIO, 'root filesystem syncfs failed')
+    finally:
+        os.close(fd)
+
+
 def close_fds(keep):
     for name in os.listdir('/proc/self/fd'):
         fd = int(name)
@@ -157,6 +175,7 @@ class Agent:
         self.active = None
         self.input = b''
         self.closed = False
+        self.close_requested = False
         self.wake_r, self.wake_w = os.pipe2(os.O_NONBLOCK | os.O_CLOEXEC)
         signal.signal(signal.SIGCHLD, lambda *_: None)
         signal.set_wakeup_fd(self.wake_w)
@@ -218,11 +237,14 @@ class Agent:
     def command(self, command):
         if not isinstance(command, dict) or command.get('v') != VERSION or command.get('epoch') != self.epoch:
             raise ValueError('guest transport identity mismatch')
+        if self.closed:
+            raise ValueError('guest already closing; no further command may be admitted')
         operation = command.get('op')
         if operation == 'start':
             self.start(command)
             return
         if operation == 'close' and self.active is None:
+            self.close_requested = True
             self.closed = True
             return
         job = self.active
@@ -380,7 +402,17 @@ class Agent:
                 if 0 in ready:
                     self.input_ready()
                 self.poll_job(ready, writable)
-            self.frame('closed')
+            if not self.close_requested or self.active is not None:
+                raise RuntimeError('guest did not reach an explicit quiescent close')
+            try:
+                sync_rootfs()
+            except Exception as error:
+                number = getattr(error, 'errno', None)
+                self.frame('close-failed', rootfsSync=False, syncMethod='syncfs', syncScope='rootfs',
+                           code='ERR_OHOS_GUEST_SYNC',
+                           errno=number if type(number) is int and 0 < number <= 4095 else None)
+                raise
+            self.frame('closed', rootfsSync=True, syncMethod='syncfs', syncScope='rootfs')
         finally:
             # Losing the controller closes its private cancellation pipe; the
             # starter kills its PID namespace. Native transport loss must quarantine.

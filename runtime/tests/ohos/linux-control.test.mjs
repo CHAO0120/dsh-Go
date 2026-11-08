@@ -188,3 +188,43 @@ test('missing fixed assets are discovered only by explicit enable and never load
   assert.equal(f.calls().owners, 0); assert.equal(f.counts().created, 0);
   await f.control.shutdown(); assert.equal(f.control.status().shutdownComplete, true);
 });
+
+
+test('native memory remains process-owned after ordinary off/on and successful final join', async t => {
+  const f = await fixture(t); await f.enable(); const opened = f.control.status();
+  f.command('setEnabled', { enabled: false }); await until(() => f.control.status().state === 'disabled');
+  const disabled = f.control.status(); await f.enable(); const reopened = f.control.status();
+  assert.equal(f.counts().created, 1); assert.equal(f.counts().joined, 0);
+  const closed = await f.control.shutdown();
+  assert.equal(closed.shutdownComplete, true); assert.equal(closed.retirement.native.joined, true);
+  assert.equal(f.counts().created, 1); assert.equal(f.counts().joined, 1);
+  for (const state of [opened, disabled, reopened, closed]) assert.equal(state.nativeMemoryRelease, 'process-exit');
+});
+
+test('native memory is not inferred from an owner whose download failed before VM creation', async t => {
+  const f = await fixture(t); f.internals.download.fetch = async () => new Response('', { status: 503 });
+  f.command('setEnabled', { enabled: true }); await until(() => f.control.status().state === 'failed');
+  const failed = f.control.status(); assert.equal(failed.ownerRetained, true); assert.equal(f.counts().created, 0);
+  assert.equal(failed.retirement.ownerQuarantined, false);
+  assert.equal(failed.nativeMemoryRelease, null);
+});
+
+test('native memory ownership survives Socket setup failure with an explicit native join debt', async t => {
+  const f = await fixture(t); let joins = 0;
+  f.internals.createSession = () => {
+    const cause = Object.assign(new Error('explicit Socket construction boundary failure'), { code: 'EIO' });
+    cause.linuxJoin = Promise.resolve().then(() => { joins++; return { joined: true, retirementError: false, apiResult: -4 }; });
+    throw cause;
+  };
+  f.command('setEnabled', { enabled: true }); await until(() => f.control.status().state === 'failed');
+  const closed = await f.control.shutdown();
+  assert.equal(joins, 1); assert.equal(closed.retirement.ownerQuarantined, true);
+  assert.equal(closed.retirement.native.joined, true); assert.equal(closed.nativeMemoryRelease, 'process-exit');
+});
+
+test('native memory ownership is not cleared by an unconfirmed native retirement', async t => {
+  const f = await fixture(t, { nativeResult: { joined: false, retirementError: null, apiResult: null } });
+  await f.enable(); const closed = await f.control.shutdown();
+  assert.equal(closed.state, 'unknown'); assert.equal(closed.shutdownComplete, false);
+  assert.equal(closed.retirement.native.joined, false); assert.equal(closed.nativeMemoryRelease, 'process-exit');
+});

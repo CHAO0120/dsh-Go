@@ -74,10 +74,13 @@ export async function ownerFixture(t, { progress = () => {}, open = true, joinBa
   const server = net.createServer(); server.listen(0, '127.0.0.1'); await once(server, 'listening');
   const accepted = once(server, 'connection'), socket = net.connect(server.address().port, '127.0.0.1');
   socket.on('error', () => {}); await once(socket, 'connect'); const [remote] = await accepted;
-  const peer = new GuestPeer(remote); peer.on('command', command => { if (command.op === 'close') peer.frame('closed'); });
+  const peer = new GuestPeer(remote); peer.on('command', command => { if (command.op === 'close') peer.frame('closed', { rootfsSync: true, syncMethod: 'syncfs', syncScope: 'rootfs' }); });
   let created = 0, stopped = 0, joined = 0, owner;
   const options = { directory: data, nativeLibraryDirectory: '/trusted/native', manifest, onProgress: progress };
   const internals = {
+    // The session/guest are explicit controlled boundaries; exclusion is the
+    // real linked native flock also used by production, never a JS mutex.
+    lockExclusive: process._linkedBinding('dsh_ohos_publication').lockExclusive,
     download: { fetch: async () => new Response(archive, { status: 200 }) },
     createSession(configPath) {
       created++; const config = JSON.parse(readFileSync(configPath, 'utf8'));
