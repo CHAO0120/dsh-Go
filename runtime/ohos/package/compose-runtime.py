@@ -291,6 +291,25 @@ def compose_python(composer, bundle, source_runtime, repo):
         composer.add(source_runtime / 'python' / name, repo, 'repository', 'runtime/ohos/python/' + name)
 
 
+def compose_linux_assets(composer, directory):
+    spec = importlib.util.spec_from_file_location('ohos_linux_assets', Path(__file__).with_name('linux-assets.py'))
+    assets = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(assets)
+    directory = directory.absolute()
+    verified = assets.verify_assets(directory)
+    for row in verified['files']:
+        destination = assets.DIRECTORY + '/' + row['path']
+        composer.add(directory / row['path'], directory, 'linux-assets', destination)
+        copied = composer.payload[destination]
+        if copied['size'] != row['size'] or copied['sha256'] != row['sha256']:
+            raise ValueError('Linux asset changed between validation and composition')
+    # Verify the actual private payload, including decompressed identities.
+    # The trusted source directory is not a substitute for the bytes published.
+    if assets.verify_assets(composer.files / assets.DIRECTORY) != verified:
+        raise ValueError('Composed Linux assets differ from the verified input')
+    return verified
+
+
 def checked_lock(prefix: Path, expected: str):
     data = (prefix / 'package-lock.json').read_bytes()
     if digest(data) != expected:
@@ -445,6 +464,7 @@ def assemble(args):
                 composer.add(source, repo, 'repository', source.relative_to(repo).as_posix())
         if args.python_bundle:
             compose_python(composer, args.python_bundle, source_runtime, repo)
+        linux_assets = compose_linux_assets(composer, args.linux_assets) if args.linux_assets else None
         for name in ('preload.mjs', 'node-version.json'):
             composer.add(source_runtime / name, repo, 'repository', 'runtime/ohos/' + name)
         composer.add(source_runtime / 'linux/native/THIRD-PARTY-NOTICES.txt', repo, 'repository',
@@ -541,12 +561,15 @@ def assemble(args):
                   'archiveRoundTrip': True, 'runtimeArchive': container,
                   'rawfileFiles': 1, 'rawfileBytes': container['bytes'],
                   'expandedRetainedForValidation': args.keep_expanded,
-                  'nativeLibraries': {**config['nativeLibraries'], **({'python': 'libdsh_python.so', 'python-runtime': 'libpython3.14.so'} if args.python_bundle else {})},
+                  'nativeLibraries': {**config['nativeLibraries'], **({'python': 'libdsh_python.so', 'python-runtime': 'libpython3.14.so'} if args.python_bundle else {}),
+                                      **({'linux': 'libdsh_linux.so'} if linux_assets else {})},
                   'nativeLibrariesInRawfile': False, 'ohosTargetAbi': 'NOT_RUN', 'hapInstall': 'NOT_RUN',
                   'requiredRuntimeFiles': required,
                   'removed': composer.removed, 'buildCommand': command,
                   'importsCommand': imports_command, 'importsReportSha256': digest(args.imports_report.read_bytes()),
                   'compileCache': 'HostOptions.cacheDir/node-compile-cache; never part of immutable rawfile'}
+        if linux_assets:
+            report['linuxAssets'] = linux_assets
         (staging / 'composition-report.json').write_bytes(json_bytes(report))
         os.rename(staging, output)
         return report
@@ -561,6 +584,7 @@ def main():
     for name in ('dsh-prefix', 'process-prefix', 'target-report', 'prepared-inputs', 'regex-artifact', 'esbuild-prefix', 'imports-report', 'out'):
         parser.add_argument('--' + name, type=Path, required=True)
     parser.add_argument('--python-bundle', type=Path, help='Verified CPython bundle from prepare-bundle.py; optional')
+    parser.add_argument('--linux-assets', type=Path, help='Trusted six-file assets directory from build-linux-assets.py; optional')
     parser.add_argument('--node', type=Path, required=True)
     parser.add_argument('--runtime-core', type=Path, required=True,
                         help='Actual RuntimeCore.ets consumer; type syntax is erased for Linux validation')

@@ -212,10 +212,17 @@ def main():
     spec.loader.exec_module(runtime_audit)
     report['runtime'], runtime_problems = runtime_audit.audit_runtime(zipped, args.runtime)
     problems += runtime_problems
+    spec = importlib.util.spec_from_file_location('linux_assets', ROOT / 'runtime/ohos/package/linux-assets.py')
+    linux_assets = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(linux_assets)
     with zipfile.ZipFile(io.BytesIO(read('resources/rawfile/dsh-runtime/runtime.zip'))) as payload:
         has_python = 'files/runtime/ohos/python/assets/manifest.json' in payload.namelist()
         if has_python != bool(supplied):
             problems.append('Python stdlib payload and native library pair must be enabled together')
+        try:
+            report['linuxAssets'] = linux_assets.verify_runtime_archive(payload, libs)
+        except (ValueError, OSError, zipfile.BadZipFile) as error:
+            problems.append(f'Packaged Linux assets: {error}')
     if supplied:
         python_info = report['nativeSetAudit']['libraries'].get('libpython3.14.so', {})
         if any(name != 'libz.so' and name.startswith(('libssl.', 'libcrypto.', 'libffi.', 'libsqlite3.', 'libz.'))

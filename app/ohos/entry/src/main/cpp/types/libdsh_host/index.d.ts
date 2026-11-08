@@ -8,6 +8,8 @@ export interface HostOptions {
   cacheDir: string;
   // Ark resolves this from its own Context installation paths; never from Dart.
   nativeLibraryDir: string;
+  // Independent writable Linux data, derived from the same trusted Context.
+  linuxDirectory: string;
   env: Record<string, string>;
   // Selects only the fixed rescue profile; no caller-supplied argv or paths.
   safeMode?: boolean;

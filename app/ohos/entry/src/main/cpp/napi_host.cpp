@@ -61,6 +61,7 @@ dsh::HostOptions Options(napi_env env, napi_value value) {
   options.dsh_home = String(env, Property(env, value, "dshHome"));
   options.cache_dir = String(env, Property(env, value, "cacheDir"));
   options.native_library_dir = String(env, Property(env, value, "nativeLibraryDir"));
+  options.linux_directory = String(env, Property(env, value, "linuxDirectory"));
   napi_value roots = Property(env, value, "workspaceRoots");
   uint32_t count;
   Check(napi_get_array_length(env, roots, &count));

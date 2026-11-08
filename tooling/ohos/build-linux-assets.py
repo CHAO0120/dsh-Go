@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Build-machine-only image assembler. No extraction/mke2fs inside the App."""
-import argparse,gzip,hashlib,json,os,pathlib,shutil,subprocess,tarfile
+import argparse,gzip,hashlib,importlib.util,json,os,pathlib,shutil,subprocess,tarfile
 P=pathlib.Path;ROOT=P(__file__).resolve().parents[2]
 p=argparse.ArgumentParser();p.add_argument('--diskimage',type=P,required=True);p.add_argument('--alpine',type=P,required=True);p.add_argument('--tools-root',type=P,required=True);p.add_argument('--agent',type=P,required=True);p.add_argument('--output',type=P,required=True);a=p.parse_args()
 def sha(f):
@@ -37,3 +37,8 @@ manifest['archive']={'url':'https://repo.huaweicloud.com/alpine/v3.24/releases/r
 portable=json.loads(json.dumps(manifest))
 for name in ['bios','kernel','tools','bootstrap','empty']:portable[name]['path']=P(portable[name]['path']).name
 (image/'install-manifest.json').write_text(json.dumps(portable,indent=2)+'\n')
+spec=importlib.util.spec_from_file_location('linux_assets',ROOT/'runtime/ohos/package/linux-assets.py')
+assets=importlib.util.module_from_spec(spec);spec.loader.exec_module(assets)
+published=assets.publish_assets(image,out/'assets')
+build=json.loads((out/'BUILD.json').read_text());build['publishedAssets']=published
+(out/'BUILD.json').write_text(json.dumps(build,indent=2)+'\n')

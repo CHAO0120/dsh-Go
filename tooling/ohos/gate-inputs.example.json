@@ -20,7 +20,7 @@
     "tinyemu_alpine_archive": "../gate-inputs/linux-inputs/alpine-minirootfs-3.24.4-riscv64.tar.gz",
     "tinyemu_guest_config": "../gate-inputs/tinyemu-guest/candidate/install.cfg",
     "linux_job_inputs": "../gate-inputs/linux-inputs",
-    "linux_install_assets": "../gate-inputs/linux-install/image",
+    "linux_install_assets": "../gate-inputs/linux-images/assets",
     "ohos_headers": "../gate-inputs/ohos-headers",
     "path_provider_source": "../gate-inputs/path-provider-source",
     "embedding_har": "../gate-inputs/embedding-har",

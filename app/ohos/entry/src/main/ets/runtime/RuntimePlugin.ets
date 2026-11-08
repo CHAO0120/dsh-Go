@@ -9,12 +9,13 @@ import { BusinessError } from '@ohos.base';
 import hilog from '@ohos.hilog';
 import { RuntimeChannelError } from './RuntimeCore';
 import { RuntimeController } from './RuntimeController';
+import { LinuxRunRequest } from './LinuxControl';
 import { ManagedSkillOwner } from './ManagedSkillService';
 import { PhoneBridge } from '../phone/PhoneBridge';
 import type { HostPhoneKey } from 'libdsh_host.so';
 
 
-const POLLED: string[] = ['getStatus', 'getLogs', 'getLogSnapshot', 'failureLog', 'guestRoot'];
+const POLLED: string[] = ['getStatus', 'getLogs', 'getLogSnapshot', 'failureLog', 'guestRoot', 'getLinuxStatus'];
 export class RuntimePlugin implements FlutterPlugin, MethodCallHandler, StreamHandler, AbilityAware {
   private methods: MethodChannel | null = null;
   private events: EventChannel | null = null;
@@ -98,7 +99,7 @@ export class RuntimePlugin implements FlutterPlugin, MethodCallHandler, StreamHa
     if (call.method === 'reopenApp') {
       const ability = this.ability?.getAbility();
       if (ability === undefined) throw new RuntimeChannelError('ohos_no_ability', '请先回到应用窗口再重新打开 App。');
-      try { this.phone?.retire(); } finally { controller.stop(); }
+      try { this.phone?.retire(); } finally { await controller.stop(); }
       const info = ability.context.abilityInfo;
       try {
         await ability.context.restartApp({ bundleName: info.bundleName, moduleName: info.moduleName, abilityName: info.name });
@@ -161,6 +162,35 @@ export class RuntimePlugin implements FlutterPlugin, MethodCallHandler, StreamHa
     // Preview must not trigger pending recovery writes through initialization.
     if (call.method === 'lastKnownGood') { result.success(await controller.lastKnownGood()); return; }
     if (call.method === 'reminderAccess') { result.success(controller.reminderAccess()); return; }
+    // Linux status is read-only and never enters installer/recovery initialization.
+    if (call.method === 'getLinuxStatus') { result.success(await controller.getLinuxStatus()); return; }
+    if (call.method === 'setLinuxEnabled') {
+      const enabled: Any = call.argument('enabled');
+      if (typeof enabled !== 'boolean') throw new RuntimeChannelError('ohos_linux_arguments', 'Linux 开关必须是布尔值。');
+      result.success(await controller.setLinuxEnabled(enabled)); return;
+    }
+    if (call.method === 'runLinuxPrivateGuest') {
+      const instance: Any = call.argument('instanceId'); const attempt: Any = call.argument('attemptId');
+      const id: Any = call.argument('requestId'); const argv: Any = call.argument('argv');
+      const cwd: Any = call.argument('cwd'); const input: Any = call.argument('stdin') ?? '';
+      const env: Any = call.argument('env') ?? new Map<string, Object>();
+      if (typeof instance !== 'string' || typeof attempt !== 'string' || typeof id !== 'number' ||
+          !Number.isSafeInteger(id) || id < 1 || !Array.isArray(argv) || typeof cwd !== 'string' ||
+          typeof input !== 'string' || !(env instanceof Map)) {
+        throw new RuntimeChannelError('ohos_linux_arguments', 'Linux 作业参数或请求身份无效。');
+      }
+      const environmentFields: string[] = [];
+      (env as Map<string, Object>).forEach((value: Object, key: string): void => {
+        if (typeof key !== 'string' || typeof value !== 'string') throw new RuntimeChannelError('ohos_linux_arguments', 'Linux 环境值必须是字符串。');
+        environmentFields.push(JSON.stringify(key) + ':' + JSON.stringify(value));
+      });
+      // JSON parsing creates own data properties, including a legal __proto__
+      // environment name; assigning that name to {} would silently discard it.
+      const environment = JSON.parse('{' + environmentFields.join(',') + '}') as Record<string, string>;
+      const request: LinuxRunRequest = { v: 1, instanceId: instance, attemptId: attempt,
+        action: 'runPrivateGuest', requestId: id, argv: argv as string[], cwd: cwd, env: environment, stdin: input };
+      result.success(await controller.runLinuxPrivateGuest(request)); return;
+    }
     await controller.initialize().catch((error: Error): void => {
       // Recovery failures must remain inspectable while mutating calls stay closed.
       if (!['getStatus', 'getLogs', 'getLogSnapshot', 'failureLog'].includes(call.method)) throw error;
@@ -174,7 +204,7 @@ export class RuntimePlugin implements FlutterPlugin, MethodCallHandler, StreamHa
           call.argument('visualReplies') !== false);
         result.success(null); return;
       case 'stop':
-        try { this.phone?.retire(); } finally { controller.stop(); }
+        try { this.phone?.retire(); } finally { await controller.stop(); }
         result.success(null); return;
       case 'getLogs': result.success(controller.recentLogs((call.argument('lines') ?? 500) as number)); return;
       case 'getLogSnapshot': result.success(controller.logSnapshot((call.argument('lines') ?? 300) as number)); return;

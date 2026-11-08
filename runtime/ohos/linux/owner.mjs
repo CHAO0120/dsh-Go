@@ -1,5 +1,5 @@
 import { constants, createReadStream, createWriteStream } from 'node:fs';
-import { mkdir, mkdtemp, open, rename, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, open, readdir, rename, rm } from 'node:fs/promises';
 import { join, isAbsolute } from 'node:path';
 import { createHash, randomBytes } from 'node:crypto';
 import { Transform } from 'node:stream';
@@ -21,13 +21,15 @@ async function copyAsset(asset,destination,signal){
 // supplies manifests/native paths; ordinary argv/env cannot select these inputs.
 export class LinuxInstallationOwner {
   state='idle';backend=undefined;active=undefined;nativeRetirement=undefined;
-  #options;#internals;#promise;#session;#backend;#attempt;#abort=new AbortController();#cleanup;#published=false;#disposed=false;#transportDebt=false;
+  #options;#internals;#promise;#session;#backend;#attempt;#descriptor;#abort=new AbortController();#cleanup;#published=false;#retainedExisting=false;#disposed=false;#transportDebt=false;
   constructor(options,internals={}){
     const {directory,manifest,nativeLibraryDirectory,bootTimeoutMs=180000,onProgress=()=>{}}=options??{};
     if(!isAbsolute(directory??'')||!isAbsolute(nativeLibraryDirectory??'')||!manifest||!['bios','kernel','tools','bootstrap','empty'].every(key=>validAsset(manifest[key]))||!Number.isFinite(bootTimeoutMs)||bootTimeoutMs<=0||bootTimeoutMs>2147483647||typeof onProgress!=='function')throw new TypeError('Trusted private directory, native directory and pinned Linux assets are required');
     this.#options={directory,manifest,nativeLibraryDirectory,bootTimeoutMs,onProgress};this.#internals=internals;
   }
-  #progress(stage,detail={}){this.#options.onProgress({stage,...detail});}
+  // Progress is an observation. A display callback cannot invalidate verified
+  // image bytes, kill a guest, or turn successful publication into rollback.
+  #progress(stage,detail={}){try{this.#options.onProgress({stage,...detail});}catch{}}
   install({signal}={}){
     if(this.#disposed)return Promise.reject(error('ERR_OHOS_LINUX_OWNER_CLOSED','A stopped owner cannot create another VM'));
     if(this.#promise)return this.#promise;
@@ -37,7 +39,12 @@ export class LinuxInstallationOwner {
   async #install(){
     const signal=this.#abort.signal,{directory,manifest,nativeLibraryDirectory,bootTimeoutMs}=this.#options;
     try{
-      signal.throwIfAborted();await mkdir(directory,{recursive:true,mode:0o700});this.#attempt=await mkdtemp(join(directory,'.installation-'));
+      signal.throwIfAborted();await mkdir(directory,{recursive:true,mode:0o700});
+      // A later App lifetime cannot silently replace user data. Until an
+      // explicit resume implementation exists, retained/orphaned attempts
+      // require recovery rather than a fresh download and a different VM.
+      if((await readdir(directory)).some(name=>name.startsWith('.installation-'))){this.#retainedExisting=true;throw error('ERR_OHOS_LINUX_RETAINED_INSTANCE','Existing Linux instance requires explicit recovery; its data was retained');}
+      signal.throwIfAborted();this.#attempt=await mkdtemp(join(directory,'.installation-'));
       this.state='downloading';this.#progress('download-start');
       const base=await downloadLinuxBase({directory:join(this.#attempt,'download'),artifact:manifest.archive,signal,onProgress:event=>this.#progress(event.stage,event)},this.#internals.download??{});
       this.state='preparing';this.#progress('prepare-start');
@@ -63,6 +70,7 @@ export class LinuxInstallationOwner {
       // Publication is data, and happens only after actual 903 opened. It does
       // not authorize workspace mounts or assert full VM deallocation/restart.
       const descriptor={version:1,epoch,directory:this.#attempt,target:images.target,archiveSha256:manifest.archive.sha256,state:'opened-private-guest',workspaceLease:false};
+      this.#descriptor=descriptor;
       const active=join(this.#attempt,'active.json');const pending=active+'.pending';const publication=await open(pending,'wx',0o600);try{await publication.writeFile(JSON.stringify(descriptor)+'\n');await publication.sync();}finally{await publication.close();}
       signal.throwIfAborted();await rename(pending,active);this.#published=true;signal.throwIfAborted();
       this.active=Object.freeze(descriptor);this.backend=this.#backend;this.state='active';this.#progress('opened-private-guest');return {backend:this.backend,active:this.active};
@@ -75,11 +83,18 @@ export class LinuxInstallationOwner {
       if(this.#session){try{await this.#backend?.dispose();}catch(cause){fault=cause;}try{this.#session.requestStop();await this.#session.join();}catch(cause){fault??=cause;}this.#session.socket.destroy();}
       const retired=!this.#transportDebt&&(!this.#session||(this.nativeRetirement?.joined===true&&this.nativeRetirement.retirementError===false));
       this.backend=undefined;this.active=undefined;this.state='quarantined';
-      // After native join all owned drive FILEs must have retired before rm;
-      // unlinking an open image is never treated as resource release.
-      if(retired){if(this.#attempt)await rm(this.#attempt,{recursive:true,force:true});this.state=this.#session?'stopped-quarantined':'cancelled-before-vm';}
-      else{this.state='quarantined';if(this.#published)await rm(join(this.#attempt,'active.json'),{force:true});}
-      return {filesRemoved:retired,ownerQuarantined:!!this.#session,native:this.nativeRetirement,releaseError:fault};
+      // Unpublished attempts can be removed only after native retirement.
+      // Published writable instances belong to the user and survive shutdown.
+      let filesRemoved=false;
+      try{
+        if(this.#published){
+          const name=retired?'retired':'quarantined',path=join(this.#attempt,name+'.json');
+          const file=await open(path+'.pending','wx',0o600);try{await file.writeFile(JSON.stringify({...this.#descriptor,state:name+'-private-guest'})+'\n');await file.sync();}finally{await file.close();}
+          await rename(path+'.pending',path);await rm(join(this.#attempt,'active.json'),{force:true});
+        }else if(retired){if(this.#attempt)await rm(this.#attempt,{recursive:true,force:true});filesRemoved=!this.#retainedExisting;}
+      }catch(cause){fault??=cause;}
+      if(retired)this.state=this.#session?'stopped-quarantined':'cancelled-before-vm';
+      return {resourcesRetired:retired,filesRemoved,dataRetained:this.#published||this.#retainedExisting,ownerQuarantined:!!this.#session,native:this.nativeRetirement,releaseError:fault};
     })();return this.#cleanup;
   }
   async dispose(){this.#disposed=true;this.#abort.abort(error('ABORT_ERR','Linux owner disposed'));if(this.#promise)await this.#promise.catch(()=>{});return this.#retireAndClean();}

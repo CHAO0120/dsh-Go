@@ -66,10 +66,11 @@ const mode = process.argv[4];
 assert.ok(mode === 'normal' || mode === 'safe');
 const guestRoot=path.join(base,'中文 root/runtime/rootfs');
 const options = {runtimeRoot:path.join(base,'runtime'),guestRoot,dshHome:path.join(guestRoot,'root/.dsh'),
+  linuxDirectory:path.join(base,'中文 root/linux-tools'),
   cacheDir:path.join(base,'cache'),nativeLibraryDir:path.join(base,'libs'),workspaceRoots:[path.join(guestRoot,'root/workspace')],
   env:{DEEPSEEK_API_KEY:'fixture_SECRET'}};
 if (mode === 'safe') options.safeMode = true;
-for (const dir of [options.runtimeRoot,options.dshHome,options.cacheDir,options.nativeLibraryDir,path.join(guestRoot,'root/.agents'),...options.workspaceRoots])
+for (const dir of [options.runtimeRoot,options.dshHome,options.cacheDir,options.nativeLibraryDir,options.linuxDirectory,path.join(guestRoot,'root/.agents'),...options.workspaceRoots])
   fs.mkdirSync(dir,{recursive:true});
 for (const name of ['libdsh_flock.so','libdsh_require_builtin.so'])
   fs.writeFileSync(path.join(options.nativeLibraryDir,name),'path fixture, not an ELF library');
@@ -90,6 +91,13 @@ assert.throws(()=>host.start({...options,guestRoot:'/missing-guest-root'}),{code
 assert.throws(()=>host.start({...options,nativeLibraryDir:undefined}),{code:'ERR_OHOS_HOST_ARGUMENT'});
 assert.throws(()=>host.start({...options,nativeLibraryDir:'/missing-native-dir'}),{code:'ERR_OHOS_NATIVE_LIBRARY_PATH'});
 assert.throws(()=>host.start({...options,env:{DSH_GO_OHOS_NATIVE_LIBRARY_DIR:'/untrusted'}}),{code:'ERR_OHOS_HOST_ENV'});
+assert.throws(()=>host.start({...options,linuxDirectory:undefined}),{code:'ERR_OHOS_HOST_ARGUMENT'});
+assert.throws(()=>host.start({...options,linuxDirectory:options.runtimeRoot}),{code:'ERR_OHOS_LINUX_DIRECTORY'});
+assert.throws(()=>host.start({...options,linuxDirectory:options.dshHome}),{code:'ERR_OHOS_LINUX_DIRECTORY'});
+assert.throws(()=>host.start({...options,linuxDirectory:path.dirname(guestRoot)}),{code:'ERR_OHOS_LINUX_DIRECTORY'});
+const linuxAlias=path.join(base,'linux-link');fs.symlinkSync(options.linuxDirectory,linuxAlias);
+assert.throws(()=>host.start({...options,linuxDirectory:linuxAlias}),{code:'ERR_OHOS_LINUX_DIRECTORY'});
+assert.throws(()=>host.start({...options,env:{DSH_GO_OHOS_LINUX_DIRECTORY:'/untrusted'}}),{code:'ERR_OHOS_HOST_ENV'});
 assert.throws(()=>host.start({...options,env:{DSH_AGENTS_HOME:'/untrusted'}}),{code:'ERR_OHOS_HOST_ENV'});
 assert.throws(()=>host.start({...options,workspaceRoots:[]}),{code:'ERR_OHOS_HOST_WORKSPACES'});
 assert.equal(host.getState().consumed,false);
@@ -115,6 +123,7 @@ const previous=process.env.DSH_HOME;
 const previousHome=process.env.HOME;
 const previousAgents=process.env.DSH_AGENTS_HOME;
 const previousNative=process.env.DSH_GO_OHOS_NATIVE_LIBRARY_DIR;
+const previousLinux=process.env.DSH_GO_OHOS_LINUX_DIRECTORY;
 async function until(phase) {
   const deadline=Date.now()+5000;
   for (;;) {
@@ -131,6 +140,7 @@ async function until(phase) {
   assert.equal(ready.baseUrl,'http://127.0.0.1:3080');assert.equal(ready.token,'fixture_LAUNCH');
   assert.equal(ready.exitCode,null);assert.equal(ready.errorCode,null);assert.equal(ready.consumed,true);
   assert.equal(process.env.DSH_GO_OHOS_NATIVE_LIBRARY_DIR,options.nativeLibraryDir);
+  assert.equal(process.env.DSH_GO_OHOS_LINUX_DIRECTORY,options.linuxDirectory);
   assert.equal(process.env.DSH_HOME,options.dshHome);
   assert.equal(process.env.HOME,path.join(guestRoot,'root'));
   assert.equal(process.env.DSH_AGENTS_HOME,path.join(guestRoot,'root/.agents'));
@@ -145,6 +155,7 @@ async function until(phase) {
   assert.equal(process.env.HOME,previousHome);
   assert.equal(process.env.DSH_AGENTS_HOME,previousAgents);
   assert.equal(process.env.DSH_GO_OHOS_NATIVE_LIBRARY_DIR,previousNative);
+  assert.equal(process.env.DSH_GO_OHOS_LINUX_DIRECTORY,previousLinux);
   assert.equal(events.at(-1).kind,'exit');assert.equal(events.at(-1).exitCode,23);
   assert.ok(events.some(e=>e.kind==='ready'&&e.token==='fixture_LAUNCH'));
   assert.ok(events.some(e=>e.kind==='log'&&e.line==='fixture-mode:'+mode));

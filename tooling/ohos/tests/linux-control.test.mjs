@@ -1,0 +1,151 @@
+import test, { after } from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import { pathToFileURL } from 'node:url';
+import { createServer } from 'node:http';
+import { once } from 'node:events';
+import { calls } from './linux-http-fixture.mjs';
+
+const source = new URL('../../../app/ohos/entry/src/main/ets/runtime/', import.meta.url);
+const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'dsh-linux-control-'));
+after(() => fs.rm(directory, { recursive: true, force: true }));
+await fs.copyFile(new URL('RuntimeCore.ets', source), path.join(directory, 'RuntimeCore.mts'));
+const ets = await fs.readFile(new URL('LinuxControl.ets', source), 'utf8');
+await fs.writeFile(path.join(directory, 'LinuxControl.mts'), ets
+  .replace("import http from '@ohos.net.http';", `import { http } from '${new URL('./linux-http-fixture.mjs', import.meta.url).href}';`)
+  .replace("from './RuntimeCore'", "from './RuntimeCore.mts'"));
+const { LinuxControl } = await import(pathToFileURL(path.join(directory, 'LinuxControl.mts')));
+
+const snapshot = (extra = {}) => ({ v: 1, instanceId: 'service-930', attemptId: null, state: 'disabled',
+  enabled: false, admission: false, guestOpened: false, ownerRetained: false, workspaceLease: false,
+  restartRequired: false, shutdownComplete: false, nextRequestId: 1, ownerState: null, backendState: null,
+  progress: null, lastErrorCode: null, job: null, retirement: null, ...extra });
+const retired = (extra = {}) => ({ resourcesRetired: true, filesRemoved: false, dataRetained: true,
+  ownerQuarantined: true, native: { joined: true, retirementError: false, apiResult: -4 },
+  releaseErrorCode: null, ...extra });
+const deferred = () => Promise.withResolvers();
+
+async function serverFor(body) {
+  const observed = [];
+  const server = createServer(async (request, response) => {
+    const chunks = []; for await (const bytes of request) chunks.push(bytes);
+    const item = { url: request.url, method: request.method, headers: request.headers,
+      body: chunks.length ? JSON.parse(Buffer.concat(chunks).toString('utf8')) : null };
+    observed.push(item);
+    if (request.url === '/?token=test-only-token') {
+      response.writeHead(303, { 'set-cookie': 'dsh-auth-fixture=session.value; HttpOnly; Path=/', location: '/' });
+      response.end(); return;
+    }
+    assert.equal(request.url, '/dsh-go/v1/linux');
+    assert.equal(request.headers.cookie, 'dsh-auth-fixture=session.value');
+    try { await body(item, response); }
+    catch (error) { response.destroy(error); }
+  });
+  server.listen(0, '127.0.0.1'); await once(server, 'listening');
+  return { url: 'http://127.0.0.1:' + server.address().port, observed,
+    close: async () => { server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); } };
+}
+function reply(response, status, value) {
+  response.writeHead(status, { 'content-type': 'application/json' }); response.end(JSON.stringify(value));
+}
+
+test('status authenticates to fixed loopback without preparing or posting', async () => {
+  calls.length = 0;
+  const fixture = await serverFor((_request, response) => reply(response, 200, snapshot()));
+  try {
+    const client = new LinuxControl();
+    const actual = JSON.parse(await client.getStatus(fixture.url, 'test-only-token'));
+    assert.equal(actual.state, 'disabled');
+    await client.getStatus(fixture.url, 'test-only-token');
+    assert.deepEqual(fixture.observed.map(row => row.method), ['GET', 'GET', 'GET']);
+    assert.equal(fixture.observed.filter(row => row.url.startsWith('/?token=')).length, 1);
+    assert.ok(calls.every(row => row.redirectAllowed === false && row.destroyed));
+    assert.ok(calls.every(row => row.options.usingCache === false && row.options.usingProxy === false && row.options.maxLimit === 65536));
+    assert.equal(fixture.observed[1].headers.authorization, undefined);
+  } finally { await fixture.close(); }
+});
+
+test('untrusted endpoints are refused before any HTTP handle is created', async () => {
+  const client = new LinuxControl(), before = calls.length;
+  for (const url of ['https://127.0.0.1:80', 'http://localhost:80', 'http://127.0.0.1:0',
+    'http://127.0.0.1:65536', 'http://127.0.0.1:80/path', 'http://user@127.0.0.1:80']) {
+    await assert.rejects(client.getStatus(url, 'test-only-token'), { code: 'ohos_linux_endpoint' });
+  }
+  assert.equal(calls.length, before);
+});
+
+test('enable is accepted asynchronously, and run preserves the supplied identity and bytes', async () => {
+  const fixture = await serverFor((request, response) => reply(response, request.method === 'POST' ? 202 : 200,
+    snapshot(request.body?.action === 'setEnabled' ? { state: 'installing', enabled: true, attemptId: 'attempt-930' } : {})));
+  try {
+    const client = new LinuxControl();
+    const accepted = JSON.parse(await client.setEnabled(fixture.url, 'test-only-token', true));
+    assert.equal(accepted.state, 'installing'); assert.equal(accepted.admission, false);
+    const request = { v: 1, instanceId: 'service-930', attemptId: 'attempt-930', action: 'runPrivateGuest',
+      requestId: 7, argv: ['python3', '-c', 'print("中文")'], cwd: '/workspace', env: { TEST_VALUE: 'a b' }, stdin: 'input\n' };
+    await client.runPrivateGuest(fixture.url, 'test-only-token', request);
+    assert.deepEqual(fixture.observed.at(-1).body, request);
+    assert.deepEqual(fixture.observed.find(row => row.body?.action === 'setEnabled').body,
+      { v: 1, instanceId: 'service-930', attemptId: null, action: 'setEnabled', enabled: true });
+  } finally { await fixture.close(); }
+});
+
+test('shutdown waits for the actual retirement observation after 202', async () => {
+  const entered = deferred(), release = deferred(); let stopping = false, done = false;
+  const fixture = await serverFor(async (request, response) => {
+    if (request.method === 'POST') { stopping = true; reply(response, 202, snapshot({ state: 'stopping' })); }
+    else if (stopping) {
+      entered.resolve(); await release.promise;
+      // Historical job failure can coexist with proven native/resource retirement.
+      reply(response, 200, snapshot({ state: 'unknown', shutdownComplete: true, retirement: retired() }));
+    } else reply(response, 200, snapshot({ state: 'enabled', enabled: true, admission: true, guestOpened: true }));
+  });
+  try {
+    const client = new LinuxControl();
+    const waiting = client.shutdown(fixture.url, 'test-only-token').then(() => { done = true; });
+    await entered.promise; assert.equal(done, false);
+    release.resolve(); await waiting; assert.equal(done, true);
+    assert.equal(fixture.observed.filter(row => row.body?.action === 'shutdown').length, 1);
+  } finally { release.resolve(); await fixture.close(); }
+});
+
+test('missing join, retirement errors and changed instance never confirm shutdown', async () => {
+  const cases = [
+    { value: snapshot({ shutdownComplete: true, retirement: null }), code: 'ohos_linux_shutdown_unconfirmed' },
+    { value: snapshot({ shutdownComplete: true, retirement: retired({ native: { joined: false, retirementError: false, apiResult: 0 } }) }), code: 'ohos_linux_shutdown_unconfirmed' },
+    { value: snapshot({ shutdownComplete: true, retirement: retired({ native: { joined: true, retirementError: true, apiResult: -8 } }) }), code: 'ohos_linux_shutdown_unconfirmed' },
+    { value: snapshot({ state: 'unknown', retirement: retired({ resourcesRetired: false }) }), code: 'ohos_linux_shutdown_unconfirmed' },
+    { value: snapshot({ instanceId: 'replacement', shutdownComplete: true, retirement: retired() }), code: 'ohos_linux_stale' },
+  ];
+  for (const item of cases) {
+    const fixture = await serverFor((request, response) => reply(response, request.method === 'POST' ? 202 : 200,
+      request.method === 'POST' ? item.value : snapshot()));
+    try { await assert.rejects(new LinuxControl().shutdown(fixture.url, 'test-only-token'), { code: item.code }); }
+    finally { await fixture.close(); }
+  }
+});
+
+test('HTTP failures preserve the error code, destroy handles and never retry a run', async () => {
+  const fixture = await serverFor((_request, response) => reply(response, 409,
+    { v: 1, error: { code: 'ERR_OHOS_LINUX_REQUEST_REUSED', message: 'must not surface this text' } }));
+  try {
+    const client = new LinuxControl();
+    await assert.rejects(client.runPrivateGuest(fixture.url, 'test-only-token', { action: 'runPrivateGuest', requestId: 3 }),
+      error => error.code === 'ERR_OHOS_LINUX_REQUEST_REUSED' && !error.message.includes('must not surface'));
+    assert.equal(fixture.observed.filter(row => row.method === 'POST').length, 1);
+    assert.ok(calls.every(row => row.destroyed));
+  } finally { await fixture.close(); }
+});
+
+test('actual native unjoined null facts stay visible without confirming release', async () => {
+  const value = snapshot({ state: 'unknown', retirement: retired({ resourcesRetired: false,
+    native: { joined: false, retirementError: null, apiResult: null } }) });
+  const fixture = await serverFor((_request, response) => reply(response, 200, value));
+  try {
+    const observed = JSON.parse(await new LinuxControl().getStatus(fixture.url, 'test-only-token'));
+    assert.equal(observed.state, 'unknown'); assert.equal(observed.shutdownComplete, false);
+    assert.deepEqual(observed.retirement.native, value.retirement.native);
+  } finally { await fixture.close(); }
+});

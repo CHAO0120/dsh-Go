@@ -120,6 +120,8 @@ with zipfile.ZipFile(transport) as bundle:
         sys.exit(f"{transport} must contain one unencrypted Stored dsh-runtime/runtime.zip")
     bundle.extract(entries[0], rawfile)
 PY_RUNTIME_ARCHIVE
+python3 -I -B "$APP/../runtime/ohos/package/linux-assets.py" \
+  --runtime-zip "$RAWFILE/dsh-runtime/runtime.zip" --native-directory "$LIBS"
 FLUTTER_ROOT="$(dirname "$(dirname "$(readlink -f "$(command -v "$FLUTTER")")")")"
 python3 -I -B "$APP/../tooling/ohos/patch_framework.py" "$FLUTTER_ROOT"
 if [[ "$MODE" == --release ]]; then

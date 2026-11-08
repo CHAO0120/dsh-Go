@@ -27,7 +27,8 @@ try{
   check('active descriptor recorded while actual disks open',JSON.parse(await readFile(result.active.directory+'/active.json','utf8')).epoch===result.active.epoch&&(await openFiles()).length>=4);
   const job=result.backend.spawn({argv:['python3','-c','import os; print("owner917"); print(os.path.exists("/oldroot/etc"))'],cwd:'/workspace',graceMs:5000,stdio:{stdin:'ignore',stdout:{maxBytes:1024},stderr:{maxBytes:1024}}});
   const done=await job.done;check('same VM executes job after pivot with old root detached',done.exitCode===0&&job.collected.stdout.snapshot().bytes.toString()==='owner917\nFalse\n');
-  const retired=await owner.dispose();check('dispose joins before removing images',retired.filesRemoved&&retired.native.joined&&retired.native.retirementError===false&&joinSawImages&&(await openFiles()).length===0&&(await readdir(directory)).length===0);
+  const retired=await owner.dispose();check('dispose joins and retains published writable instance',retired.resourcesRetired&&retired.filesRemoved===false&&retired.dataRetained&&retired.native.joined&&retired.native.retirementError===false&&joinSawImages&&(await openFiles()).length===0&&(await readdir(directory)).length===1);
+  check('retired descriptor preserves the published target identity',JSON.parse(await readFile(result.active.directory+'/retired.json','utf8')).target===result.active.target);
   await assert.rejects(owner.install(),{code:'ERR_OHOS_LINUX_OWNER_CLOSED'});
   check('disposed owner stays quarantined and cannot start another VM',owner.state==='stopped-quarantined'&&retired.ownerQuarantined);
  }

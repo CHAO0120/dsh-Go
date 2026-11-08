@@ -1,6 +1,7 @@
 import { SubprocessRuntime } from '@deepseek-ai/dsh-subprocess';
 import { CommandRouter, bindPluginCommands } from './command-router.mjs';
 import { createChildProcessFacade } from './plugin-process.mjs';
+import { createLinuxControl, registerLinuxControlRoutes } from '../linux/control.mjs';
 
 export default class OhSubprocessRuntime extends SubprocessRuntime {
   constructor(ctx, config = {}) {
@@ -9,6 +10,9 @@ export default class OhSubprocessRuntime extends SubprocessRuntime {
     this.backend = new CommandRouter({ ...config, onSpillFailure: error => ctx.logger.error('鸿蒙虚拟进程无法保留完整输出', error) });
     this.pluginProcess = createChildProcessFacade(spec => this.backend.spawnPlugin(spec));
     this.capabilities = this.backend.capabilities;
+    this.linux = createLinuxControl();
+    ctx.inject(['webServer'], webCtx => registerLinuxControlRoutes(webCtx, this.linux));
+    ctx.effect(() => () => this.linux.shutdown(), 'ohos Linux joined shutdown');
     ctx.effect(() => () => this.backend.dispose(), 'ohos subprocess teardown');
     ctx.effect(() => bindPluginCommands(this.backend), 'ohos plugin command binding');
   }
