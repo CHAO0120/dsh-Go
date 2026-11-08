@@ -16,6 +16,16 @@ the media protocol fields below; it is not a successful device execution.
 
 ## Build and verification
 
+`prepare_upstream.py` already refuses an existing `.upstream` whose recorded
+pin/patch identity or file inventory differs. It now reports the unchanged
+directory, expected commit/archive/patch hashes and a quoted rerun command,
+including the original `--archive` argument when supplied. Missing or invalid
+prepared metadata receives the same recovery guidance. Preserve and inspect
+the old entry, check it against `source-pins.json` and the current patch, then
+explicitly move it to a chosen backup outside `.upstream` before rerunning.
+The script never removes or rebuilds that entry automatically. A matching
+existing tree is still reused; archive, patch and source checks are unchanged.
+
 The local [toolchain file](rust-toolchain.toml) pins Rust 1.99.1. The repository
 iOS build integration supplies the native archive and generated config. Merely
 linking the component grants no pairing, network, media or input authority; all

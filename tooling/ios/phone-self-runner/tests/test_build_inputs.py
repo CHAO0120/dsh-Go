@@ -6,12 +6,14 @@ import io
 import json
 import os
 from pathlib import Path
+import shlex
 import shutil
 import subprocess
 import sys
 import tarfile
 import tempfile
 import unittest
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -90,6 +92,72 @@ class BuildInputs(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'differs'):
             self.prepare.prepare()
         self.assertEqual((output / 'source.rs').read_text(), 'changed\n')
+
+    def prepared_fixture(self):
+        output = self.root / '.upstream'
+        output.mkdir()
+        (output / 'source.rs').write_bytes(b'original source\r\n')
+        identity = {'commit': 'test', 'archiveSha256': self.pins['archiveSha256'],
+                    'patchSha256': hashlib.sha256((self.root / 'local.patch').read_bytes()).hexdigest()}
+        report = {'identity': identity, 'files': self.prepare.inventory(output)}
+        (output / '.dsh-source.json').write_text(json.dumps(report))
+        return output, identity, report
+
+    def byte_snapshot(self, root):
+        return {path.relative_to(root).as_posix(): path.read_bytes()
+                for path in root.rglob('*') if path.is_file()}
+
+    def test_stale_identity_explains_backup_pins_hashes_and_quoted_rerun(self):
+        output, identity, report = self.prepared_fixture()
+        report['identity'] = dict(identity, commit='old-test')
+        (output / '.dsh-source.json').write_text(json.dumps(report))
+        archive = self.root / "archive with 'quotes' and spaces.tar.gz"
+        archive.write_bytes(b'not accessed while existing output is rejected')
+        before = self.byte_snapshot(self.root)
+        with mock.patch.object(self.prepare.urllib.request, 'urlopen', side_effect=AssertionError('no download')):
+            with self.assertRaises(ValueError) as raised:
+                self.prepare.prepare(archive)
+        message = str(raised.exception)
+        self.assertIn(str(output), message)
+        self.assertIn('left unchanged', message)
+        self.assertIn('source-pins.json', message)
+        self.assertIn('local.patch', message)
+        for key, value in identity.items():
+            self.assertIn(key, message)
+            self.assertIn(value, message)
+        self.assertIn('explicitly move', message)
+        self.assertIn('backup', message)
+        command = message.split('After moving it aside, rerun: ', 1)[1].splitlines()[0]
+        self.assertEqual(shlex.split(command), [sys.executable, str(self.root / 'prepare_upstream.py'),
+                                               '--archive', str(archive)])
+        self.assertEqual(self.byte_snapshot(self.root), before)
+
+    def test_missing_or_invalid_metadata_keeps_every_existing_byte(self):
+        output, _, _ = self.prepared_fixture()
+        metadata = output / '.dsh-source.json'
+        for value in [None, b'{incomplete', b'[]', b'{"files":{}}']:
+            with self.subTest(value=value):
+                if value is None:
+                    metadata.unlink()
+                else:
+                    metadata.write_bytes(value)
+                before = self.byte_snapshot(self.root)
+                with mock.patch.object(self.prepare.urllib.request, 'urlopen', side_effect=AssertionError('no download')):
+                    with self.assertRaises(ValueError) as raised:
+                        self.prepare.prepare()
+                message = str(raised.exception)
+                self.assertIn('left unchanged', message)
+                self.assertIn('source-pins.json', message)
+                self.assertIn('explicitly move', message)
+                self.assertIn('rerun:', message)
+                self.assertEqual(self.byte_snapshot(self.root), before)
+
+    def test_verified_existing_output_is_reused_without_download_or_write(self):
+        output, _, _ = self.prepared_fixture()
+        before = self.byte_snapshot(self.root)
+        with mock.patch.object(self.prepare.urllib.request, 'urlopen', side_effect=AssertionError('no download')):
+            self.assertEqual(self.prepare.prepare(self.root / 'unused-missing-archive'), output)
+        self.assertEqual(self.byte_snapshot(self.root), before)
 
     def test_license_inventory_has_no_host_paths_or_raw_metadata(self):
         exporter = module('license_test', ROOT / 'license_inventory.py')

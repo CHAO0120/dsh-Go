@@ -4,8 +4,10 @@ import argparse
 import hashlib
 import json
 from pathlib import Path, PurePosixPath
+import shlex
 import shutil
 import subprocess
+import sys
 import tarfile
 import tempfile
 import urllib.request
@@ -25,6 +27,20 @@ def inventory(root):
             for path in paths if path.is_file() and path != root / '.dsh-source.json'}
 
 
+def existing_output_error(reason, output, identity, patch, archive):
+    command = [sys.executable, str(HERE / 'prepare_upstream.py')]
+    if archive:
+        command.extend(['--archive', str(Path(archive).absolute())])
+    return ValueError(
+        reason + '\nExisting output was left unchanged: ' + str(output)
+        + '\nCheck source-pins.json and ' + patch.name + ' against this checkout. Expected identity: '
+        + json.dumps(identity, sort_keys=True)
+        + '\nPreserve and inspect the old .upstream entry, then explicitly move it to a chosen backup '
+          'outside .upstream before rebuilding. No directory is removed or rebuilt automatically.'
+        + '\nAfter moving it aside, rerun: ' + shlex.join(command)
+        + '\nThe archive checksum, patch applicability and prepared-file checks still apply.')
+
+
 def prepare(archive=None):
     pins = json.loads((HERE / 'source-pins.json').read_text())
     patch = HERE / pins['patch']
@@ -33,10 +49,21 @@ def prepare(archive=None):
     output = HERE / '.upstream'
     if output.exists() or output.is_symlink():
         if output.is_symlink():
-            raise ValueError('Refusing a symlinked upstream output')
-        report = json.loads((output / '.dsh-source.json').read_text())
-        if report['identity'] != identity or report['files'] != inventory(output):
-            raise ValueError('Prepared upstream differs; preserve it and remove the generated .upstream directory explicitly before rebuilding')
+            raise existing_output_error('Refusing a symlinked upstream output', output, identity, patch, archive)
+        try:
+            report = json.loads((output / '.dsh-source.json').read_text())
+        except (OSError, UnicodeError, json.JSONDecodeError) as error:
+            raise existing_output_error('Prepared upstream metadata is missing or invalid',
+                                        output, identity, patch, archive) from error
+        if not isinstance(report, dict) or report.get('identity') != identity:
+            raise existing_output_error('Prepared upstream identity differs', output, identity, patch, archive)
+        try:
+            files = inventory(output)
+        except (OSError, ValueError) as error:
+            raise existing_output_error('Prepared upstream file inventory could not be verified',
+                                        output, identity, patch, archive) from error
+        if report.get('files') != files:
+            raise existing_output_error('Prepared upstream differs', output, identity, patch, archive)
         return output
     if archive:
         data = Path(archive).read_bytes()
