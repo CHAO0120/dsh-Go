@@ -438,7 +438,7 @@ diff --git a/idevice/src/xpc/http2/frame.rs b/idevice/src/xpc/http2/frame.rs
 diff --git a/idevice/src/xpc/http2/mod.rs b/idevice/src/xpc/http2/mod.rs
 --- a/idevice/src/xpc/http2/mod.rs
 +++ b/idevice/src/xpc/http2/mod.rs
-@@ -1,319 +1,498 @@
+@@ -1,319 +1,516 @@
  // Jackson Coxson
  
  use frame::HttpFrame;
@@ -992,10 +992,28 @@ diff --git a/idevice/src/xpc/http2/mod.rs b/idevice/src/xpc/http2/mod.rs
 -        for id in stream_ids {
 -            self.cache.entry(*id).or_default();
 -        }
++        self.read_any_inner(stream_ids, None).await
++    }
++    /// Drain cooperating streams while waiting for one required route. Its
++    /// final queued DATA remains readable, but another open stream must not
++    /// hide EOF after that DATA has been consumed.
++    pub(super) async fn read_any_while_open(&mut self, stream_ids: &[u32], required: u32)
++        -> Result<(u32, Vec<u8>), IdeviceError>
++    {
++        if !stream_ids.contains(&required) { return self.fail(error("HTTP/2 read stream limit")); }
++        self.read_any_inner(stream_ids, Some(required)).await
++    }
++    async fn read_any_inner(&mut self, stream_ids: &[u32], required: Option<u32>)
++        -> Result<(u32, Vec<u8>), IdeviceError>
++    {
 +        self.flush_output().await?;
 +        if stream_ids.is_empty() || stream_ids.len() > MAX_STREAMS { return self.fail(error("HTTP/2 read stream limit")); }
 +        for id in stream_ids { if !self.is_retired(*id) { self.ensure_stream(*id)?; } }
          loop {
++            if required.is_some_and(|id| self.is_retired(id)
++                || self.streams.get(&id).is_some_and(|s| s.remote_ended && s.cache.is_empty())) {
++                return Err(error("HTTP/2 requested streams have ended"));
++            }
              for id in stream_ids {
 -                if let Some(d) = self.cache.get_mut(id).and_then(|c| c.pop_front()) {
 -                    return Ok((*id, d));
@@ -1586,7 +1604,7 @@ diff --git a/idevice/src/xpc/mod.rs b/idevice/src/xpc/mod.rs
  
  #[derive(Debug)]
  pub struct RemoteXpcClient<R: ReadWrite> {
-@@ -114,6 +114,12 @@
+@@ -114,18 +114,27 @@
      }
  
      pub async fn recv_any(&mut self) -> Result<plist::Value, IdeviceError> {
@@ -1599,12 +1617,19 @@ diff --git a/idevice/src/xpc/mod.rs b/idevice/src/xpc/mod.rs
          const CHANNELS: [u32; 2] = [ROOT_CHANNEL, REPLY_CHANNEL];
          loop {
              for channel in CHANNELS {
-@@ -121,11 +127,11 @@
-                     && let Some(inner) = msg.message
-                     && !inner.as_dictionary().is_some_and(|d| d.is_empty())
-                 {
+-                if let Some(msg) = self.take_buffered(channel)?
+-                    && let Some(inner) = msg.message
+-                    && !inner.as_dictionary().is_some_and(|d| d.is_empty())
+-                {
 -                    return Ok(inner.to_plist());
-+                    return inner.to_plist();
++                // A different receive route may already have buffered several
++                // keepalives followed by a body. Drain those before awaiting IO.
++                while let Some(msg) = self.take_buffered(channel)? {
++                    if let Some(inner) = msg.message
++                        && !inner.as_dictionary().is_some_and(|d| d.is_empty())
++                    {
++                        return inner.to_plist();
++                    }
                  }
              }
              let (channel, chunk) = self.h2_client.read_any(&CHANNELS).await?;
@@ -1613,7 +1638,7 @@ diff --git a/idevice/src/xpc/mod.rs b/idevice/src/xpc/mod.rs
          }
      }
  
-@@ -135,20 +141,22 @@
+@@ -135,20 +144,22 @@
      /// message yet.
      fn take_buffered(&mut self, channel: u32) -> Result<Option<XPCMessage>, IdeviceError> {
          let buf = self.partial.entry(channel).or_default();
@@ -1647,7 +1672,7 @@ diff --git a/idevice/src/xpc/mod.rs b/idevice/src/xpc/mod.rs
          loop {
              // Try to decode a whole message from what's already buffered before
              // reading more, so a message split across earlier reads completes.
-@@ -161,13 +169,13 @@
+@@ -161,13 +172,21 @@
                          {
                              continue;
                          }
@@ -1657,13 +1682,22 @@ diff --git a/idevice/src/xpc/mod.rs b/idevice/src/xpc/mod.rs
                      None => continue,
                  },
                  None => {
-                     let chunk = self.h2_client.read(channel).await?;
+-                    let chunk = self.h2_client.read(channel).await?;
 -                    self.partial.entry(channel).or_default().extend(chunk);
-+                    bounds::append(self.partial.entry(channel).or_default(), &chunk)?;
++                    // Consume both control channels so an unread root/reply
++                    // stream cannot retain the shared HTTP/2 receive window.
++                    // Prefer the requested route, but keep the other bytes for
++                    // recv_root/recv/recv_any under the existing per-channel cap.
++                    let other = if channel == ROOT_CHANNEL { REPLY_CHANNEL } else { ROOT_CHANNEL };
++                    let (received, chunk) = self.h2_client
++                        .read_any_while_open(&[channel, other], channel).await?;
++                    // No await after DATA consumption and before persistence:
++                    // cancelling this receive cannot lose another route's bytes.
++                    bounds::append(self.partial.entry(received).or_default(), &chunk)?;
                  }
              }
          }
-@@ -309,10 +317,3 @@
+@@ -309,10 +328,3 @@
      }
  }
  
