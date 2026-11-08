@@ -761,6 +761,26 @@ def main():
         return {'scope': 'Test double of the Ark-hosted library; not a Host build', 'libdshHostSha256': sha(target / 'libdsh_host.so')}
     g.internal('round-native-libraries', round_libraries, needs=('native-tools',))
     g.run('workspace-authority-entry', lambda: g.py(rt + 'workspace-authority-entry.py', '--node', node(), '--assembled-payload', payload(), '--typescript-prefix', p('typescript_prefix'), '--publication-fixture', native() / 'libpublication-test-linked.so', '--round-native-directory', o / 'round-native', '--node-headers', headers(), '--cxx', p('cxx'), '--out', o / 'workspace-authority-entry'), needs=('compose', 'native-publication-build', 'round-native-libraries', 'native-tools'), timeout=240, tests=[rt + name for name in ['workspace-authority-entry.py', 'workspace-authority-entry.mjs', 'workspace-authority-instrumentation.mjs', 'workspace-authority-owner-probe.mjs']], scope='Actual DSH bin/sole product preload/public shell factory and shared native FD authority; explicit SDK and retirement-confirmation fixtures; no Linux guest, SDK, device or complete user-session claim')
+    # Insert after the existing workspace-authority-entry registration.
+    # Reuse that group's actual host/consumer/publisher output. No new SDK fixture
+    # input and no duplicate native build are introduced by these two frontend runs.
+    for workspace_frontend_mode in ('plain', 'jitless'):
+        g.run('workspace-frontend-' + workspace_frontend_mode,
+              lambda m=workspace_frontend_mode: g.py(
+                  rt + 'workspace-frontend-entry.py',
+                  '--source', s, '--payload', payload(), '--node', node(),
+                  '--typescript-prefix', p('typescript_prefix'),
+                  '--native-directory', o / 'workspace-authority-entry/native',
+                  '--publication-fixture', native() / 'libpublication-test-linked.so',
+                  '--provenance-file', o / 'composed/manifest.json',
+                  '--out', o / ('workspace-frontend-' + m),
+                  *(['--jitless'] if m == 'jitless' else [])),
+              needs=('compose', 'workspace-authority-entry', 'native-publication-build'),
+              timeout=120,
+              tests=[rt + name for name in (
+                  'workspace-frontend-entry.py', 'workspace-frontend-entry.mjs',
+                  'workspace-frontend-instrumentation.mjs')],
+              scope='Actual DSH bin/sole preload/WorkspaceRegistry/WorkingDirectory/public shell after real ETS FD publication; explicit SDK/storage/session-projection seams; no full chat, SDK, device, Linux guest or durable-storage claim')
     g.run('host-layout', lambda: g.py(rt + 'host-layout.py', '--node', node(), '--native-library-dir', o / 'round-native', '--publication-fixture', native() / 'libpublication-test-linked.so', '--assembled-payload', payload(), '--out', o / 'host-layout'), needs=('compose', 'native-publication-build', 'native-static-resources', 'round-native-libraries'), timeout=240)
     g.run('host-safe-profile', lambda: g.py(rt + 'host-safe-profile.py', '--node', node(), '--native-library-dir', o / 'round-native', '--publication-fixture', native() / 'libpublication-test-linked.so', '--assembled-payload', payload(), '--out', o / 'host-safe-profile'), needs=('compose', 'native-publication-build', 'round-native-libraries'), timeout=600, tests=[rt + 'host-safe-profile.py'], scope='Actual Host safe argv and original public round; not OH device restart')
     for label, host in [('loopback', '127.0.0.1'), ('owned-http', g.config.get('ownedHttpHost', ''))]:
@@ -769,6 +789,19 @@ def main():
     g.run('python-build-inputs', lambda: g.py(rt + 'python-build-inputs.test.py'), needs=('tools',), tests=[rt + 'python-build-inputs.test.py'], scope='Python ELF preflight and fixed system certificate compile option; controlled compiler boundary, no SDK build')
     g.run('python-package', lambda: g.py(rt + 'python-package.test.py'), needs=('tools',), tests=[rt + 'python-package.test.py'], scope='Actual stdlib compilation and composer asset integrity; no SDK/device claim')
     g.run('linux-assets-package', lambda: g.py(rt + 'linux-assets-package.test.py'), needs=('tools',), tests=[rt + 'linux-assets-package.test.py'], scope='Actual six-file composition, ZIP integrity and pre-SDK native pairing with small data fixtures; no guest/HAP/device claim')
+    # Small build-stage regressions only. Register next to linux-assets-package.
+    g.run('linux-tools-ownership', lambda: g.py(
+        'tooling/ohos/tests/linux-tools-ownership.test.py', '--source', s,
+        '--output', o / 'linux-tools-ownership'),
+        needs=('tools',), timeout=60,
+        tests=['tooling/ohos/tests/linux-tools-ownership.test.py'],
+        scope='Real small production tar assembly/readback; nonroot filesystem or explicit TarInfo owner input reported in RESULT; no six-asset, SDK or guest build')
+    g.run('linux-control-staging', lambda: g.py(
+        'tooling/ohos/tests/linux-control-staging.test.py', '--source', s,
+        '--output', o / 'linux-control-staging'),
+        needs=('tools',), timeout=60,
+        tests=['tooling/ohos/tests/linux-control-staging.test.py'],
+        scope='Actual production Linux source-copy nodes; complete top-level mjs byte/mode set with a future ordinary module; no assets, native or VM execution')
     g.run('linux-assets-composition', lambda: g.py(rt + 'linux-assets-compose.py', '--prepared', p('prepared'), '--regex-artifact', s / 'runtime/ohos/process/build/re2js-unicode.mjs', '--esbuild-prefix', p('esbuild_prefix'), '--assets', p('linux_install_assets'), '--baseline', o / 'composed', '--node', node(), '--out', o / 'linux-assets-composition'), needs=('compose',), timeout=600, tests=[rt + 'linux-assets-compose.py'], scope='Actual composer with real prepared receipt and six Linux assets; ZIP identity and refusal/cleanup, no SDK/HAP/device build')
     g.run('python-production', lambda: g.py(rt + 'python-native.py', '--production', '--node-headers', p('node_source') / 'src', '--output', o / 'python-production'), needs=('tools',), timeout=120, tests=[rt + 'python-production.test.mjs', rt + 'python-owner.test.mjs', rt + 'python-native-symbols.test.mjs', rt + 'python-link-probe.c', rt + 'python-test-observation.mjs'], scope='Host shared-library production source, real subinterpreter/cwd/env/SQLite/SSL/stream/cancel/owner-exit and separately loaded CPython extension ABI; HAP and device NOT_RUN')
     g.node_tests('python-backend', [rt + 'python-backend.test.mjs'], needs=('tools',))

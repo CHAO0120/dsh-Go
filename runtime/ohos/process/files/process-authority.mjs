@@ -58,9 +58,9 @@ export function processGrantNativeDirectory() {
   return nativeDirectory;
 }
 
-// Call only after the actual Worker-exit/pipe barrier failed to confirm D.
-// R without D during cancellation is normal and does not invoke this. The debt
-// belongs to the process, so a different Cordis runtime cannot bypass it.
+// Call after the last consumer boundary (Worker exit/pipes, or a main-thread
+// metadata handle close) failed to confirm D. Cancellation's early R without D
+// is normal. The debt belongs to the process across Cordis runtime instances.
 export function quarantineProcessGrantRetirement() {
   borrowProcessGrantAuthority();
   retirementFailed = true;
