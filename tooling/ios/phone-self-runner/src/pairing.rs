@@ -119,11 +119,18 @@ impl PairingInput {
                 if !metadata.is_file() || metadata.len() > MAX_PAIRING as u64 {
                     return Err(PAIRING);
                 }
-                let mut bytes = SecretData::new(Vec::new());
+                // Reserve the complete bounded read, including its oversize
+                // sentinel, before any pairing bytes enter this allocation.
+                let mut bytes = SecretData::new(Vec::with_capacity(MAX_PAIRING + 1));
+                #[cfg(test)]
+                let allocation = (bytes.0.capacity(), bytes.0.as_ptr() as usize);
                 file.take((MAX_PAIRING + 1) as u64)
                     .read_to_end(&mut bytes.0)
                     .await
                     .map_err(|_| PAIRING)?;
+                #[cfg(test)]
+                LEGACY_READS.with(|reads| reads.borrow_mut().push((allocation.0,
+                    bytes.0.capacity(), allocation.1 == bytes.0.as_ptr() as usize, bytes.0.len())));
                 validate(&bytes.0)
             }
         }
@@ -173,6 +180,7 @@ fn validate(bytes: &[u8]) -> Result<PairingRecord, Failure> {
 thread_local! {
     static CLEARS: std::cell::RefCell<Vec<(&'static str, bool)>> = const { std::cell::RefCell::new(Vec::new()) };
     static VALIDATIONS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    static LEGACY_READS: std::cell::RefCell<Vec<(usize, usize, bool, usize)>> = const { std::cell::RefCell::new(Vec::new()) };
 }
 #[cfg(test)]
 fn record_clear(kind: &'static str, cleared: bool) { CLEARS.with(|events| events.borrow_mut().push((kind, cleared))); }
@@ -187,6 +195,81 @@ mod tests {
 
     fn bytes() -> Vec<u8> {
         RpPairingFile::generate("dsh-portable-test.invalid").to_bytes()
+    }
+
+    struct LegacyFixture(std::path::PathBuf);
+    impl LegacyFixture {
+        fn new(bytes: &[u8]) -> Self {
+            use std::io::Write;
+            let path = std::env::temp_dir().join(format!("dsh-pairing-capacity-{}.plist", uuid::Uuid::new_v4()));
+            let mut file = std::fs::OpenOptions::new().write(true).create_new(true).open(&path).unwrap();
+            let fixture = Self(path);
+            file.write_all(bytes).unwrap();
+            fixture
+        }
+
+        async fn load(&self) -> Result<PairingRecord, Failure> {
+            let input = PairingInput::LegacyFile(self.0.to_str().unwrap().into());
+            tokio::time::timeout(std::time::Duration::from_secs(2), input.load())
+                .await.expect("bounded synthetic regular-file read")
+        }
+    }
+    impl Drop for LegacyFixture {
+        fn drop(&mut self) { let _ = std::fs::remove_file(&self.0); }
+    }
+
+    fn check_legacy_allocation(length: usize) {
+        let reads = LEGACY_READS.with(|reads| std::mem::take(&mut *reads.borrow_mut()));
+        assert_eq!(reads.len(), 1);
+        let (before, after, same_pointer, used) = reads[0];
+        assert!(before >= MAX_PAIRING + 1);
+        assert_eq!(before, after);
+        assert!(same_pointer, "the guarded destination must not reallocate after receiving pairing bytes");
+        assert_eq!(used, length);
+    }
+
+    #[tokio::test]
+    async fn w31_pairing_legacy_capacity_reuses_one_buffer() {
+        let short = bytes();
+        let value: plist::Value = plist::from_bytes(&short).unwrap();
+        let mut maximum = Vec::new();
+        plist::to_writer_xml(&mut maximum, &value).unwrap();
+        maximum.resize(MAX_PAIRING, b' ');
+        for source in [short, maximum] {
+            let fixture = LegacyFixture::new(&source);
+            take_clear_events();
+            LEGACY_READS.with(|reads| reads.borrow_mut().clear());
+            let record = fixture.load().await.unwrap();
+            check_legacy_allocation(source.len());
+            let events = take_clear_events();
+            assert!(events.contains(&("data", true)));
+            assert!(events.iter().all(|(_, cleared)| *cleared));
+            drop(record);
+            assert_eq!(take_clear_events(), vec![("record", true)]);
+        }
+    }
+
+    #[tokio::test]
+    async fn w31_pairing_legacy_capacity_rejects_and_clears() {
+        let partial = b"<?xml version=\"1.0\"?><plist version=\"1.0\"><dict><key>private_key</key><data>AQIDBA==</data><key>unknown</key><true/></dict></plist>";
+        for source in [Vec::new(), partial.to_vec()] {
+            let fixture = LegacyFixture::new(&source);
+            take_clear_events();
+            LEGACY_READS.with(|reads| reads.borrow_mut().clear());
+            assert!(fixture.load().await.is_err());
+            check_legacy_allocation(source.len());
+            let events = take_clear_events();
+            assert!(events.contains(&("data", true)));
+            assert!(events.iter().all(|(_, cleared)| *cleared));
+        }
+        let oversized = LegacyFixture::new(&vec![0; MAX_PAIRING + 1]);
+        take_clear_events();
+        LEGACY_READS.with(|reads| reads.borrow_mut().clear());
+        VALIDATIONS.with(|count| count.set(0));
+        assert!(oversized.load().await.is_err());
+        assert!(LEGACY_READS.with(|reads| reads.borrow().is_empty()));
+        assert_eq!(VALIDATIONS.with(|count| count.get()), 0);
+        assert!(take_clear_events().is_empty());
     }
 
     fn changed(field: &str, value: plist::Value) -> Vec<u8> {
