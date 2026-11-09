@@ -1066,7 +1066,7 @@ internal class MainScreenDriver(private val service: PhoneA11yService, private v
                 val before = clock.count
                 val out = actuator.scroll(null, 0, a.direction == PhoneAction.Direction.LEFT || a.direction == PhoneAction.Direction.RIGHT,
                     Box(screen.left, screen.top + screen.height / 5, screen.right, screen.bottom - screen.height / 6), screen, a.direction) {
-                    !cancelled(gen) && allowed() && actionSourcesAllowed(sources)
+                    !cancelled(gen) && !overlay.editing && allowed() && actionSourcesAllowed(sources)
                 }
                 // l10n:keep agent screen result
                 if (!out.accepted) return after(before, snap, gen,
@@ -1085,7 +1085,7 @@ internal class MainScreenDriver(private val service: PhoneA11yService, private v
             refuseHalted { allowed() && actionSourcesAllowed(sources) }?.let { return it }
             val before = clock.count
             val out = actuator.scroll(r.node, r.el.scroll, r.el.horizontal, r.el.bounds, r.cap.screen, a.direction) {
-                !cancelled(gen) && allowed() && actionSourcesAllowed(sources)
+                !cancelled(gen) && !overlay.editing && allowed() && actionSourcesAllowed(sources)
             }
             // l10n:keep agent screen result
             if (!out.accepted) return after(before, r.snap, gen,
