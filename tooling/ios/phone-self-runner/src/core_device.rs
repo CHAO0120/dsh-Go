@@ -10,6 +10,7 @@ use idevice::core_device::{AppServiceClient, ScreenCaptureServiceClient, ImageFo
     UniversalHidServiceClient, IndigoHidClient, MainKeyboardService, KeyboardUsage,
     ButtonState, TOUCHSCREEN_STATE_CONTACT, TOUCHSCREEN_STATE_RELEASE};
 use idevice::springboardservices::SpringBoardServicesClient;
+use idevice::dvt::{remote_server::RemoteServerClient, screenshot::ScreenshotClient};
 use serde::Deserialize;
 use serde_json::{Value, json};
 use tokio::sync::{mpsc, watch};
@@ -30,7 +31,10 @@ const ORIENTATION: &str = "com.apple.springboardservices.shim.remote";
 const HID: &str = "com.apple.coredevice.hid.universalhidservice";
 const INDIGO: &str = "com.apple.coredevice.hid.indigo";
 const DISPLAY: &str = "com.apple.coredevice.displayservice";
-const CORE_REQUIRED: &[&str] = &[SCREEN, APPS, ORIENTATION];
+const DVT: &str = "com.apple.instruments.dtservicehub";
+// These establish the developer image's base services. Screenshot/input
+// support is probed separately: older images expose DVT rather than SCREEN.
+const CORE_REQUIRED: &[&str] = &[APPS, ORIENTATION];
 
 const STARTING: u8 = 0;
 const READY: u8 = 1;
@@ -699,7 +703,12 @@ impl Session {
     }
     async fn probe(&mut self) -> Result<Value, Failure> {
         self.orientation().await?;
-        ScreenCaptureServiceClient::connect_rsd(&mut self.tunnel.adapter, &mut self.tunnel.handshake).await.map_err(|_| SERVICE)?;
+        if self.tunnel.handshake.services.contains_key(SCREEN) {
+            ScreenCaptureServiceClient::connect_rsd(&mut self.tunnel.adapter, &mut self.tunnel.handshake).await.map_err(|_| SERVICE)?;
+        } else if self.tunnel.handshake.services.contains_key(DVT) {
+            let mut client = self.dvt().await?;
+            ScreenshotClient::new(&mut client).await.map_err(|_| SERVICE)?;
+        } else { return Err(SERVICE); }
         AppServiceClient::connect_rsd(&mut self.tunnel.adapter, &mut self.tunnel.handshake).await.map_err(|_| SERVICE)?;
         let input = if self.tunnel.handshake.services.contains_key(HID) && self.tunnel.handshake.services.contains_key(DISPLAY) {
             let probe = async {
@@ -828,8 +837,13 @@ impl Session {
     async fn screenshot(&mut self) -> Result<Payload, Failure> {
         self.frame = None;
         let before = self.orientation().await?;
-        let mut client = ScreenCaptureServiceClient::connect_rsd(&mut self.tunnel.adapter, &mut self.tunnel.handshake).await.map_err(|_| SERVICE)?;
-        let bytes = client.take_screenshot(None, ImageFormat::Png).await.map_err(|_| SERVICE)?;
+        let bytes = if self.tunnel.handshake.services.contains_key(SCREEN) {
+            let mut client = ScreenCaptureServiceClient::connect_rsd(&mut self.tunnel.adapter, &mut self.tunnel.handshake).await.map_err(|_| SERVICE)?;
+            client.take_screenshot(None, ImageFormat::Png).await.map_err(|_| SERVICE)?
+        } else if self.tunnel.handshake.services.contains_key(DVT) {
+            let mut client = self.dvt().await?;
+            ScreenshotClient::new(&mut client).await.map_err(|_| SERVICE)?.take_screenshot().await.map_err(|_| SERVICE)?
+        } else { return Err(SERVICE); };
         let (width, height) = png_dimensions(&bytes)?;
         let after = self.orientation().await?;
         if before != after { return Err(ORIENTATION_CHANGED); }
@@ -841,6 +855,11 @@ impl Session {
         payload.metadata["foregroundVerified"] = false.into();
         self.frame = Some(Frame { id, at_ns: continuous_now_ns().ok_or(FRAME)?, orientation: after });
         Ok(payload)
+    }
+    async fn dvt(&mut self) -> Result<RemoteServerClient<Box<dyn ReadWrite>>, Failure> {
+        let mut client = RemoteServerClient::connect_rsd(&mut self.tunnel.adapter, &mut self.tunnel.handshake).await.map_err(|_| SERVICE)?;
+        client.read_message(0).await.map_err(|_| SERVICE)?;
+        Ok(client)
     }
     async fn apps(&mut self) -> Result<Payload, Failure> {
         let mut client = AppServiceClient::connect_rsd(&mut self.tunnel.adapter, &mut self.tunnel.handshake).await.map_err(|_| SERVICE)?;

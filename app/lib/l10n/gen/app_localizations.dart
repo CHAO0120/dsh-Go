@@ -15554,6 +15554,18 @@ abstract class L10n {
   /// **'连接正常'**
   String get iosPhoneLinkChecked;
 
+  /// No description provided for @iosPhoneLinkReadOnly.
+  ///
+  /// In zh, this message translates to:
+  /// **'连接正常，可读屏和打开应用；点按、滚动和输入需使用 XCTest 增强'**
+  String get iosPhoneLinkReadOnly;
+
+  /// No description provided for @iosPhoneLinkErrorServices.
+  ///
+  /// In zh, this message translates to:
+  /// **'当前开发者服务不支持这条 CoreDevice 连接。已有镜像时重新下载不一定有用；可启用 XCTest 增强，或交还自己操作。'**
+  String get iosPhoneLinkErrorServices;
+
   /// No description provided for @iosPhoneLinkDdi.
   ///
   /// In zh, this message translates to:

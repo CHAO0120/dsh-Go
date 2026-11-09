@@ -61,6 +61,8 @@
   "iosPhoneLinkCheckHint": "确认 VPN、配对和开发者服务都通",
   "iosPhoneLinkCheck": "检查",
   "iosPhoneLinkChecked": "连接正常",
+  "iosPhoneLinkReadOnly": "连接正常，可读屏和打开应用；点按、滚动和输入需使用 XCTest 增强",
+  "iosPhoneLinkErrorServices": "当前开发者服务不支持这条 CoreDevice 连接。已有镜像时重新下载不一定有用；可启用 XCTest 增强，或交还自己操作。",
   "iosPhoneLinkDdi": "开发者镜像",
   "iosPhoneLinkDdiHint": "部分功能需要。约 17 MB，来自第三方 DeveloperDiskImage 镜像仓库（不是 Apple 下载站），按固定哈希校验，再由 Apple 为这台手机个性化。",
   "iosPhoneLinkDdiPrepare": "准备",

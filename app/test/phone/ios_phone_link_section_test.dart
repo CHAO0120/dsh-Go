@@ -71,6 +71,7 @@ PhoneLinkStatus _status({
   int total = 0,
   bool clipboard = false,
   String? lastCheckCode,
+  Map<String, bool> capabilities = const {},
   PhoneLinkPhase phase = PhoneLinkPhase.idle,
 }) => PhoneLinkStatus(
   buildAvailable: available,
@@ -84,6 +85,7 @@ PhoneLinkStatus _status({
   clipboardPending: clipboard,
   lastCheck: lastCheckCode == null ? null : DateTime(2026, 11, 8),
   lastCheckCode: lastCheckCode,
+  lastCheckCapabilities: capabilities,
   phase: phase,
 );
 
@@ -113,6 +115,14 @@ void main() {
     await tester.pump();
     await tester.pump();
   }
+
+  testWidgets('a limited connection does not promise tapping or typing', (tester) async {
+    link = _Link(
+      _status(paired: true, enabled: true, lastCheckCode: 'OK', capabilities: {'screenshot': true, 'touch': false}),
+    );
+    await show(tester);
+    expect(find.text('连接正常，可读屏和打开应用；点按、滚动和输入需使用 XCTest 增强'), findsOneWidget);
+  }, variant: ios);
 
   testWidgets('an older iOS says what it needs and offers nothing else', (tester) async {
     link = _Link(_status(available: false));
@@ -174,7 +184,9 @@ void main() {
     expect(link.calls.last, 'mountDDI');
   }, variant: ios);
 
-  testWidgets('a connection that never confirmed it closed: check waits, and restarting is the way back', (tester) async {
+  testWidgets('a connection that never confirmed it closed: check waits, and restarting is the way back', (
+    tester,
+  ) async {
     link = _Link(_status(paired: true, enabled: true, lastCheckCode: 'OK', phase: PhoneLinkPhase.faulted));
     await show(tester);
     expect(find.text('上一次连接没能确认已经关掉'), findsOneWidget);
@@ -275,6 +287,7 @@ void main() {
           'phase': 'failed',
           'code': 'ERR_PHONE_TUNNEL',
           'checks': {'vpnReachable': false},
+          'capabilities': {'screenshot': true, 'touch': false, 'junk': 'x'},
         },
       },
       'ddiCache': {'catalogId': 'x', 'downloading': false, 'verifiedThisProcess': true},
@@ -288,6 +301,7 @@ void main() {
     expect(status.lastCheckPhase, PhoneLinkPhase.failed);
     expect(status.lastCheckCode, 'ERR_PHONE_TUNNEL');
     expect(status.lastCheckChecks, {'vpnReachable': false});
+    expect(status.lastCheckCapabilities, {'screenshot': true, 'touch': false});
     expect(status.lastCheck, DateTime.fromMillisecondsSinceEpoch(1794000000 * 1000));
     expect(status.ddiVerified, isTrue);
     expect(status.downloading, isTrue);

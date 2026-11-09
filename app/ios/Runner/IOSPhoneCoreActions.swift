@@ -64,6 +64,10 @@ final class IOSPhoneCoreActions {
     defer { busy = false }
     do {
       try require(live)
+      let capabilities = core.state["capabilities"] as? [String: Bool] ?? [:]
+      if plan.requiresObservation && capabilities["touch"] != true {
+        return .failure("ERR_PHONE_CORE_INPUT_UNAVAILABLE：本连接可查询应用、打开应用和读屏，但系统没有提供 CoreDevice 输入服务。不要重试镜像或猜坐标；请在用户选择的可用增强路线重新读屏，或交还用户操作。")
+      }
       let token = plan.screen ?? latestToken
       var point: CGPoint?
       if plan.requiresObservation {
@@ -113,7 +117,6 @@ final class IOSPhoneCoreActions {
 
       // Only a fresh screen/open consent establishes the media gate. A mutation
       // uses the already established gate; it never silently starts one.
-      let capabilities = core.state["capabilities"] as? [String: Bool] ?? [:]
       if (plan.method == .screen || plan.method == .open), capabilities["touch"] == true {
         _ = try await send(["op": "prepareInput"], execution, current: live)
       }
@@ -351,7 +354,14 @@ final class IOSPhoneCoreActions {
       image: image, detail: detail, current: current)
     try requireBackground(current)
     latestToken = output.screen
-    return output
+    let capabilities = core.state["capabilities"] as? [String: Bool] ?? [:]
+    guard capabilities["touch"] == false else { return output }
+    let next = IOSPhoneLink.shared.xctestEnabled
+      ? "XCTest 增强已开启；需要操作时先调用 screen，准备新的增强观察。不要重复要求用户开开关，旧 CoreDevice 编号不能用于 XCTest。"
+      : "需要输入时请用户开启 XCTest 增强，再重新读屏；也可以 handoff。"
+    return .init(screen: output.screen,
+      text: "CoreDevice 当前可读屏和打开应用，不支持点按、滚动、系统键或输入。" + next + "不要重试镜像。\n" + output.text,
+      jpeg: output.jpeg, imageWidth: output.imageWidth, imageHeight: output.imageHeight)
   }
 
   private func capture(_ execution: Execution, current: @escaping () -> Bool) async throws -> IOSPhoneCoreReply {

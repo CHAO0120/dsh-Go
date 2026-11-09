@@ -72,7 +72,7 @@ cp -R "$GUEST_BUILT/DshGuest.framework" "$GUEST_BUILT/DshGuestBridge.framework" 
 cp "$ENGINE/runtime.zip" "$RESOURCES/dsh-runtime/runtime.zip"
 # The phone tools' backend is iOS's own, so it isn't in the archive runtime/ohos composes.
 mkdir -p "$RESOURCES/dsh-runtime/phone"
-for file in actions.mjs bridge.mjs plugin.mjs catalog.json; do
+for file in actions.mjs bridge.mjs plugin.mjs descriptions.mjs catalog.json; do
   cp "$ROOT/runtime/ios/phone/$file" "$RESOURCES/dsh-runtime/phone/"
 done
 if [ -d "$ROOT/runtime/ios/browser" ]; then

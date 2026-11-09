@@ -8432,6 +8432,12 @@ class L10nZh extends L10n {
   String get iosPhoneLinkChecked => '连接正常';
 
   @override
+  String get iosPhoneLinkReadOnly => '连接正常，可读屏和打开应用；点按、滚动和输入需使用 XCTest 增强';
+
+  @override
+  String get iosPhoneLinkErrorServices => '当前开发者服务不支持这条 CoreDevice 连接。已有镜像时重新下载不一定有用；可启用 XCTest 增强，或交还自己操作。';
+
+  @override
   String get iosPhoneLinkDdi => '开发者镜像';
 
   @override

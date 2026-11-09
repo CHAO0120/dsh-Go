@@ -37,6 +37,7 @@ final class PhoneLinkStatus {
     this.lastCheck,
     this.lastCheckPhase,
     this.lastCheckChecks = const {},
+    this.lastCheckCapabilities = const {},
     this.lastCheckCode,
     this.ddiVerified = false,
     this.ddiDownloading = false,
@@ -80,6 +81,7 @@ final class PhoneLinkStatus {
   final DateTime? lastCheck;
   final PhoneLinkPhase? lastCheckPhase;
   final Map<String, bool> lastCheckChecks;
+  final Map<String, bool> lastCheckCapabilities;
   final String? lastCheckCode;
 
   /// A downloaded disk image passed its hash check in this run. Not that it is mounted.
@@ -129,6 +131,7 @@ final class PhoneLinkStatus {
       lastCheck: time is num ? DateTime.fromMillisecondsSinceEpoch((time * 1000).round()) : null,
       lastCheckPhase: phaseOf(lastConnection['phase']),
       lastCheckChecks: bools(lastConnection['checks']),
+      lastCheckCapabilities: bools(lastConnection['capabilities']),
       lastCheckCode: lastConnection['code'] as String?,
       ddiVerified: cache['verifiedThisProcess'] == true,
       ddiDownloading: cache['downloading'] == true,

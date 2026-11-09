@@ -53,7 +53,7 @@ final class PetOverlayPictureInPicture: NSObject,
     if audio.isValid { return nil }
     return audioCoordinator.blocker(for: .pictureInPicture).map(Self.audioFailureCode)
   }
-  var keepingAlive: Bool { requested && active && !suspended && audioConfigured }
+  var keepingAlive: Bool { requested && active && !suspended && !playbackPaused && audioConfigured }
   var inlineVisible: Bool {
     guard let window = sourceView.window, !window.isHidden,
       sourceView.bounds.width >= 80, sourceView.bounds.height >= 50,
@@ -173,8 +173,10 @@ final class PetOverlayPictureInPicture: NSObject,
   }
 
   func setPaused(_ paused: Bool) {
+    guard playbackPaused != paused else { return }
     playbackPaused = paused
     picture?.invalidatePlaybackState()
+    onChange?()
   }
 
   func stop(keepInline: Bool = false) {

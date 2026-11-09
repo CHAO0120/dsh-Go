@@ -148,7 +148,7 @@ session；暂停、结束、配对/设置 generation 变化会使当前使用失
 能用增强；每 App 规则来自前台设置，不来自工具参数。XCTest 对它实际核到的包名
 再次检查 CoreDevice 专用集合，不把上次路线当作当前 App 身份证明。
 
-自动切换只允许发生在 CoreDevice **准备连接失败、确认未派发、清理完成**时，且
+自动切换只允许发生在 CoreDevice **准备连接失败，或新的 screen 准备时确认缺少输入能力、确认未派发、清理完成**时，且
 没有不兼容规则/旧观察绑定。共享屏幕准备、启动应用、触摸、输入或任何结果不明
 之后都不在另一个后端重试。端上 XCTest bootstrap 失败也不自动转 Mac runner。
 已有 Mac runner 只是用户已开启增强时的独立准备路线，不代表不需要逐次批准。
@@ -157,7 +157,7 @@ session；暂停、结束、配对/设置 generation 变化会使当前使用失
 
 | 场景 | 实现约束 |
 | --- | --- |
-| CoreDevice 读屏 | 本机 Vision OCR，最多 200 个文字元素/约 24 KiB；OCR 框是文字框，不是系统可交互元素树 |
+| CoreDevice 读屏 | 优先直接 capture 服务；较早系统通过同一 owner/RSD 的 Instruments DVT 截图，不启动 XCTest。随后本机 Vision OCR，最多 200 个文字元素/约 24 KiB；OCR 框是文字框，不是系统可交互元素树 |
 | CoreDevice `screen(image:true)` | JPEG 标号图，长边至多 1280，必要时降质/缩小，原始 JPEG ≤880 KiB；坐标按返回图大小解释，不截断图片 |
 | XCTest `screen(image:true)` | 沿用 XCUIScreen 的原图 JPEG(.5)，没有宣称加上 Core 的标号/缩放链；原生 caller 拒绝超过 880 KiB 的图，不截断后继续使用 |
 | `screen(image:false)` | 可返回文字编号；不因此授权按模型未见的截图像素坐标输入 |

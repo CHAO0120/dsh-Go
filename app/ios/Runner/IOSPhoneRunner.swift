@@ -137,7 +137,11 @@ final class IOSPhoneRunner {
       && link.generation == settingsGeneration && IOSPhoneControl.shared.enabled
       && !IOSPhoneControl.shared.isPaused
       && request.expiresAt > Date().timeIntervalSince1970 * 1000 }
-    guard live(), !link.isPreparing, link.enabled || link.xctestEnabled else {
+    guard live() else { return .failure(IOSPhoneSelfRunnerError.cancelled.message) }
+    guard !link.isPreparing else {
+      return .failure("连接设置正在处理另一项准备，请等待完成后重新发起；不是增强开关未开启。")
+    }
+    guard link.enabled || link.xctestEnabled else {
       return .failure("手机连接和 XCTest 增强均未启用。请由用户在设置中选择；已保存配对不等于授权操控。")
     }
     guard IOSPetOverlay.shared.isUsable else {
@@ -183,7 +187,18 @@ final class IOSPhoneRunner {
       let prepared = await core.prepare(ownerID: ownerID, current: live)
       guard live(), consent.isGranted else { core.stop(ownerID: ownerID); return .failure(IOSPhoneSelfRunnerError.cancelled.message) }
       switch prepared {
-      case .success:
+      case .success(let capabilities):
+        // A fresh screen has not captured or dispatched anything yet. When
+        // the native probe reports no input, an already enabled enhancement
+        // can prepare a NEW XCTest observation, with normal approval below.
+        // Never carry a CoreDevice element ID into an XCTest input request.
+        let mayEnhance = link.xctestEnabled && !mustCore && !link.appRoutes.values.contains("coredevice")
+        if capabilities["touch"] == false, mayEnhance, plan.method == .screen { break }
+        if capabilities["touch"] == false, link.xctestEnabled, plan.requiresObservation {
+          return .failure(mayEnhance
+            ? "XCTest 增强已开启。当前编号来自 CoreDevice 的只读观察；请先调用 screen 获取新的 XCTest 屏幕和编号，再操作。本次没有点击、滚动或输入，不需要重复开启开关。"
+            : "XCTest 增强已开启，但当前应用规则不允许自动切换。这次没有派发输入；请用户核对应用后端规则，或 handoff。")
+        }
         if lastRoute != .coredevice { coreActions.invalidate(); lastXCTestScreen = nil }
         lastRoute = .coredevice; lastEndpoint = nil
         progress(.executing)
@@ -201,9 +216,8 @@ final class IOSPhoneRunner {
         }
       }
     }
-    guard live(), consent.isGranted, link.xctestEnabled else {
-      return .failure("XCTest 增强未获授权，没有启动或调用运行器。")
-    }
+    guard live(), consent.isGranted else { return .failure(IOSPhoneSelfRunnerError.cancelled.message) }
+    guard link.xctestEnabled else { return .failure("XCTest 增强已关闭，没有启动或调用运行器。") }
     // A fresh, unknown route is not guessed. The XCTest server also checks the
     // exact live bundle ID against these rules before every observed input.
     if explicitApp == nil, link.appRoutes.values.contains("coredevice"), lastRoute != .xctest {

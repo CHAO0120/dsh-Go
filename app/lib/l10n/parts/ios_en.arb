@@ -61,6 +61,8 @@
   "iosPhoneLinkCheckHint": "Confirms the VPN, pairing and developer services all work",
   "iosPhoneLinkCheck": "Check",
   "iosPhoneLinkChecked": "The connection works",
+  "iosPhoneLinkReadOnly": "Connected for screen reading and opening apps; tapping, scrolling and typing need XCTest enhancement",
+  "iosPhoneLinkErrorServices": "The current developer services do not support this CoreDevice connection. Downloading again may not help if an image is already mounted; use XCTest enhancement or take over manually.",
   "iosPhoneLinkDdi": "Developer disk image",
   "iosPhoneLinkDdiHint": "Some features need it. About 17 MB from the third-party DeveloperDiskImage mirror (not Apple's download site), checked against fixed hashes, then personalized for this phone by Apple.",
   "iosPhoneLinkDdiPrepare": "Prepare",

@@ -11,6 +11,7 @@ final class IOSPetOverlay: NSObject {
   var onTaskPauseRequested: ((Int) -> Void)?
   var onTaskStopConfirmed: ((Int) -> Void)?
   var onTaskResumeConfirmed: ((Int) -> Void)?
+  var onKeepingAliveChanged: ((Bool) -> Void)?
 
   private let picture = PetOverlayPictureInPicture()
   private var channel: FlutterMethodChannel?
@@ -35,6 +36,7 @@ final class IOSPetOverlay: NSObject {
   private var backpressure = 0
   private var manualAnimationPaused = false
   private var wasKeepingAlive = false
+  private var publishedKeepingAlive: Bool?
   private weak var prompt: UIAlertController?
   private var dismissPrompt: (() -> Void)?
   private var stopPromptTaskID: Int?
@@ -300,8 +302,8 @@ final class IOSPetOverlay: NSObject {
     let title = words(always ? "Always show the pet?" : "Enable the picture-in-picture pet?",
       always ? "始终显示宠物？" : "开启宠物画中画？")
     let message = always
-      ? words("The pet may keep its video and audio session active even after phone control ends. This can use more battery. You can turn this off at any time.",
-          "即使手机操控任务结束，宠物也可能继续保持视频和音频会话，会增加耗电。你随时可以关闭。")
+      ? words("The pet may keep its video and audio session active after phone control ends, allowing the local engine to continue while Picture in Picture is playing. iOS may interrupt it. This uses more battery; you can turn it off at any time.",
+          "手机操控任务结束后，宠物可以继续播放画中画，让本机引擎在画中画有效时继续运行。系统仍可能中断，会增加耗电；你随时可以关闭。")
       : words("While a phone-control task is running, a visible pet video can continue in Picture in Picture when you leave DSH Go. iOS may interrupt it. This uses an audio session and may affect other audio. It stops when the task ends unless you separately choose Always show.",
           "手机操控任务进行时，离开 DSH Go 后可以在画中画里继续显示宠物。系统仍可能中断。它会使用音频会话，可能影响其他音频；任务结束即收起，除非另行选择始终显示。")
     let alert = UIAlertController(title: title, message: message, preferredStyle: .alert)
@@ -592,6 +594,11 @@ final class IOSPetOverlay: NSObject {
   }
 
   private func emit() {
+    let keepingAlive = isKeepingAlive
+    if publishedKeepingAlive != keepingAlive {
+      publishedKeepingAlive = keepingAlive
+      onKeepingAliveChanged?(keepingAlive)
+    }
     let snapshot = statusSnapshot as NSDictionary
     guard lastStatus?.isEqual(snapshot) != true else { return }
     lastStatus = snapshot

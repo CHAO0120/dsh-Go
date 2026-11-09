@@ -2,6 +2,14 @@
 
 DSH can run right on this phone (this phone's engine), or on your computer or server with your phone connecting to it. Chats, workspaces and plugins belong to each host.
 
+## Running in the background on iPhone
+
+The local engine continues after leaving the app only while the system actually allows background execution. A playing, unsuspended picture-in-picture pet and an accepted continued-processing task are independent sources; ending one must not clear the other. An enabled switch, downloaded assets or a previously visible PiP does not prove current execution permission.
+
+Enable the picture-in-picture pet on the phone-control page and choose to keep it after tasks to use it for ordinary local chats as well. Start a real PiP from the foreground before switching apps. If PiP closes, pauses, the device locks or audio is interrupted, and no other system execution grant remains, the engine pauses at its next tool boundary. iOS can still suspend or terminate the app; permanent uptime is not promised.
+
+PiP does not approve tools, disable safe mode or resume a phone task you manually paused. Return to the app for confirmations; restoring PiP does not approve a previous request. An engine on a remote host does not depend on the iPhone's PiP.
+
 ## This phone or remote
 
 The first time you open the app, choose where DSH runs:

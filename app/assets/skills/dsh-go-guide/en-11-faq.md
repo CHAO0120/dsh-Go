@@ -1,5 +1,13 @@
 # Troubleshooting
 
+## Why can phone control fail when an iPhone already has a developer image?
+
+Mounting an image, verifying pairing and supporting actions are separate facts. Check the connection on the phone-control page. CoreDevice may support screen reading and app launch without touch or input services; downloading again cannot create those capabilities. Use XCTest enhancement or take over as the check suggests, rather than replaying failed actions. Without credentials, first generate a Remote Pairing file over USB using a computer; migrate an existing legacy file when available.
+
+## Does PiP keep an iPhone online forever?
+
+No. An actually active, unpaused PiP pet can support local engine execution, but device lock, closing it, audio interruptions and system resource limits may end that permission. An enabled switch does not establish current background execution, and PiP cannot approve tools. See [local engine](03-engine-hosts.md) and [pets](06-pets.md).
+
 ## Messages won't send, or no reply comes
 
 Check the host status at the bottom of the chat list.

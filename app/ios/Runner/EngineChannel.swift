@@ -285,7 +285,9 @@ private final class EngineLifecycle: NSObject, URLSessionTaskDelegate {
   private var requested = -1
   private var acknowledged = -1
   private(set) var failure: String?
-  private(set) var continued = false
+  private var continuedProcessing = false
+  private var pictureInPicture = false
+  var continued: Bool { continuedProcessing || pictureInPicture }
   private var retryDelay = 1.0
   private var retry: DispatchWorkItem?
   private var task: URLSessionTask?
@@ -328,9 +330,18 @@ private final class EngineLifecycle: NSObject, URLSessionTaskDelegate {
 
   /// The system is letting the engine keep running in the background.
   func observe(continued: Bool) {
-    guard continued != self.continued else { return }
+    guard continued != continuedProcessing else { return }
     resetRetry()
-    self.continued = continued
+    continuedProcessing = continued
+    revision += 1
+    failures = 0
+    push()
+  }
+
+  func observe(pictureInPicture: Bool) {
+    guard pictureInPicture != self.pictureInPicture else { return }
+    resetRetry()
+    self.pictureInPicture = pictureInPicture
     revision += 1
     failures = 0
     push()
@@ -353,7 +364,9 @@ private final class EngineLifecycle: NSObject, URLSessionTaskDelegate {
   }
 
   func status() -> [String: Any?] {
-    ["foreground": foreground, "continued": continued, "revision": revision, "acknowledgedRevision": acknowledged < 0 ? nil : acknowledged, "error": failure]
+    ["foreground": foreground, "continued": continued, "pictureInPicture": pictureInPicture,
+     "continuedProcessing": continuedProcessing, "revision": revision,
+     "acknowledgedRevision": acknowledged < 0 ? nil : acknowledged, "error": failure]
   }
 
   private func resetRetry() {
@@ -431,8 +444,8 @@ private final class EngineLifecycle: NSObject, URLSessionTaskDelegate {
     request.httpMethod = "POST"
     request.setValue(cookie, forHTTPHeaderField: "Cookie")
     request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-    // Without a continued task iOS gives no compute in the background, so the engine pauses new
-    // tool calls. It pauses on what it's told about the foreground, so a continued task counts.
+    // Only actual system-backed execution counts: an active continued task or
+    // a playing, unsuspended PiP with its owned audio session. A setting alone does not.
     let foreground = self.foreground || continued
     let body: [String: Any] = [
       "operation": "host", "revision": revision, "foreground": foreground,
@@ -556,6 +569,16 @@ final class EngineChannel: NSObject, FlutterStreamHandler {
         self.lifecycle.observe(continued: running)
         self.emitStatus()
       }
+    }
+    MainActor.assumeIsolated {
+      IOSPetOverlay.shared.onKeepingAliveChanged = { [weak self] active in
+        self?.queue.async { [weak self] in
+          self?.lifecycle.observe(pictureInPicture: active)
+          self?.emitStatus()
+        }
+      }
+      let active = IOSPetOverlay.shared.isKeepingAlive
+      queue.async { [self] in lifecycle.observe(pictureInPicture: active) }
     }
     let center = NotificationCenter.default
     center.addObserver(

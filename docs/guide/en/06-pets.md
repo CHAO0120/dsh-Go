@@ -2,6 +2,14 @@
 
 Pick a pet to keep you company in chats. When a turn finishes, fails, or waits for your approval or answer, it pops up a bubble. It can also float outside the app.
 
+## Picture-in-picture pet on iPhone
+
+On iOS the pet outside the app uses system Picture in Picture, without Android overlay or accessibility permission. Enable the PiP pet on the phone-control page. Keeping it after a task is a separate choice that uses a video/audio session and more battery. If it does not appear automatically, return to the foreground and start PiP; select a pet first and keep its source view visible.
+
+A playing, unsuspended PiP can allow the local engine to continue in the background. Pausing, closing, locking the device or losing audio stops counting PiP as execution permission; iOS may still interrupt it. A ready setting indicates configuration and assets, not an active PiP. Restoring PiP does not approve phone actions. See [background execution](03-engine-hosts.md).
+
+The following overlay permissions, radial menu and floating input instructions describe Android features, not iOS PiP controls.
+
 ## Choose a pet
 
 <!-- nav: commonSettings,botsPets -->

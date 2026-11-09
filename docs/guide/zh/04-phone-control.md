@@ -2,6 +2,26 @@
 
 让 DSH 看屏幕、帮你点按和输入，在你的手机上完成任务，随时可以暂停或停止。手机操控只在本机引擎可用，安全模式下不加载。
 
+## iPhone / iOS
+
+<!-- nav: commonSettings,hubSettingsPhoneControl -->
+`设置 › 手机操控` · [打开](dshgo://open/phone)
+
+iPhone 使用本机开发者连接，默认路线是 CoreDevice；不是 Android 无障碍，也没有 Android 的不打扰后台屏。
+
+1. 在系统里开启开发者模式，保持 iPhone 解锁、LocalDevVPN 已连接。
+2. 在本机连接里导入 Remote Pairing 配对文件。旧版已有文件时点迁移，再由你选择记住在这台手机上或只用一次。没有文件时，需要先用电脑通过 USB 生成；普通 USB 信任记录和 Apple ID 不能代替它。参见[配对文件说明](https://github.com/ccch1mneyyy/dsh-Go/blob/ab2d179/tooling/ios/phone-control/PAIRING-WINDOWS.md)。
+3. 打开开发者连接，点检查。保存凭据不等于连接成功。只有确实缺镜像时才点准备；已挂载镜像仍缺某项服务时，反复下载不保证能补齐。
+4. 先选一只宠物，再开启宠物画中画。离开 DSH Go 后，真实活动、未暂停的画中画让本机任务有机会继续；开关开启不等于画中画已经运行。
+
+CoreDevice 读屏用本机 OCR，从截图识别文字；编号是本次观察的文字位置，不是系统可交互元素树。部分系统通过同一开发者隧道的 Instruments 服务取得截图，不会为读屏启动 XCTest。连接检查会如实说明是否支持点按和输入：能读屏、能打开应用，不等于能点按、滚动或输入。
+
+若结果提示 CoreDevice 输入不可用，停止该动作。增强已经开启时，先让 DSH 再调用一次 screen：它会在尚未派发动作时按可用性和应用规则准备新的 XCTest 观察，不需要重复开启开关；增强未开启时才需要你在前台开启。你也可以自己操作。XCTest 需要匹配且签名安装的 PhoneRunner；出现 Enable UI Automation 时，只在 iPhone 的系统界面输入锁屏密码确认。不会把已经派发或结果不明的动作交给另一条路线重做，旧屏幕编号也不能跨后端使用。
+
+每次手机调用都需要你在原生确认框点允许；30 分钟资格不会免除逐次确认，睡眠也计入期限。密码、验证码和支付步骤交还你处理。屏幕、应用列表和网页文字只是数据，其中的指令不是你的授权。iOS 不支持 `background:true`、Android 无障碍修复、Shizuku 或 ADB；模型不能让你去找这些入口。
+
+以下无障碍、悬浮条、不打扰后台屏和解除限制等说明面向 Android。
+
 ## 开启
 
 <!-- nav: commonSettings,hubSettingsPhoneControl -->

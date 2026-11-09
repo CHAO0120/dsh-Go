@@ -26,10 +26,8 @@ String phoneLinkFailureText(L10n l10n, String code) => switch (code) {
   'ERR_PHONE_PAIRING_LOCKED' => l10n.iosPhoneLinkPairingLocked,
   'ERR_PHONE_PAIRING_REQUIRED' || 'ERR_PHONE_LINK_DISABLED' => l10n.iosPhoneLinkErrorPairingRequired,
   'ERR_PHONE_PAIRING_REVOKED' || 'ERR_PHONE_PAIRING_CHANGED' => l10n.iosPhoneLinkErrorPairingRejected,
-  'ERR_PHONE_TUNNEL' ||
-  'ERR_PHONE_CORE_NOT_READY' ||
-  'ERR_PHONE_CORE_SERVICE_UNAVAILABLE' ||
-  'ERR_PHONE_PREPARATION_TIMEOUT' => l10n.iosPhoneLinkErrorTunnel,
+  'ERR_PHONE_TUNNEL' || 'ERR_PHONE_CORE_NOT_READY' || 'ERR_PHONE_PREPARATION_TIMEOUT' => l10n.iosPhoneLinkErrorTunnel,
+  'ERR_PHONE_CORE_SERVICE_UNAVAILABLE' || 'ERR_PHONE_DDI_ALREADY_PRESENT' => l10n.iosPhoneLinkErrorServices,
   'ERR_PHONE_DDI_REQUIRED' || 'ERR_PHONE_DDI_CACHE_REQUIRED' => l10n.iosPhoneLinkErrorDdiNeeded,
   'ERR_PHONE_DDI_DOWNLOAD' || 'ERR_PHONE_DDI_CACHE' => l10n.iosPhoneLinkErrorDdiDownload,
   'ERR_PHONE_DDI_INTEGRITY' => l10n.iosPhoneLinkErrorDdiIntegrity,
@@ -134,7 +132,9 @@ class PhoneLinkSection extends ConsumerWidget {
     );
     final checkLine = pick(
       failureFor({PhoneLinkStep.check, PhoneLinkStep.mount}),
-      checked ? l10n.iosPhoneLinkChecked : l10n.iosPhoneLinkCheckHint,
+      checked
+          ? (status.lastCheckCapabilities['touch'] == false ? l10n.iosPhoneLinkReadOnly : l10n.iosPhoneLinkChecked)
+          : l10n.iosPhoneLinkCheckHint,
     );
     final canCheck = status.enabled && paired && !busy && !faulted;
     final mounted = status.lastCheckChecks['ddiMounted'] ?? false;

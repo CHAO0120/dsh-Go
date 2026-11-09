@@ -7,6 +7,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomBytes, randomUUID } from 'node:crypto';
 import * as phone from '../../../runtime/ios/phone/plugin.mjs';
+import { iosToolDescription } from '../../../runtime/ios/phone/descriptions.mjs';
 const directory = await mkdtemp(join(tmpdir(), 'ios-phone-registry-'));
 const token = randomBytes(32).toString('hex'), runId = randomUUID();
 const nativeTest = process._linkedBinding('dsh_ios_phone_test');
@@ -22,10 +23,10 @@ try {
   for (const tool of catalog) {
     const schema = schemas.find(value => value.name === `mcp__phone__${tool.name}`);
     assert.ok(schema, tool.name);
-    assert.equal(schema.description, tool.description);
+    assert.equal(schema.description, iosToolDescription(tool.name));
     assert.deepEqual(schema.parameters, tool.inputSchema);
   }
-  assert.equal(schemas.length, 13);
+  assert.equal(schemas.filter(value => value.name.startsWith('mcp__phone__')).length, 13);
   assert.deepEqual(await readdir(directory), ['endpoint.json']);
   const endpointBytes = await readFile(join(directory, 'endpoint.json'));
   assert.equal(endpointBytes.includes(token), false);

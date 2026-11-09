@@ -8898,6 +8898,14 @@ class L10nEn extends L10n {
   String get iosPhoneLinkChecked => 'The connection works';
 
   @override
+  String get iosPhoneLinkReadOnly =>
+      'Connected for screen reading and opening apps; tapping, scrolling and typing need XCTest enhancement';
+
+  @override
+  String get iosPhoneLinkErrorServices =>
+      'The current developer services do not support this CoreDevice connection. Downloading again may not help if an image is already mounted; use XCTest enhancement or take over manually.';
+
+  @override
   String get iosPhoneLinkDdi => 'Developer disk image';
 
   @override
