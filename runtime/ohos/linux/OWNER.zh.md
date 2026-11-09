@@ -1,6 +1,6 @@
 # Linux 安装与恢复 owner（917、930、931）
 
-生产入口是 `owner.mjs` 的 `loadLinuxInstallationManifest({assetsDirectory})` 与 `createLinuxInstallationOwner({directory,nativeLibraryDirectory,manifest,onProgress,bootTimeoutMs})`。路径来自可信运行时发布根；清单仅选择固定五个资产名。`owner.install({signal})` 返回 `{backend,active}`，只有实际 guest `opened` 经协议验证且当前 active 记录提交成功后才交出 backend。`opened-private-guest` 与 `workspaceLease:false` 不表示全部 P0、授权目录或所有插件命令已可用。
+生产入口是 `owner.mjs` 的 `loadLinuxInstallationManifest({assetsDirectory})` 与 `createLinuxInstallationOwner({directory,nativeLibraryDirectory,manifest,exports,onProgress,bootTimeoutMs})`。`exports`（940）是至多四个 `{tag:'dshN', path}` App 目录，安装与恢复的 TinyEMU 配置都写成 `fsN` 9P 设备，backend 只接受这些 tag 的挂载。路径来自可信运行时发布根；清单仅选择固定五个资产名。`owner.install({signal})` 返回 `{backend,active}`，只有实际 guest `opened` 经协议验证且当前 active 记录提交成功后才交出 backend。`opened-private-guest` 与 `workspaceLease:false` 不表示全部 P0、授权目录或所有插件命令已可用。
 
 实际 OHOS subprocess service 在 `/dsh-go/v1/linux` 注册现有 connection 鉴权的 App 数据入口。唯一 host preload 在插件前捕获 `DSH_GO_OHOS_LINUX_DIRECTORY`、`DSH_GO_OHOS_NATIVE_LIBRARY_DIR` 和已链接 publication binding 的 `lockExclusive` 函数。专用目录由可信 `HostOptions.linuxDirectory = filesDir + '/linux-tools'` 提供；普通 profile、argv、后续 env 和 HTTP body 均不能改选路径或锁。缺少真实锁能力时启用明确失败，GET 不因此创建目录、装盘或加载 VM。字段与请求去重见 [CONTROL.zh.md](CONTROL.zh.md)。此入口未给 CommandRouter 注入 Linux，插件路由保持既有能力，宿主 cwd 不静默改成 guest `/workspace`。
 
