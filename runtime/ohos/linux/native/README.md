@@ -57,7 +57,7 @@ cmake --build /build/linux-oh
 
 `tooling/ohos/research/tinyemu-native/run.py` 是登记的定向门：真实重编基线/候选、Node jit/strict socket/stop/join、EMFILE 构造失败恢复、三类 oversized 真实启动错误、三类显式 fatal 边界、slirp 断开、受影响 core3/CLINT13/低写1、实际 rename-header 编译导入、NODELETE/RUNPATH 检查。可附 `--guest-config`，接已生成独立909镜像执行真实 Node插件→四盘安装→pivot_root→903 agent→python/gh/git/rg→双EOF/ACK→stop/join。guest config 是本机测试输入，不是 production SIM 开关。
 
-本件不负责 JS 共享路由（910）、9P 文件授权或正式安装 RPC。首次下载/准备/guest tar/工具overlay/同VM交接已有不同范围真实证据，但还没有一份最终签名 HAP 实装证据。所有工具测试均在 Linux host 仿真，gh pr list 真实账号留本机测。关闭 Linux 后 owner 仍隔离，不能同 App 重新启动；正常连续作业必须复用仍运行的 VM，不以每 job 停机。父级必须把 903 的取消标志、leader实际退出状态、双流ACK与租约收尾保留，绝不以 native join 代替 job complete。
+940 增加 `fs_export.c` 与补丁 0016：嵌入构建（`-DDSH_FS_EXPORT`）里 `fsN` 设备不再用上游 fs_disk，而是逐级 `openat(O_NOFOLLOW)` 从导出根重新解析每个操作的路径、拒绝 `.`/`..`、所有对象报告为客体作业身份 60081、错误码按 Linux errno 原样回传、打开时带 O_NONBLOCK。上游 fs_disk 用路径字符串交给宿主解析，客体造一个指向宿主路径的符号链接或把已打开 fid 的父目录换成链接，宿主就会跟着走出导出根；`tooling/ohos/tests/linux-fs-export.test.py` 对这些情形逐项验证。授权 FD 根（grants/）仍是研究件。本件不负责正式安装 RPC。首次下载/准备/guest tar/工具overlay/同VM交接已有不同范围真实证据，但还没有一份最终签名 HAP 实装证据。所有工具测试均在 Linux host 仿真，gh pr list 真实账号留本机测。关闭 Linux 后 owner 仍隔离，不能同 App 重新启动；正常连续作业必须复用仍运行的 VM，不以每 job 停机。父级必须把 903 的取消标志、leader实际退出状态、双流ACK与租约收尾保留，绝不以 native join 代替 job complete。
 
 ## 许可
 

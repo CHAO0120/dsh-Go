@@ -11,6 +11,7 @@ import { MAX_TIMER_DELAY_MS } from '@deepseek-ai/dsh-timeout';
 import { capabilities, subprocessCommands, unavailableMessage } from './commands.mjs';
 import { distinctRoots, isInside } from './paths.mjs';
 import { createOwnedGitServer } from './owned-server.mjs';
+import { createLinuxForwardServer } from './linux-forward.mjs';
 import { createNodeScriptWorker, formatNodeScriptError, nodeScriptAvailable } from './node-script.mjs';
 import { borrowProcessGrantAuthority, isLogicalWorkspacePath, processGrantNativeDirectory,
   processWorkspaceGrant, quarantineProcessGrantRetirement } from './files/process-authority.mjs';
@@ -39,12 +40,15 @@ export class VirtualSubprocessRuntime {
   #resourceFailures = new Set();
   #createOwnedGitServer;
   #selectExternal;
+  #linux;
   #concurrent;
 
   constructor({ workspaceRoots, temporaryRoot, onSpillFailure = () => {} } = {}, internals = {}) {
     // Explicit trusted test seam; never read from Worker messages or DSH config.
     this.#createOwnedGitServer = internals.createOwnedGitServer ?? createOwnedGitServer;
     this.#selectExternal = internals.selectExternal;
+    // The owner's Linux backend, looked up when a shell starts.
+    this.#linux = internals.linux ?? (() => undefined);
     this.#concurrent = internals.concurrent === true;
     if (typeof this.#createOwnedGitServer !== 'function') throw new TypeError('Invalid owned-resource server factory');
     if (!Array.isArray(workspaceRoots) || workspaceRoots.length === 0) {
@@ -270,6 +274,7 @@ export class VirtualSubprocessRuntime {
             workerEnv.DSH_GO_OHOS_SIM_PLATFORM = process.env.DSH_GO_OHOS_SIM_PLATFORM;
           }
           const nodeTask = name === 'node';
+          const linux = this.#linux();
           if (grant && (nodeTask || name === 'git')) throw Object.assign(new Error(
             'ERR_WORKSPACE_SCOPE_UNSUPPORTED: Node 脚本与 owned-git 尚未接入目录租约'), { code: 'ERR_WORKSPACE_SCOPE_UNSUPPORTED' });
           let worker;
@@ -293,11 +298,13 @@ export class VirtualSubprocessRuntime {
               throw error;
             }
           } else {
+            const send = message => state.worker.postMessage(message);
             if (!grant) state.resources = this.#createOwnedGitServer({
-              roots, policy,
-              send: message => state.worker.postMessage(message),
+              roots, policy, send,
               onFailure: error => { state.providerFailure ??= error; handle.terminate(); },
             });
+            if (!grant && linux) state.resources = createLinuxForwardServer({ linux, send, next: state.resources,
+              workspaceRoot: policy?.workspaceRoot ?? cwd, mode: policy?.mode ?? 'workspace-write' });
             if (grant) state.workspace = borrowProcessGrantAuthority().issue([grant], {
               readOnly: policy.mode === 'read-only', workspaceRoot: policy.workspaceRoot,
             });
@@ -308,7 +315,7 @@ export class VirtualSubprocessRuntime {
                 dshOhosVirtualProcess: { protocol: 1 },
                 ...(state.workspace ? { dshOhosWorkspaceGrants: { mounts: state.workspace.mounts } } : {}),
                 argv: [name, ...argv.slice(1)], cwd, policy,
-                roots,
+                roots, linuxCommands: linux?.commands ?? [],
                 env, stdin: typeof spec.stdio.stdin === 'object' ? spec.stdio.stdin.data : '',
               },
               env: workerEnv, stdout: true, stderr: true,

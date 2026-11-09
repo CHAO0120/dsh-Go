@@ -12,16 +12,20 @@ const deferred=()=>{const value=Promise.withResolvers();value.promise.catch(()=>
 const argvValid=argv=>Array.isArray(argv)&&argv.length>0&&argv[0]&&argv.every(x=>typeof x==='string'&&!x.includes('\0'));
 const checkedMode=mode=>mode==='pipe'||mode==='ignore'||mode==='inherit'||(mode&&typeof mode==='object'&&Number.isSafeInteger(mode.maxBytes)&&mode.maxBytes>=0&&(!mode.spill||(Number.isSafeInteger(mode.spill.maxBytes)&&mode.spill.maxBytes>0)));
 const knownSignals=new Set(['SIGTERM','SIGKILL']);
+const inside=(root,path)=>path===root||path.startsWith(root+'/');
+const mountValid=item=>item&&typeof item.source==='string'&&typeof item.target==='string'&&isAbsolute(item.target)&&item.target!=='/'&&typeof item.readOnly==='boolean';
 
 export class LinuxRuntimeBackend {
   capabilities=Object.freeze({confinement:Object.freeze([]),streamingStdin:true,workspaceLease:false,pty:false});
   live=new Set();closed=false;state='opening';
-  #opened=deferred();#closedFrame=deferred();#jobs=new Map();#queue=[];#active;#nextJob=0;#session;#controller;#failure;#disposePromise;#guestClose=null;
-  constructor({nativeLibraryDirectory,configPath,epoch,temporaryRoot,onSpillFailure=()=>{},closeTimeoutMs=10000}={},internals={}) {
+  #exports;#mounts=false;#opened=deferred();#closedFrame=deferred();#jobs=new Map();#queue=[];#active;#nextJob=0;#session;#controller;#failure;#disposePromise;#guestClose=null;
+  constructor({nativeLibraryDirectory,configPath,epoch,temporaryRoot,exports=[],onSpillFailure=()=>{},closeTimeoutMs=10000}={},internals={}) {
     if(typeof temporaryRoot!=='string'||!isAbsolute(temporaryRoot)||temporaryRoot.includes('\0')||!statSync(temporaryRoot).isDirectory())throw new TypeError('Linux collector root must be a trusted existing private directory');
     if(typeof configPath!=='string'||!isAbsolute(configPath)||configPath.includes('\0')||!/^[a-f0-9]{64}$/.test(epoch))throw new TypeError('Trusted native config and private epoch are required');
     if(!Number.isFinite(closeTimeoutMs)||closeTimeoutMs<=0||closeTimeoutMs>2147483647)throw new TypeError('Invalid guest close timeout');
     this.closeTimeoutMs=closeTimeoutMs;
+    // Tags of the App directories this VM booted with; jobs may mount only these.
+    this.#exports=new Set(exports);
     this.temporaryRoot=temporaryRoot;this.onSpillFailure=onSpillFailure;this.opened=this.#opened.promise;
     // Explicit owner-only seam for protocol tests; never argv/env/SIM selected.
     const createSession=internals.createSession??(path=>loadLinuxNative({nativeLibraryDirectory}).create(path));
@@ -41,13 +45,15 @@ export class LinuxRuntimeBackend {
     if(this.closed||this.#failure)throw this.#failure??failure('ERR_OHOS_PROCESS_CLOSED','Linux backend is closed');
     if(!spec||!argvValid(spec.argv))throw new TypeError('argv must contain NUL-free strings');
     if(spec.policy!==undefined||spec.argv[0]==='/dsh-go/ohos/confined'||spec.argv[0]==='/dsh-go/ohos/linux/confined')throw failure('ERR_OHOS_BACKEND_CONFINEMENT','Linux cannot consume an unenforced workspace policy or ticket');
-    if(spec.cwd!=='/workspace')throw failure('ERR_OHOS_LINUX_WORKSPACE_UNAVAILABLE','Host or external-mount cwd requires an authorized 9P mapping; this backend only admits the explicit private guest /workspace');
+    const mounts=spec.mounts??[];
+    if(!Array.isArray(mounts)||mounts.length>4||!mounts.every(item=>mountValid(item)&&this.#exports.has(item.tag))||(mounts.length&&!this.#mounts))throw failure('ERR_OHOS_LINUX_WORKSPACE_UNAVAILABLE','Guest mounts must name App directories this VM exported, and the guest must support them');
+    if(spec.cwd!=='/workspace'&&!mounts.some(item=>inside(item.target,spec.cwd)))throw failure('ERR_OHOS_LINUX_WORKSPACE_UNAVAILABLE','A host cwd must lie inside one of this job\'s App directory mounts; otherwise only the private guest /workspace is admitted');
     if(!Number.isFinite(spec.graceMs)||spec.graceMs<=0||spec.graceMs>2147483647)throw new TypeError('Invalid subprocess graceMs');
     spec.signal?.throwIfAborted();
     const io=spec.stdio;if(!io||io.control!==undefined||!checkedMode(io.stdout)||!checkedMode(io.stderr)||!(io.stdin==='pipe'||io.stdin==='ignore'||(io.stdin&&typeof io.stdin.data==='string')))throw failure('ERR_OHOS_LINUX_STDIO','Unsupported Linux stdio disposition');
     const env={PATH:'/usr/bin:/bin',HOME:'/workspace',TMPDIR:'/tmp',LANG:'C.UTF-8',...spec.env};
     for(const key of Object.keys(env)){if(env[key]===undefined){delete env[key];continue;}if(!key||key.includes('=')||key.includes('\0')||typeof env[key]!=='string'||env[key].includes('\0'))throw new TypeError('Invalid guest environment');}
-    const command={argv:[...spec.argv],cwd:spec.cwd,env};
+    const command={argv:[...spec.argv],cwd:spec.cwd,env,...(mounts.length?{mounts:mounts.map(({tag,source,target,readOnly})=>({tag,source,target,readOnly}))}:{})};
     if(Buffer.byteLength(JSON.stringify(command))>60000)throw failure('ERR_OHOS_LINUX_ARGUMENTS','Guest start frame exceeds bound');
     if(this.#nextJob>=Number.MAX_SAFE_INTEGER)throw failure('ERR_OHOS_LINUX_PROTOCOL','Guest job identity exhausted');
     const job={id:++this.#nextJob,command,spec,wire:false,started:false,admitted:false,cancelRequested:false,complete:false,unknown:false,startedResult:deferred(),done:deferred(),gone:deferred(),outputs:{},collected:{}};
@@ -83,7 +89,7 @@ export class LinuxRuntimeBackend {
     try{
       if(frame.kind==='opened'){
         if(this.state!=='opening'||frame.job!==null||frame.capabilities?.streamingStdin!==true||frame.capabilities?.pidNamespace!==true||frame.capabilities?.workspaceLease!==false)throw failure('ERR_OHOS_LINUX_PROTOCOL','Guest opened capability mismatch');
-        this.state='opened';this.#opened.resolve();this.#next();return;
+        this.#mounts=frame.capabilities.mounts===true;this.state='opened';this.#opened.resolve();this.#next();return;
       }
       if(frame.kind==='closed'||frame.kind==='close-failed'){
         if(this.#controller.agentClosed||this.state!=='closing'||frame.job!==null||this.live.size||this.#active)throw failure('ERR_OHOS_LINUX_PROTOCOL','Guest closed before all job release facts');
