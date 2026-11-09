@@ -13,6 +13,22 @@ export class NativeGrantFs {
     while(true){const bytes=this.#call('read',relative,size,Math.min(chunk,limit-size+1));if(bytes.length===0)break;
       size+=bytes.length;if(size>limit)throw failure('ERR_WORKSPACE_LIMIT');parts.push(bytes);}
     return Buffer.concat(parts,size);}
+  // Same 64 MiB resource ceiling as whole reads; never report a truncated file
+  // as EOF. The caller owns this handle until iteration closes.
+  async *readFileChunks(value,signal){const relative=this.#path(value);let size=0;
+    while(true){signal?.throwIfAborted();
+      const bytes=this.#call('read',relative,size,Math.min(chunk,limit-size+1));
+      signal?.throwIfAborted();if(bytes.length===0)return;
+      size+=bytes.length;if(size>limit)throw failure('ERR_WORKSPACE_LIMIT');yield bytes;}}
+  // Raw bytes from the requested offset; no whole-file read or text conversion.
+  async readFileWindow(value,{offset,length},signal){const relative=this.#path(value);
+    if(!Number.isSafeInteger(offset)||offset<0||!Number.isSafeInteger(length)||length<0||!Number.isSafeInteger(offset+length))throw failure('EINVAL');
+    const parts=[];let size=0;
+    while(size<length){signal?.throwIfAborted();
+      const bytes=this.#call('read',relative,offset+size,Math.min(chunk,length-size));
+      signal?.throwIfAborted();if(bytes.length===0)break;
+      size+=bytes.length;parts.push(bytes);}
+    return Buffer.concat(parts,size);}
   async readFile(value,options){return (await this.readFileBuffer(value)).toString(encoding(options));}
   async readFileBytes(value){return (await this.readFileBuffer(value)).toString('latin1');}
   async #write(value,content,options,append){const relative=this.#path(value);if(!relative)throw failure('EISDIR');
@@ -28,6 +44,8 @@ export class NativeGrantFs {
   async lstat(value){const st=this.#call('stat',this.#path(value));return {isFile:st.type===1,isDirectory:st.type===2,isSymbolicLink:st.type===3,
     size:st.size,mode:st.mode,mtime:new Date(st.mtimeMs),dev:st.dev,ino:st.ino};}
   async stat(value){const st=await this.lstat(value);if(st.isSymbolicLink)throw failure('ELOOP');return st;}
+  async lstatExact(value){const st=this.#call('statExact',this.#path(value));return {...st,isFile:st.type===1,isDirectory:st.type===2,isSymbolicLink:st.type===3};}
+  async statExact(value){const st=await this.lstatExact(value);if(st.isSymbolicLink)throw failure('ELOOP');return st;}
   async exists(value){try{await this.lstat(value);return true;}catch(error){if(['ENOENT','ENOTDIR'].includes(error.code))return false;throw error;}}
   async readdir(value){return this.#call('readdir',this.#path(value));}
   async readdirWithFileTypes(value){const names=await this.readdir(value);return Promise.all(names.map(async name=>({name,...await this.lstat(path.posix.join(value,name))})));}
@@ -53,4 +71,11 @@ export class NativeGrantFs {
   async utimes(){throw failure('ENOTSUP');}
   async link(){throw failure('ENOTSUP');}
   async symlink(){throw failure('ENOTSUP');}
+}
+
+// One opaque metadata domain for read observations and the private edit scope.
+export function grantFileObservation(info,grant){
+  if(info.schemaVersion!==1)throw failure('ERR_WORKSPACE_HOST_ABI');
+  return {type:info.type===1?'file':info.type===2?'directory':info.type===3?'symlink':'other',size:Number(info.size),
+    version:`ohos-grant:${grant.id}:${grant.generation}:${info.dev}:${info.ino}:${info.size}:${info.mtimeSec}:${info.mtimeNsec}:${info.ctimeSec}:${info.ctimeNsec}`};
 }
