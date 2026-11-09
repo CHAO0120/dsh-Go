@@ -248,9 +248,14 @@ class PhoneTasks(
     inner class SystemDispatch internal constructor(private val owner: Owner, private val allowed: () -> Boolean) {
         private var startCommitted = false
         private var noticeCommitted = false
+        private var refusedPaused = false
+        /** Exact last start-admission result, not a later sample of task state. */
+        val startRefusedPaused: Boolean get() = synchronized(lock) { refusedPaused }
 
         fun commitStart(): Boolean = synchronized(lock) {
+            refusedPaused = false
             if (startCommitted || !owner.active || !currentLocked(owner) || Thread.currentThread().isInterrupted) return false
+            if (paused) { refusedPaused = true; return false }
             if (!allowed()) return false
             startCommitted = true
             true

@@ -137,4 +137,34 @@ class SystemDispatchTest {
         assertEquals("successor", tasks.snapshot().app)
     }
 
+    @Test fun pauseAcknowledgedDuringPreparationRefusesStartUntilUserResumes() {
+        val tasks = tasks()
+        val owner = tasks.activeOwner()!!
+        var policyCalls = 0
+        val dispatch = tasks.systemDispatch(owner) { policyCalls++; true }
+        assertTrue(tasks.setPausedIfCurrent(owner, true))
+        assertTrue(tasks.isCurrent(owner))
+        assertFalse(dispatch.commitStart())
+        assertEquals(0, policyCalls)
+        assertFalse(dispatch.commitNotice())
+        assertFalse(tasks.isStopped())
+        assertTrue(tasks.setPausedIfCurrent(owner, false))
+        assertTrue(dispatch.commitStart())
+        assertEquals(1, policyCalls)
+        assertFalse(dispatch.commitStart())
+    }
+
+    @Test fun pauseAfterStartCommitDoesNotUndoItsExistingNoticeEligibility() {
+        val tasks = tasks()
+        val owner = tasks.activeOwner()!!
+        val dispatch = tasks.systemDispatch(owner)
+        assertTrue(dispatch.commitStart())
+        assertTrue(tasks.setPausedIfCurrent(owner, true))
+        assertFalse(dispatch.commitStart())
+        assertTrue(dispatch.commitNotice())
+        assertFalse(dispatch.commitNotice())
+        assertTrue(tasks.isCurrent(owner))
+        assertFalse(tasks.isStopped())
+    }
+
 }

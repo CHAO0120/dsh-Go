@@ -684,9 +684,14 @@ class PhoneCore(
         return try {
             env.system().launch(plan, dispatch)
         } catch (e: InterruptedException) {
-            // Only this call's explicit policy refusal means no start was committed. Owner
-            // cancellation keeps its original exception; an already committed start is not recalled.
-            val refusal = denied.get() ?: throw e
+            // Exact ticket pause refusal and this call's policy refusal precede start commit.
+            // Owner cancellation keeps its exception; a committed start is never recalled.
+            val refusal = denied.get()
+            if (refusal == null) {
+                if (dispatch.startRefusedPaused && current(owner))
+                    return SysResult(false, "启动准入时任务处于暂停，本次请求未派发。请确认用户已继续任务后再操作。") // l10n:keep agent pause result
+                throw e
+            }
             tasks.runIfCurrent(owner) {
                 this.refusal = HandoffCause.ofDecision("refused:${refusal.rule}")?.let { owner to it }
             }

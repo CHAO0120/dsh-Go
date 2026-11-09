@@ -1780,4 +1780,47 @@ class PhoneCorePromptOwnerTest {
             PhoneSkillRoute.Step(PhoneSkillRoute.Op.SELECT_OPTION, "app1", PhoneScreen.BACKGROUND, "navigation", "bottom-tabs",
                 PhoneSkillRoute.Value.OptionLiteral("more"), PhoneSkillRoute.Post.OptionSelected)))
     }
+    @Test fun pauseDuringSystemPreparationRefusesAllStartsWithoutStoppingOrReviewing() {
+        for (call in listOf(::openApp, ::openUrl, ::shareIntent)) {
+            val starts = launches + urls + intents
+            val reads = main.reads
+            val reviews = handoffCauses.size
+            prepareSystem = { assertTrue(tasks.setPausedIfCurrent(checkNotNull(tasks.activeOwner()), true)) }
+            val result = call()
+            assertTrue(result.text, result.isError)
+            assertTrue(result.text, result.text.contains("暂停"))
+            assertFalse(result.text.startsWith(PhoneTasks.STOPPED_MESSAGE))
+            assertEquals(starts, launches + urls + intents)
+            assertEquals(reads, main.reads)
+            assertEquals(reviews, handoffCauses.size)
+            assertTrue(tasks.isPaused); assertFalse(tasks.isStopped())
+            assertEquals("failed", core.log.last()!!.decision)
+            assertTrue(tasks.setPausedIfCurrent(checkNotNull(tasks.activeOwner()), false))
+            prepareSystem = {}
+            assertFalse(call().isError)
+            assertEquals(starts + 1, launches + urls + intents)
+        }
+    }
+
+    @Test fun pausedAdmissionReasonSurvivesResumeBeforeFailureIsConsumed() {
+        prepareSystem = { assertTrue(tasks.setPausedIfCurrent(checkNotNull(tasks.activeOwner()), true)) }
+        afterRejectedStart = { assertTrue(tasks.setPausedIfCurrent(checkNotNull(tasks.activeOwner()), false)) }
+        val result = openApp()
+        assertTrue(result.isError)
+        assertTrue(result.text, result.text.contains("暂停"))
+        assertFalse(result.text.startsWith(PhoneTasks.STOPPED_MESSAGE))
+        assertEquals(0, launches)
+        assertFalse(tasks.isPaused)
+    }
+
+    @Test fun ownerReplacementAfterPausedStartRefusalKeepsCancellationPriority() {
+        prepareSystem = { assertTrue(tasks.setPausedIfCurrent(checkNotNull(tasks.activeOwner()), true)) }
+        afterRejectedStart = ::replace
+        val result = openApp()
+        assertTrue(result.isError)
+        assertTrue(result.text, result.text.startsWith(PhoneTasks.STOPPED_MESSAGE))
+        assertEquals(0, launches)
+        assertFalse(tasks.isPaused)
+    }
+
 }
