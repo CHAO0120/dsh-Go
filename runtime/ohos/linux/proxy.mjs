@@ -72,6 +72,13 @@ function normalize(value) {
   return Object.freeze({ mode: 'manual', httpProxy, httpsProxy, noProxy: noProxy(value.noProxy) });
 }
 
+/** A routed command inherits the App's own proxy variables through its shell.
+ * Those copies are not deliberate settings: drop them so this policy decides. */
+export function withoutInheritedProxy(env) {
+  const parent = scrubbedParentEnv();
+  return Object.fromEntries(Object.entries(env).filter(([key, value]) => !names.includes(key) || value !== parent[key]));
+}
+
 /** In-memory configuration only. No persistence, dispatcher mutation or I/O. */
 export class LinuxProxyPolicy {
   #configuration = Object.freeze({ mode: 'inherit' });

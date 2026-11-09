@@ -6,7 +6,7 @@ options 包含可信 nativeLibraryDirectory、绝对 configPath、与客体一�
 
 ## 授权边界
 
-当前 confinement=[]，workspaceLease=false。prepare 明确抛 ERR_OHOS_BACKEND_CONFINEMENT，不签发无法落实的票据；spawn 同样拒绝 policy 与 confined argv。唯一可接纳 cwd 是显式客体私有 /workspace。通常插件传入的是宿主 cwd，必须先完成授权 9P 映射才能运行；本后端不偷换 cwd、不假装已有宿主工作区隔离。PTY 未实现。
+当前 confinement=[]，workspaceLease=false。prepare 明确抛 ERR_OHOS_BACKEND_CONFINEMENT，不签发无法落实的票据；spawn 同样拒绝 policy 与 confined argv。940 起 spawn 另接受可信 owner 给出的 `mounts`（本 VM 启动时导出的 9P tag、导出内相对路径、客体绝对目标、是否只读），仅当客体 opened 帧声明 `mounts:true`；宿主 cwd 必须落在其中一个目标内，否则唯一可接纳 cwd 仍是显式客体私有 /workspace。policy 到 mounts 的换算与只读视图由路由后端负责，见 [ROUTING.zh.md](ROUTING.zh.md)。通常插件传入的是宿主 cwd，必须先完成授权 9P 映射才能运行；本后端不偷换 cwd、不假装已有宿主工作区隔离。PTY 未实现。
 
 ## 作业与流
 
