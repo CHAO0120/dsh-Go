@@ -877,16 +877,28 @@ internal class MainScreenDriver(private val service: PhoneA11yService, private v
                         stop = "当前页面来源不允许滚动" // l10n:keep agent screen result
                         break
                     }
+                    if (overlay.editing) {
+                        stop = "用户正在输入插话，未继续滚动；已读内容保留。" // l10n:keep agent screen result
+                        break
+                    }
+                    var editingBlocked = false
                     val before = clock.count
                     val out = actuator.scroll(node, el.scroll, el.horizontal, list.bounds, cap.screen, direction) {
                         if (cancelled(gen) || !allowed()) false
-                        else if (!canRead(source) || !scrollSourcesAllowed(scrollSources)) {
+                        else if (overlay.editing) {
+                            editingBlocked = true
+                            false
+                        } else if (!canRead(source) || !scrollSourcesAllowed(scrollSources)) {
                             sourceDenied = true
                             false
                         } else true
                     }
                     // l10n:keep agent screen result
-                    if (!out.accepted) { stop = "系统没有接受滚动，无法确认是否到底"; break }
+                    if (!out.accepted) {
+                        stop = if (editingBlocked) "用户正在输入插话，未继续滚动；已读内容保留。" // l10n:keep agent screen result
+                        else "系统没有接受滚动，无法确认是否到底" // l10n:keep agent screen result
+                        break
+                    }
                     clock.settle(before, 1_200, 350, 3_000) { cancelled(gen) }
                     if (misses > 0) clock.pause(800) { cancelled(gen) } // lists that load more on demand
                 } finally { cap.recycle() }
