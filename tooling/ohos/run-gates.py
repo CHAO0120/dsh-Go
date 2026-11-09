@@ -858,6 +858,44 @@ def main():
                   'workspace-edit-entry.py', 'workspace-edit-entry.mjs',
                   'workspace-edit-instrumentation.mjs')],
               scope='Two ordinary own-file default read/edit calls through actual SessionStore/Session/WorkingDirectory/tool pipeline and ETS select/attach; real host grant/save components, explicit SDK/Agent/publication fixtures; independent exact-stat versions and post-edit-await lease sample; no full Host/RPC/UI, SDK/device, fault/race/VM or expected-intent claim')
+    # Explicit optional apply_patch: two ordinary existing-file Update operations.
+    # Default standard preset remains applyPatch:false; no Add/Move/Delete here.
+    for workspace_patch_mode in ('plain', 'jitless'):
+        g.run('workspace-patch-' + workspace_patch_mode,
+              lambda m=workspace_patch_mode: g.py(
+                  rt + 'workspace-patch-entry.py',
+                  '--source', s, '--payload', payload(), '--node', node(),
+                  '--manifest', o / 'composed/manifest.json',
+                  '--typescript-prefix', p('typescript_prefix'),
+                  '--native-directory', o / 'workspace-authority-entry/native',
+                  '--publication-fixture', native() / 'libpublication-test-linked.so',
+                  '--out', o / ('workspace-patch-' + m),
+                  *(['--jitless'] if m == 'jitless' else [])),
+              needs=('compose', 'workspace-authority-entry', 'native-publication-build'),
+              timeout=120,
+              tests=[rt + name for name in (
+                  'workspace-patch-entry.py', 'workspace-patch-entry.mjs',
+                  'workspace-patch-instrumentation.mjs')],
+              scope='Explicit applyPatch:true ordinary existing-file single Update through actual SessionStore/tool pipeline and normal ETS select/attach; physical and authorized logical, full oracle and ordinary cleanup; standard default false; no Add/Move/Delete, injected expected, Host/RPC/UI/device/VM or whole-write claim')
+    # Explicit optional apply_patch: two ordinary existing-file Delete File operations.
+    # Default standard preset remains applyPatch:false; no Add/Move/Update here.
+    for workspace_delete_mode in ('plain', 'jitless'):
+        g.run('workspace-delete-' + workspace_delete_mode,
+              lambda m=workspace_delete_mode: g.py(
+                  rt + 'workspace-delete-entry.py',
+                  '--source', s, '--payload', payload(), '--node', node(),
+                  '--manifest', o / 'composed/manifest.json',
+                  '--typescript-prefix', p('typescript_prefix'),
+                  '--native-directory', o / 'workspace-authority-entry/native',
+                  '--publication-fixture', native() / 'libpublication-test-linked.so',
+                  '--out', o / ('workspace-delete-' + m),
+                  *(['--jitless'] if m == 'jitless' else [])),
+              needs=('compose', 'workspace-authority-entry', 'native-publication-build'),
+              timeout=120,
+              tests=[rt + name for name in (
+                  'workspace-delete-entry.py', 'workspace-delete-entry.mjs',
+                  'workspace-delete-instrumentation.mjs')],
+              scope='Explicit applyPatch:true ordinary existing-file single Delete File through actual SessionStore/tool pipeline and normal ETS select/attach; physical and authorized logical, full oracle and ordinary cleanup; standard default false; no Add/Move/Update, injected expected, Host/RPC/UI/device/VM or whole-write claim')
     g.run('host-layout', lambda: g.py(rt + 'host-layout.py', '--node', node(), '--native-library-dir', o / 'round-native', '--publication-fixture', native() / 'libpublication-test-linked.so', '--assembled-payload', payload(), '--out', o / 'host-layout'), needs=('compose', 'native-publication-build', 'native-static-resources', 'round-native-libraries'), timeout=240)
     g.run('host-safe-profile', lambda: g.py(rt + 'host-safe-profile.py', '--node', node(), '--native-library-dir', o / 'round-native', '--publication-fixture', native() / 'libpublication-test-linked.so', '--assembled-payload', payload(), '--out', o / 'host-safe-profile'), needs=('compose', 'native-publication-build', 'round-native-libraries'), timeout=600, tests=[rt + 'host-safe-profile.py'], scope='Actual Host safe argv and original public round; not OH device restart')
     for label, host in [('loopback', '127.0.0.1'), ('owned-http', g.config.get('ownedHttpHost', ''))]:

@@ -15,7 +15,7 @@ if (isMainThread && process.platform === 'openharmony') {
     borrowProcessGrantAuthority();
     const loaded = loadGrantBinding();
     const methods = ['consume', 'statExact', 'openEditInput', 'readEditInput', 'closeEditInput',
-      'beginEdit', 'writeEdit', 'closeEdit', 'publishEdit', 'abortEdit', 'close'];
+      'beginEdit', 'writeEdit', 'closeEdit', 'publishEdit', 'abortEdit', 'close', 'mutate'];
     binding = Object.freeze(Object.fromEntries(methods.map(name => {
       if (typeof loaded[name] !== 'function') throw fail('ERR_WORKSPACE_EDIT_ABI');
       return [name, loaded[name].bind(loaded)];
@@ -78,6 +78,60 @@ export function workspaceEditScope(target, policy, signal) {
       }
       if (info.type === 3) throw fail('ELOOP');
       return { ...grantFileObservation(info, grant), mode: info.mode & 0o777 };
+    }
+
+    // Private FileHandle shape for the existing bounded diff reader. Its stat
+    // reports the same input FD's initial fstat captured by OpenEditInput.
+    async function openDiffInput() {
+      await turn(signal);
+      const size = BigInt(binding.openEditInput(handle, relative));
+      let opened = true;
+      return Object.freeze({
+        async stat() { return { isFile: () => true, size }; },
+        async read(buffer, offset, length, position) {
+          if (!opened || position !== null || !Number.isSafeInteger(length) || length < 0 || length > 65536) {
+            throw fail('ERR_WORKSPACE_ARGUMENT');
+          }
+          await turn(signal);
+          const part = binding.readEditInput(handle, length);
+          part.copy(buffer, offset);
+          return { bytesRead: part.length };
+        },
+        async close() {
+          if (!opened) return;
+          try { binding.closeEditInput(handle); opened = false; }
+          catch (error) {
+            cleanupFailed = true;
+            const aborted = signal?.aborted ? Object.assign(
+              new Error('The operation was aborted', { cause: signal.reason }),
+              { name: 'AbortError', code: 'ABORT_ERR' }) : null;
+            const cause = aborted ? combined(aborted, error, 'input close failed') : error;
+            throw Object.assign(new Error(cause?.message ?? String(cause), { cause }), {
+              code: error?.code, workspaceEditCleanupFailed: true,
+            });
+          }
+        },
+      });
+    }
+
+    async function remove() {
+      if (cleanupFailed) throw fail('ERR_WORKSPACE_DRAIN', 'workspace input close was not confirmed');
+      await turn(signal);
+      publicationAttempted = true;
+      // Single-file unlink only: never select AT_REMOVEDIR or recursive rm.
+      // A throw may occur after the native unlink, so keep the attempted fact.
+      try { binding.mutate(handle, 'remove', relative, false); }
+      catch (error) {
+        // These current ABI errors arise before successful unlink. In
+        // particular, permission failures keep the original permission result.
+        // N-API return-value construction is not in this known-rejection list.
+        if (['ENOENT', 'EEXIST', 'ENOTDIR', 'EISDIR', 'ENOTEMPTY', 'ELOOP', 'EACCES', 'EPERM', 'EIO',
+          'ERR_WORKSPACE_LEASE', 'ERR_WORKSPACE_ARGUMENT', 'ERR_WORKSPACE_PATH', 'ERR_WORKSPACE_RETIRED',
+          'ERR_WORKSPACE_CLOSE_FAILED', 'ERR_WORKSPACE_TASK_RETIRED', 'ERR_WORKSPACE_READ_ONLY',
+          'ERR_WORKSPACE_INTERNAL'].includes(error?.code)) publicationAttempted = false;
+        throw error;
+      }
+      committed = true;
     }
 
     async function read() {
@@ -150,7 +204,7 @@ export function workspaceEditScope(target, policy, signal) {
 
     try {
       handle = binding.consume(lease.mounts[0].ticket);
-      result = await action(Object.freeze({ probe, read, write }));
+      result = await action(Object.freeze({ probe, read, write, openDiffInput, remove }));
     } catch (error) { recordFailure(error, 'workspace edit failed'); }
     if (handle !== undefined) {
       try { binding.abortEdit(handle); }
