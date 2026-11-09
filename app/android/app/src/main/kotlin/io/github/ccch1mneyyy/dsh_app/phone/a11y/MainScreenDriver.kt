@@ -717,7 +717,7 @@ internal class MainScreenDriver(private val service: PhoneA11yService, private v
             if (cancelled(gen)) throw InterruptedException()
             refuseHalted(allowed)?.let { return it }
             return when (action) {
-                is PhoneAction.Key -> key(action, gen)
+                is PhoneAction.Key -> key(action, gen, allowed)
                 is PhoneAction.Tap -> tap(action, gen, allowed, actionSourcesAllowed)
                 is PhoneAction.Type -> type(action, gen, allowed)
                 is PhoneAction.Scroll -> scroll(action, gen, allowed, actionSourcesAllowed)
@@ -1107,8 +1107,11 @@ internal class MainScreenDriver(private val service: PhoneA11yService, private v
         } finally { r.cap.recycle() }
     }
 
-    private fun key(a: PhoneAction.Key, gen: Long): ActionResult {
+    private fun key(a: PhoneAction.Key, gen: Long, allowed: () -> Boolean): ActionResult {
         val before = clock.count
+        if (cancelled(gen)) throw InterruptedException()
+        refuseHalted(allowed)?.let { return it }
+        if (overlay.editing) return ActionResult(false, "用户正在输入插话，没有提交本次按键。") // l10n:keep agent screen result
         // l10n:keep agent screen result
         if (!actuator.global(a.key)) return ActionResult(false, "系统没有执行这个按键。")
         val what = when (a.key) {
