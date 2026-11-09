@@ -6112,6 +6112,7 @@
   "phoneControlSubtitle": "看屏幕、帮你点按，随时可以停",
   "phoneControlWorking": "正在操作手机",
   "phoneControlTaskNoConfirmHint": "本任务免确认 · 悬浮条上也能暂停或停止",
+  "phoneTaskHandoffWaitingHint": "等待你处理，请在原提示中继续或停止。",
   "phoneControlFloatingBarHint": "悬浮条上也能暂停或停止",
   "phoneControlAdvanced": "进阶",
   "phoneControlKeepAliveHint": "防止系统关掉无障碍",

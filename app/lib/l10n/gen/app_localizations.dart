@@ -18914,6 +18914,12 @@ abstract class L10n {
   /// **'本任务免确认 · 悬浮条上也能暂停或停止'**
   String get phoneControlTaskNoConfirmHint;
 
+  /// No description provided for @phoneTaskHandoffWaitingHint.
+  ///
+  /// In zh, this message translates to:
+  /// **'等待你处理，请在原提示中继续或停止。'**
+  String get phoneTaskHandoffWaitingHint;
+
   /// No description provided for @phoneControlFloatingBarHint.
   ///
   /// In zh, this message translates to:

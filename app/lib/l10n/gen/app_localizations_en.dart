@@ -10715,6 +10715,9 @@ class L10nEn extends L10n {
       'Confirmation skipped for this task · Pause or stop from the floating bar';
 
   @override
+  String get phoneTaskHandoffWaitingHint => 'Waiting for you to act. Continue or stop in the original prompt.';
+
+  @override
   String get phoneControlFloatingBarHint => 'Pause or stop from the floating bar';
 
   @override

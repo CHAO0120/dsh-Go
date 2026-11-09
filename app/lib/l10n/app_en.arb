@@ -3137,6 +3137,7 @@
   "phoneControlSubtitle": "Reads the screen and taps for you. Stop anytime.",
   "phoneControlWorking": "Operating your phone",
   "phoneControlTaskNoConfirmHint": "Confirmation skipped for this task · Pause or stop from the floating bar",
+  "phoneTaskHandoffWaitingHint": "Waiting for you to act. Continue or stop in the original prompt.",
   "phoneControlFloatingBarHint": "Pause or stop from the floating bar",
   "phoneControlAdvanced": "Advanced",
   "phoneControlKeepAliveHint": "Prevent Android from turning off accessibility",

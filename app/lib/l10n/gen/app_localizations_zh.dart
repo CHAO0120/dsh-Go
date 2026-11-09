@@ -10201,6 +10201,9 @@ class L10nZh extends L10n {
   String get phoneControlTaskNoConfirmHint => '本任务免确认 · 悬浮条上也能暂停或停止';
 
   @override
+  String get phoneTaskHandoffWaitingHint => '等待你处理，请在原提示中继续或停止。';
+
+  @override
   String get phoneControlFloatingBarHint => '悬浮条上也能暂停或停止';
 
   @override
