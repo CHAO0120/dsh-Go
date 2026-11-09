@@ -4,6 +4,8 @@
 await import('./process/child-process.mjs');
 const { installProcessGrantAuthority } = await import('./process/files/process-authority.mjs');
 installProcessGrantAuthority();
+await import('./process/files/workspace-paths.mjs');
+await import('./process/files/workspace-edit.mjs');
 await import('./linux/host-paths.mjs');
 await import('./net/dsh-preload.mjs');
 await import('./publication/preload.mjs');

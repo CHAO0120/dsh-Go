@@ -10,7 +10,7 @@ options 包含可信 nativeLibraryDirectory、绝对 configPath、与客体一�
 
 ## 作业与流
 
-spawn 接受现有 subprocess spec，返回 stdin Writable、stdout/stderr Readable（pipe 模式）、collected、started、done、terminate、waitForExit。串行提交作业，严格验证 epoch/seq/job、偏移、base64、帧序和结果。环境先用现有 scrubbedParentEnv，客体 PATH/HOME/TMPDIR/LANG 使用客体默认值，最后显式 env 可覆盖或用 undefined 删除。
+spawn 接受现有 subprocess spec，返回 stdin Writable、stdout/stderr Readable（pipe 模式）、collected、started、done、terminate、waitForExit。串行提交作业，严格验证 epoch/seq/job、偏移、base64、帧序和结果。环境仅由客体 PATH/HOME/TMPDIR/LANG 默认值和显式 env 组成；不隐式继承宿主变量。显式 env 可覆盖默认值或用 undefined 删除。App 代理由 LinuxControl 的 LinuxProxyPolicy 逐作业生成显式别名后传入；直接调用 backend 不自动取得 App 代理或其他宿主环境。
 
 每个输出流的客体未确认信用窗口为 64 KiB；pipe 另有 64 KiB Readable 高水位，不能把两者相加误称总共仅 64 KiB。push(false) 后停止 ACK，消费恢复后才续传。collector 使用现有公开 OutputCollector；ACK 在 Buffer 已交给 collector.push 后发出。ignore 是明确丢弃，inherit 等待写入接受及 drain。stdin 每次切片最多 4096 字节，最多 64 KiB 未确认，Writable 回调要等客体实际 write ACK；调用方仍须遵循标准 Writable 背压。
 
