@@ -32,6 +32,34 @@ const HEALTHY_MS = 30000;
 
 const PROGRESS_BYTES = 512 * 1024;
 
+// Optional in-memory counts of existing calls, not CPU time or completed work.
+class IdleDiagnosticsWindow {
+  readonly id: string;
+  readonly startedAtMs: number;
+  stoppedAtMs: number | null = null;
+  pollTicks: number = 0;
+  collectCalls: number = 0;
+  snapshotCalls: number = 0;
+  emitStatusCalls: number = 0;
+  lifecycleRefreshRequests: number = 0;
+  manifestPairChecks: number = 0;
+
+  constructor(id: string, startedAtMs: number) {
+    this.id = id; this.startedAtMs = startedAtMs;
+  }
+
+  toMap(): Map<string, Object | null> {
+    return new Map<string, Object | null>([
+      ['id', this.id], ['startedAtMs', this.startedAtMs], ['stoppedAtMs', this.stoppedAtMs],
+      ['counters', new Map<string, Object | null>([
+        ['pollTicks', this.pollTicks], ['collectCalls', this.collectCalls],
+        ['snapshotCalls', this.snapshotCalls], ['emitStatusCalls', this.emitStatusCalls],
+        ['lifecycleRefreshRequests', this.lifecycleRefreshRequests], ['manifestPairChecks', this.manifestPairChecks]
+      ])]
+    ]);
+  }
+}
+
 export class RuntimeController {
   private static shared: RuntimeController | null = null;
   private static foreground: boolean = false;
@@ -48,11 +76,16 @@ export class RuntimeController {
   private retiredOwners: TransientTaskOwner[] = [];
   private ownerAbility: UIAbility | null = null;
   private lifecycleTicks: number = 0;
+  private idleDiagnosticsEnabled: boolean = false;
+  private idleDiagnosticsWindow: IdleDiagnosticsWindow | null = null;
   private lastLifecycleError: string | null = null;
   private sinks: RuntimeSink[] = [];
   private initialized: Promise<void> | null = null;
   private manifest: RuntimeManifest | null = null;
   private installed: RuntimeManifest | null = null;
+  private comparedManifest: RuntimeManifest | null = null;
+  private comparedInstalled: RuntimeManifest | null = null;
+  private comparedCurrent: boolean = false;
   private setupError: string | null = null;
   private lastError: string | null = null;
   private failureLines: string[] = [];
@@ -171,6 +204,25 @@ export class RuntimeController {
     return ability.context;
   }
 
+  // This read and the toggle deliberately do not initialize, collect or emit.
+  getIdleDiagnostics(): Map<string, Object | null> {
+    return new Map<string, Object | null>([
+      ['schema', 1], ['enabled', this.idleDiagnosticsEnabled], ['observedAtMs', Date.now()],
+      ['window', this.idleDiagnosticsWindow?.toMap() ?? null]
+    ]);
+  }
+
+  setIdleDiagnosticsEnabled(enabled: boolean): Map<string, Object | null> {
+    if (enabled && !this.idleDiagnosticsEnabled) {
+      this.idleDiagnosticsWindow = new IdleDiagnosticsWindow(util.generateRandomUUID(), Date.now());
+      this.idleDiagnosticsEnabled = true;
+    } else if (!enabled && this.idleDiagnosticsEnabled) {
+      if (this.idleDiagnosticsWindow !== null) this.idleDiagnosticsWindow.stoppedAtMs = Date.now();
+      this.idleDiagnosticsEnabled = false;
+    }
+    return this.getIdleDiagnostics();
+  }
+
   initialize(): Promise<void> {
     if (this.initialized === null) this.initialized = this.prepareRecovery().catch((error: Error): void => {
       this.initialized = null;
@@ -233,20 +285,32 @@ export class RuntimeController {
   }
 
   private current(): boolean {
-    if (this.manifest === null || this.installed === null ||
-        this.manifest.runtimeVersion !== this.installed.runtimeVersion ||
-        this.manifest.dshVersion !== this.installed.dshVersion ||
-        this.manifest.nodeVersion !== this.installed.nodeVersion ||
-        this.manifest.files.length !== this.installed.files.length) return false;
-    const files = new Map<string, RuntimeFile>();
-    this.installed.files.forEach((file: RuntimeFile) => files.set(file.path, file));
-    return this.manifest.files.every((file: RuntimeFile) => {
-      const other = files.get(file.path);
-      return other !== undefined && other.sha256 === file.sha256 && other.size === file.size;
-    });
+    const manifest = this.manifest;
+    const installed = this.installed;
+    if (manifest === null || installed === null) {
+      this.comparedManifest = null; this.comparedInstalled = null; this.comparedCurrent = false;
+      return false;
+    }
+    // These private parsed records are read-only after acquisition. A successful
+    // installed() re-read returns a new object, even when its version is unchanged.
+    if (manifest === this.comparedManifest && installed === this.comparedInstalled) return this.comparedCurrent;
+    if (this.idleDiagnosticsEnabled && this.idleDiagnosticsWindow !== null) this.idleDiagnosticsWindow.manifestPairChecks++;
+    let matches = false;
+    if (manifest.runtimeVersion === installed.runtimeVersion && manifest.dshVersion === installed.dshVersion &&
+        manifest.nodeVersion === installed.nodeVersion && manifest.files.length === installed.files.length) {
+      const files = new Map<string, RuntimeFile>();
+      installed.files.forEach((file: RuntimeFile) => files.set(file.path, file));
+      matches = manifest.files.every((file: RuntimeFile) => {
+        const other = files.get(file.path);
+        return other !== undefined && other.sha256 === file.sha256 && other.size === file.size;
+      });
+    }
+    this.comparedManifest = manifest; this.comparedInstalled = installed; this.comparedCurrent = matches;
+    return matches;
   }
 
   snapshot(): Map<string, Object | null> {
+    if (this.idleDiagnosticsEnabled && this.idleDiagnosticsWindow !== null) this.idleDiagnosticsWindow.snapshotCalls++;
     const native = nativeHostState();
     this.syncManagedSkills(native);
     let phase = this.current() ? 'installed' : 'notInstalled';
@@ -324,17 +388,22 @@ export class RuntimeController {
   }
 
   private emitStatus(): void {
+    if (this.idleDiagnosticsEnabled && this.idleDiagnosticsWindow !== null) this.idleDiagnosticsWindow.emitStatusCalls++;
     this.emit(new Map<string, Object | null>([['type', 'status'], ['status', this.snapshot()]]));
   }
 
   private startPolling(): void {
     const state = nativeHostState();
     if (this.timer === null && ['starting', 'running', 'stopping'].includes(state.phase)) {
-      this.timer = setInterval(() => this.collect(), 100);
+      this.timer = setInterval(() => {
+        if (this.idleDiagnosticsEnabled && this.idleDiagnosticsWindow !== null) this.idleDiagnosticsWindow.pollTicks++;
+        this.collect();
+      }, 100);
     }
   }
 
   collect(): void {
+    if (this.idleDiagnosticsEnabled && this.idleDiagnosticsWindow !== null) this.idleDiagnosticsWindow.collectCalls++;
     const state = nativeHostState();
     this.retiredOwners = this.retiredOwners.filter((owner: TransientTaskOwner): boolean => owner.cleanupPending());
     const finished = (state.phase === 'exited' || state.phase === 'error') && this.lastNative?.phase !== state.phase;
@@ -353,7 +422,11 @@ export class RuntimeController {
     }
     this.noteHealthy(state);
     this.noteLastGood(state);
-    if (++this.lifecycleTicks >= 10) { this.lifecycleTicks = 0; this.lifecycle.refresh(); }
+    if (++this.lifecycleTicks >= 10) {
+      this.lifecycleTicks = 0;
+      if (this.idleDiagnosticsEnabled && this.idleDiagnosticsWindow !== null) this.idleDiagnosticsWindow.lifecycleRefreshRequests++;
+      this.lifecycle.refresh();
+    }
     this.syncManagedSkills(state);
     if (state.token !== null) this.logs.rememberSecret(state.token);
     const batch: RuntimeLogEntry[] = [];
