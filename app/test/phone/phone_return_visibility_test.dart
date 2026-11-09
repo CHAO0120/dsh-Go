@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:dsh_app/notify/chat_alerts.dart';
 import 'package:dsh_app/state/connection_state.dart';
 import 'package:dsh_app/state/chat_reveal.dart';
 import 'package:dsh_app/state/notify_state.dart';
@@ -29,6 +30,22 @@ class _Client extends DshClient {
   }
 }
 
+// Observe the real deferral rather than infer it from an empty notification list.
+class _ObservedTurnEnd extends PhoneTurnEndController {
+  final deferred = Completer<void>();
+  final resumed = Completer<void>();
+
+  @override
+  bool deferTurnEnd(ChatAlert alert, void Function() ready) {
+    final accepted = super.deferTurnEnd(alert, () {
+      ready();
+      if (!resumed.isCompleted) resumed.complete();
+    });
+    if (accepted && !deferred.isCompleted) deferred.complete();
+    return accepted;
+  }
+}
+
 class _Local extends LocalConnectionController {
   _Local(this.client);
   final DshClient client;
@@ -44,8 +61,15 @@ void main() {
   late notify.FakeNotifyChannel channel;
   late notify.FakeAlertSource source;
   late ProviderContainer container;
+  late Future<void> Function() close;
 
-  Future<void> make({bool delayOwner = false, bool doneAllowed = false}) async {
+  Future<void> make({
+    bool delayOwner = false,
+    bool doneAllowed = false,
+    WidgetTester? clock,
+    _ObservedTurnEnd? observed,
+  }) async {
+    Future<void> flush() => clock == null ? notify.settle() : clock.pump();
     SharedPreferences.setMockInitialValues({'notify_done': doneAllowed});
     client = _Client();
     if (!delayOwner) client.ownerSnapshot.complete([notify.session('s1', running: true)]);
@@ -55,6 +79,7 @@ void main() {
     final connection = HostConnection(client: client, label: 'local', isLocal: true);
     container = ProviderContainer(
       overrides: [
+        if (observed != null) phoneTurnEndProvider.overrideWith(() => observed),
         notifyChannelProvider.overrideWithValue(channel),
         alertSourceFactoryProvider.overrideWithValue((_) => source),
         alertTimingProvider.overrideWithValue((announce: Duration.zero, reconcile: const Duration(milliseconds: 30))),
@@ -62,22 +87,40 @@ void main() {
         activeConnectionProvider.overrideWithValue(AsyncData(connection)),
       ],
     );
-    addTearDown(() async {
+    Future<void>? closing;
+    close = () => closing ??= () async {
       container.dispose();
+      if (clock != null) {
+        // Cancel the real Future.timeout even when an earlier assertion failed.
+        for (final request in client.requests) {
+          if (!request.isCompleted) request.complete([]);
+        }
+        await clock.pump();
+      }
       await client.events.close();
       await client.close();
-    });
-    container.listen(phoneTurnEndProvider, (_, _) {});
-    container.listen(chatAlertsProvider, (_, _) {});
-    await notify.settle();
-    container.read(appForegroundProvider.notifier).set(false);
-    await notify.settle();
+    }();
+    addTearDown(close);
+    try {
+      container.listen(phoneTurnEndProvider, (_, _) {});
+      container.listen(chatAlertsProvider, (_, _) {});
+      await flush();
+      container.read(appForegroundProvider.notifier).set(false);
+      await flush();
+    } catch (_) {
+      await close();
+      rethrow;
+    }
   }
 
-  Future<void> end(String sessionId) async {
+  Future<void> end(String sessionId, {WidgetTester? clock}) async {
     source.outcomes[sessionId] = notify.outcome(10, 'completed', reply: 'fixture');
     source.emit(SessionStatusEvent(sessionId, false));
-    await notify.settle();
+    if (clock == null) {
+      await notify.settle();
+    } else {
+      await clock.pump();
+    }
   }
 
   test('a rejected activity launch still leaves a result notification for the owning turn', () async {
@@ -170,14 +213,25 @@ void main() {
     expect(channel.shown, isEmpty);
   });
 
-  test('a pending owner read times out without later finishing the task', () async {
-    await make(delayOwner: true);
-    await end('s1');
-    await Future<void>.delayed(PhoneTurnEndController.ownerWait + const Duration(milliseconds: 50));
-    client.ownerSnapshot.complete([notify.session('s1', running: true)]);
-    await notify.settle();
-    expect(native.callsOf('finishTask'), isEmpty);
-    expect(channel.shown, isEmpty);
+  testWidgets('a pending owner read times out without later finishing the task', (tester) async {
+    final observed = _ObservedTurnEnd();
+    await make(delayOwner: true, clock: tester, observed: observed);
+    try {
+      expect(container.read(phoneTurnEndProvider.notifier), same(observed));
+      expect(client.requests, hasLength(1), reason: 'The actual owner read must have entered.');
+      expect(client.ownerSnapshot.isCompleted, isFalse);
+      await end('s1', clock: tester);
+      expect(observed.deferred.isCompleted, isTrue, reason: 'The real controller must register the end.');
+      expect(observed.resumed.isCompleted, isFalse);
+      await tester.pump(PhoneTurnEndController.ownerWait);
+      expect(observed.resumed.isCompleted, isTrue, reason: 'The original timeout must release the deferred end.');
+      client.ownerSnapshot.complete([notify.session('s1', running: true)]);
+      await tester.pump();
+      expect(native.callsOf('finishTask'), isEmpty);
+      expect(channel.shown, isEmpty);
+    } finally {
+      await close();
+    }
   });
 
   test('an ambiguous initial owner still releases the ordinary notice exactly once', () async {
@@ -202,17 +256,28 @@ void main() {
     expect(channel.shown.map((post) => (post.kind, post.sessionId)), [('done', 's1')]);
   });
 
-  test('an initial owner timeout releases one ordinary notice and ignores its late reply', () async {
-    await make(delayOwner: true, doneAllowed: true);
-    await end('s1');
-    expect(channel.shown, isEmpty);
-    await Future<void>.delayed(PhoneTurnEndController.ownerWait + const Duration(milliseconds: 50));
-    expect(native.callsOf('finishTask'), isEmpty);
-    expect(channel.shown.map((post) => (post.kind, post.sessionId)), [('done', 's1')]);
-    client.ownerSnapshot.complete([notify.session('s1', running: true)]);
-    await notify.settle();
-    expect(native.callsOf('finishTask'), isEmpty);
-    expect(channel.shown, hasLength(1));
+  testWidgets('an initial owner timeout releases one ordinary notice and ignores its late reply', (tester) async {
+    final observed = _ObservedTurnEnd();
+    await make(delayOwner: true, doneAllowed: true, clock: tester, observed: observed);
+    try {
+      expect(container.read(phoneTurnEndProvider.notifier), same(observed));
+      expect(client.requests, hasLength(1), reason: 'The actual owner read must have entered.');
+      expect(client.ownerSnapshot.isCompleted, isFalse);
+      await end('s1', clock: tester);
+      expect(observed.deferred.isCompleted, isTrue, reason: 'The real controller must register the end.');
+      expect(observed.resumed.isCompleted, isFalse);
+      expect(channel.shown, isEmpty);
+      await tester.pump(PhoneTurnEndController.ownerWait);
+      expect(observed.resumed.isCompleted, isTrue, reason: 'The original timeout must release the deferred end.');
+      expect(native.callsOf('finishTask'), isEmpty);
+      expect(channel.shown.map((post) => (post.kind, post.sessionId)), [('done', 's1')]);
+      client.ownerSnapshot.complete([notify.session('s1', running: true)]);
+      await tester.pump();
+      expect(native.callsOf('finishTask'), isEmpty);
+      expect(channel.shown, hasLength(1));
+    } finally {
+      await close();
+    }
   });
 
   test('an expired native task discards its deferred ordinary notice', () async {
