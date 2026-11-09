@@ -1784,11 +1784,11 @@
       "0.2.2-rc.1": {
         "node_modules/@deepseek-ai/dsh-fs-local/lib/index.js": {
           "before": "509e5a9fab8b33473ce7193443321b04244fd8f9e6250549d12fd336ce448bb0",
-          "after": "58b45c8775b85de1e9e37386e6f67afa04cc696704472dfd6e89feb39e07ffc9"
+          "after": "90ddc3efa585a545a141614963587b539e1eb6365d8b821a9ad03b4c54300896"
         },
         "node_modules/@deepseek-ai/dsh-fs-sandbox/lib/index.js": {
           "before": "f4edd14bf48f8d5bfdea10a61c6651ccde99f2d08a79855746ad2a8d89c6fb73",
-          "after": "078b33f3fc55e81145d707b4a45c088f2f450e488ade174524de80bacf73cf95"
+          "after": "719082b852fdb5d3ebabf7cbc2fce5dcb5ef195ca5d65482171ab8e7a205d68d"
         }
       }
     }

@@ -896,6 +896,25 @@ def main():
                   'workspace-delete-entry.py', 'workspace-delete-entry.mjs',
                   'workspace-delete-instrumentation.mjs')],
               scope='Explicit applyPatch:true ordinary existing-file single Delete File through actual SessionStore/tool pipeline and normal ETS select/attach; physical and authorized logical, full oracle and ordinary cleanup; standard default false; no Add/Move/Update, injected expected, Host/RPC/UI/device/VM or whole-write claim')
+    # Explicit optional apply_patch: two ordinary same-root Move operations.
+    # New destination, existing parent; reuse composed payload and existing authority outputs.
+    for workspace_move_mode in ('plain', 'jitless'):
+        g.run('workspace-move-' + workspace_move_mode,
+              lambda m=workspace_move_mode: g.py(
+                  rt + 'workspace-move-entry.py',
+                  '--source', s, '--payload', payload(), '--node', node(),
+                  '--manifest', o / 'composed/manifest.json',
+                  '--typescript-prefix', p('typescript_prefix'),
+                  '--native-directory', o / 'workspace-authority-entry/native',
+                  '--publication-fixture', native() / 'libpublication-test-linked.so',
+                  '--out', o / ('workspace-move-' + m),
+                  *(['--jitless'] if m == 'jitless' else [])),
+              needs=('compose', 'workspace-authority-entry', 'native-publication-build'),
+              timeout=120,
+              tests=[rt + name for name in (
+                  'workspace-move-entry.py', 'workspace-move-entry.mjs',
+                  'workspace-move-instrumentation.mjs')],
+              scope='Explicit applyPatch:true ordinary same-root Move to absent destination with existing parent; actual SessionStore/tool pipeline and normal ETS select/attach; physical and logical, complete provider/batch/meta/file-version oracle and ordinary cleanup; default false; no partial/fault/expected/cross-grant/new-parent, Host/RPC/UI/device/VM claim')
     g.run('host-layout', lambda: g.py(rt + 'host-layout.py', '--node', node(), '--native-library-dir', o / 'round-native', '--publication-fixture', native() / 'libpublication-test-linked.so', '--assembled-payload', payload(), '--out', o / 'host-layout'), needs=('compose', 'native-publication-build', 'native-static-resources', 'round-native-libraries'), timeout=240)
     g.run('host-safe-profile', lambda: g.py(rt + 'host-safe-profile.py', '--node', node(), '--native-library-dir', o / 'round-native', '--publication-fixture', native() / 'libpublication-test-linked.so', '--assembled-payload', payload(), '--out', o / 'host-safe-profile'), needs=('compose', 'native-publication-build', 'round-native-libraries'), timeout=600, tests=[rt + 'host-safe-profile.py'], scope='Actual Host safe argv and original public round; not OH device restart')
     for label, host in [('loopback', '127.0.0.1'), ('owned-http', g.config.get('ownedHttpHost', ''))]:

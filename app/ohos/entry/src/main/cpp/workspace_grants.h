@@ -78,6 +78,20 @@ inline int EditParent(State& state,const std::vector<std::string>& parts){
  }
  return cursor.Release();
 }
+// Move preserves writeFileAtomic's recursive parent creation, anchored to
+// the existing lease. Only directories missing below that root are created.
+inline int MoveParent(State& state,const std::vector<std::string>& parts){
+ EditFd cursor(state,fcntl(state.root,F_DUPFD_CLOEXEC,0));
+ for(size_t i=0;i+1<parts.size();++i){
+  int next_fd=openat(cursor.fd,parts[i].c_str(),O_RDONLY|O_DIRECTORY|O_NOFOLLOW|O_CLOEXEC);
+  if(next_fd<0&&errno==ENOENT){
+   if(mkdirat(cursor.fd,parts[i].c_str(),0777)!=0&&errno!=EEXIST)Check(false);
+   next_fd=openat(cursor.fd,parts[i].c_str(),O_RDONLY|O_DIRECTORY|O_NOFOLLOW|O_CLOEXEC);
+  }
+  EditFd next(state,next_fd);cursor.CloseChecked();cursor.fd=next.Release();
+ }
+ return cursor.Release();
+}
 template<class Integer> inline uint64_t StatUnsigned(Integer value){
  static_assert(std::numeric_limits<Integer>::is_integer&&std::numeric_limits<Integer>::digits<=64,"integer exceeds exact stat ABI");
  if constexpr(std::numeric_limits<Integer>::is_signed){if(value<0)throw GrantError("ERR_WORKSPACE_LIMIT");}
@@ -101,6 +115,7 @@ struct EditOutput {
  EditFd parent,directory,file;
  std::string target,staging;
  mode_t prior_mode;
+ bool move_output=false,create_if_absent=false;
  struct stat directory_identity{},file_identity{};
  bool owns_directory=false,owns_file=false;
  bool has_directory_identity=false,has_file_identity=false;
@@ -112,9 +127,18 @@ struct EditOutput {
  ~EditOutput(){Cleanup();}
  static bool Same(const struct stat& a,const struct stat& b) noexcept {return a.st_dev==b.st_dev&&a.st_ino==b.st_ino;}
  static void Remember(int value,int& destination) noexcept {if(value&&!destination)destination=value;}
- void Create(){
-  struct stat target_stat{};Check(fstatat(parent.fd,target.c_str(),&target_stat,AT_SYMLINK_NOFOLLOW)==0);
+ void CheckMoveTarget(bool publishing=false){
+  struct stat target_stat{};
+  if(fstatat(parent.fd,target.c_str(),&target_stat,AT_SYMLINK_NOFOLLOW)!=0){if(errno==ENOENT)return;Check(false);}
   if(!S_ISREG(target_stat.st_mode))throw GrantError("ERR_WORKSPACE_FILE_TYPE");
+  if(publishing&&create_if_absent)throw std::system_error(EEXIST,std::generic_category(),"Workspace destination already exists");
+ }
+ void Create(){
+  if(move_output)CheckMoveTarget();
+  else {
+   struct stat target_stat{};Check(fstatat(parent.fd,target.c_str(),&target_stat,AT_SYMLINK_NOFOLLOW)==0);
+   if(!S_ISREG(target_stat.st_mode))throw GrantError("ERR_WORKSPACE_FILE_TYPE");
+  }
   std::random_device random;
   static const char hex[]="0123456789abcdef";
   for(unsigned attempt=0;attempt<16&&!owns_directory;++attempt){
@@ -187,6 +211,50 @@ struct EditOutput {
   // best-effort removal of our staging directory, never a retirement claim.
   phase=Phase::published;owns_file=false;
   cleanup.entry_error=RemoveOwnDirectory();
+  return cleanup.entry_error==0;
+ }
+ // Separate Move publication. effect is written immediately after each
+ // visible effect: 0 unchanged, 1 exclusive final may be incomplete, 2 complete.
+ // No renameat2 call bypasses the existing publication crash-fuse service.
+ bool PublishMove(uint32_t& effect){
+  if(!move_output||phase!=Phase::ready||file.fd>=0)throw GrantError("ERR_WORKSPACE_EDIT_STATE");
+  phase=Phase::failed;
+  CheckMoveTarget(true);
+  if(!create_if_absent){
+   Check(renameat(directory.fd,"content",parent.fd,target.c_str())==0);
+   effect=2;owns_file=false;
+  }else if(linkat(directory.fd,"content",parent.fd,target.c_str(),0)==0){
+   effect=2;
+  }else{
+   const int link_error=errno;
+   // These are exactly the OH Local provider's existing link -> wx cases.
+   if(link_error!=EPERM&&link_error!=EXDEV&&link_error!=ENOTSUP&&link_error!=EMLINK&&link_error!=EACCES){errno=link_error;Check(false);}
+   file.fd=openat(parent.fd,target.c_str(),O_WRONLY|O_CREAT|O_EXCL|O_NOFOLLOW|O_CLOEXEC,0600);
+   Check(file.fd>=0);effect=1;
+   // Never unlink this final pathname after an error: original Local behavior
+   // leaves a possible incomplete file rather than remove a replacement.
+   Check(fchmod(file.fd,0600)==0);
+   EditFd input(state,openat(directory.fd,"content",O_RDONLY|O_NOFOLLOW|O_CLOEXEC));
+   struct stat input_stat{};Check(fstat(input.fd,&input_stat)==0);
+   if(!S_ISREG(input_stat.st_mode)||!Same(input_stat,file_identity))throw std::system_error(ESTALE,std::generic_category(),"Workspace staging changed");
+   char buffer[65536];
+   for(;;){
+    ssize_t n;do{n=::read(input.fd,buffer,sizeof(buffer));}while(n<0&&errno==EINTR);Check(n>=0);if(!n)break;
+    size_t offset=0;
+    while(offset<static_cast<size_t>(n)){
+     ssize_t count;do{count=::write(file.fd,buffer+offset,static_cast<size_t>(n)-offset);}while(count<0&&errno==EINTR);
+     Check(count>=0);if(!count)throw std::system_error(EIO,std::generic_category(),"Workspace write made no progress");
+     offset+=static_cast<size_t>(count);
+    }
+   }
+   input.CloseChecked();Check(fsync(file.fd)==0);Check(fchmod(file.fd,prior_mode)==0);file.CloseChecked();
+   effect=2;
+  }
+  phase=Phase::published;
+  // Both removals are best-effort owned staging entries. Auxiliary descriptor
+  // closure remains separate and checked by AbortEdit/lease retirement.
+  Remember(RemoveOwnFile(),cleanup.entry_error);
+  Remember(RemoveOwnDirectory(),cleanup.entry_error);
   return cleanup.entry_error==0;
  }
  EditCleanup Cleanup() noexcept {
@@ -295,6 +363,26 @@ class WorkspaceLease {
   }
   edit_output_=std::move(output);
  }
+ void BeginMoveOutput(const std::string& path,uint32_t source_mode,bool create_if_absent){
+  if(source_mode>0777)throw GrantError("ERR_WORKSPACE_MODE");
+  auto parts=grant_detail::Parts(path);std::lock_guard<std::mutex> lock(state_->mutex);Access(true);
+  if(edit_input_||edit_output_)throw GrantError("ERR_WORKSPACE_EDIT_STATE");
+  auto output=std::make_unique<grant_detail::EditOutput>(*state_,parts.back(),static_cast<mode_t>(source_mode));
+  output->move_output=true;output->create_if_absent=create_if_absent;
+  try{output->parent.fd=grant_detail::MoveParent(*state_,parts);output->Create();}
+  catch(...){
+   const auto result=output->Cleanup();
+   if(result.close_error)throw std::system_error(result.close_error,std::generic_category(),"Workspace move close failed");
+   if(result.entry_error)throw std::system_error(result.entry_error,std::generic_category(),"Workspace staging cleanup failed");
+   throw;
+  }
+  edit_output_=std::move(output);
+ }
+ bool PublishMoveOutput(uint32_t& effect){
+  std::lock_guard<std::mutex> lock(state_->mutex);Access(true);
+  if(!edit_output_||!edit_output_->move_output)throw GrantError("ERR_WORKSPACE_EDIT_STATE");
+  return edit_output_->PublishMove(effect);
+ }
  size_t WriteEdit(const void* buffer,size_t length){
   if((!buffer&&length)||length>1024*1024)throw GrantError("ERR_WORKSPACE_BUFFER");
   std::lock_guard<std::mutex> lock(state_->mutex);Access(true);
@@ -309,6 +397,7 @@ class WorkspaceLease {
  bool PublishEdit(){
   std::lock_guard<std::mutex> lock(state_->mutex);Access(true);
   if(!edit_output_)throw GrantError("ERR_WORKSPACE_EDIT_STATE");
+  if(edit_output_->move_output)throw GrantError("ERR_WORKSPACE_EDIT_STATE");
   return edit_output_->Publish();
  }
  void AbortEdit(){

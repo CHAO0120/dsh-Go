@@ -64,6 +64,12 @@ int64_t dsh_workspace_edit_write_v1(void* lease,const void* data,size_t count){r
 int dsh_workspace_edit_close_v1(void* lease){return Call([&]()->int64_t{Lease(lease).CloseEdit();return 0;});}
 int dsh_workspace_edit_publish_v1(void* lease){return Call([&]()->int64_t{return Lease(lease).PublishEdit()?1:0;});}
 int dsh_workspace_edit_abort_v1(void* lease){return Call([&]()->int64_t{Lease(lease).AbortEdit();return 0;});}
+int dsh_workspace_move_output_begin_v1(void* lease,const char* path,uint32_t mode,int create_if_absent){return Call([&]()->int64_t{
+ if(create_if_absent!=0&&create_if_absent!=1)throw dsh::GrantError("ERR_WORKSPACE_MODE");
+ Lease(lease).BeginMoveOutput(Path(path),mode,create_if_absent!=0);return 0;});}
+int dsh_workspace_move_output_publish_v1(void* lease,DshWorkspaceMovePublishV1* out,size_t out_size){return Call([&]()->int64_t{
+ if(!out||out_size!=sizeof(*out))throw dsh::GrantError("ERR_WORKSPACE_BUFFER");
+ *out={1,0,0,0};out->staging_removed=Lease(lease).PublishMoveOutput(out->effect)?1:0;return 0;});}
 int dsh_workspace_readdir(void* lease,const char* path,DshWorkspaceEntry callback,void* data){return Call([&]()->int64_t{
  if(!callback)throw dsh::GrantError("ERR_WORKSPACE_BUFFER");
  Lease(lease).Readdir(Path(path),[&](const std::string& name){if(callback(name.data(),name.size(),data)!=0)throw dsh::GrantError("ERR_WORKSPACE_LIST_LIMIT");});return 0;});}

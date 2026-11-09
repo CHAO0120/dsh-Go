@@ -86,3 +86,22 @@ DSH_WORKSPACE_API int dsh_workspace_edit_abort_v1(void* lease);
 }
 #endif
 #endif
+
+#ifndef DSH_WORKSPACE_GRANTS_MOVE_ABI_V1
+#define DSH_WORKSPACE_GRANTS_MOVE_ABI_V1
+#ifdef __cplusplus
+extern "C" {
+#endif
+// Additive Move output only; legacy stat/edit layouts and symbols unchanged.
+// Reuses edit write/close/abort on the same lease-owned output slot.
+DSH_WORKSPACE_API int dsh_workspace_move_output_begin_v1(void*,const char*,uint32_t source_mode,int create_if_absent);
+struct DshWorkspaceMovePublishV1 {uint32_t version;uint32_t reserved;uint32_t effect;uint32_t staging_removed;};
+// out remains meaningful on -1: effect0=no final created by this call,
+// effect1=wx final created but possibly incomplete, effect2=complete publication.
+// Complete output does NOT imply descriptor closure or lease retirement.
+// staging_removed concerns only best-effort removal of owned staging entries.
+DSH_WORKSPACE_API int dsh_workspace_move_output_publish_v1(void*,struct DshWorkspaceMovePublishV1*,size_t);
+#ifdef __cplusplus
+}
+#endif
+#endif

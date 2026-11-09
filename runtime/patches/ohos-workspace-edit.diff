@@ -1,5 +1,5 @@
 diff --git a/node_modules/@deepseek-ai/dsh-fs-local/lib/index.js b/node_modules/@deepseek-ai/dsh-fs-local/lib/index.js
-index 5e78ec9..b819905 100644
+index 5e78ec9..eaf21f3 100644
 --- a/node_modules/@deepseek-ai/dsh-fs-local/lib/index.js
 +++ b/node_modules/@deepseek-ai/dsh-fs-local/lib/index.js
 @@ -755,9 +755,9 @@ function countOccurrences(content, needle) {
@@ -48,7 +48,7 @@ index 5e78ec9..b819905 100644
  		if (error instanceof Error && "code" in error) return null;
  		throw error;
  	}
-@@ -1075,45 +1079,84 @@ var LocalFileSystem = class extends FileSystem {
+@@ -1075,94 +1079,173 @@ var LocalFileSystem = class extends FileSystem {
  			};
  		});
  	}
@@ -162,8 +162,135 @@ index 5e78ec9..b819905 100644
 +			}
  		});
  	}
- 	async moveFile(source, destination, options, signal) {
-@@ -1170,8 +1213,8 @@ var LocalFileSystem = class extends FileSystem {
+-	async moveFile(source, destination, options, signal) {
++	async moveFile(source, destination, options, signal, withWorkspace) {
+ 		if (source.targetKey === destination.targetKey) throw new FsError(`cannot move "${source.displayPath}" to itself`, "FS_SAME_TARGET");
+ 		return this.withLocks([source.targetKey, destination.targetKey], async () => {
+-			const sourceInfo = await this.requireFile(source, options.expectedSource, "move");
+-			const existing = await this.writeTarget(destination, options.expectedDestination);
+-			const original = await readForEdit(source.targetKey, source.displayPath, signal);
+-			const after = options.hunks === void 0 ? original.content : this.patchContent(source, original.content, options.hunks);
+-			const content = restoreFileText(after, original);
+-			// The diff basis keeps its existing text budget, excluding the stored BOM.
+-			const before = existing && Buffer.byteLength(content, "utf8") - (original.bom ? 3 : 0) < this.config.diffBasisMaxBytes ? await readTextForDiff(destination.targetKey, this.config.diffBasisMaxBytes, signal) : null;
+-			await this.internals.inspectBeforeMutation?.(source);
+-			if (signal?.aborted) throw new FsError("move aborted", "FS_ABORTED");
+-			await writeFileAtomic(destination.targetKey, content, sourceInfo.mode, void 0, this.internals, {
+-				displayPath: destination.displayPath,
+-				createIfAbsent: options.expectedDestination?.kind === "createIfAbsent",
+-				existingDestination: existing !== null
+-			});
+-			const outcome = {
+-				operation: existing ? "update" : "create",
+-				version: this.versionAfterWrite(await probe(destination.targetKey), destination),
+-				before,
+-				after
+-			};
+-			const sourceBefore = Buffer.byteLength(original.content, "utf8") < this.config.diffBasisMaxBytes ? original.content : null;
+-			try {
+-				await removeFile(source.targetKey, source.displayPath, this.internals);
+-			} catch (error) {
+-				if (!(error instanceof FsError)) throw error;
++			const apply = async (io) => {
++				const sourceInfo = await this.requireFile(source, options.expectedSource, "move", io?.source.probe);
++				const existing = await this.writeTarget(destination, options.expectedDestination, io?.destination.probe);
++				const original = await readForEdit(source.targetKey, source.displayPath, signal, io?.source.read);
++				const after = options.hunks === void 0 ? original.content : this.patchContent(source, original.content, options.hunks);
++				const content = restoreFileText(after, original);
++				// The diff basis keeps its existing text budget, excluding the stored BOM.
++				const before = existing && Buffer.byteLength(content, "utf8") - (original.bom ? 3 : 0) < this.config.diffBasisMaxBytes ? await readTextForDiff(destination.targetKey, this.config.diffBasisMaxBytes, signal, io?.destination.openDiffInput) : null;
++				await this.internals.inspectBeforeMutation?.(source);
++				if (signal?.aborted) throw new FsError("move aborted", "FS_ABORTED");
++				if (io) {
++					io.beginCommit();
++					try { await io.destination.write(content, sourceInfo.mode, { createIfAbsent: options.expectedDestination?.kind === "createIfAbsent" }); }
++					catch (error) {
++						if (error.workspaceMoveEffect === 1) throw new FsError(`cannot finish creating "${destination.displayPath}": ${errorMessage(error)}; file may be incomplete`, "FS_IO_ERROR", { cause: error });
++						if (error.workspaceMoveEffect === 0 && options.expectedDestination?.kind === "createIfAbsent") {
++							await throwGuardedCreateFailure(error, destination.targetKey, destination.displayPath, async () => {
++								const found = await io.destination.probe();
++								if (!found) throw Object.assign(new Error("not found"), { code: "ENOENT" });
++								return { isFile: () => found.type === "file" };
++							});
++						}
++						throw writeIoError(destination.displayPath, error);
++					}
++				} else await writeFileAtomic(destination.targetKey, content, sourceInfo.mode, void 0, this.internals, {
++					displayPath: destination.displayPath,
++					createIfAbsent: options.expectedDestination?.kind === "createIfAbsent",
++					existingDestination: existing !== null
++				});
++				const outcome = {
++					operation: existing ? "update" : "create",
++					version: this.versionAfterWrite(io ? await io.destination.probe() : await probe(destination.targetKey), destination),
++					before,
++					after
++				};
++				const sourceBefore = Buffer.byteLength(original.content, "utf8") < this.config.diffBasisMaxBytes ? original.content : null;
++				try {
++					if (io) {
++						try { await io.source.remove(); }
++						catch (error) {
++							if (!error.workspaceMoveSourceUnchanged) throw error;
++							throw new FsError(`cannot delete "${source.displayPath}": ${errorMessage(error)}`, isPermissionError(error) ? "FS_PERMISSION_DENIED" : "FS_IO_ERROR", { cause: error });
++						}
++					} else await removeFile(source.targetKey, source.displayPath, this.internals);
++				} catch (error) {
++					if (!(error instanceof FsError)) throw error;
++					return {
++						sourceBefore,
++						destination: outcome,
++						sourceDeleted: false,
++						sourceFailure: {
++							code: error.code,
++							message: error.message
++						}
++					};
++				}
+ 				return {
+ 					sourceBefore,
+ 					destination: outcome,
+-					sourceDeleted: false,
+-					sourceFailure: {
+-						code: error.code,
+-						message: error.message
+-					}
++					sourceDeleted: true
+ 				};
+-			}
+-			return {
+-				sourceBefore,
+-				destination: outcome,
+-				sourceDeleted: true
+ 			};
++			if (!withWorkspace) return apply();
++			try { return await withWorkspace(apply); }
++			catch (error) {
++				const facts = error.workspaceMoveFacts;
++				const partial = error.workspaceMoveResult;
++				if (partial?.sourceDeleted === false && facts?.destination === "published" && facts.source === "not-deleted") {
++					return { ...partial, sourceFailure: { ...partial.sourceFailure, message: `${partial.sourceFailure.message}; resource cleanup could not be confirmed: ${error.message}` } };
++				}
++				if (facts?.destination === "published") throw new FsError(`destination "${destination.displayPath}" was written; source removal is ${facts.source}; resource/operation completion could not be confirmed: ${error.message}`, "FS_IO_ERROR", { cause: error });
++				if (facts?.destination === "partial") throw new FsError(`cannot finish creating "${destination.displayPath}": file may be incomplete; source removal was not attempted: ${error.message}`, "FS_IO_ERROR", { cause: error });
++				if (facts?.destination === "unknown" || facts?.source === "unknown") throw new FsError(`move status could not be confirmed for "${source.displayPath}" to "${destination.displayPath}": ${error.message}`, "FS_IO_ERROR", { cause: error });
++				if (facts?.cleanupFailed) throw new FsError(`move was not committed; resource cleanup could not be confirmed: ${error.message}`, "FS_IO_ERROR", { cause: error });
++				const cause = facts ? error.cause : error;
++				if (cause instanceof FsError) throw cause;
++				if (isAbortError(cause)) throw new FsError("move aborted", "FS_ABORTED", { cause });
++				if (cause?.reason === "ERR_WORKSPACE_REAUTHORIZATION_REQUIRED") throw ohosFileError(cause, "move", source.displayPath);
++				throw new FsError(`cannot move "${source.displayPath}": ${errorMessage(cause)}`, isPermissionError(cause) ? "FS_PERMISSION_DENIED" : "FS_IO_ERROR", { cause });
++			}
+ 		});
+ 	}
+-	async writeTarget(target, expected) {
+-		const existing = await probe(target.targetKey);
++	async writeTarget(target, expected, probeFile) {
++		const existing = probeFile ? await probeFile() : await probe(target.targetKey);
+ 		if (existing && existing.type !== "file") throw new FsError(`cannot write "${target.displayPath}": not a regular file`, "FS_NOT_REGULAR_FILE");
+ 		if (expected?.kind === "replaceIfVersion") {
+ 			if (!existing) throw new FsError(`cannot write "${target.displayPath}": file no longer exists`, "FS_STALE_VERSION");
+@@ -1170,8 +1253,8 @@ var LocalFileSystem = class extends FileSystem {
  		} else if (expected?.kind === "createIfAbsent" && existing) throw new FsError(`cannot overwrite existing "${target.displayPath}" without reading it first`, "FS_NOT_OBSERVED");
  		return existing;
  	}
@@ -175,7 +302,7 @@ index 5e78ec9..b819905 100644
  		if (existing.type !== "file") throw new FsError(`cannot ${verb} "${target.displayPath}": not a regular file`, "FS_NOT_REGULAR_FILE");
  		if (expected && existing.version !== expected.version) throw new FsError(`cannot ${verb} "${target.displayPath}": file changed since it was read`, "FS_STALE_VERSION");
 diff --git a/node_modules/@deepseek-ai/dsh-fs-sandbox/lib/index.js b/node_modules/@deepseek-ai/dsh-fs-sandbox/lib/index.js
-index 870a1e4..b8476ce 100644
+index 870a1e4..37f4cb3 100644
 --- a/node_modules/@deepseek-ai/dsh-fs-sandbox/lib/index.js
 +++ b/node_modules/@deepseek-ai/dsh-fs-sandbox/lib/index.js
 @@ -1,3 +1,4 @@
@@ -183,7 +310,7 @@ index 870a1e4..b8476ce 100644
  import { LocalFileSystem } from "@deepseek-ai/dsh-fs-local";
  import { FsError } from "@deepseek-ai/dsh-fs";
  import { writableRoots } from "@deepseek-ai/dsh-sandbox";
-@@ -137,21 +138,27 @@ var SandboxedFileSystem = class extends LocalFileSystem {
+@@ -137,30 +138,37 @@ var SandboxedFileSystem = class extends LocalFileSystem {
  	* @returns the edit outcome from the inherited backend.
  	*/
  	async editText(target, edit, expected, signal, sandboxPolicy) {
@@ -214,3 +341,16 @@ index 870a1e4..b8476ce 100644
  	}
  	/**
  	* Fence the mutation before delegating to the local provider.
+ 	* @param sandboxPolicy - per-call mode and workspace root; omit for the deployment fallback.
+ 	*/
+ 	async moveFile(source, destination, options, signal, sandboxPolicy) {
+-		const checkedSource = await this.checkedTarget(source, sandboxPolicy);
+-		const checkedDestination = await this.checkedTarget(destination, sandboxPolicy);
+-		return super.moveFile(checkedSource, checkedDestination, options, signal);
++		const policy = sandboxPolicy ?? this.ctx.sandboxPolicy.resolve();
++		const checkedSource = await this.checkedTarget(source, policy);
++		const checkedDestination = await this.checkedTarget(destination, policy);
++		return super.moveFile(checkedSource, checkedDestination, options, signal, ohosWorkspaceEdit?.workspaceMoveScope(checkedSource, checkedDestination, policy, signal));
+ 	}
+ 	/**
+ 	* Enforce the per-call policy against `target` and return the EXACT target the
