@@ -1,0 +1,174 @@
+# reverse temp branch only (request core20-078). Not product; never merged; ci.yml untouched.
+# From the core20-076 workflow with the 078 values. One Linux job: deadline -> packet check -> two complete e5d product
+# trees (A = base + TESTONLY, B = base + FULL-NOPINS) -> A strict prefix (one npm ci, one strict patch-dsh with the
+# original pins) -> one node --test (3 new cases) -> gate A (tap078.py, frozen before the first Node run) -> only if A
+# passed: B record prefix (one npm ci, one record, typed whole-JSON gate, real-Git pins-only diff; no Node) -> B strict
+# prefix (one npm ci, one strict) -> one node --test (3 new + 9 legacy Unicode) -> gate B -> read-only final snapshot ->
+# upload. The bootstrap checkout is a third complete repo tree that only carries this workflow, the packet and the
+# wrapper scripts; no prefix, product import or test runs in it. Zero project retries; every self-written step runs
+# under the deadline watchdog (common078.sh), which writes nothing into captured tool/Node files. Each Node: min(120 s,
+# deadline). dryrun078.py is the pre-push dry run of tap078.py; it is carried for identity only and not run here.
+name: reverse core20 078
+
+on:
+  push:
+    branches: [reverse/core20-078]
+
+permissions:
+  contents: read
+
+env:
+  NODE_VERSION: 24.22.1
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  bridge:
+    name: Request 078 turn outline first human A strict 3 cases / B record / B strict 12 cases (e5d931cd + 2622)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      BASE: e5d931cd84c21e833cf1f9dcbed6061008168f5e
+      R: .github/reverse-078
+      REQUEST_END: 2026-11-09T02:25:06Z
+      UV_USE_IO_URING: 0
+    steps:
+      - name: Deadline = min(job start - 30 s + 20 min, request end)
+        run: |
+          set +e
+          js=$(( $(date -u +%s) - 30 )); re=$(date -u -d "$REQUEST_END" +%s); d=$(( js + 1200 )); [ "$d" -lt "$re" ] || d=$re
+          echo "FIRST_STEP_UTC=$(date -u +%Y-%m-%dT%H:%M:%SZ) JOB_START_ASSUMED=$(date -u -d @$js +%Y-%m-%dT%H:%M:%SZ) REQUEST_END=$REQUEST_END DEADLINE=$(date -u -d @$d +%Y-%m-%dT%H:%M:%SZ)"
+          echo "DEADLINE=$(date -u -d @$d +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_ENV"
+          exit 0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+          fetch-depth: 2
+      - name: Tool cache before setup-node (report only)
+        run: |
+          set +e
+          echo "RUNNER_TOOL_CACHE=$RUNNER_TOOL_CACHE"
+          echo "NODE_TOOL_CACHE_ENTRIES_BEFORE:"; ls -1 "$RUNNER_TOOL_CACHE/node" 2>&1
+          [ -d "$RUNNER_TOOL_CACHE/node/24.22.1" ] && echo "NODE_24_22_1_PRESENT_BEFORE=yes" || echo "NODE_24_22_1_PRESENT_BEFORE=no"
+          echo "PATH_NODE_BEFORE=$(command -v node)"
+          exit 0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        id: setupnode
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - name: Toolchain (report only; tool metadata, no product load)
+        run: |
+          set +e
+          mkdir -p "$RUNNER_TEMP/out"
+          echo "SETUP_NODE_OUTPUT node-version=${{ steps.setupnode.outputs.node-version }} cache-hit=${{ steps.setupnode.outputs.cache-hit }}"
+          echo "NODE_TOOL_CACHE_ENTRIES_AFTER:"; ls -1 "$RUNNER_TOOL_CACHE/node" 2>&1
+          echo "NODE_BIN=$(command -v node) NODE_VERSION_REPORTED=$(node --version) NPM_BIN=$(command -v npm) NPM_VERSION=$(npm --version)"
+          echo "NPM_CONFIG registry=$(npm config get registry) replace-registry-host=$(npm config get replace-registry-host) cache=$(npm config get cache) fetch-retries(default, overridden to 0 for npm ci)=$(npm config get fetch-retries)"
+          echo "NPM_CACHE_ENTRIES_BEFORE=$(find "$(npm config get cache)" -type f 2>/dev/null | wc -l)"
+          echo "CHECKOUT_HEAD=$(git rev-parse HEAD) PARENTS=$(git log -1 --format=%P)"
+          git log -2 --format='COMMIT %H parents=%P author=%an <%ae> %s'
+          echo "SHALLOW=$(git rev-parse --is-shallow-repository) BOOTSTRAP_TRACKED_FILES=$(git ls-files | wc -l) (second complete repo tree; bootstrap only)"
+          echo "CORE_AUTOCRLF_EFFECTIVE=$(git config --get core.autocrlf || echo unset) (every self-written git call passes -c core.autocrlf=false)"
+          echo "PYTHON $(python3 --version 2>&1) PYTHON_BIN $(command -v python3) $(git --version) $(timeout --version | head -1)"
+          uname -srmv
+          grep -E '^(PRETTY_NAME|VERSION_ID)=' /etc/os-release
+          echo "HOME=$HOME RUNNER_TEMP=$RUNNER_TEMP TMPDIR=${TMPDIR-unset} DSH_HOME=${DSH_HOME-unset} DSH_PREFIX=${DSH_PREFIX-unset} UV_USE_IO_URING=$UV_USE_IO_URING DEADLINE=$DEADLINE NOW=$(date -u +%Y-%m-%dT%H:%M:%SZ) UID=$(id -u)"
+          sha256sum "$R"/* .github/workflows/reverse-core20-078.yml
+          exit 0
+      - name: Packet check (zip -> new directory outside the product tree)
+        id: packet
+        timeout-minutes: 2
+        run: |
+          set +e
+          cp "$R/common078.sh" "$R/ident078.py" "$R/tap078.py" "$R/inputs078.py" "$RUNNER_TEMP/" || exit 1
+          . "$RUNNER_TEMP/common078.sh"
+          gate_run 60 python3 -I "$RUNNER_TEMP/inputs078.py" "$R/requestfromweb-078-files-v2.zip" "$RUNNER_TEMP/raw" > "$RUNNER_TEMP/out/packet.txt"
+          rc=$?; cat "$RUNNER_TEMP/out/packet.txt"; echo "$rc" > "$RUNNER_TEMP/out/packet-exit.txt"; exit $rc
+      - name: Prepare product tree A (base + TESTONLY)
+        id: treeA
+        if: steps.packet.outcome == 'success'
+        timeout-minutes: 3
+        run: bash "$R/prep078.sh" A
+      - name: Prepare product tree B (base + FULL-NOPINS)
+        id: treeB
+        if: steps.treeA.outcome == 'success'
+        timeout-minutes: 3
+        run: bash "$R/prep078.sh" B
+      - name: A strict prefix (one npm ci, one strict patch-dsh with the original pins, identity)
+        id: astrict
+        if: steps.treeB.outcome == 'success'
+        timeout-minutes: 4
+        run: bash "$R/stage078.sh" ASTRICT
+      - name: A test (pre-gates, the only A Node command, read-only post gates)
+        id: testA
+        if: steps.astrict.outcome == 'success'
+        timeout-minutes: 3
+        run: bash "$R/test078.sh" A
+      - name: Result gate A (exit 1, R1/R2 the frozen reds, C1 plain ok, three TRACE with empty fixtureFailures/loggerMessages)
+        id: gateA
+        if: ${{ !cancelled() && steps.testA.outputs.rc != '' }}
+        timeout-minutes: 1
+        run: |
+          set +e
+          . "$RUNNER_TEMP/common078.sh"
+          gate_run 60 python3 -I "$RUNNER_TEMP/tap078.py" A "$RUNNER_TEMP/out/node-A.stdout" "$RUNNER_TEMP/out/node-A.stderr" "${{ steps.testA.outputs.rc }}" > "$RUNNER_TEMP/out/gate-A.txt"
+          rc=$?; cat "$RUNNER_TEMP/out/gate-A.txt"; echo "$rc" > "$RUNNER_TEMP/out/gate-A-exit.txt"; exit $rc
+      - name: B record prefix (one npm ci, one patch-dsh --record, typed whole-JSON gate, pins-only diff; no Node target)
+        id: brec
+        if: steps.testA.outcome == 'success' && steps.gateA.outcome == 'success'
+        timeout-minutes: 4
+        run: bash "$R/stage078.sh" BREC
+      - name: B strict prefix (one npm ci, one strict patch-dsh with the recorded pins, identity)
+        id: bstrict
+        if: steps.brec.outcome == 'success'
+        timeout-minutes: 4
+        run: bash "$R/stage078.sh" BSTRICT
+      - name: B test (pre-gates, the only B Node command, read-only post gates)
+        id: testB
+        if: steps.bstrict.outcome == 'success'
+        timeout-minutes: 3
+        run: bash "$R/test078.sh" B
+      - name: Result gate B (exit 0, twelve plain ok, three TRACE with empty fixtureFailures/loggerMessages)
+        id: gateB
+        if: ${{ !cancelled() && steps.testB.outputs.rc != '' }}
+        timeout-minutes: 1
+        run: |
+          set +e
+          . "$RUNNER_TEMP/common078.sh"
+          gate_run 60 python3 -I "$RUNNER_TEMP/tap078.py" B "$RUNNER_TEMP/out/node-B.stdout" "$RUNNER_TEMP/out/node-B.stderr" "${{ steps.testB.outputs.rc }}" > "$RUNNER_TEMP/out/gate-B.txt"
+          rc=$?; cat "$RUNNER_TEMP/out/gate-B.txt"; echo "$rc" > "$RUNNER_TEMP/out/gate-B-exit.txt"; exit $rc
+      - name: Read-only final snapshot (HEAD, unfiltered status, complete diff, pins, isolation dirs; both trees)
+        id: final
+        if: ${{ !cancelled() && steps.treeA.outcome != 'skipped' }}
+        timeout-minutes: 1
+        run: |
+          set +e
+          . "$RUNNER_TEMP/common078.sh"
+          O="$RUNNER_TEMP/out"; f=0
+          for G in A B; do
+            T="$RUNNER_TEMP/tree-$G"
+            if [ ! -d "$T" ]; then echo "FINAL_TREE_$G absent"; continue; fi
+            gate_run 20 git -c core.autocrlf=false -C "$T" rev-parse HEAD > "$O/final-head-$G.txt"; r=$?; echo $r > "$O/final-head-$G-exit.txt"; [ $r -eq 0 ] || f=1
+            gate_run 20 git -c core.autocrlf=false -C "$T" status --porcelain=v1 --untracked-files=all > "$O/final-status-$G.txt"; r=$?; echo $r > "$O/final-status-$G-exit.txt"; [ $r -eq 0 ] || f=1
+            gate_run 20 git -c core.autocrlf=false -C "$T" diff --full-index --binary --no-ext-diff "$BASE" -- > "$O/final-diff-$G.patch"; r=$?; echo $r > "$O/final-diff-$G-exit.txt"; [ $r -eq 0 ] || f=1
+            echo "FINAL_HEAD_$G=$(cat "$O/final-head-$G.txt")"; echo "FINAL_STATUS_$G:"; cat "$O/final-status-$G.txt"
+            sha256sum "$O/final-diff-$G.patch" "$O/final-status-$G.txt" "$T/runtime/patches/pins.json"; wc -c "$O/final-diff-$G.patch" "$T/runtime/patches/pins.json"
+          done
+          for d in "$RUNNER_TEMP/iso-A-tmpdir" "$RUNNER_TEMP/iso-A-dsh-home" "$RUNNER_TEMP/iso-B-tmpdir" "$RUNNER_TEMP/iso-B-dsh-home"; do
+            if [ -d "$d" ]; then echo "FINAL_ISOLATION $d entries=$(find "$d" -mindepth 1 | wc -l)"; find "$d" -mindepth 1 -printf '%y %s %p\n'; else echo "FINAL_ISOLATION $d absent"; fi
+          done
+          ls -la "$RUNNER_TEMP" > "$O/final-runner-temp-listing.txt"; cat "$O/final-runner-temp-listing.txt"
+          echo "$f" > "$O/final-snapshot-exit.txt"; exit $f
+      - name: Step outcomes (report only)
+        if: ${{ !cancelled() }}
+        run: |
+          echo "packet=${{ steps.packet.outcome }} treeA=${{ steps.treeA.outcome }} treeB=${{ steps.treeB.outcome }} astrict=${{ steps.astrict.outcome }} testA=${{ steps.testA.outcome }} rcA=${{ steps.testA.outputs.rc }} gateA=${{ steps.gateA.outcome }} brec=${{ steps.brec.outcome }} bstrict=${{ steps.bstrict.outcome }} testB=${{ steps.testB.outcome }} rcB=${{ steps.testB.outputs.rc }} gateB=${{ steps.gateB.outcome }} final=${{ steps.final.outcome }} END=$(date -u +%Y-%m-%dT%H:%M:%SZ) DEADLINE=$DEADLINE" > "$RUNNER_TEMP/out/step-outcomes.txt"
+          cat "$RUNNER_TEMP/out/step-outcomes.txt"
+      - name: Upload request 078 outputs (reverse temp branch only)
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: reverse-078-outputs
+          path: ${{ runner.temp }}/out
