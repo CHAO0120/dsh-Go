@@ -1,6 +1,5 @@
 import 'dart:async';
 
-import 'package:dsh_app/notify/chat_alerts.dart';
 import 'package:dsh_app/state/connection_state.dart';
 import 'package:dsh_app/state/chat_reveal.dart';
 import 'package:dsh_app/state/notify_state.dart';
@@ -97,8 +96,23 @@ void main() {
         }
         await clock.pump();
       }
-      await client.events.close();
-      await client.close();
+      Future<void> closeResources() async {
+        try {
+          await client.events.close();
+        } finally {
+          await client.close();
+        }
+      }
+      if (clock == null) {
+        await closeResources();
+      } else {
+        // Start these closes in the real async zone, not after the final fake-clock pump.
+        final closed = await clock.runAsync(() async {
+          await closeResources();
+          return true;
+        });
+        if (closed != true) fail('Resource cleanup failed; see the original runAsync exception');
+      }
     }();
     addTearDown(close);
     try {
