@@ -9,20 +9,23 @@ const accepts = (backend, policy) => Array.isArray(backend?.capabilities?.confin
   && backend.capabilities.confinement.includes(policy.mode) && typeof backend.prepare === 'function';
 
 // Only the application owner installs backends. Neither argv nor env can enable one.
+// A Linux factory receives this router's own roots: they are what its guest may mount.
 export class CommandRouter {
   closed = false;
   #disposePromise;
   constructor(config, { linux, nativePython } = {}) {
-    this.linux = linux;
     this.nativePython = nativePython;
     this.virtual = new VirtualSubprocessRuntime(config, { selectExternal: (argv, policy) => {
       if (virtualCommands.has(basename(argv[0]))) return;
       return this.select(argv, policy);
-    } });
+    }, linux: () => this.linux });
     this.pluginNode = new VirtualSubprocessRuntime({ ...config, temporaryRoot: this.virtual.temporaryRoot }, { concurrent: true });
+    this.linux = typeof linux === 'function'
+      ? linux({ workspaceRoots: this.virtual.workspaceRoots, temporaryRoot: this.virtual.temporaryRoot }) : linux;
     this.capabilities = Object.freeze({ ...this.virtual.capabilities,
+      linuxCommands: Object.freeze([...this.linux?.commands ?? []]),
       pluginProcesses: Object.freeze({ node: this.virtual.capabilities.nodeScripts !== 'none',
-        nativePython: !!nativePython, linux: !!linux }),
+        nativePython: !!nativePython, linux: !!this.linux }),
     });
   }
   get temporaryRoot() { return this.virtual.temporaryRoot; }

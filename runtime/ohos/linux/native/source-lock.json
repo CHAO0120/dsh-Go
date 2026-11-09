@@ -2,7 +2,7 @@
   "upstream": "https://bellard.org/tinyemu/tinyemu-2019-12-21.tar.gz",
   "archiveSha256": "be8351f2121819b3172fcedce5cb1826fa12c87da1b7ed98f269d3e802a05555",
   "files": {
-    "CMakeLists.txt": "d16aa35d732227f9bed59e510c53671d5f6aa6b26886642fba67d373a75fe597",
+    "CMakeLists.txt": "d9d838e5c364f3fbbd92956fa37268f98e2b9a636e516a2a78d6294b467919a4",
     "THIRD-PARTY-NOTICES.txt": "8aa05a2e0e64c199f75b5f96d694b1de3b27a2b1b81ab2f6dba3b8ce661f3c99",
     "binding.c": "a54179c1cc291629faefe7c8ea0b9bcc8899ee833f742b5318885e878fdd91d2",
     "embed-fatal.c": "15d366e8861f2bb993ac46025a83708a51193ad28c2d60a4d24ad7eba9c209b1",
@@ -22,6 +22,9 @@
     "patches/0013-embedded-network-nosigpipe.patch": "439769b843ee36fe1a1753ee842470a74556a23b849c7be6b87cb2a307e42e3a",
     "temu_embed.h": "e6b6da718dd459cee79733c854c3b2a1d55fae2956c9030c7806a7d2dc733485",
     "patches/0014-grant-fid-decoder.patch": "c356a51798380a59267621884e096e0e7de36b727b3915eb282ff2b868906d27",
-    "patches/0015-block-write-errors.patch": "e6644b787e29c98caeab49b0911a88f88ab120c290dcaf07383c7e228f83d66d"
+    "patches/0015-block-write-errors.patch": "e6644b787e29c98caeab49b0911a88f88ab120c290dcaf07383c7e228f83d66d",
+    "fs_export.c": "4ebc81e80db33f47daa7677ab84ae50bcff90411f490842602a4bdde9804f6f9",
+    "fs_export.h": "978fea6b3a36b9c49751b1f8c306c0fad9414c114a95d9067a64fd67161c9200",
+    "patches/0016-app-workspace-export.patch": "d229bd61ea52c9f9743813565cbbf3f21a34a711512fdcf86747233a56f36696"
   }
 }

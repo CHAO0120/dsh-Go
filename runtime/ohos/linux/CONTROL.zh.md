@@ -7,7 +7,7 @@
 - HTTP exact route：`/dsh-go/v1/linux`，只允许 `GET`、`POST`，不得带 query。使用已有 NativeHost 提供的 IPv4 loopback baseUrl / launchToken，复用现有 token→cookie 握手和 `connection.requestRejection(req)`；鉴权在解析 body 或作任何操作之前。
 - 唯一 host preload 在插件前捕获 `DSH_GO_OHOS_LINUX_DIRECTORY` 和 `DSH_GO_OHOS_NATIVE_LIBRARY_DIR`。前者由 `HostOptions.linuxDirectory = filesDir + '/linux-tools'` 固定发布。缺失/非法路径是不可用，不能读取 config、argv 或后续 env 补值。
 - assets 仅从当前模块所在 runtime 的 `runtime/ohos/linux/assets/` 固定目录加载。仅有库或目录存在都不表示已打开 guest。`GET` 不读 manifest、不探测文件、不联网、不导入原生库、不创建 owner。
-- Node 的 Linux service 装入实际 OHOS `SubprocessRuntime`，但本期不向 `CommandRouter` 注入 Linux，不改变任何插件命令的默认路由。
+- Node 的 Linux service 装入实际 OHOS `SubprocessRuntime`。940 起同一个 LinuxControl 也是 `CommandRouter` 的 Linux 后端（agent 的 gh/python3/pip 等与插件进程），见 [ROUTING.zh.md](ROUTING.zh.md)；本控制入口的字段与语义不变，只是 `runPrivateGuest` 与这些命令共用客体唯一的作业通道（忙时同样 409 `ERR_OHOS_LINUX_BUSY`），开关 false 与最终停止也会取消正在跑的路由命令。
 
 ## 2. POST 精确字段
 
