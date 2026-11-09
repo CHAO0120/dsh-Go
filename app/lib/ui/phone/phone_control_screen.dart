@@ -410,6 +410,9 @@ class _PhoneControlScreenState extends ConsumerState<PhoneControlScreen> {
                   title: task.app == null ? l10n.phoneControlWorking : l10n.phoneControlWorkingApp(task.app!),
                   subtitle: task.paused
                       ? l10n.commonPaused
+                      : ready && task.handoffWaiting && !task.stopped && !task.retiring &&
+                            !task.finishing && !task.draining && !task.settling && !task.cleanupFailed
+                      ? l10n.phoneTaskHandoffWaitingHint
                       : task.waived
                       ? l10n.phoneControlTaskNoConfirmHint
                       : l10n.phoneControlFloatingBarHint,

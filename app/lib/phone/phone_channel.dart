@@ -416,6 +416,7 @@ class PhoneTaskStatus {
     this.runId,
     this.generation,
     this.waitingForScreen,
+    this.handoffWaiting = false,
     this.backgroundSlot,
     this.waitingForApp,
     this.waitingForMs = 0,
@@ -441,6 +442,7 @@ class PhoneTaskStatus {
     runId: _text(m['runId']),
     generation: _int(m['generation']),
     waitingForScreen: _text(m['waitingForScreen']),
+    handoffWaiting: m['handoffWaiting'] is bool && m['handoffWaiting'] == true,
     backgroundSlot: m.containsKey('backgroundSlot') ? m['backgroundSlot'] is bool && m['backgroundSlot'] == true : null,
     waitingForApp: PhoneAppWait.fromValue(m['waitingForApp']),
     waitingForMs: m['waitingForMs'] is int && (m['waitingForMs'] as int) >= 0 ? m['waitingForMs'] as int : 0,
@@ -465,6 +467,8 @@ class PhoneTaskStatus {
   final String? runId;
   final int? generation;
   final String? waitingForScreen;
+  /// The original task is waiting for its handoff ticket, not a resource release.
+  final bool handoffWaiting;
   /// Null only for absent legacy metadata; malformed present values never grant a slot.
   final bool? backgroundSlot;
   final PhoneAppWait? waitingForApp;
