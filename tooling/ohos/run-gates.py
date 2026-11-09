@@ -915,6 +915,44 @@ def main():
                   'workspace-move-entry.py', 'workspace-move-entry.mjs',
                   'workspace-move-instrumentation.mjs')],
               scope='Explicit applyPatch:true ordinary same-root Move to absent destination with existing parent; actual SessionStore/tool pipeline and normal ETS select/attach; physical and logical, complete provider/batch/meta/file-version oracle and ordinary cleanup; default false; no partial/fault/expected/cross-grant/new-parent, Host/RPC/UI/device/VM claim')
+    # Explicit optional apply_patch: same-root Move over an owned existing destination.
+    # Source mode 0640, destination OLD LF/mode0600; original complete update oracle.
+    for workspace_move_overwrite_mode in ('plain', 'jitless'):
+        g.run('workspace-move-overwrite-' + workspace_move_overwrite_mode,
+              lambda m=workspace_move_overwrite_mode: g.py(
+                  rt + 'workspace-move-overwrite-entry.py',
+                  '--source', s, '--payload', payload(), '--node', node(),
+                  '--manifest', o / 'composed/manifest.json',
+                  '--typescript-prefix', p('typescript_prefix'),
+                  '--native-directory', o / 'workspace-authority-entry/native',
+                  '--publication-fixture', native() / 'libpublication-test-linked.so',
+                  '--out', o / ('workspace-move-overwrite-' + m),
+                  *(['--jitless'] if m == 'jitless' else [])),
+              needs=('compose', 'workspace-authority-entry', 'native-publication-build'),
+              timeout=120,
+              tests=[rt + name for name in (
+                  'workspace-move-overwrite-entry.py', 'workspace-move-overwrite-entry.mjs',
+                  'workspace-move-overwrite-instrumentation.mjs')],
+              scope='Explicit applyPatch:true ordinary same-root Move over existing owned destination; source FIRST LF/mode0640 and destination OLD LF/mode0600 to SECOND LF/mode0640, original complete update/provider/batch/meta/version/cleanup oracle; actual SessionStore and normal select/attach; default false, no guard/fallback/partial/new-parent/cross-grant/device/VM claim')
+    # Explicit optional apply_patch: new destination under two absent owned parent levels.
+    # Source mode 0644; parent mode is 0777 masked by the actual child umask.
+    for workspace_move_parents_mode in ('plain', 'jitless'):
+        g.run('workspace-move-parents-' + workspace_move_parents_mode,
+              lambda m=workspace_move_parents_mode: g.py(
+                  rt + 'workspace-move-parents-entry.py',
+                  '--source', s, '--payload', payload(), '--node', node(),
+                  '--manifest', o / 'composed/manifest.json',
+                  '--typescript-prefix', p('typescript_prefix'),
+                  '--native-directory', o / 'workspace-authority-entry/native',
+                  '--publication-fixture', native() / 'libpublication-test-linked.so',
+                  '--out', o / ('workspace-move-parents-' + m),
+                  *(['--jitless'] if m == 'jitless' else [])),
+              needs=('compose', 'workspace-authority-entry', 'native-publication-build'),
+              timeout=120,
+              tests=[rt + name for name in (
+                  'workspace-move-parents-entry.py', 'workspace-move-parents-entry.mjs',
+                  'workspace-move-parents-instrumentation.mjs')],
+              scope='Explicit applyPatch:true ordinary same-root Move to nested/archive/moved.txt with both parents absent before and after read; actual SessionStore and normal select/attach; full create/provider/batch/meta/versions, source0644 and parent umask oracle, ordinary cleanup; default false; no overwrite/guard/fallback/partial/fault/cancel/cross-grant/device/VM claim')
     g.run('host-layout', lambda: g.py(rt + 'host-layout.py', '--node', node(), '--native-library-dir', o / 'round-native', '--publication-fixture', native() / 'libpublication-test-linked.so', '--assembled-payload', payload(), '--out', o / 'host-layout'), needs=('compose', 'native-publication-build', 'native-static-resources', 'round-native-libraries'), timeout=240)
     g.run('host-safe-profile', lambda: g.py(rt + 'host-safe-profile.py', '--node', node(), '--native-library-dir', o / 'round-native', '--publication-fixture', native() / 'libpublication-test-linked.so', '--assembled-payload', payload(), '--out', o / 'host-safe-profile'), needs=('compose', 'native-publication-build', 'round-native-libraries'), timeout=600, tests=[rt + 'host-safe-profile.py'], scope='Actual Host safe argv and original public round; not OH device restart')
     for label, host in [('loopback', '127.0.0.1'), ('owned-http', g.config.get('ownedHttpHost', ''))]:
