@@ -25,10 +25,10 @@ export class LinuxInstallationOwner {
   state='idle';backend=undefined;active=undefined;nativeRetirement=undefined;
   #options;#internals;#promise;#session;#backend;#instance;#attempt;#epoch;#persistentId=null;#bootMode=null;#abort=new AbortController();#cleanup;#published=false;#retainedExisting=false;#disposed=false;#transportDebt=false;
   constructor(options,internals={}){
-    const {directory,manifest,nativeLibraryDirectory,bootTimeoutMs=180000,onProgress=()=>{}}=options??{};
-    if(!isAbsolute(directory??'')||!isAbsolute(nativeLibraryDirectory??'')||!manifest||!['bios','kernel','tools','bootstrap','empty'].every(key=>validAsset(manifest[key]))||!Number.isFinite(bootTimeoutMs)||bootTimeoutMs<=0||bootTimeoutMs>2147483647||typeof onProgress!=='function')throw new TypeError('Trusted private directory, native directory and pinned Linux assets are required');
+    const {directory,manifest,nativeLibraryDirectory,exports=[],bootTimeoutMs=180000,onProgress=()=>{}}=options??{};
+    if(!isAbsolute(directory??'')||!isAbsolute(nativeLibraryDirectory??'')||!manifest||!['bios','kernel','tools','bootstrap','empty'].every(key=>validAsset(manifest[key]))||!Number.isFinite(bootTimeoutMs)||bootTimeoutMs<=0||bootTimeoutMs>2147483647||typeof onProgress!=='function'||!Array.isArray(exports)||exports.length>4||!exports.every((item,index)=>item?.tag==='dsh'+index&&isAbsolute(item.path??'')))throw new TypeError('Trusted private directory, native directory, App exports and pinned Linux assets are required');
     const pinned=Object.freeze(Object.fromEntries(['bios','kernel','tools','bootstrap','empty','archive'].map(key=>[key,Object.freeze({...manifest[key]})])));
-    this.#options={directory,manifest:pinned,nativeLibraryDirectory,bootTimeoutMs,onProgress};this.#internals=internals;
+    this.#options={directory,manifest:pinned,nativeLibraryDirectory,exports:Object.freeze(exports.map(({tag,path})=>Object.freeze({tag,path}))),bootTimeoutMs,onProgress};this.#internals=internals;
   }
   get persistentInstanceId(){return this.#persistentId;}
   get bootMode(){return this.#bootMode;}
@@ -43,7 +43,7 @@ export class LinuxInstallationOwner {
     this.#promise=this.#install().finally(()=>signal?.removeEventListener('abort',abort));this.#promise.catch(()=>{});return this.#promise;
   }
   async #install(){
-    const signal=this.#abort.signal,{directory,manifest,nativeLibraryDirectory,bootTimeoutMs}=this.#options;
+    const signal=this.#abort.signal,{directory,manifest,nativeLibraryDirectory,exports,bootTimeoutMs}=this.#options;
     try{
       signal.throwIfAborted();
       this.#instance=await openLinuxInstance({directory,manifest,lockExclusive:this.#internals.lockExclusive??linuxHostLock()},this.#internals.instance);
@@ -63,7 +63,9 @@ export class LinuxInstallationOwner {
         await mkdir(join(this.#attempt,'spill'),{mode:0o700});
       }
       const config={version:1,machine:'riscv64',memory_size:512,bios:paths.bios,kernel:paths.kernel,cmdline:`console=hvc0 root=/dev/vda ${store.existing?'rw':'ro'} init=/sbin/dsh-init dsh.epoch=${epoch} dsh.time=${Math.floor(Date.now()/1000)}`,
-        ...(store.existing?{drive0:{file:store.target}}:{drive0:{file:images.bootstrap,readOnly:true},drive1:{file:images.archive,readOnly:true},drive2:{file:store.target},drive3:{file:paths.tools,readOnly:true}}),eth0:{driver:'user'}};
+        ...(store.existing?{drive0:{file:store.target}}:{drive0:{file:images.bootstrap,readOnly:true},drive1:{file:images.archive,readOnly:true},drive2:{file:store.target},drive3:{file:paths.tools,readOnly:true}}),eth0:{driver:'user'},
+        // App-owned host directories over virtio-9p; each job mounts only its own.
+        ...Object.fromEntries(exports.map((item,index)=>['fs'+index,{tag:item.tag,file:item.path}]))};
       const configPath=await store.config(store.existing?'resume.cfg':'guest.cfg',config);
       signal.throwIfAborted();
       // Consuming clean is a confirmed file+directory commit BEFORE native can
@@ -78,7 +80,7 @@ export class LinuxInstallationOwner {
       let line='';const installFailure=deferred();const observe=bytes=>{
         try{line+=bytes.toString('utf8');let index;while((index=line.indexOf('\n'))>=0){const item=line.slice(0,index).trim();line=line.slice(index+1);if(item==='__DSH_INSTALL_FAILED__')throw error('ERR_OHOS_LINUX_INSTALL_GUEST','Guest installer failed');if(/^__DSH_INSTALL_(BEGIN|BASE|TOOLS|PIVOT)__$/.test(item))this.#progress('guest-install',{step:item.slice(14,-2).toLowerCase()});}if(line.length>131072)line=line.slice(-131072);}catch(cause){installFailure.reject(cause);}
       };raw.socket.on('data',observe);
-      this.#backend=new LinuxRuntimeBackend({nativeLibraryDirectory,configPath,epoch,temporaryRoot:join(this.#attempt,'spill')},{createSession:()=>this.#session});
+      this.#backend=new LinuxRuntimeBackend({nativeLibraryDirectory,configPath,epoch,temporaryRoot:join(this.#attempt,'spill'),exports:exports.map(item=>item.tag)},{createSession:()=>this.#session});
       const cancelled=deferred();const onAbort=()=>cancelled.reject(signal.reason??error('ABORT_ERR','Installation cancelled'));signal.addEventListener('abort',onAbort,{once:true});if(signal.aborted)onAbort();
       const timer=setTimeout(()=>installFailure.reject(error('ERR_OHOS_LINUX_INSTALL_TIMEOUT','Guest did not confirm opening before install deadline')),bootTimeoutMs);
       try{await Promise.race([this.#backend.opened,cancelled.promise,installFailure.promise]);}finally{clearTimeout(timer);signal.removeEventListener('abort',onAbort);raw.socket.removeListener('data',observe);}
