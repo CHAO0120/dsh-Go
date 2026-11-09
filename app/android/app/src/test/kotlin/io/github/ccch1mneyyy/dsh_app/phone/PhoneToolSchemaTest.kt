@@ -52,7 +52,7 @@ class PhoneToolSchemaTest {
                 intents += (plan as TestSystemLaunch).spec!!
                 return SysResult(true, "attempted", plan.target)
             }
-            override fun notify(title: String, text: String): SysResult = error("unexpected notification")
+            override fun notify(title: String, text: String, dispatch: PhoneTasks.SystemDispatch): SysResult = error("unexpected notification")
             override fun clipboardSet(text: String, dispatch: PhoneTasks.SystemDispatch): SysResult = error("unexpected clipboard")
             override fun clipboardGet(): SysResult = error("unexpected clipboard")
         }

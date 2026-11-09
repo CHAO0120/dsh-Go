@@ -706,7 +706,7 @@ class PhoneCore(
         // l10n:keep agent tool result
         val text = a.str("text") ?: return Out("notify 需要 title 和 text。", error = true)
         skillTrace.markIncomplete(owner)
-        val r = env.system().notify(title, text)
+        val r = env.system().notify(title, text, tasks.systemDispatch(owner))
         return Out(r.message, error = !r.ok, summary = ui.get("phone_log_notify", "通知"), decision = if (r.ok) "ok" else "failed") // l10n:keep test default
     }
 

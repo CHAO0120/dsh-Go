@@ -39,6 +39,9 @@ class PhoneCorePromptOwnerTest {
     private var beforeClipboard: () -> Unit = {}
     private var afterClipboard: () -> Unit = {}
     private var clipboardWrites = 0
+    private var beforeNotify: () -> Unit = {}
+    private var afterNotify: () -> Unit = {}
+    private var notifications = 0
     private var settle: () -> Unit = {}
     private var launchResult = SysResult(true, "launched")
     private var preparedTarget: SystemTarget = SystemTarget.Known(AppEntry("Example", PhoneAppIdentity("example.app", 10123)))
@@ -103,7 +106,16 @@ class PhoneCorePromptOwnerTest {
                 val needsReview = reviewRequired && result.ok && dispatch.commitNotice()
                 return SysResult(result.ok, result.message, plan.target, requiresReview = needsReview)
             }
-            override fun notify(title: String, text: String) = error("unexpected notification")
+            override fun notify(title: String, text: String, dispatch: PhoneTasks.SystemDispatch): SysResult {
+                beforeNotify()
+                if (!dispatch.commitEffect()) {
+                    if (dispatch.effectRefusedPaused) return SysResult(false, "paused before publication")
+                    throw InterruptedException()
+                }
+                notifications++
+                afterNotify()
+                return SysResult(true, "notification returned")
+            }
             override fun clipboardSet(text: String, dispatch: PhoneTasks.SystemDispatch): SysResult {
                 beforeClipboard()
                 if (!dispatch.commitEffect()) {
@@ -1861,6 +1873,35 @@ class PhoneCorePromptOwnerTest {
         val result = core.call("clipboard", mapOf("set" to "public"))
         assertFalse(result.isError)
         assertEquals(1, clipboardWrites)
+        assertFalse(tasks.isStopped())
+    }
+
+    @Test fun notificationPreparationPauseRefusesPublicationWithoutStoppingTask() {
+        beforeNotify = { assertTrue(tasks.setPausedIfCurrent(tasks.activeOwner()!!, true)) }
+        val result = core.call("notify", mapOf("title" to "public", "text" to "reminder"))
+        assertTrue(result.isError)
+        assertTrue(result.text.contains("paused"))
+        assertEquals(0, notifications)
+        assertFalse(tasks.isStopped())
+        assertTrue(tasks.setPausedIfCurrent(tasks.activeOwner()!!, false))
+        beforeNotify = {}
+        assertFalse(core.call("notify", mapOf("title" to "public", "text" to "reminder")).isError)
+        assertEquals(1, notifications)
+    }
+
+    @Test fun notificationPreparationCannotPublishForSuccessorOwner() {
+        beforeNotify = { tasks.endTask(); tasks.begin() }
+        val result = core.call("notify", mapOf("title" to "public", "text" to "reminder"))
+        assertTrue(result.isError)
+        assertEquals(0, notifications)
+        assertNotNull(tasks.activeOwner())
+    }
+
+    @Test fun notificationReturnedPublicationSurvivesLaterPause() {
+        afterNotify = { assertTrue(tasks.setPausedIfCurrent(tasks.activeOwner()!!, true)) }
+        val result = core.call("notify", mapOf("title" to "public", "text" to "reminder"))
+        assertFalse(result.isError)
+        assertEquals(1, notifications)
         assertFalse(tasks.isStopped())
     }
 

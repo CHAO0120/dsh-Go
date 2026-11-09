@@ -287,7 +287,7 @@ class SystemActions(private val app: Context) : SystemApi {
         return SysResult(true, attempted, native.target, requiresReview = true)
     }
 
-    override fun notify(title: String, text: String): SysResult {
+    override fun notify(title: String, text: String, dispatch: PhoneTasks.SystemDispatch): SysResult {
         if (!nm.areNotificationsEnabled()) {
             // l10n:keep agent tool result
             return SysResult(false, "DSH 没有通知权限，通知发不出去。请用户在系统设置里允许 DSH 发通知。")
@@ -309,7 +309,18 @@ class SystemActions(private val app: Context) : SystemApi {
             .setContentIntent(open)
             .setAutoCancel(true)
             .build()
-        nm.notify(TAG, ids.incrementAndGet(), n)
+        if (!dispatch.commitEffect()) {
+            // Channel and PendingIntent preparation may already have happened; only publication is refused.
+            // l10n:keep agent tool result
+            if (dispatch.effectRefusedPaused) return SysResult(false, "任务处于暂停，本次通知未发布。")
+            throw InterruptedException()
+        }
+        try {
+            nm.notify(TAG, ids.incrementAndGet(), n)
+        } catch (_: Exception) {
+            // l10n:keep agent tool result
+            return SysResult(false, "通知发布已获准，但结果未知。不要自动重发。")
+        }
         // l10n:keep agent tool result
         return SysResult(true, "已发通知「${SafetyRules.quoteText(title, 30)}」。")
     }

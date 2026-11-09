@@ -42,7 +42,7 @@ class PhoneEngineExitTest {
             override fun launch(plan: SystemLaunch, dispatch: PhoneTasks.SystemDispatch) = error("unexpected launch")
             override fun prepareUrl(url: String): Either<String, SystemLaunch> = error("unexpected URL")
             override fun prepareIntent(spec: IntentSpec, selectedApp: AppEntry?): Either<String, SystemLaunch> = error("unexpected intent")
-            override fun notify(title: String, text: String): SysResult {
+            override fun notify(title: String, text: String, dispatch: PhoneTasks.SystemDispatch): SysResult {
                 notifications.incrementAndGet()
                 synchronized(workerThreads) { workerThreads += Thread.currentThread().name }
                 return SysResult(true, "sent")

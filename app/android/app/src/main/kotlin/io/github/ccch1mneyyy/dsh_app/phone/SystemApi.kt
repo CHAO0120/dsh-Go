@@ -40,7 +40,7 @@ interface SystemApi {
     fun prepareUrl(url: String): Either<String, SystemLaunch>
     fun prepareIntent(spec: IntentSpec, selectedApp: AppEntry?): Either<String, SystemLaunch>
     fun launch(plan: SystemLaunch, dispatch: PhoneTasks.SystemDispatch): SysResult
-    fun notify(title: String, text: String): SysResult
+    fun notify(title: String, text: String, dispatch: PhoneTasks.SystemDispatch): SysResult
     fun clipboardSet(text: String, dispatch: PhoneTasks.SystemDispatch): SysResult
     fun clipboardGet(): SysResult
 }

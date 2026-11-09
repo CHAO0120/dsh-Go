@@ -76,7 +76,7 @@ class PhoneTaskSessionsTest {
             override fun launch(plan: SystemLaunch, dispatch: PhoneTasks.SystemDispatch): SysResult = this@PhoneTaskSessionsTest.launch(plan, dispatch)
             override fun prepareUrl(url: String): Either<String, SystemLaunch> = Either.Right(this@PhoneTaskSessionsTest.prepareUrl(url))
             override fun prepareIntent(spec: IntentSpec, selectedApp: AppEntry?): Either<String, SystemLaunch> = error("unexpected intent")
-            override fun notify(title: String, text: String): SysResult = error("unexpected notify")
+            override fun notify(title: String, text: String, dispatch: PhoneTasks.SystemDispatch): SysResult = error("unexpected notify")
             override fun clipboardSet(text: String, dispatch: PhoneTasks.SystemDispatch): SysResult = error("unexpected clipboard")
             override fun clipboardGet(): SysResult = error("unexpected clipboard")
         }

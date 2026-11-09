@@ -44,7 +44,7 @@ class PhoneSkillCoreTest {
                 if ((plan as TestSystemLaunch).kind == "app") opens++
                 return SysResult(true, "PRIVATE_RESULT", plan.target)
             }
-            override fun notify(title: String, text: String) = SysResult(true, "PRIVATE_RESULT")
+            override fun notify(title: String, text: String, dispatch: PhoneTasks.SystemDispatch) = SysResult(true, "PRIVATE_RESULT")
             override fun clipboardSet(text: String, dispatch: PhoneTasks.SystemDispatch) = SysResult(true, "PRIVATE_RESULT")
             override fun clipboardGet() = SysResult(true, "PRIVATE_CLIPBOARD")
         }
