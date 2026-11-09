@@ -451,6 +451,7 @@ internal class MainScreenDriver(private val service: PhoneA11yService, private v
                 pasteAttempted -> "已尝试一次粘贴，效果未核实；不要重复输入或改用其他方式。" // l10n:keep agent focus result
                 clipboard.get() == 2 -> "系统剪贴板已被覆盖，未派发粘贴；请核对当前焦点，不要自动重试。" // l10n:keep agent focus result
                 clipboard.get() == 1 -> "系统剪贴板写入已开始，结果未知，未派发粘贴；不要自动重试。" // l10n:keep agent focus result
+                overlay.editing -> "用户正在输入插话，未提交焦点输入；请重新读屏，不会自动重试。" // l10n:keep agent focus result
                 else -> FOCUS_CHANGED
                 })
             }
@@ -470,7 +471,7 @@ internal class MainScreenDriver(private val service: PhoneA11yService, private v
                         !allowed() || !focusCurrent(candidate) || SystemClock.uptimeMillis() >= actionDeadline)
                         return uncertain()
                     val task = FutureTask {
-                        if (!allowed() || !focusCurrent(candidate) || !availability().ok ||
+                        if (overlay.editing || !allowed() || !focusCurrent(candidate) || !availability().ok ||
                             SystemClock.uptimeMillis() >= actionDeadline || !clipboard.compareAndSet(0, 1)) false
                         else {
                             service.getSystemService(ClipboardManager::class.java)
@@ -489,7 +490,7 @@ internal class MainScreenDriver(private val service: PhoneA11yService, private v
                     val events = clock.count
                     try {
                         val node = freshFocusNode(pasteCap, candidate) ?: return uncertain()
-                        if (!pasteAdvertised(node) || !allowed() || !focusCurrent(candidate) ||
+                        if (!pasteAdvertised(node) || overlay.editing || !allowed() || !focusCurrent(candidate) ||
                             SystemClock.uptimeMillis() >= actionDeadline) return uncertain()
                         pasteAttempted = true
                         if (!node.performAction(AccessibilityNodeInfo.ACTION_PASTE)) return uncertain()
@@ -549,6 +550,8 @@ internal class MainScreenDriver(private val service: PhoneA11yService, private v
                         !allowed() || SystemClock.uptimeMillis() >= actionDeadline || !verifyFocus(candidate, input) ||
                         !allowed() || SystemClock.uptimeMillis() >= actionDeadline ||
                         !input.currentBeforeDispatch()) return ActionResult(false, FOCUS_CHANGED)
+                    if (overlay.editing) return ActionResult(false,
+                        "用户正在输入插话，未提交焦点输入；请重新读屏，不会自动重试。") // l10n:keep agent focus result
                     val events = clock.count
                     input.commitOnce(text)
                     val afterText = if (allowed() && focusCurrent(candidate)) input.readBounded(actionDeadline) else null
@@ -644,6 +647,7 @@ internal class MainScreenDriver(private val service: PhoneA11yService, private v
                 refuseWrite(Resolved(snap, el, cap, node, hit))?.let { return it }
                 if (!observed.moreCanClick || !node.isEnabled || !allowed() || cancelled(generation) || !typedCurrent(cap))
                     return ActionResult(false, "原路线目标或权限改变，没有操作。") // l10n:keep
+                if (overlay.editing) return ActionResult(false, "用户正在输入插话，没有发起本步点击。") // l10n:keep
                 val events = clock.count
                 attempted = true
                 val accepted = node.performAction(AccessibilityNodeInfo.ACTION_CLICK)
