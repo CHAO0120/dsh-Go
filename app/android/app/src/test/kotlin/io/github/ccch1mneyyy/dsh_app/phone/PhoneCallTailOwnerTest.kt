@@ -77,7 +77,7 @@ class PhoneCallTailOwnerTest {
                 override fun prepareUrl(url: String): Either<String, SystemLaunch> = error("unexpected URL")
                 override fun prepareIntent(spec: IntentSpec, selectedApp: AppEntry?): Either<String, SystemLaunch> = error("unexpected intent")
                 override fun notify(title: String, text: String) = error("unexpected notification")
-                override fun clipboardSet(text: String) = error("unexpected clipboard")
+                override fun clipboardSet(text: String, dispatch: PhoneTasks.SystemDispatch) = error("unexpected clipboard")
                 override fun clipboardGet() = error("unexpected clipboard")
             }
         }, tasks, log)

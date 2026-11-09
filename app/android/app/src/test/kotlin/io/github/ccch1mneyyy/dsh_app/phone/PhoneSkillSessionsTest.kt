@@ -61,7 +61,7 @@ class PhoneSkillSessionsTest {
                 override fun prepareUrl(url: String): Either<String, SystemLaunch> = error("unexpected url")
                 override fun prepareIntent(spec: IntentSpec, selectedApp: AppEntry?): Either<String, SystemLaunch> = error("unexpected intent")
                 override fun notify(title: String, text: String) = error("unexpected notify")
-                override fun clipboardSet(text: String) = error("unexpected clipboard")
+                override fun clipboardSet(text: String, dispatch: PhoneTasks.SystemDispatch) = error("unexpected clipboard")
                 override fun clipboardGet() = error("unexpected clipboard")
             }
         }

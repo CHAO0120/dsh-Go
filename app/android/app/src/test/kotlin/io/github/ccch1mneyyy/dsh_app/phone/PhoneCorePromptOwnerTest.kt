@@ -36,6 +36,9 @@ class PhoneCorePromptOwnerTest {
     private var prepareSystem: () -> Unit = {}
     private var afterRejectedStart: () -> Unit = {}
     private var afterStart: () -> Unit = {}
+    private var beforeClipboard: () -> Unit = {}
+    private var afterClipboard: () -> Unit = {}
+    private var clipboardWrites = 0
     private var settle: () -> Unit = {}
     private var launchResult = SysResult(true, "launched")
     private var preparedTarget: SystemTarget = SystemTarget.Known(AppEntry("Example", PhoneAppIdentity("example.app", 10123)))
@@ -101,7 +104,16 @@ class PhoneCorePromptOwnerTest {
                 return SysResult(result.ok, result.message, plan.target, requiresReview = needsReview)
             }
             override fun notify(title: String, text: String) = error("unexpected notification")
-            override fun clipboardSet(text: String) = error("unexpected clipboard")
+            override fun clipboardSet(text: String, dispatch: PhoneTasks.SystemDispatch): SysResult {
+                beforeClipboard()
+                if (!dispatch.commitEffect()) {
+                    if (dispatch.effectRefusedPaused) return SysResult(false, "paused before clipboard write")
+                    throw InterruptedException()
+                }
+                clipboardWrites++
+                afterClipboard()
+                return SysResult(true, "clipboard returned")
+            }
             override fun clipboardGet() = error("unexpected clipboard")
         }
     }, tasks, ActionLog())
@@ -1821,6 +1833,35 @@ class PhoneCorePromptOwnerTest {
         assertTrue(result.text, result.text.startsWith(PhoneTasks.STOPPED_MESSAGE))
         assertEquals(0, launches)
         assertFalse(tasks.isPaused)
+    }
+
+    @Test fun clipboardPreparationPauseRefusesWriteAndResumeAllowsNextCall() {
+        beforeClipboard = { assertTrue(tasks.setPausedIfCurrent(tasks.activeOwner()!!, true)) }
+        val denied = core.call("clipboard", mapOf("set" to "public"))
+        assertTrue(denied.isError)
+        assertTrue(denied.text.contains("paused"))
+        assertEquals(0, clipboardWrites)
+        assertFalse(tasks.isStopped())
+        assertTrue(tasks.setPausedIfCurrent(tasks.activeOwner()!!, false))
+        beforeClipboard = {}
+        assertFalse(core.call("clipboard", mapOf("set" to "public")).isError)
+        assertEquals(1, clipboardWrites)
+    }
+
+    @Test fun clipboardPreparationCannotBorrowSuccessorOwner() {
+        beforeClipboard = { tasks.endTask(); tasks.begin() }
+        val result = core.call("clipboard", mapOf("set" to "public"))
+        assertTrue(result.isError)
+        assertEquals(0, clipboardWrites)
+        assertNotNull(tasks.activeOwner())
+    }
+
+    @Test fun clipboardReturnedSuccessIsNotRewrittenByLaterPause() {
+        afterClipboard = { assertTrue(tasks.setPausedIfCurrent(tasks.activeOwner()!!, true)) }
+        val result = core.call("clipboard", mapOf("set" to "public"))
+        assertFalse(result.isError)
+        assertEquals(1, clipboardWrites)
+        assertFalse(tasks.isStopped())
     }
 
 }

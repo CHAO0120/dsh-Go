@@ -47,7 +47,7 @@ class PhoneEngineExitTest {
                 synchronized(workerThreads) { workerThreads += Thread.currentThread().name }
                 return SysResult(true, "sent")
             }
-            override fun clipboardSet(text: String) = error("unexpected clipboard")
+            override fun clipboardSet(text: String, dispatch: PhoneTasks.SystemDispatch) = error("unexpected clipboard")
             override fun clipboardGet() = error("unexpected clipboard")
         }
     }, tasks, ActionLog())

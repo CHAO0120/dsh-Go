@@ -248,6 +248,29 @@ class PhoneTasks(
     inner class SystemDispatch internal constructor(private val owner: Owner, private val allowed: () -> Boolean) {
         private var startCommitted = false
         private var noticeCommitted = false
+
+        // Independent visible effect: not an Activity start or its fallback notice.
+        private var effectClosed = false
+        private var effectClaimed = false
+        private var effectPaused = false
+        val effectCommitted: Boolean get() = synchronized(lock) { effectClaimed }
+        val effectRefusedPaused: Boolean get() = synchronized(lock) { effectPaused }
+
+        fun commitEffect(): Boolean = synchronized(lock) {
+            effectPaused = false
+            if (effectClosed || effectClaimed || !owner.active || !currentLocked(owner) ||
+                Thread.currentThread().isInterrupted) return false
+            if (paused) { effectPaused = true; return false }
+            if (!allowed()) return false
+            effectClaimed = true
+            true
+        }
+
+        /** Revokes an unclaimed queued effect; a claimed platform operation may still finish. */
+        fun sealEffect(): Boolean = synchronized(lock) {
+            effectClosed = true
+            effectClaimed
+        }
         private var refusedPaused = false
         /** Exact last start-admission result, not a later sample of task state. */
         val startRefusedPaused: Boolean get() = synchronized(lock) { refusedPaused }

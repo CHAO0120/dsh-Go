@@ -26,6 +26,8 @@ import io.github.ccch1mneyyy.dsh_app.MainActivity
 import io.github.ccch1mneyyy.dsh_app.R
 import io.github.ccch1mneyyy.dsh_app.phone.background.Reasons
 import java.util.concurrent.CountDownLatch
+import java.util.concurrent.ExecutionException
+import java.util.concurrent.TimeoutException
 import java.util.concurrent.FutureTask
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
@@ -312,16 +314,52 @@ class SystemActions(private val app: Context) : SystemApi {
         return SysResult(true, "已发通知「${SafetyRules.quoteText(title, 30)}」。")
     }
 
-    override fun clipboardSet(text: String): SysResult {
+    override fun clipboardSet(text: String, dispatch: PhoneTasks.SystemDispatch): SysResult {
         // l10n:keep agent tool result
         if (text.length > 100_000) return SysResult(false, "内容太长（超过 10 万字）。")
-        val ok = onMain {
-            val cm = app.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-            cm.setPrimaryClip(ClipData.newPlainText("DSH", text))
-            true
-        } == true
         // l10n:keep agent tool result
-        return if (ok) SysResult(true, "已写入剪贴板（${text.length} 字）。") else SysResult(false, "写剪贴板失败。")
+        fun unknown() = SysResult(false, "剪贴板写入已获准，但结果未知，可能仍会完成。不要自动重试。")
+        fun write(): SysResult {
+            try {
+                val cm = app.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                val data = ClipData.newPlainText("DSH", text)
+                if (!dispatch.commitEffect()) {
+                    // l10n:keep agent tool result
+                    if (dispatch.effectRefusedPaused) return SysResult(false, "任务处于暂停，本次未覆盖剪贴板。")
+                    throw InterruptedException()
+                }
+                cm.setPrimaryClip(data)
+                // l10n:keep agent tool result
+                return SysResult(true, "已写入剪贴板（${text.length} 字）。")
+            } catch (e: InterruptedException) {
+                throw e
+            } catch (_: Exception) {
+                // l10n:keep agent tool result
+                return if (dispatch.effectCommitted) unknown() else SysResult(false, "剪贴板写入准备失败，本次未覆盖。")
+            }
+        }
+        if (Looper.myLooper() == Looper.getMainLooper()) return write()
+        val task = FutureTask<SysResult> { write() }
+        if (!main.post(task)) {
+            dispatch.sealEffect()
+            // l10n:keep agent tool result
+            return SysResult(false, "剪贴板写入未能排队，本次未覆盖。")
+        }
+        try {
+            return task.get(3, TimeUnit.SECONDS)
+        } catch (_: TimeoutException) {
+            val claimed = dispatch.sealEffect()
+            task.cancel(false)
+            // l10n:keep agent tool result
+            return if (claimed) unknown() else SysResult(false, "等待剪贴板写入超时，本次未覆盖。")
+        } catch (e: InterruptedException) {
+            dispatch.sealEffect()
+            task.cancel(false)
+            throw e
+        } catch (e: ExecutionException) {
+            dispatch.sealEffect()
+            throw (e.cause ?: e)
+        }
     }
 
     override fun clipboardGet(): SysResult {

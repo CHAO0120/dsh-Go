@@ -718,7 +718,7 @@ class PhoneCore(
         if (set != null && get) return Out("clipboard 的 set 和 get 一次只能用一个。", error = true)
         if (set != null) {
             skillTrace.markIncomplete(owner)
-            val r = env.system().clipboardSet(set)
+            val r = env.system().clipboardSet(set, tasks.systemDispatch(owner))
             return Out(r.message, error = !r.ok, summary = ui.get("phone_log_clipboard_write", "写剪贴板（%1\$d 字）", set.length), decision = if (r.ok) "ok" else "failed") // l10n:keep test default
         }
         // l10n:keep agent tool result

@@ -68,7 +68,7 @@ class PhoneScreenWorkersTest {
                     override fun prepareIntent(spec: IntentSpec, selectedApp: AppEntry?): Either<String, SystemLaunch> = error("unused")
                     override fun launch(plan: SystemLaunch, dispatch: PhoneTasks.SystemDispatch): SysResult = error("unused")
                     override fun notify(title: String, text: String): SysResult = error("unused")
-                    override fun clipboardSet(text: String): SysResult = error("unused")
+                    override fun clipboardSet(text: String, dispatch: PhoneTasks.SystemDispatch): SysResult = error("unused")
                     override fun clipboardGet(): SysResult = this@Fixture.clipboard()
                 }
             }, tasks, ActionLog(), main)

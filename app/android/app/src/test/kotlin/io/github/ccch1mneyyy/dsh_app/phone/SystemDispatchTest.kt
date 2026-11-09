@@ -167,4 +167,46 @@ class SystemDispatchTest {
         assertFalse(tasks.isStopped())
     }
 
+    @Test fun sealedQueuedEffectCannotClaimEvenAfterResume() {
+        val tasks = tasks()
+        val owner = tasks.activeOwner()!!
+        val dispatch = tasks.systemDispatch(owner)
+        assertFalse(dispatch.sealEffect())
+        assertTrue(tasks.setPausedIfCurrent(owner, true))
+        assertTrue(tasks.setPausedIfCurrent(owner, false))
+        assertFalse(dispatch.commitEffect())
+        assertFalse(dispatch.effectCommitted)
+        assertFalse(dispatch.sealEffect())
+    }
+
+    @Test fun committedEffectRemainsKnownAfterSealAndOwnerReplacement() {
+        val tasks = tasks()
+        val dispatch = tasks.systemDispatch(tasks.activeOwner()!!)
+        assertTrue(dispatch.commitEffect())
+        tasks.endTask()
+        tasks.begin()
+        assertTrue(dispatch.sealEffect())
+        assertTrue(dispatch.effectCommitted)
+        assertFalse(dispatch.commitEffect())
+        assertFalse(dispatch.commitNotice())
+    }
+
+    @Test fun effectAdmissionKeepsPauseAndOriginalOwnerBeforePolicy() {
+        val tasks = tasks()
+        val owner = tasks.activeOwner()!!
+        var policyCalls = 0
+        val dispatch = tasks.systemDispatch(owner) { policyCalls++; true }
+        assertTrue(tasks.setPausedIfCurrent(owner, true))
+        assertFalse(dispatch.commitEffect())
+        assertTrue(dispatch.effectRefusedPaused)
+        assertEquals(0, policyCalls)
+        assertTrue(tasks.setPausedIfCurrent(owner, false))
+        tasks.endTask()
+        tasks.begin()
+        assertFalse(dispatch.commitEffect())
+        assertFalse(dispatch.effectRefusedPaused)
+        assertEquals(0, policyCalls)
+        assertTrue(tasks.systemDispatch(tasks.activeOwner()!!).commitEffect())
+    }
+
 }
