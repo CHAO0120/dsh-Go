@@ -882,9 +882,14 @@ internal class MainScreenDriver(private val service: PhoneA11yService, private v
                         break
                     }
                     var editingBlocked = false
+                    var unavailableReason: String? = null
                     val before = clock.count
                     val out = actuator.scroll(node, el.scroll, el.horizontal, list.bounds, cap.screen, direction) {
-                        if (cancelled(gen) || !allowed()) false
+                        val available = availability()
+                        if (!available.ok) {
+                            unavailableReason = checkNotNull(available.reason)
+                            false
+                        } else if (cancelled(gen) || !allowed()) false
                         else if (overlay.editing) {
                             editingBlocked = true
                             false
@@ -895,7 +900,7 @@ internal class MainScreenDriver(private val service: PhoneA11yService, private v
                     }
                     // l10n:keep agent screen result
                     if (!out.accepted) {
-                        stop = if (editingBlocked) "用户正在输入插话，未继续滚动；已读内容保留。" // l10n:keep agent screen result
+                        stop = unavailableReason ?: if (editingBlocked) "用户正在输入插话，未继续滚动；已读内容保留。" // l10n:keep agent screen result
                         else "系统没有接受滚动，无法确认是否到底" // l10n:keep agent screen result
                         break
                     }
@@ -970,7 +975,7 @@ internal class MainScreenDriver(private val service: PhoneA11yService, private v
                 ?.takeIf { typedCurrent(r.cap) } else null
             val before = clock.count
             val out = actuator.click(r.node, r.el.bounds, r.cap.screen, a.long) {
-                val admitted = !cancelled(gen) && !overlay.editing && allowed() && actionSourcesAllowed(sources)
+                val admitted = !cancelled(gen) && availability().ok && !overlay.editing && allowed() && actionSourcesAllowed(sources)
                 if (!typedCurrent(r.cap)) navigation = null
                 admitted
             }
@@ -999,7 +1004,7 @@ internal class MainScreenDriver(private val service: PhoneA11yService, private v
             if (a.text.length > 2_000) return ActionResult(false, "一次最多输入 2000 字。")
             refuseHalted(allowed)?.let { return it }
             val before = clock.count
-            if (!actuator.setText(r.node, a.text) { !cancelled(gen) && !overlay.editing && allowed() }) {
+            if (!actuator.setText(r.node, a.text) { !cancelled(gen) && availability().ok && !overlay.editing && allowed() }) {
                 // l10n:keep agent screen result
                 return after(before, r.snap, gen,
                     "输入未获系统确认，输入、焦点或点击可能已产生部分效果；请先核对新屏幕，不要重复输入。", ok = false)
@@ -1025,7 +1030,7 @@ internal class MainScreenDriver(private val service: PhoneA11yService, private v
                             return after(before, r.snap, gen,
                                 "已输入并完成回读，但输入框现在属于密码或验证码等敏感字段，未发起键盘提交。请交给用户核对；不要重复输入。", ok = false)
                         }
-                        if (cancelled(gen) || overlay.editing || !allowed()) false else r.node.performAction(id)
+                        if (cancelled(gen) || !availability().ok || overlay.editing || !allowed()) false else r.node.performAction(id)
                     }
                 }
                 // l10n:keep agent screen result
@@ -1078,7 +1083,7 @@ internal class MainScreenDriver(private val service: PhoneA11yService, private v
                 val before = clock.count
                 val out = actuator.scroll(null, 0, a.direction == PhoneAction.Direction.LEFT || a.direction == PhoneAction.Direction.RIGHT,
                     Box(screen.left, screen.top + screen.height / 5, screen.right, screen.bottom - screen.height / 6), screen, a.direction) {
-                    !cancelled(gen) && !overlay.editing && allowed() && actionSourcesAllowed(sources)
+                    !cancelled(gen) && availability().ok && !overlay.editing && allowed() && actionSourcesAllowed(sources)
                 }
                 // l10n:keep agent screen result
                 if (!out.accepted) return after(before, snap, gen,
@@ -1097,7 +1102,7 @@ internal class MainScreenDriver(private val service: PhoneA11yService, private v
             refuseHalted { allowed() && actionSourcesAllowed(sources) }?.let { return it }
             val before = clock.count
             val out = actuator.scroll(r.node, r.el.scroll, r.el.horizontal, r.el.bounds, r.cap.screen, a.direction) {
-                !cancelled(gen) && !overlay.editing && allowed() && actionSourcesAllowed(sources)
+                !cancelled(gen) && availability().ok && !overlay.editing && allowed() && actionSourcesAllowed(sources)
             }
             // l10n:keep agent screen result
             if (!out.accepted) return after(before, r.snap, gen,
