@@ -185,3 +185,11 @@ export function workspaceEditScope(target, policy, signal) {
     return result;
   };
 }
+
+// Patched DSH reaches this through a registered symbol, like workspace-paths,
+// so the provider loads the same way in every runtime layout.
+if (isMainThread && process.platform === 'openharmony') {
+  Object.defineProperty(globalThis, Symbol.for('dsh.go.ohos.workspace-edit'), {
+    value: Object.freeze({ workspaceEditScope }), writable: false, configurable: false,
+  });
+}

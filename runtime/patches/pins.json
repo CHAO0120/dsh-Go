@@ -1788,7 +1788,7 @@
         },
         "node_modules/@deepseek-ai/dsh-fs-sandbox/lib/index.js": {
           "before": "f4edd14bf48f8d5bfdea10a61c6651ccde99f2d08a79855746ad2a8d89c6fb73",
-          "after": "df8b5dcd4220210236fba5ceee4399849e5592daf1d75b430bce73caccaf2807"
+          "after": "a5c1919e3efc18a14234b3af2a38f2533af051eb65fb8143c9c51c7467431aba"
         }
       }
     }
