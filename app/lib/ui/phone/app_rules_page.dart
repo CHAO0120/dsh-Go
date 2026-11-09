@@ -114,7 +114,13 @@ class PhoneAppRulesPage extends ConsumerWidget {
 
   Future<void> _add(BuildContext context, WidgetRef ref) async {
     final added = await showAppDialog<(String, AppRule)>(context: context, builder: (_) => const _AddAppDialog());
-    if (added == null) return;
+    if (added == null || !context.mounted) return;
+    final policies = ref.read(phoneProvider).policies!;
+    final current = policies.ruleFor(added.$1);
+    if (added.$2.looseness > current.looseness) {
+      final confirmed = await confirmLoosening(context, label: policies.labelFor(added.$1), from: current);
+      if (!confirmed || !context.mounted) return;
+    }
     final ok = await ref.read(phoneProvider.notifier).setRule(added.$1, added.$2);
     if (!ok && context.mounted) {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(context.l10n.phoneAppRulesSaveFailed)));

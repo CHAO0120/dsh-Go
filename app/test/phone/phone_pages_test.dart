@@ -352,6 +352,59 @@ void main() {
       expect(find.descendant(of: groupTitled('不碰'), matching: find.text('淘宝')), findsOneWidget);
     });
 
+    testWidgets('adding an existing denied app requires confirmation before changing its rule', (tester) async {
+      const package = 'org.example.rules';
+      final native = FakePhoneNative(policies: {
+        'denyPackages': [package], 'confirmEveryWritePackages': <String>[],
+      });
+      await pumpPhone(tester, const PhoneAppRulesPage(), native: native);
+      Future<void> addAsConfirmed() async {
+        await tester.tap(find.text('添加 App'));
+        await tester.pumpAndSettle();
+        await tester.enterText(find.byType(TextField), package);
+        await tester.tap(find.descendant(of: find.byType(AlertDialog), matching: find.text('每一步都确认')));
+        await tester.pump();
+        await tester.tap(find.descendant(of: find.byType(AlertDialog), matching: find.text('添加')));
+        await tester.pumpAndSettle();
+      }
+
+      await addAsConfirmed();
+      expect(native.callsOf('setPolicies'), isEmpty);
+      expect(find.byType(RiskNoticeSheet), findsOneWidget);
+      expect(phoneOf(tester).policies!.ruleFor(package), AppRule.deny);
+      await tester.tap(find.descendant(of: find.byType(SheetHeader), matching: find.byType(SheetIconButton)));
+      await tester.pumpAndSettle();
+      expect(native.callsOf('setPolicies'), isEmpty);
+      expect(phoneOf(tester).policies!.ruleFor(package), AppRule.deny);
+
+      await addAsConfirmed();
+      expect(native.callsOf('setPolicies'), isEmpty);
+      await tester.tap(find.text('我知道风险，仍然修改'));
+      await tester.pumpAndSettle();
+      final args = native.callsOf('setPolicies').single.arguments as Map;
+      expect(args['denyPackages'], isNot(contains(package)));
+      expect(args['confirmEveryWritePackages'], contains(package));
+      expect(phoneOf(tester).policies!.ruleFor(package), AppRule.confirmEachStep);
+    });
+
+    testWidgets('adding a new app with confirmation tightens the default without a risk prompt', (tester) async {
+      const package = 'org.example.newapp';
+      final native = FakePhoneNative();
+      await pumpPhone(tester, const PhoneAppRulesPage(), native: native);
+      expect(phoneOf(tester).policies!.ruleFor(package), AppRule.normal);
+      await tester.tap(find.text('添加 App'));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byType(TextField), package);
+      await tester.tap(find.descendant(of: find.byType(AlertDialog), matching: find.text('每一步都确认')));
+      await tester.pump();
+      await tester.tap(find.descendant(of: find.byType(AlertDialog), matching: find.text('添加')));
+      await tester.pumpAndSettle();
+      expect(find.byType(RiskNoticeSheet), findsNothing);
+      final args = native.callsOf('setPolicies').single.arguments as Map;
+      expect(args['confirmEveryWritePackages'], contains(package));
+      expect(phoneOf(tester).policies!.ruleFor(package), AppRule.confirmEachStep);
+    });
+
     testWidgets('unreadable list says so', (tester) async {
       await pumpPhone(tester, const PhoneAppRulesPage(), missingNative: true);
       expect(find.text('读不到应用名单'), findsOneWidget);
