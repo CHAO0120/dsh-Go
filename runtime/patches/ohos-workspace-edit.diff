@@ -1,0 +1,81 @@
+diff --git a/node_modules/@deepseek-ai/dsh-fs-local/lib/index.js b/node_modules/@deepseek-ai/dsh-fs-local/lib/index.js
+--- a/node_modules/@deepseek-ai/dsh-fs-local/lib/index.js
++++ b/node_modules/@deepseek-ai/dsh-fs-local/lib/index.js
+@@ -755,9 +755,9 @@
+ * @param signal - aborts the read (`FS_ABORTED`).
+ * @returns LF-normalized content and the original format metadata to restore on write-back.
+ */
+-async function readForEdit(absolutePath, displayPath, signal) {
++async function readForEdit(absolutePath, displayPath, signal, readBuffer) {
+ 	throwIfAborted(signal, "edit");
+-	const buffer = await readFileAbortable(absolutePath, "edit", signal);
++	const buffer = readBuffer ? await readBuffer() : await readFileAbortable(absolutePath, "edit", signal);
+ 	throwIfAborted(signal, "edit");
+ 	if (buffer.includes(0)) throw new FsError(`cannot edit "${displayPath}": binary file`, "FS_NOT_TEXT");
+ 	const raw = decodeUtf8(buffer, "edit", displayPath);
+@@ -1075,22 +1075,32 @@
+ 			};
+ 		});
+ 	}
+-	async editText(target, edit, expected, signal) {
++	async editText(target, edit, expected, signal, withWorkspace) {
+ 		return this.withLock(target.targetKey, async () => {
+-			const existing = await probe(target.targetKey);
+-			if (!existing) throw new FsError(`cannot edit "${target.displayPath}": file changed since it was read`, "FS_STALE_VERSION");
+-			if (existing.type !== "file") throw new FsError(`cannot edit "${target.displayPath}": not a regular file`, "FS_NOT_REGULAR_FILE");
+-			if (expected && existing.version !== expected.version) throw new FsError(`cannot edit "${target.displayPath}": file changed since it was read`, "FS_STALE_VERSION");
+-			const original = await readForEdit(target.targetKey, target.displayPath, signal);
+-			const edited = applyLiteralEdit(original.content, edit.oldString, edit.newString, edit.replaceAll, target.displayPath);
+-			const content = restoreFileText(edited.content, original);
+-			await writeFileAtomic(target.targetKey, content, existing.mode, signal, this.internals, { displayPath: target.displayPath });
+-			const after = await probe(target.targetKey);
+-			return {
+-				version: this.versionAfterWrite(after, target),
+-				before: original.content,
+-				after: edited.content
++			const apply = async (io) => {
++				const existing = io ? await io.probe() : await probe(target.targetKey);
++				if (!existing) throw new FsError(`cannot edit "${target.displayPath}": file changed since it was read`, "FS_STALE_VERSION");
++				if (existing.type !== "file") throw new FsError(`cannot edit "${target.displayPath}": not a regular file`, "FS_NOT_REGULAR_FILE");
++				if (expected && existing.version !== expected.version) throw new FsError(`cannot edit "${target.displayPath}": file changed since it was read`, "FS_STALE_VERSION");
++				const original = await readForEdit(target.targetKey, target.displayPath, signal, io?.read);
++				const edited = applyLiteralEdit(original.content, edit.oldString, edit.newString, edit.replaceAll, target.displayPath);
++				const content = restoreFileText(edited.content, original);
++				if (io) await io.write(content, existing.mode);
++				else await writeFileAtomic(target.targetKey, content, existing.mode, signal, this.internals, { displayPath: target.displayPath });
++				const after = io ? await io.probe() : await probe(target.targetKey);
++				return { version: this.versionAfterWrite(after, target), before: original.content, after: edited.content };
+ 			};
++			if (!withWorkspace) return apply();
++			try { return await withWorkspace(apply); }
++			catch (error) {
++				if (error.workspaceEditState === "committed") throw new FsError(`saved "${target.displayPath}", but post-save validation or resource cleanup failed: ${error.message}`, "FS_IO_ERROR", { cause: error });
++				if (error.workspaceEditState === "unknown") throw new FsError(`save status for "${target.displayPath}" could not be confirmed: ${error.message}`, "FS_IO_ERROR", { cause: error });
++				if (error.workspaceEditCleanupFailed) throw new FsError(`edit of "${target.displayPath}" did not reach publication; resource cleanup was not confirmed: ${error.message}`, "FS_IO_ERROR", { cause: error });
++				if (error instanceof FsError || error.code === "ERR_FS_FILE_TOO_LARGE") throw error;
++				if (isAbortError(error)) throw new FsError("edit aborted", "FS_ABORTED");
++				if (error.reason === "ERR_WORKSPACE_REAUTHORIZATION_REQUIRED") throw ohosFileError(error, "edit", target.displayPath);
++				throw writeIoError(target.displayPath, error);
++			}
+ 		});
+ 	}
+ 	async patchText(target, hunks, expected, signal) {
+diff --git a/node_modules/@deepseek-ai/dsh-fs-sandbox/lib/index.js b/node_modules/@deepseek-ai/dsh-fs-sandbox/lib/index.js
+--- a/node_modules/@deepseek-ai/dsh-fs-sandbox/lib/index.js
++++ b/node_modules/@deepseek-ai/dsh-fs-sandbox/lib/index.js
+@@ -1,3 +1,4 @@
++import { workspaceEditScope } from "../../../../runtime/ohos/process/files/workspace-edit.mjs";
+ import { LocalFileSystem } from "@deepseek-ai/dsh-fs-local";
+ import { FsError } from "@deepseek-ai/dsh-fs";
+ import { writableRoots } from "@deepseek-ai/dsh-sandbox";
+@@ -137,7 +138,9 @@
+ 	* @returns the edit outcome from the inherited backend.
+ 	*/
+ 	async editText(target, edit, expected, signal, sandboxPolicy) {
+-		return super.editText(await this.checkedTarget(target, sandboxPolicy), edit, expected, signal);
++		const policy = sandboxPolicy ?? this.ctx.sandboxPolicy.resolve();
++		const fresh = await this.checkedTarget(target, policy);
++		return super.editText(fresh, edit, expected, signal, workspaceEditScope(fresh, policy, signal));
+ 	}
+ 	/**
+ 	* Fence the mutation before delegating to the local provider.

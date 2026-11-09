@@ -761,6 +761,101 @@ def main():
         return {'scope': 'Test double of the Ark-hosted library; not a Host build', 'libdshHostSha256': sha(target / 'libdsh_host.so')}
     g.internal('round-native-libraries', round_libraries, needs=('native-tools',))
     g.run('workspace-authority-entry', lambda: g.py(rt + 'workspace-authority-entry.py', '--node', node(), '--assembled-payload', payload(), '--typescript-prefix', p('typescript_prefix'), '--publication-fixture', native() / 'libpublication-test-linked.so', '--round-native-directory', o / 'round-native', '--node-headers', headers(), '--cxx', p('cxx'), '--out', o / 'workspace-authority-entry'), needs=('compose', 'native-publication-build', 'round-native-libraries', 'native-tools'), timeout=240, tests=[rt + name for name in ['workspace-authority-entry.py', 'workspace-authority-entry.mjs', 'workspace-authority-instrumentation.mjs', 'workspace-authority-owner-probe.mjs']], scope='Actual DSH bin/sole product preload/public shell factory and shared native FD authority; explicit SDK and retirement-confirmation fixtures; no Linux guest, SDK, device or complete user-session claim')
+    # Insert after the existing workspace-authority-entry registration.
+    # Reuse that group's actual host/consumer/publisher output. No new SDK fixture
+    # input and no duplicate native build are introduced by these two frontend runs.
+    for workspace_frontend_mode in ('plain', 'jitless'):
+        g.run('workspace-frontend-' + workspace_frontend_mode,
+              lambda m=workspace_frontend_mode: g.py(
+                  rt + 'workspace-frontend-entry.py',
+                  '--source', s, '--payload', payload(), '--node', node(),
+                  '--typescript-prefix', p('typescript_prefix'),
+                  '--native-directory', o / 'workspace-authority-entry/native',
+                  '--publication-fixture', native() / 'libpublication-test-linked.so',
+                  '--provenance-file', o / 'composed/manifest.json',
+                  '--out', o / ('workspace-frontend-' + m),
+                  *(['--jitless'] if m == 'jitless' else [])),
+              needs=('compose', 'workspace-authority-entry', 'native-publication-build'),
+              timeout=120,
+              tests=[rt + name for name in (
+                  'workspace-frontend-entry.py', 'workspace-frontend-entry.mjs',
+                  'workspace-frontend-instrumentation.mjs')],
+              scope='Actual DSH bin/sole preload/WorkspaceRegistry/WorkingDirectory/public shell after real ETS FD publication; explicit SDK/storage/session-projection seams; no full chat, SDK, device, Linux guest or durable-storage claim')
+    # Reuse the five existing authority-entry native outputs; these two groups
+    # neither build native code nor prepare/copy a payload.
+    for workspace_read_mode in ('plain', 'jitless'):
+        g.run('workspace-read-' + workspace_read_mode,
+              lambda m=workspace_read_mode: g.py(
+                  rt + 'workspace-read-entry.py',
+                  '--source', s, '--payload', payload(), '--node', node(),
+                  '--manifest', o / 'composed/manifest.json',
+                  '--typescript-prefix', p('typescript_prefix'),
+                  '--native-directory', o / 'workspace-authority-entry/native',
+                  '--publication-fixture', native() / 'libpublication-test-linked.so',
+                  '--out', o / ('workspace-read-' + m),
+                  *(['--jitless'] if m == 'jitless' else [])),
+              needs=('compose', 'workspace-authority-entry', 'native-publication-build'),
+              timeout=120,
+              tests=[rt + name for name in (
+                  'workspace-read-entry.py', 'workspace-read-entry.mjs',
+                  'workspace-read-instrumentation.mjs')],
+              scope='Three ordinary default read calls: physical whole, selected logical whole, same small logical file streamed; actual services/tool pipeline and ETS FD publication with explicit SDK/in-memory Agent fixtures; no full chat, SDK/device, Linux guest or persistent-session claim')
+    # Reuse the five existing authority-entry native outputs; these two groups
+    # neither build native code nor prepare/copy a payload.
+    for workspace_directory_mode in ('plain', 'jitless'):
+        g.run('workspace-directory-' + workspace_directory_mode,
+              lambda m=workspace_directory_mode: g.py(
+                  rt + 'workspace-directory-entry.py',
+                  '--source', s, '--payload', payload(), '--node', node(),
+                  '--manifest', o / 'composed/manifest.json',
+                  '--typescript-prefix', p('typescript_prefix'),
+                  '--native-directory', o / 'workspace-authority-entry/native',
+                  '--publication-fixture', native() / 'libpublication-test-linked.so',
+                  '--out', o / ('workspace-directory-' + m),
+                  *(['--jitless'] if m == 'jitless' else [])),
+              needs=('compose', 'workspace-authority-entry', 'native-publication-build'),
+              timeout=120,
+              tests=[rt + name for name in (
+                  'workspace-directory-entry.py', 'workspace-directory-entry.mjs',
+                  'workspace-directory-instrumentation.mjs')],
+              scope='Two ordinary directory API-service calls: physical root positive control and selected logical root; actual SessionStore/registered lookup/WorkspaceFiles and ETS FD publication with explicit SDK doubles; no full RPC/UI/watch, SDK/device or persistent-session claim')
+    # Reuse the existing authority-entry native outputs and composed payload.
+    for workspace_bytes_mode in ('plain', 'jitless'):
+        g.run('workspace-bytes-' + workspace_bytes_mode,
+              lambda m=workspace_bytes_mode: g.py(
+                  rt + 'workspace-bytes-entry.py',
+                  '--source', s, '--payload', payload(), '--node', node(),
+                  '--manifest', o / 'composed/manifest.json',
+                  '--typescript-prefix', p('typescript_prefix'),
+                  '--native-directory', o / 'workspace-authority-entry/native',
+                  '--publication-fixture', native() / 'libpublication-test-linked.so',
+                  '--out', o / ('workspace-bytes-' + m),
+                  *(['--jitless'] if m == 'jitless' else [])),
+              needs=('compose', 'workspace-authority-entry', 'native-publication-build'),
+              timeout=120,
+              tests=[rt + name for name in (
+                  'workspace-bytes-entry.py', 'workspace-bytes-entry.mjs',
+                  'workspace-bytes-instrumentation.mjs')],
+              scope='Two ordinary 11-byte file windows through actual SessionStore/registered lookup/WorkspaceFiles and readByteRange: physical and selected logical; complete return-object oracle and target-await resource sample; no full readBytes, multi-window/Dart/RPC/UI, SDK/device or persistent-session claim')
+    # Reuse the composed payload and the same authority-entry native registry.
+    # Only two normal own-file read/edit cases; no new native build in this runner.
+    for workspace_edit_mode in ('plain', 'jitless'):
+        g.run('workspace-edit-' + workspace_edit_mode,
+              lambda m=workspace_edit_mode: g.py(
+                  rt + 'workspace-edit-entry.py',
+                  '--source', s, '--payload', payload(), '--node', node(),
+                  '--manifest', o / 'composed/manifest.json',
+                  '--typescript-prefix', p('typescript_prefix'),
+                  '--native-directory', o / 'workspace-authority-entry/native',
+                  '--publication-fixture', native() / 'libpublication-test-linked.so',
+                  '--out', o / ('workspace-edit-' + m),
+                  *(['--jitless'] if m == 'jitless' else [])),
+              needs=('compose', 'workspace-authority-entry', 'native-publication-build'),
+              timeout=120,
+              tests=[rt + name for name in (
+                  'workspace-edit-entry.py', 'workspace-edit-entry.mjs',
+                  'workspace-edit-instrumentation.mjs')],
+              scope='Two ordinary own-file default read/edit calls through actual SessionStore/Session/WorkingDirectory/tool pipeline and ETS select/attach; real host grant/save components, explicit SDK/Agent/publication fixtures; independent exact-stat versions and post-edit-await lease sample; no full Host/RPC/UI, SDK/device, fault/race/VM or expected-intent claim')
     g.run('host-layout', lambda: g.py(rt + 'host-layout.py', '--node', node(), '--native-library-dir', o / 'round-native', '--publication-fixture', native() / 'libpublication-test-linked.so', '--assembled-payload', payload(), '--out', o / 'host-layout'), needs=('compose', 'native-publication-build', 'native-static-resources', 'round-native-libraries'), timeout=240)
     g.run('host-safe-profile', lambda: g.py(rt + 'host-safe-profile.py', '--node', node(), '--native-library-dir', o / 'round-native', '--publication-fixture', native() / 'libpublication-test-linked.so', '--assembled-payload', payload(), '--out', o / 'host-safe-profile'), needs=('compose', 'native-publication-build', 'round-native-libraries'), timeout=600, tests=[rt + 'host-safe-profile.py'], scope='Actual Host safe argv and original public round; not OH device restart')
     for label, host in [('loopback', '127.0.0.1'), ('owned-http', g.config.get('ownedHttpHost', ''))]:
@@ -769,6 +864,19 @@ def main():
     g.run('python-build-inputs', lambda: g.py(rt + 'python-build-inputs.test.py'), needs=('tools',), tests=[rt + 'python-build-inputs.test.py'], scope='Python ELF preflight and fixed system certificate compile option; controlled compiler boundary, no SDK build')
     g.run('python-package', lambda: g.py(rt + 'python-package.test.py'), needs=('tools',), tests=[rt + 'python-package.test.py'], scope='Actual stdlib compilation and composer asset integrity; no SDK/device claim')
     g.run('linux-assets-package', lambda: g.py(rt + 'linux-assets-package.test.py'), needs=('tools',), tests=[rt + 'linux-assets-package.test.py'], scope='Actual six-file composition, ZIP integrity and pre-SDK native pairing with small data fixtures; no guest/HAP/device claim')
+    # Small build-stage regressions only. Register next to linux-assets-package.
+    g.run('linux-tools-ownership', lambda: g.py(
+        'tooling/ohos/tests/linux-tools-ownership.test.py', '--source', s,
+        '--output', o / 'linux-tools-ownership'),
+        needs=('tools',), timeout=60,
+        tests=['tooling/ohos/tests/linux-tools-ownership.test.py'],
+        scope='Real small production tar assembly/readback; nonroot filesystem or explicit TarInfo owner input reported in RESULT; no six-asset, SDK or guest build')
+    g.run('linux-control-staging', lambda: g.py(
+        'tooling/ohos/tests/linux-control-staging.test.py', '--source', s,
+        '--output', o / 'linux-control-staging'),
+        needs=('tools',), timeout=60,
+        tests=['tooling/ohos/tests/linux-control-staging.test.py'],
+        scope='Actual production Linux source-copy nodes; complete top-level mjs byte/mode set with a future ordinary module; no assets, native or VM execution')
     g.run('linux-assets-composition', lambda: g.py(rt + 'linux-assets-compose.py', '--prepared', p('prepared'), '--regex-artifact', s / 'runtime/ohos/process/build/re2js-unicode.mjs', '--esbuild-prefix', p('esbuild_prefix'), '--assets', p('linux_install_assets'), '--baseline', o / 'composed', '--node', node(), '--out', o / 'linux-assets-composition'), needs=('compose',), timeout=600, tests=[rt + 'linux-assets-compose.py'], scope='Actual composer with real prepared receipt and six Linux assets; ZIP identity and refusal/cleanup, no SDK/HAP/device build')
     g.run('python-production', lambda: g.py(rt + 'python-native.py', '--production', '--node-headers', p('node_source') / 'src', '--output', o / 'python-production'), needs=('tools',), timeout=120, tests=[rt + 'python-production.test.mjs', rt + 'python-owner.test.mjs', rt + 'python-native-symbols.test.mjs', rt + 'python-link-probe.c', rt + 'python-test-observation.mjs'], scope='Host shared-library production source, real subinterpreter/cwd/env/SQLite/SSL/stream/cancel/owner-exit and separately loaded CPython extension ABI; HAP and device NOT_RUN')
     g.node_tests('python-backend', [rt + 'python-backend.test.mjs'], needs=('tools',))
@@ -784,6 +892,8 @@ def main():
         g.node_tests('linux-prepare-images-' + mode, [rt + 'linux-prepare-images.test.mjs'], mode=mode, needs=('tools',))
     for mode in ['plain', 'strict']:
         g.node_tests('linux-proxy-policy-' + mode, [rt + 'linux-proxy-policy.test.mjs'],
+                     mode=mode, needs=('prepared-inputs',))
+        g.node_tests('linux-guest-environment-' + mode, [rt + 'linux-guest-environment.test.mjs'],
                      mode=mode, needs=('prepared-inputs',))
         g.node_tests('linux-app-control-' + mode,
                      [rt + 'linux-control-entry.test.mjs', rt + 'linux-owner-control.test.mjs', rt + 'linux-control.test.mjs', rt + 'linux-control-persistence.test.mjs', rt + 'linux-instance.test.mjs', rt + 'linux-proxy-control.test.mjs'],
@@ -934,6 +1044,7 @@ def main():
             return values
         g.run('lifecycle-' + label, lifecycle_command, needs=('prepared-inputs', 'native-publication-build', 'build-bash', 'build-regex') + (('proc-mapping-tools',) if label == 'freeze' else ()), env=g.common, timeout=360, tests=[rt + 'lifecycle-' + label + '-controller.py'])
     g.node_tests('lifecycle-platform', [rt + 'lifecycle-platform.test.mjs'], needs=('prepared-inputs',), extra=lambda: {'DSH_LIFECYCLE_BASE_PIPELINE': str(p('android_pristine') / 'node_modules/@deepseek-ai/dsh-tools/lib/pipeline.js')})
+    # Includes steady-heartbeat history isolation and control-completion ACK cases.
     g.node_tests('lifecycle-host-http', [rt + 'lifecycle-host-http.test.mjs'], needs=('prepared-inputs', 'native-publication-build'), extra=lambda: {**linked_env(), 'DSH_LIFECYCLE_BEFORE_ROUTE': str(p('lifecycle_before_route'))})
     g.node_tests('publication-platform', [rt + 'publication-platform.test.mjs', rt + 'fs-exclusive.test.mjs'], needs=('android-targets',), extra=lambda: {'DSH_TEST_PREFIX': str(o / 'targets/ohos-prefix')})
     g.node_tests('publication-capabilities-route', [rt + 'publication-capabilities-route.test.mjs'], needs=('prepared-inputs',), extra=lambda: {'M6_TEST_PREFIX': str(prefix()), 'M6_TEST_CAPABILITIES_MODULE': str(s / 'runtime/ohos/capabilities/index.mjs')})
@@ -962,7 +1073,7 @@ def main():
     g.internal('embedding-package', embedding_package, needs=('tools',))
     g.node_tests('launch-clip', [rt + 'launch-clip.test.mjs'], needs=('embedding-package',), extra=lambda: {'OHOS_FLUTTER_EMBEDDING': str(o / 'embedding-package/package')})
     tooling = ['managed-skill', 'native-host-lazy', 'runtime-archive', 'runtime-channel', 'linux-control', 'lifecycle-host', 'web-files', 'transient-task', 'runtime-recovery', 'recovery-storage', 'native-recovery-gate', 'last-known-good']
-    g.node_tests('ets-runtime-tooling', [tools + n + '.test.mjs' for n in tooling], needs=('native-zlib-build',), extra=lambda: {'OHOS_TEST_ZLIB_ADDON': str(o / 'zlib.node'), 'OHOS_INSTALL_RECORD_WIRE': str(o / 'install-record-wire.json')}, timeout=240)
+    g.node_tests('ets-runtime-tooling', [tools + n + '.test.mjs' for n in tooling], needs=('native-zlib-build', 'prepared-inputs'), extra=lambda: {'OHOS_TEST_ZLIB_ADDON': str(o / 'zlib.node'), 'OHOS_INSTALL_RECORD_WIRE': str(o / 'install-record-wire.json')}, timeout=240)
     g.internal('install-record-wire', lambda _: verify_install_record_wire(o / 'install-record-wire.json'), needs=('ets-runtime-tooling',))
     for mode in ['plain', 'jitless']:
         g.node_tests('secrets-picker-' + mode, [rt + 'secrets.test.mjs', tools + 'attachment-files-channel.test.mjs'], mode=mode, needs=('tools',))
@@ -1026,6 +1137,7 @@ def main():
     flutter_tests = ['test/secrets', 'test/ohos/attachment_files_test.dart', 'test/runtime/phone_callback_bridge_test.dart', 'test/runtime/runtime_recovery_test.dart', 'test/runtime/ohos_install_record_test.dart', 'test/usage/ohos_device_contract_test.dart',
                      'test/safe_mode/safe_mode_logic_test.dart', 'test/state/engine_control_test.dart', 'test/runtime/runtime_controller_test.dart',
                      'test/plugins/ohos_replace_cancel_test.dart',
+                     'test/chat/artifact_ohos_workspace_materialize_test.dart',
                      'test/chat/attachment_file_budget_test.dart', 'test/remote/private_key_file_budget_test.dart',
                      'test/chat/attachment_owner_test.dart', 'test/remote/ssh_key_callback_lifetime_test.dart', 'test/share_hosted', 'test/share/share_panel_test.dart']
     g.run('flutter-consumers', lambda: g.flutter('test', '--no-pub', '--reporter', 'json', '--concurrency=1', *flutter_tests), cwd=g.flutter_source / 'app', env=g.flutter_env, needs=('flutter-input-identity',), timeout=300, tests=['app/' + x for x in flutter_tests], scope='Actual Linux Flutter engine and Dart consumers; not OHOS AOT/device')

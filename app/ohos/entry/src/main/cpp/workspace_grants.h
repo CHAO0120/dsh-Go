@@ -12,6 +12,9 @@
 #include <map>
 #include <memory>
 #include <mutex>
+#include <limits>
+#include <random>
+#include <utility>
 #include <stdexcept>
 #include <string>
 #include <system_error>
@@ -47,19 +50,175 @@ inline int Parent(int root,const std::vector<std::string>& parts){
  const int result=cursor.fd;cursor.fd=-1;return result;
 }
 inline void Regular(int fd){struct stat st{};Check(fstat(fd,&st)==0);if(!S_ISREG(st.st_mode))throw GrantError("ERR_WORKSPACE_FILE_TYPE");}
+// New edit resources use checked, one-attempt closes. The legacy Fd and old
+// ABI methods retain their existing behavior. All callers hold State::mutex.
+struct EditFd {
+ State& state;
+ int fd=-1;
+ int close_error=0;
+ explicit EditFd(State& value):state(value){}
+ EditFd(State& value,int descriptor):state(value),fd(descriptor){Check(fd>=0);}
+ EditFd(const EditFd&)=delete;EditFd& operator=(const EditFd&)=delete;
+ ~EditFd(){Close();}
+ int Close() noexcept {
+  if(fd>=0){
+   const int descriptor=fd;fd=-1; // Never retry an ambiguously closed number.
+   if(::close(descriptor)!=0){close_error=errno?errno:EIO;state.close_failed=true;}
+  }
+  return close_error;
+ }
+ void CloseChecked(){const int error=Close();if(error)throw std::system_error(error,std::generic_category(),"Workspace close failed");}
+ int Release() noexcept {const int descriptor=fd;fd=-1;return descriptor;}
+};
+inline int EditParent(State& state,const std::vector<std::string>& parts){
+ EditFd cursor(state,fcntl(state.root,F_DUPFD_CLOEXEC,0));
+ for(size_t i=0;i+1<parts.size();++i){
+  EditFd next(state,openat(cursor.fd,parts[i].c_str(),O_RDONLY|O_DIRECTORY|O_NOFOLLOW|O_CLOEXEC));
+  cursor.CloseChecked();cursor.fd=next.Release();
+ }
+ return cursor.Release();
+}
+template<class Integer> inline uint64_t StatUnsigned(Integer value){
+ static_assert(std::numeric_limits<Integer>::is_integer&&std::numeric_limits<Integer>::digits<=64,"integer exceeds exact stat ABI");
+ if constexpr(std::numeric_limits<Integer>::is_signed){if(value<0)throw GrantError("ERR_WORKSPACE_LIMIT");}
+ return static_cast<uint64_t>(value);
+}
+struct EditInput {
+ EditFd file;
+ uint64_t size=0;
+ explicit EditInput(State& state):file(state){}
+ void Open(int parent,const char* name){
+  file.fd=openat(parent,name,O_RDONLY|O_NOFOLLOW|O_CLOEXEC|O_NONBLOCK);Check(file.fd>=0);
+  struct stat st{};Check(fstat(file.fd,&st)==0);
+  if(!S_ISREG(st.st_mode))throw GrantError("ERR_WORKSPACE_FILE_TYPE");
+  size=StatUnsigned(st.st_size);
+ }
+};
+struct EditCleanup {int entry_error=0;int close_error=0;};
+struct EditOutput {
+ enum class Phase {writing,ready,failed,published};
+ State& state;
+ EditFd parent,directory,file;
+ std::string target,staging;
+ mode_t prior_mode;
+ struct stat directory_identity{},file_identity{};
+ bool owns_directory=false,owns_file=false;
+ bool has_directory_identity=false,has_file_identity=false;
+ bool cleaned=false;
+ EditCleanup cleanup;
+ Phase phase=Phase::writing;
+ EditOutput(State& value,std::string name,mode_t mode):state(value),parent(value),directory(value),file(value),target(std::move(name)),prior_mode(mode){}
+ EditOutput(const EditOutput&)=delete;EditOutput& operator=(const EditOutput&)=delete;
+ ~EditOutput(){Cleanup();}
+ static bool Same(const struct stat& a,const struct stat& b) noexcept {return a.st_dev==b.st_dev&&a.st_ino==b.st_ino;}
+ static void Remember(int value,int& destination) noexcept {if(value&&!destination)destination=value;}
+ void Create(){
+  struct stat target_stat{};Check(fstatat(parent.fd,target.c_str(),&target_stat,AT_SYMLINK_NOFOLLOW)==0);
+  if(!S_ISREG(target_stat.st_mode))throw GrantError("ERR_WORKSPACE_FILE_TYPE");
+  std::random_device random;
+  static const char hex[]="0123456789abcdef";
+  for(unsigned attempt=0;attempt<16&&!owns_directory;++attempt){
+   staging=".dsh-edit-";
+   for(unsigned word=0;word<4;++word){uint32_t value=static_cast<uint32_t>(random());
+    for(unsigned digit=0;digit<8;++digit){staging.push_back(hex[value&15]);value>>=4;}}
+   if(mkdirat(parent.fd,staging.c_str(),0700)==0)owns_directory=true;
+   else if(errno!=EEXIST)Check(false);
+  }
+  if(!owns_directory)throw std::system_error(EEXIST,std::generic_category(),"Workspace staging collision");
+  Check(fstatat(parent.fd,staging.c_str(),&directory_identity,AT_SYMLINK_NOFOLLOW)==0);
+  has_directory_identity=true;
+  if(!S_ISDIR(directory_identity.st_mode))throw GrantError("ERR_WORKSPACE_FILE_TYPE");
+  directory.fd=openat(parent.fd,staging.c_str(),O_RDONLY|O_DIRECTORY|O_NOFOLLOW|O_CLOEXEC);
+  Check(directory.fd>=0);
+  struct stat opened{};Check(fstat(directory.fd,&opened)==0);
+  if(!Same(opened,directory_identity))throw std::system_error(ESTALE,std::generic_category(),"Workspace staging changed");
+  // Set actual modes on the opened objects; creation mode alone is insufficient.
+  Check(fchmod(directory.fd,0700)==0);
+  file.fd=openat(directory.fd,"content",O_WRONLY|O_CREAT|O_EXCL|O_NOFOLLOW|O_CLOEXEC,0600);
+  Check(file.fd>=0);owns_file=true;
+  Check(fstat(file.fd,&file_identity)==0);has_file_identity=true;
+  if(!S_ISREG(file_identity.st_mode))throw GrantError("ERR_WORKSPACE_FILE_TYPE");
+  Check(fchmod(file.fd,0600)==0);
+ }
+ size_t Write(const void* bytes,size_t length){
+  if(phase!=Phase::writing||file.fd<0)throw GrantError("ERR_WORKSPACE_EDIT_STATE");
+  const auto count=::write(file.fd,bytes,length);
+  if(count<0){phase=Phase::failed;Check(false);}
+  if(length&&count==0){phase=Phase::failed;throw std::system_error(EIO,std::generic_category(),"Workspace write made no progress");}
+  return static_cast<size_t>(count);
+ }
+ void CloseOutput(){
+  if(phase!=Phase::writing||file.fd<0)throw GrantError("ERR_WORKSPACE_EDIT_STATE");
+  phase=Phase::failed;
+  Check(fsync(file.fd)==0);
+  Check(fchmod(file.fd,prior_mode)==0);
+  file.CloseChecked();
+  phase=Phase::ready;
+ }
+ int RemoveOwnFile() noexcept {
+  if(!owns_file)return 0;
+  if(directory.fd<0||!has_file_identity)return ESTALE;
+  struct stat found{};
+  if(fstatat(directory.fd,"content",&found,AT_SYMLINK_NOFOLLOW)!=0){
+   if(errno==ENOENT){owns_file=false;return 0;}return errno?errno:EIO;
+  }
+  if(!Same(found,file_identity))return ESTALE;
+  if(unlinkat(directory.fd,"content",0)!=0)return errno?errno:EIO;
+  owns_file=false;return 0;
+ }
+ int RemoveOwnDirectory() noexcept {
+  if(!owns_directory)return 0;
+  if(parent.fd<0||!has_directory_identity)return ESTALE;
+  struct stat found{};
+  if(fstatat(parent.fd,staging.c_str(),&found,AT_SYMLINK_NOFOLLOW)!=0){
+   if(errno==ENOENT){owns_directory=false;return 0;}return errno?errno:EIO;
+  }
+  if(!S_ISDIR(found.st_mode)||!Same(found,directory_identity))return ESTALE;
+  if(unlinkat(parent.fd,staging.c_str(),AT_REMOVEDIR)!=0)return errno?errno:EIO;
+  owns_directory=false;return 0;
+ }
+ bool Publish(){
+  if(phase!=Phase::ready||file.fd>=0)throw GrantError("ERR_WORKSPACE_EDIT_STATE");
+  phase=Phase::failed;
+  struct stat target_stat{};Check(fstatat(parent.fd,target.c_str(),&target_stat,AT_SYMLINK_NOFOLLOW)==0);
+  if(!S_ISREG(target_stat.st_mode))throw GrantError("ERR_WORKSPACE_FILE_TYPE");
+  Check(renameat(directory.fd,"content",parent.fd,target.c_str())==0);
+  // No throwing work or descriptor closes after commit. The bool is only the
+  // best-effort removal of our staging directory, never a retirement claim.
+  phase=Phase::published;owns_file=false;
+  cleanup.entry_error=RemoveOwnDirectory();
+  return cleanup.entry_error==0;
+ }
+ EditCleanup Cleanup() noexcept {
+  if(cleaned)return cleanup;
+  cleaned=true;
+  Remember(file.Close(),cleanup.close_error);
+  if(phase!=Phase::published){
+   Remember(RemoveOwnFile(),cleanup.entry_error);
+   Remember(RemoveOwnDirectory(),cleanup.entry_error);
+  }
+  // After publication do not retry directory removal or touch the target.
+  // Checked auxiliary closes are separate from Publish's directory bool.
+  Remember(directory.Close(),cleanup.close_error);
+  Remember(parent.Close(),cleanup.close_error);
+  return cleanup;
+ }
+};
 struct TaskScope { std::shared_ptr<State> state;bool active=true;bool live=true; };
 }
 struct WorkspaceGrantStatus { bool active;bool drained;bool writable;size_t leases;uint64_t generation; };
 class WorkspaceLease {
  std::shared_ptr<grant_detail::State> state_;bool write_;
  std::shared_ptr<grant_detail::TaskScope> task_;
+ std::unique_ptr<grant_detail::EditInput> edit_input_;
+ std::unique_ptr<grant_detail::EditOutput> edit_output_;
  friend class WorkspaceGrants;
  friend class WorkspaceFid;
  WorkspaceLease(std::shared_ptr<grant_detail::State> state,bool write):state_(std::move(state)),write_(write){++state_->leases;}
  void Access(bool write){state_->CheckActive(write);if(task_&&!task_->active)throw GrantError("ERR_WORKSPACE_TASK_RETIRED");if(write&&!write_)throw GrantError("ERR_WORKSPACE_READ_ONLY");}
  public:
  WorkspaceLease(const WorkspaceLease&)=delete;WorkspaceLease& operator=(const WorkspaceLease&)=delete;
- ~WorkspaceLease(){std::lock_guard<std::mutex> lock(state_->mutex);--state_->leases;if(task_)task_->live=false;}
+ ~WorkspaceLease(){std::lock_guard<std::mutex> lock(state_->mutex);edit_input_.reset();edit_output_.reset();--state_->leases;if(task_)task_->live=false;}
  std::shared_ptr<grant_detail::TaskScope> Task(){std::lock_guard<std::mutex> lock(state_->mutex);
   if(!task_)task_=std::make_shared<grant_detail::TaskScope>(grant_detail::TaskScope{state_,true,true});
   return task_;}
@@ -87,6 +246,79 @@ class WorkspaceLease {
   grant_detail::Fd parent(grant_detail::Parent(state_->root,parts));
   grant_detail::Fd file(openat(parent.fd,parts.back().c_str(),O_RDONLY|O_NOFOLLOW|O_CLOEXEC|O_NONBLOCK));grant_detail::Regular(file.fd);
   std::string result(maximum,'\0');auto count=pread(file.fd,result.data(),maximum,static_cast<off_t>(offset));grant_detail::Check(count>=0);result.resize(count);return result;
+ }
+ // New exact observations use checked temporary parent descriptors. The old
+ // Stat method/layout remain unchanged for existing consumers.
+ struct stat StatExact(const std::string& path){
+  std::lock_guard<std::mutex> lock(state_->mutex);Access(false);struct stat st{};
+  if(path.empty()){grant_detail::Check(fstat(state_->root,&st)==0);return st;}
+  auto parts=grant_detail::Parts(path);
+  grant_detail::EditFd parent(*state_,grant_detail::EditParent(*state_,parts));
+  grant_detail::Check(fstatat(parent.fd,parts.back().c_str(),&st,AT_SYMLINK_NOFOLLOW)==0);
+  parent.CloseChecked();return st;
+ }
+ uint64_t OpenEditInput(const std::string& path){
+  auto parts=grant_detail::Parts(path);std::lock_guard<std::mutex> lock(state_->mutex);Access(false);
+  if(edit_input_||edit_output_)throw GrantError("ERR_WORKSPACE_EDIT_STATE");
+  grant_detail::EditFd parent(*state_,grant_detail::EditParent(*state_,parts));
+  // Allocate the owning slot before openat: allocation failure cannot strand
+  // a raw descriptor evaluated as a make_unique argument.
+  auto input=std::make_unique<grant_detail::EditInput>(*state_);
+  input->Open(parent.fd,parts.back().c_str());
+  parent.CloseChecked();
+  const auto size=input->size;edit_input_=std::move(input);return size;
+ }
+ size_t ReadEditInput(void* buffer,size_t length){
+  if((!buffer&&length)||length>1024*1024)throw GrantError("ERR_WORKSPACE_BUFFER");
+  std::lock_guard<std::mutex> lock(state_->mutex);Access(false);
+  if(!edit_input_||edit_input_->file.fd<0)throw GrantError("ERR_WORKSPACE_EDIT_STATE");
+  const auto count=::read(edit_input_->file.fd,buffer,length);
+  grant_detail::Check(count>=0);return static_cast<size_t>(count);
+ }
+ void CloseEditInput(){
+  std::lock_guard<std::mutex> lock(state_->mutex);
+  // Cleanup remains available after cancellation/retirement of this lease.
+  if(!edit_input_)return;
+  edit_input_->file.CloseChecked();edit_input_.reset();
+ }
+ void BeginEdit(const std::string& path,uint32_t prior_mode){
+  if(prior_mode>0777)throw GrantError("ERR_WORKSPACE_MODE");
+  auto parts=grant_detail::Parts(path);std::lock_guard<std::mutex> lock(state_->mutex);Access(true);
+  if(edit_input_||edit_output_)throw GrantError("ERR_WORKSPACE_EDIT_STATE");
+  auto output=std::make_unique<grant_detail::EditOutput>(*state_,parts.back(),static_cast<mode_t>(prior_mode));
+  try{output->parent.fd=grant_detail::EditParent(*state_,parts);output->Create();}
+  catch(...){
+   const auto result=output->Cleanup();
+   if(result.close_error)throw std::system_error(result.close_error,std::generic_category(),"Workspace edit close failed");
+   if(result.entry_error)throw std::system_error(result.entry_error,std::generic_category(),"Workspace staging cleanup failed");
+   throw;
+  }
+  edit_output_=std::move(output);
+ }
+ size_t WriteEdit(const void* buffer,size_t length){
+  if((!buffer&&length)||length>1024*1024)throw GrantError("ERR_WORKSPACE_BUFFER");
+  std::lock_guard<std::mutex> lock(state_->mutex);Access(true);
+  if(!edit_output_)throw GrantError("ERR_WORKSPACE_EDIT_STATE");
+  return edit_output_->Write(buffer,length);
+ }
+ void CloseEdit(){
+  std::lock_guard<std::mutex> lock(state_->mutex);Access(true);
+  if(!edit_output_)throw GrantError("ERR_WORKSPACE_EDIT_STATE");
+  edit_output_->CloseOutput();
+ }
+ bool PublishEdit(){
+  std::lock_guard<std::mutex> lock(state_->mutex);Access(true);
+  if(!edit_output_)throw GrantError("ERR_WORKSPACE_EDIT_STATE");
+  return edit_output_->Publish();
+ }
+ void AbortEdit(){
+  std::lock_guard<std::mutex> lock(state_->mutex);
+  if(!edit_output_)return;
+  const bool published=edit_output_->phase==grant_detail::EditOutput::Phase::published;
+  const auto result=edit_output_->Cleanup();
+  if(result.close_error)throw std::system_error(result.close_error,std::generic_category(),"Workspace edit close failed");
+  if(!published&&result.entry_error)throw std::system_error(result.entry_error,std::generic_category(),"Workspace staging cleanup failed");
+  edit_output_.reset();
  }
  size_t Write(const std::string& path,const std::string& bytes,uint64_t offset,bool create=false,bool truncate=false,bool append=false,bool exclusive=false){
   if(bytes.size()>1024*1024||offset>INT64_MAX)throw GrantError("ERR_WORKSPACE_LIMIT");
