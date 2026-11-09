@@ -954,7 +954,7 @@ internal class MainScreenDriver(private val service: PhoneA11yService, private v
                 ?.takeIf { typedCurrent(r.cap) } else null
             val before = clock.count
             val out = actuator.click(r.node, r.el.bounds, r.cap.screen, a.long) {
-                val admitted = !cancelled(gen) && allowed() && actionSourcesAllowed(sources)
+                val admitted = !cancelled(gen) && !overlay.editing && allowed() && actionSourcesAllowed(sources)
                 if (!typedCurrent(r.cap)) navigation = null
                 admitted
             }
@@ -983,7 +983,7 @@ internal class MainScreenDriver(private val service: PhoneA11yService, private v
             if (a.text.length > 2_000) return ActionResult(false, "一次最多输入 2000 字。")
             refuseHalted(allowed)?.let { return it }
             val before = clock.count
-            if (!actuator.setText(r.node, a.text) { !cancelled(gen) && allowed() }) {
+            if (!actuator.setText(r.node, a.text) { !cancelled(gen) && !overlay.editing && allowed() }) {
                 // l10n:keep agent screen result
                 return after(before, r.snap, gen,
                     "输入未获系统确认，输入、焦点或点击可能已产生部分效果；请先核对新屏幕，不要重复输入。", ok = false)
@@ -999,6 +999,7 @@ internal class MainScreenDriver(private val service: PhoneA11yService, private v
             var message = "已在「$name」输入，回读一致。"
             if (a.submit) {
                 // The read-back can take 1.5 s: a pause in it keeps the text but sends nothing.
+                if (overlay.editing) return ActionResult(false, "$message 但用户正在输入插话，没有提交；不要重复输入。") // l10n:keep agent result
                 if (!allowed()) return ActionResult(false, "$message 但本任务已暂停或停止，没有提交。") // l10n:keep agent result
                 val submitted = if (Build.VERSION.SDK_INT < 30 || !r.node.refresh()) false else {
                     val id = AccessibilityNodeInfo.AccessibilityAction.ACTION_IME_ENTER.id
@@ -1008,7 +1009,7 @@ internal class MainScreenDriver(private val service: PhoneA11yService, private v
                             return after(before, r.snap, gen,
                                 "已输入并完成回读，但输入框现在属于密码或验证码等敏感字段，未发起键盘提交。请交给用户核对；不要重复输入。", ok = false)
                         }
-                        if (cancelled(gen) || !allowed()) false else r.node.performAction(id)
+                        if (cancelled(gen) || overlay.editing || !allowed()) false else r.node.performAction(id)
                     }
                 }
                 // l10n:keep agent screen result
