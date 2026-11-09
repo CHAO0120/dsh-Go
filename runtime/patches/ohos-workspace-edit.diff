@@ -1,5 +1,4 @@
 diff --git a/node_modules/@deepseek-ai/dsh-fs-local/lib/index.js b/node_modules/@deepseek-ai/dsh-fs-local/lib/index.js
-index 5e78ec9..900db0b 100644
 --- a/node_modules/@deepseek-ai/dsh-fs-local/lib/index.js
 +++ b/node_modules/@deepseek-ai/dsh-fs-local/lib/index.js
 @@ -755,9 +755,9 @@
@@ -71,8 +70,65 @@ index 5e78ec9..900db0b 100644
  		return readWholeBytes({
  			displayPath: target.displayPath,
  			targetKey: target.targetKey
-@@ -1075,94 +1095,173 @@
+@@ -1058,111 +1078,217 @@
+ 			...entry.size !== void 0 ? { size: entry.size } : {}
+ 		}));
+ 	}
+-	async writeText(target, content, expected, signal) {
++	async writeText(target, content, expected, signal, withWorkspace) {
+ 		return this.withLock(target.targetKey, async () => {
+-			const existing = await this.writeTarget(target, expected);
+-			const before = existing !== null && Buffer.byteLength(content, "utf8") < this.config.diffBasisMaxBytes ? await readTextForDiff(target.targetKey, this.config.diffBasisMaxBytes, signal) : null;
+-			await writeFileAtomic(target.targetKey, content, existing?.mode, signal, this.internals, {
+-				displayPath: target.displayPath,
+-				createIfAbsent: expected?.kind === "createIfAbsent"
+-			});
+-			const after = await probe(target.targetKey);
+-			return {
+-				operation: existing ? "update" : "create",
+-				version: this.versionAfterWrite(after, target),
+-				before,
+-				after: normalizeLineEndings(content)
++			const apply = async (io) => {
++				const existing = await this.writeTarget(target, expected, io?.probe);
++				const before = existing !== null && Buffer.byteLength(content, "utf8") < this.config.diffBasisMaxBytes ? await readTextForDiff(target.targetKey, this.config.diffBasisMaxBytes, signal, io?.openDiffInput) : null;
++				if (io) {
++					try { await io.writeWhole(content, existing?.mode, { createIfAbsent: expected?.kind === "createIfAbsent" }); }
++					catch (error) {
++						if (error.workspaceMoveEffect === 1) throw new FsError(`cannot finish creating "${target.displayPath}": ${errorMessage(error)}; file may be incomplete`, isAbortError(error) ? "FS_ABORTED" : "FS_IO_ERROR", { cause: error });
++						if (error.workspaceMoveEffect === 0 && expected?.kind === "createIfAbsent") {
++							await throwGuardedCreateFailure(error, target.targetKey, target.displayPath, async () => {
++								const found = await io.probe();
++								if (!found) throw Object.assign(new Error("not found"), { code: "ENOENT" });
++								return { isFile: () => found.type === "file" };
++							});
++						}
++						throw error;
++					}
++				} else await writeFileAtomic(target.targetKey, content, existing?.mode, signal, this.internals, {
++					displayPath: target.displayPath,
++					createIfAbsent: expected?.kind === "createIfAbsent"
++				});
++				const after = io ? await io.probe() : await probe(target.targetKey);
++				return {
++					operation: existing ? "update" : "create",
++					version: this.versionAfterWrite(after, target),
++					before,
++					after: normalizeLineEndings(content)
++				};
  			};
++			if (!withWorkspace) return apply();
++			try { return await withWorkspace(apply); }
++			catch (error) {
++				if (error.workspaceEditState === "committed") throw new FsError(`saved "${target.displayPath}", but post-save validation or resource cleanup failed: ${error.message}`, "FS_IO_ERROR", { cause: error });
++				if (error.workspaceEditState === "partial") throw new FsError(`cannot finish creating "${target.displayPath}": file may be incomplete; resource/operation completion could not be confirmed: ${error.message}`, "FS_IO_ERROR", { cause: error });
++				if (error.workspaceEditState === "unknown") throw new FsError(`save status for "${target.displayPath}" could not be confirmed: ${error.message}`, "FS_IO_ERROR", { cause: error });
++				if (error.workspaceEditCleanupFailed) throw new FsError(`write of "${target.displayPath}" did not reach publication; resource cleanup was not confirmed: ${error.message}`, "FS_IO_ERROR", { cause: error });
++				if (error instanceof FsError) throw error;
++				if (isAbortError(error)) throw new FsError("write aborted", "FS_ABORTED", { cause: error });
++				if (error.reason === "ERR_WORKSPACE_REAUTHORIZATION_REQUIRED") throw ohosFileError(error, "write", target.displayPath);
++				throw writeIoError(target.displayPath, error);
++			}
  		});
  	}
 -	async editText(target, edit, expected, signal) {
@@ -313,7 +369,7 @@ index 5e78ec9..900db0b 100644
  		if (existing && existing.type !== "file") throw new FsError(`cannot write "${target.displayPath}": not a regular file`, "FS_NOT_REGULAR_FILE");
  		if (expected?.kind === "replaceIfVersion") {
  			if (!existing) throw new FsError(`cannot write "${target.displayPath}": file no longer exists`, "FS_STALE_VERSION");
-@@ -1170,8 +1269,8 @@
+@@ -1170,8 +1296,8 @@
  		} else if (expected?.kind === "createIfAbsent" && existing) throw new FsError(`cannot overwrite existing "${target.displayPath}" without reading it first`, "FS_NOT_OBSERVED");
  		return existing;
  	}
@@ -325,7 +381,6 @@ index 5e78ec9..900db0b 100644
  		if (existing.type !== "file") throw new FsError(`cannot ${verb} "${target.displayPath}": not a regular file`, "FS_NOT_REGULAR_FILE");
  		if (expected && existing.version !== expected.version) throw new FsError(`cannot ${verb} "${target.displayPath}": file changed since it was read`, "FS_STALE_VERSION");
 diff --git a/node_modules/@deepseek-ai/dsh-fs-sandbox/lib/index.js b/node_modules/@deepseek-ai/dsh-fs-sandbox/lib/index.js
-index 870a1e4..37f4cb3 100644
 --- a/node_modules/@deepseek-ai/dsh-fs-sandbox/lib/index.js
 +++ b/node_modules/@deepseek-ai/dsh-fs-sandbox/lib/index.js
 @@ -1,3 +1,4 @@
@@ -333,7 +388,18 @@ index 870a1e4..37f4cb3 100644
  import { LocalFileSystem } from "@deepseek-ai/dsh-fs-local";
  import { FsError } from "@deepseek-ai/dsh-fs";
  import { writableRoots } from "@deepseek-ai/dsh-sandbox";
-@@ -137,30 +138,37 @@ var SandboxedFileSystem = class extends LocalFileSystem {
+@@ -123,7 +124,9 @@
+ 	* @returns the write outcome from the inherited backend.
+ 	*/
+ 	async writeText(target, content, expected, signal, sandboxPolicy) {
+-		return super.writeText(await this.checkedTarget(target, sandboxPolicy), content, expected, signal);
++		const policy = sandboxPolicy ?? this.ctx.sandboxPolicy.resolve();
++		const fresh = await this.checkedTarget(target, policy);
++		return super.writeText(fresh, content, expected, signal, ohosWorkspaceEdit?.workspaceEditScope(fresh, policy, signal));
+ 	}
+ 	/**
+ 	* Fence the edit by the per-call policy, then delegate to the inherited
+@@ -137,30 +140,37 @@
  	* @returns the edit outcome from the inherited backend.
  	*/
  	async editText(target, edit, expected, signal, sandboxPolicy) {

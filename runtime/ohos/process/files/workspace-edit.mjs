@@ -80,7 +80,7 @@ function workspaceOperationScope(target, policy, requestSignal, destination) {
     }
     if (policy.mode === 'read-only' || !grant.writable) throw fail('EACCES', '授权文件夹没有本次编辑所需的写入权限。');
     const lease = borrowProcessGrantAuthority().issue([grant], { readOnly: false, workspaceRoot: root });
-    let handle, result, failure, failed = false, committed = false, publicationAttempted = false, cleanupFailed = false;
+    let handle, result, failure, failed = false, committed = false, publicationAttempted = false, cleanupFailed = false, wholeWritePartial = false;
     function recordFailure(error, stage) {
       failure = failed ? combined(failure, error, stage) : error;
       failed = true;
@@ -221,6 +221,36 @@ function workspaceOperationScope(target, policy, requestSignal, destination) {
       committed = true;
     }
 
+    // Whole-write uses the original request signal, never Move's commit view.
+    // This draft admits existing files only until the new-file mode is decided.
+    async function writeWhole(content, mode, options = {}) {
+      if (mode === undefined) throw fail('ERR_WORKSPACE_ARGUMENT',
+        'new-file whole-write mode remains pending owner confirmation');
+      if (!moveBinding) throw fail('ERR_WORKSPACE_MOVE_ABI');
+      await turn(signal);
+      moveBinding.beginMoveOutput(handle, relative, mode, options.createIfAbsent === true);
+      const bytes = Buffer.from(content, 'utf8');
+      for (let offset = 0; offset < bytes.length;) {
+        await turn(signal);
+        const part = bytes.subarray(offset, Math.min(offset + 1048576, bytes.length));
+        const count = binding.writeEdit(handle, part);
+        if (count <= 0 || count > part.length) throw fail('EIO', 'workspace whole write made invalid write progress');
+        offset += count;
+      }
+      binding.closeEdit(handle);
+      await turn(signal);
+      publicationAttempted = true;
+      try { moveBinding.publishMoveOutput(handle); }
+      catch (error) {
+        if (error.workspaceMoveEffect === 0) publicationAttempted = false;
+        else if (error.workspaceMoveEffect === 1) wholeWritePartial = true;
+        else if (error.workspaceMoveEffect === 2) committed = true;
+        throw error;
+      }
+      // Normal return confirms complete publication; its bool is staging-only.
+      committed = true;
+    }
+
     async function writeMove(content, mode, options) {
       if (!commitPhase) throw fail('ERR_WORKSPACE_EDIT_STATE');
       await turn(signal);
@@ -272,7 +302,7 @@ function workspaceOperationScope(target, policy, requestSignal, destination) {
         destination: Object.freeze({ probe: () => probe(destinationRelative),
           openDiffInput: () => openDiffInput(destinationRelative), write: writeMove }),
         beginCommit() { checkAbort(signal); commitPhase = true; },
-      }) : Object.freeze({ probe, read, write, openDiffInput, remove });
+      }) : Object.freeze({ probe, read, write, writeWhole, openDiffInput, remove });
       result = await action(io);
     } catch (error) { recordFailure(error, 'workspace edit failed'); }
     if (handle !== undefined) {
@@ -305,7 +335,7 @@ function workspaceOperationScope(target, policy, requestSignal, destination) {
       if (committed || publicationAttempted || cleanupFailed) {
         throw Object.assign(new Error(failure?.message ?? String(failure), { cause: failure }), {
           code: failure?.code,
-          workspaceEditState: committed ? 'committed' : publicationAttempted ? 'unknown' : 'unpublished',
+          workspaceEditState: committed ? 'committed' : wholeWritePartial ? 'partial' : publicationAttempted ? 'unknown' : 'unpublished',
           workspaceEditCleanupFailed: cleanupFailed,
         });
       }

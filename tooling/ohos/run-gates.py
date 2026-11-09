@@ -857,6 +857,24 @@ def main():
                   'workspace-whole-bytes-entry.py', 'workspace-whole-bytes-entry.mjs',
                   'workspace-whole-bytes-instrumentation.mjs')],
               scope='Four ordinary no-range whole-byte contracts: physical and normally selected logical 11-byte files at cap11 and cap10; actual SessionStore/registered scope/WorkspaceFiles/Sandbox, independent exact versions and target-await/dispose samples; no range, codec, HTTP/RPC/UI, SDK/device or new Native claim')
+    # Existing-only default whole-write; no old logical baseline or new-file claim.
+    for workspace_write_existing_mode in ('plain', 'jitless'):
+        g.run('workspace-write-existing-' + workspace_write_existing_mode,
+              lambda m=workspace_write_existing_mode: g.py(
+                  rt + 'workspace-write-existing-entry.py',
+                  '--source', s, '--payload', payload(), '--node', node(),
+                  '--manifest', o / 'composed/manifest.json',
+                  '--typescript-prefix', p('typescript_prefix'),
+                  '--native-directory', o / 'workspace-authority-entry/native',
+                  '--publication-fixture', native() / 'libpublication-test-linked.so',
+                  '--out', o / ('workspace-write-existing-' + m),
+                  *(['--jitless'] if m == 'jitless' else [])),
+              needs=('compose', 'workspace-authority-entry', 'native-publication-build'),
+              timeout=120,
+              tests=[rt + name for name in (
+                  'workspace-write-existing-entry.py', 'workspace-write-existing-entry.mjs',
+                  'workspace-write-existing-instrumentation.mjs', 'workspace-write-existing-oracle.json')],
+              scope='Two after-only existing-file default write contracts: physical and normally selected logical; actual SessionStore/ToolRuntime/Sandbox/Local, complete batch and independent exact versions, after-write-await and dispose resource samples; no new file, guard/cancellation, full Host/RPC/UI or device claim')
     # Reuse the composed payload and the same authority-entry native registry.
     # Only two normal own-file read/edit cases; no new native build in this runner.
     for workspace_edit_mode in ('plain', 'jitless'):
