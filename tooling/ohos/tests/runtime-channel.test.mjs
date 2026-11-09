@@ -1910,3 +1910,307 @@ test('no restore starts once a reset has been committed', async () => {
   await assert.rejects(c.controller.reset([], false), { code: 'ohos_reset_committed' });
   await assert.rejects(c.controller.restoreLastKnownGood(), { code: 'ohos_restart_required' });
 });
+
+// 813: observe one real, already-parsed record without replacing the comparison
+// algorithm or a global built-in. Node can read this private field after type
+// erasure; the probe only delegates the original data value and is restored.
+const manifestCurrentObservations813 = [];
+function manifestReadProbe813(controller) {
+  const manifest = controller.manifest;
+  assert(manifest !== null && manifest.files.length > 0);
+  const file = manifest.files[0];
+  const descriptor = Object.getOwnPropertyDescriptor(file, 'path');
+  assert(descriptor && typeof descriptor.value === 'string' && descriptor.configurable);
+  let reads = 0;
+  Object.defineProperty(file, 'path', {
+    configurable: descriptor.configurable, enumerable: descriptor.enumerable,
+    get() { reads++; return descriptor.value; }
+  });
+  return { count: () => reads, restore: () => Object.defineProperty(file, 'path', descriptor) };
+}
+function snapshotPhases813(controller, count = 20) {
+  return Array.from({ length: count }, () => controller.snapshot().get('phase'));
+}
+after(async () => {
+  if (process.env.OHOS_MANIFEST_CURRENT_WIRE) {
+    await fs.writeFile(process.env.OHOS_MANIFEST_CURRENT_WIRE,
+      JSON.stringify({ boundary: 'Actual Controller/installer methods; explicit per-record read probe and SDK fixtures, not ArkTS/HBN',
+        observations: manifestCurrentObservations813 }, null, 2) + '\n');
+  }
+});
+
+test('813 current cache: repeated real snapshots reuse a matched object pair', async () => {
+  const c = await controllerCase('current-cache-hot');
+  await c.controller.install(false);
+  assert.equal(c.controller.snapshot().get('phase'), 'installed');
+  const probe = manifestReadProbe813(c.controller);
+  try {
+    const before = probe.count();
+    const phases = snapshotPhases813(c.controller);
+    const reads = probe.count() - before;
+    manifestCurrentObservations813.push({ name: 'matched-hot', queries: phases.length, reads, phases,
+      nativeStarts: native.starts.length });
+    assert(phases.every(phase => phase === 'installed'));
+    assert.equal(native.starts.length, 0);
+    assert.equal(reads, 0, 'an unchanged parsed manifest pair must not be scanned for every snapshot');
+  } finally { probe.restore(); }
+});
+
+test('813 current cache: actual start rereads same-version changed hashes and later repair', async () => {
+  const c = await controllerCase('current-cache-reread');
+  await c.controller.install(false);
+  const record = c.dir + '/dsh-runtime/installed.json';
+  const original = await fs.readFile(record, 'utf8');
+  const installedBefore = c.controller.installed;
+  const wrong = JSON.parse(original);
+  const hash = wrong.files[0].sha256;
+  wrong.files[0].sha256 = (hash[0] === '0' ? '1' : '0') + hash.slice(1);
+  const probe = manifestReadProbe813(c.controller);
+  try {
+    await fs.writeFile(record, JSON.stringify(wrong));
+    const beforeMismatch = probe.count();
+    await assert.rejects(c.controller.start(null, false, null, false), { code: 'ohos_install_required' });
+    const mismatchReads = probe.count() - beforeMismatch;
+    const installedMismatch = c.controller.installed;
+    assert.notEqual(installedMismatch, installedBefore, 'the actual installer returns a fresh parsed record');
+    assert.equal(installedMismatch.runtimeVersion, installedBefore.runtimeVersion);
+    assert.equal(native.starts.length, 0);
+    assert(mismatchReads > 0, 'the changed object pair must be compared before refusing start');
+    const beforeHot = probe.count();
+    const phases = snapshotPhases813(c.controller);
+    const negativeHotReads = probe.count() - beforeHot;
+    assert(phases.every(phase => phase === 'error'));
+    assert.equal(await c.controller.publishDiagnostics('# must remain unavailable'), null);
+    await fs.writeFile(record, original);
+    const beforeRepair = probe.count();
+    await c.controller.start(null, false, null, false);
+    const repairReads = probe.count() - beforeRepair;
+    assert.notEqual(c.controller.installed, installedMismatch);
+    assert.equal(native.starts.length, 1, 'restored data may start through the original native boundary');
+    assert(repairReads > 0, 'repair must compare the newly parsed record rather than retain false');
+    manifestCurrentObservations813.push({ name: 'same-version-reread', mismatchCode: 'ohos_install_required',
+      sameVersion: true, mismatchReads, negativeHotQueries: phases.length, negativeHotReads,
+      repairReads, nativeStarts: native.starts.length });
+    assert.equal(negativeHotReads, 0, 'an unchanged mismatching object pair must also reuse its result');
+  } finally { probe.restore(); c.controller.stop(); }
+});
+
+test('813 current cache: actual missing record and install journal override a former match', async () => {
+  const c = await controllerCase('current-cache-null');
+  await c.controller.install(false);
+  assert.equal(c.controller.snapshot().get('phase'), 'installed');
+  const record = c.dir + '/dsh-runtime/installed.json';
+  const journal = c.dir + '/dsh-runtime/installing.json';
+  const original = await fs.readFile(record, 'utf8');
+  await fs.unlink(record);
+  await assert.rejects(c.controller.start(null, false, null, false), { code: 'ohos_install_required' });
+  assert.equal(c.controller.installed, null);
+  assert.equal(await c.controller.publishDiagnostics('# missing record'), null);
+  assert.equal(native.starts.length, 0);
+  await fs.writeFile(record, original);
+  const parsed = JSON.parse(original);
+  await fs.writeFile(journal, JSON.stringify({ schema: 1, runtimeVersion: parsed.runtimeVersion,
+    ownedPaths: parsed.files.map(file => file.path), stagingHashes: [...new Set(parsed.files.map(file => file.sha256))] }));
+  await assert.rejects(c.controller.start(null, false, null, false), { code: 'ohos_install_required' });
+  assert.equal(c.controller.installed, null);
+  assert.equal(await c.controller.publishDiagnostics('# incomplete install'), null);
+  assert.equal(native.starts.length, 0);
+  await fs.unlink(journal);
+  try {
+    await c.controller.start(null, false, null, false);
+    assert.equal(native.starts.length, 1);
+    manifestCurrentObservations813.push({ name: 'real-null-boundaries', missingRecordCode: 'ohos_install_required',
+      journalCode: 'ohos_install_required', diagnosticsDuringNull: null, repairedNativeStarts: native.starts.length });
+  } finally { c.controller.stop(); }
+});
+
+test('813 current cache: failed real install clears the old match and the same Controller retries', async () => {
+  const c = await controllerCase('current-cache-install-retry');
+  await c.controller.install(false);
+  assert.equal(c.controller.snapshot().get('phase'), 'installed');
+  const installedBefore = c.controller.installed;
+  const record = c.dir + '/dsh-runtime/installed.json';
+  const journal = c.dir + '/dsh-runtime/installing.json';
+  const open = fileIo.open;
+  const failure = new Error('813 injected installed record open failure');
+  let injected = false;
+  fileIo.open = async (...args) => {
+    if (!injected && String(args[0]) === record + '.tmp') { injected = true; throw failure; }
+    return open(...args);
+  };
+  try {
+    await assert.rejects(c.controller.install(false), error => error === failure);
+  } finally { fileIo.open = open; }
+  assert.equal(injected, true);
+  assert.equal(c.controller.installed, null);
+  assert.equal(c.controller.snapshot().get('phase'), 'error');
+  assert.equal(await c.controller.publishDiagnostics('# incomplete installation'), null);
+  await fs.access(record); await fs.access(journal);
+  await c.controller.install(false);
+  assert.notEqual(c.controller.installed, installedBefore);
+  assert.equal(c.controller.snapshot().get('phase'), 'installed');
+  assert.equal(c.controller.snapshot().get('error'), null);
+  await assert.rejects(fs.access(journal), { code: 'ENOENT' });
+  const published = await c.controller.publishDiagnostics('# retry completed');
+  assert.equal(await fs.readFile(published.get('path'), 'utf8'), '# retry completed');
+  assert.equal(native.starts.length, 0);
+  manifestCurrentObservations813.push({ name: 'actual-install-retry', injected, originalErrorPreserved: true,
+    diagnosticsDuringNull: null, repairedPhase: c.controller.snapshot().get('phase'), nativeStarts: native.starts.length });
+});
+
+
+// 942: ordinary optional diagnostics through the real RuntimePlugin. The clock
+// fixture advances only the existing interval scheduler, not Date or product code.
+const idleDiagnosticsObservations942 = [];
+after(async () => {
+  if (process.env.OHOS_IDLE_DIAGNOSTICS_WIRE) {
+    await fs.writeFile(process.env.OHOS_IDLE_DIAGNOSTICS_WIRE, JSON.stringify({
+      boundary: 'Actual Controller/Plugin bodies and existing SDK/Native fixtures; MockTimers dispatches the original 100 ms interval; no device cadence/CPU claim',
+      observations: idleDiagnosticsObservations942,
+    }, null, 2) + '\n');
+  }
+});
+const idleCounterKeys942 = ['pollTicks', 'collectCalls', 'snapshotCalls', 'emitStatusCalls',
+  'lifecycleRefreshRequests', 'manifestPairChecks'];
+function idlePlain942(value) {
+  if (value instanceof Map) return Object.fromEntries([...value].map(([key, item]) => [key, idlePlain942(item)]));
+  return value;
+}
+function idleValue942(reply) {
+  assert.equal(reply.kind, 'success', 'the actual RuntimePlugin must implement the diagnostics method');
+  assert(reply.value instanceof Map);
+  assert.deepEqual([...reply.value.keys()].sort(), ['schema', 'enabled', 'observedAtMs', 'window'].sort());
+  const value = idlePlain942(reply.value);
+  assert.equal(value.schema, 1); assert.equal(typeof value.enabled, 'boolean');
+  assert(Number.isInteger(value.observedAtMs));
+  if (value.window !== null) {
+    assert.deepEqual(Object.keys(value.window).sort(), ['id', 'startedAtMs', 'stoppedAtMs', 'counters'].sort());
+    assert.equal(typeof value.window.id, 'string'); assert(value.window.id.length > 0);
+    assert(Number.isInteger(value.window.startedAtMs));
+    assert(value.window.stoppedAtMs === null || Number.isInteger(value.window.stoppedAtMs));
+    assert.deepEqual(Object.keys(value.window.counters).sort(), [...idleCounterKeys942].sort());
+    for (const number of Object.values(value.window.counters)) assert(Number.isSafeInteger(number) && number >= 0);
+  }
+  return value;
+}
+function idleChannel942(context) {
+  const binding = { getApplicationContext: () => context, getBinaryMessenger: () => ({ setMessageHandler() {} }) };
+  const plugin = new RuntimePlugin(); plugin.onAttachedToEngine(binding);
+  return {
+    invoke: (method, args = {}) => new Promise(resolve => plugin.onMethodCall(
+      new MethodCall(method, new Map(Object.entries(args))), {
+        success: value => resolve({ kind: 'success', value }),
+        error: (code, message) => resolve({ kind: 'error', code, message }),
+        notImplemented: () => resolve({ kind: 'notImplemented' }),
+      })),
+    close: () => plugin.onDetachedFromEngine(binding),
+  };
+}
+function idleZero942() { return Object.fromEntries(idleCounterKeys942.map(key => [key, 0])); }
+
+test('942 idle diagnostics: cold channel keeps optional window transitions independent of initialization', async () => {
+  native.reset();
+  const c = await makeCase('idle-diagnostics-cold');
+  const cacheDir = path.join(c.dir, 'cache'); await fs.mkdir(cacheDir);
+  const context = { filesDir: c.dir, cacheDir, resourceManager: c.resources,
+    bundleCodeDir: '/private/hap', applicationInfo: { nativeLibraryPath: 'libs/arm64/' } };
+  const controller = RuntimeController.get(context); controllers.push(controller);
+  const initialize = controller.initialize;
+  let initializeCalls = 0;
+  controller.initialize = function (...args) { initializeCalls++; return Reflect.apply(initialize, this, args); };
+  const channel = idleChannel942(context);
+  const before = { files: (await fs.readdir(c.dir, { recursive: true })).sort(), reads: c.resources.reads.length,
+    nativeLoads: nativeModuleLoads, nativeStarts: native.starts.length };
+  try {
+    const reply = await channel.invoke('getIdleDiagnostics');
+    idleDiagnosticsObservations942.push({ name: 'cold-entry', reply: idlePlain942(reply.value) ?? reply,
+      initializeCalls, resourceReads: c.resources.reads.length - before.reads });
+    const initial = idleValue942(reply);
+    assert.equal(initial.enabled, false); assert.equal(initial.window, null);
+    const stillOff = idleValue942(await channel.invoke('setIdleDiagnosticsEnabled', { enabled: false }));
+    assert.equal(stillOff.enabled, false); assert.equal(stillOff.window, null);
+    const opened = idleValue942(await channel.invoke('setIdleDiagnosticsEnabled', { enabled: true }));
+    assert.equal(opened.enabled, true); assert.equal(opened.window.stoppedAtMs, null);
+    assert.deepEqual(opened.window.counters, idleZero942());
+    const repeated = idleValue942(await channel.invoke('setIdleDiagnosticsEnabled', { enabled: true }));
+    assert.deepEqual(repeated.window, opened.window);
+    const read = idleValue942(await channel.invoke('getIdleDiagnostics'));
+    assert.deepEqual(read.window, opened.window);
+    const stopped = idleValue942(await channel.invoke('setIdleDiagnosticsEnabled', { enabled: false }));
+    assert.equal(stopped.enabled, false); assert(Number.isInteger(stopped.window.stoppedAtMs));
+    assert.equal(stopped.window.id, opened.window.id);
+    assert.equal(stopped.window.startedAtMs, opened.window.startedAtMs);
+    assert.deepEqual(stopped.window.counters, idleZero942());
+    const repeatedStop = idleValue942(await channel.invoke('setIdleDiagnosticsEnabled', { enabled: false }));
+    assert.deepEqual(repeatedStop.window, stopped.window);
+    const next = idleValue942(await channel.invoke('setIdleDiagnosticsEnabled', { enabled: true }));
+    assert.equal(next.enabled, true); assert.notEqual(next.window.id, opened.window.id);
+    assert.equal(next.window.stoppedAtMs, null); assert.deepEqual(next.window.counters, idleZero942());
+    const invalid = await channel.invoke('setIdleDiagnosticsEnabled', { enabled: 'true' });
+    assert.equal(invalid.kind, 'error'); assert.equal(invalid.code, 'ohos_idle_diagnostics_arguments');
+    assert.deepEqual(idleValue942(await channel.invoke('getIdleDiagnostics')).window, next.window);
+    await channel.invoke('setIdleDiagnosticsEnabled', { enabled: false });
+    assert.equal(initializeCalls, 0); assert.equal(controller.initialized, null);
+    assert.equal(controller.timer, null);
+    assert.equal(c.resources.reads.length, before.reads); assert.equal(c.resources.opened.size, 0);
+    assert.equal(nativeModuleLoads, before.nativeLoads); assert.equal(native.starts.length, before.nativeStarts);
+    assert.deepEqual((await fs.readdir(c.dir, { recursive: true })).sort(), before.files);
+    idleDiagnosticsObservations942.push({ name: 'cold-windows', initial, opened, repeated, stopped, repeatedStop, next,
+      invalidCode: invalid.code, initializeCalls, resourceReads: 0, nativeLoads: 0, nativeStarts: 0, timer: controller.timer });
+  } finally { controller.initialize = initialize; channel.close(); }
+});
+
+test('942 idle diagnostics: existing poll and collect paths count calls while enabled and freeze while disabled', async t => {
+  t.mock.timers.enable({ apis: ['setInterval'] });
+  const c = await controllerCase('idle-diagnostics-counts');
+  await c.controller.install(false);
+  const channel = idleChannel942(c.context);
+  const oracle = { collectCalls: 0, snapshotCalls: 0, emitStatusCalls: 0, lifecycleRefreshRequests: 0 };
+  const restore = [];
+  for (const [object, key, count] of [[c.controller, 'collect', 'collectCalls'],
+    [c.controller, 'snapshot', 'snapshotCalls'], [c.controller, 'emitStatus', 'emitStatusCalls'],
+    [c.controller.lifecycle, 'refresh', 'lifecycleRefreshRequests']]) {
+    const original = object[key];
+    object[key] = function (...args) { oracle[count]++; return Reflect.apply(original, this, args); };
+    restore.push(() => { object[key] = original; });
+  }
+  const probe = manifestReadProbe813(c.controller);
+  let accepted = false;
+  try {
+    const reply = await channel.invoke('setIdleDiagnosticsEnabled', { enabled: true });
+    idleDiagnosticsObservations942.push({ name: 'count-entry', reply: idlePlain942(reply.value) ?? reply });
+    const opened = idleValue942(reply); accepted = true;
+    assert.deepEqual(opened.window.counters, idleZero942());
+    await c.controller.start(null, false, null, false);
+    assert.equal(native.starts.length, 1); assert.notEqual(c.controller.timer, null);
+    c.controller.snapshot();
+    const beforeTicks = { ...oracle };
+    t.mock.timers.tick(1000);
+    await Promise.resolve(); await new Promise(setImmediate);
+    assert.equal(oracle.collectCalls - beforeTicks.collectCalls, 10, 'ten deliveries of the original interval callback');
+    const observed = idleValue942(await channel.invoke('getIdleDiagnostics'));
+    const expected = { pollTicks: 10, ...oracle, manifestPairChecks: probe.count() };
+    assert.equal(expected.manifestPairChecks, 1, 'normal start rereads a new parsed installed record once');
+    assert.equal(expected.lifecycleRefreshRequests, 1, 'one request at the original ten-collect boundary');
+    assert.deepEqual(observed.window.counters, expected);
+    const reread = idleValue942(await channel.invoke('getIdleDiagnostics'));
+    assert.deepEqual(reread.window, observed.window, 'diagnostic reads must not collect or take ordinary snapshots');
+    const disabled = idleValue942(await channel.invoke('setIdleDiagnosticsEnabled', { enabled: false }));
+    assert.equal(disabled.enabled, false); assert.deepEqual(disabled.window.counters, expected);
+    c.controller.collect(); c.controller.snapshot(); c.controller.emitStatus(); c.controller.lifecycle.refresh();
+    t.mock.timers.tick(100);
+    await Promise.resolve(); await new Promise(setImmediate);
+    const frozen = idleValue942(await channel.invoke('getIdleDiagnostics'));
+    assert.deepEqual(frozen.window, disabled.window);
+    assert(oracle.collectCalls > expected.collectCalls && oracle.snapshotCalls > expected.snapshotCalls);
+    idleDiagnosticsObservations942.push({ name: 'actual-counts', opened, observed, expected, disabled, frozen,
+      callbackDriver: { api: 'node:test MockTimers(setInterval)', firstAdvanceMs: 1000, firstCallbackCount: 10,
+        disabledAdvanceMs: 100, DateMocked: false }, oracleAfterDisabled: { ...oracle } });
+  } finally {
+    if (accepted) await channel.invoke('setIdleDiagnosticsEnabled', { enabled: false });
+    probe.restore();
+    await c.controller.stop(); native.state.phase = 'idle'; c.controller.collect();
+    for (const undo of restore) undo();
+    channel.close(); t.mock.timers.reset();
+  }
+});
