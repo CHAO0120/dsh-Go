@@ -33,7 +33,7 @@
 
 `cwd` 必须显式精确为 `/workspace`，绝不替换宿主 cwd。`argv` 为 1–128 个无 NUL 字符串，首项非空，单项 ≤ 8,192 UTF-8 bytes，合计 ≤ 24,576 bytes。`env` 可省略，最多 64 个键，键须匹配 `[A-Za-z_][A-Za-z0-9_]*` 且 ≤ 128 bytes，值为无 NUL 字符串且单值 ≤ 4,096 bytes，整个 JSON env ≤ 16,384 bytes。`stdin` 可省略，UTF-8 string ≤ 16,384 bytes。
 
-父环境继承仍由 914 backend 的既有 `scrubbedParentEnv()` 删除 `DSH_*` 和凭据形名字；代理变量另按下述当前模式处理。显式 env 按既有 subprocess 契约可显式提供凭据，但不影响已捕获的宿主路径，也不自动回显/写日志。这里只开放 batch stdin + stdout/stderr 各 16,384 bytes 尾部 collector，没有 pipe/PTY/宿主目录/grant/spill 配置入口。`graceMs` 固定为 10,000，不由 App 自选。取消本期唯一当前 job 使用 `setEnabled(false)`，同时关闭准入；GET 观察 cancelRequested 和真实 settled/unknown。
+backend 不再隐式继承宿主环境，仅提供客体 PATH/HOME/TMPDIR/LANG 默认值；其他变量须由调用方显式提供。代理变量仍按下述当前模式生成逐作业快照，其中 inherit 保留既有活动代理与父代理别名的来源。显式 env 按既有 subprocess 契约可显式提供凭据，但不影响已捕获的宿主路径，也不自动回显/写日志。这里只开放 batch stdin + stdout/stderr 各 16,384 bytes 尾部 collector，没有 pipe/PTY/宿主目录/grant/spill 配置入口。`graceMs` 固定为 10,000，不由 App 自选。取消本期唯一当前 job 使用 `setEnabled(false)`，同时关闭准入；GET 观察 cancelRequested 和真实 settled/unknown。
 
 ### 私有作业代理
 
