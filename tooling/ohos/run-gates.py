@@ -837,6 +837,25 @@ def main():
                   'workspace-bytes-entry.py', 'workspace-bytes-entry.mjs',
                   'workspace-bytes-instrumentation.mjs')],
               scope='Two ordinary 11-byte file windows through actual SessionStore/registered lookup/WorkspaceFiles and readByteRange: physical and selected logical; complete return-object oracle and target-await resource sample; no full readBytes, multi-window/Dart/RPC/UI, SDK/device or persistent-session claim')
+    # Reuse the composed payload and the same authority-entry native registry.
+    # Only two normal own-file read/edit cases; no new native build in this runner.
+    for workspace_edit_mode in ('plain', 'jitless'):
+        g.run('workspace-edit-' + workspace_edit_mode,
+              lambda m=workspace_edit_mode: g.py(
+                  rt + 'workspace-edit-entry.py',
+                  '--source', s, '--payload', payload(), '--node', node(),
+                  '--manifest', o / 'composed/manifest.json',
+                  '--typescript-prefix', p('typescript_prefix'),
+                  '--native-directory', o / 'workspace-authority-entry/native',
+                  '--publication-fixture', native() / 'libpublication-test-linked.so',
+                  '--out', o / ('workspace-edit-' + m),
+                  *(['--jitless'] if m == 'jitless' else [])),
+              needs=('compose', 'workspace-authority-entry', 'native-publication-build'),
+              timeout=120,
+              tests=[rt + name for name in (
+                  'workspace-edit-entry.py', 'workspace-edit-entry.mjs',
+                  'workspace-edit-instrumentation.mjs')],
+              scope='Two ordinary own-file default read/edit calls through actual SessionStore/Session/WorkingDirectory/tool pipeline and ETS select/attach; real host grant/save components, explicit SDK/Agent/publication fixtures; independent exact-stat versions and post-edit-await lease sample; no full Host/RPC/UI, SDK/device, fault/race/VM or expected-intent claim')
     g.run('host-layout', lambda: g.py(rt + 'host-layout.py', '--node', node(), '--native-library-dir', o / 'round-native', '--publication-fixture', native() / 'libpublication-test-linked.so', '--assembled-payload', payload(), '--out', o / 'host-layout'), needs=('compose', 'native-publication-build', 'native-static-resources', 'round-native-libraries'), timeout=240)
     g.run('host-safe-profile', lambda: g.py(rt + 'host-safe-profile.py', '--node', node(), '--native-library-dir', o / 'round-native', '--publication-fixture', native() / 'libpublication-test-linked.so', '--assembled-payload', payload(), '--out', o / 'host-safe-profile'), needs=('compose', 'native-publication-build', 'round-native-libraries'), timeout=600, tests=[rt + 'host-safe-profile.py'], scope='Actual Host safe argv and original public round; not OH device restart')
     for label, host in [('loopback', '127.0.0.1'), ('owned-http', g.config.get('ownedHttpHost', ''))]:

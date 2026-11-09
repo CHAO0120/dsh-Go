@@ -44,6 +44,8 @@ export class NativeGrantFs {
   async lstat(value){const st=this.#call('stat',this.#path(value));return {isFile:st.type===1,isDirectory:st.type===2,isSymbolicLink:st.type===3,
     size:st.size,mode:st.mode,mtime:new Date(st.mtimeMs),dev:st.dev,ino:st.ino};}
   async stat(value){const st=await this.lstat(value);if(st.isSymbolicLink)throw failure('ELOOP');return st;}
+  async lstatExact(value){const st=this.#call('statExact',this.#path(value));return {...st,isFile:st.type===1,isDirectory:st.type===2,isSymbolicLink:st.type===3};}
+  async statExact(value){const st=await this.lstatExact(value);if(st.isSymbolicLink)throw failure('ELOOP');return st;}
   async exists(value){try{await this.lstat(value);return true;}catch(error){if(['ENOENT','ENOTDIR'].includes(error.code))return false;throw error;}}
   async readdir(value){return this.#call('readdir',this.#path(value));}
   async readdirWithFileTypes(value){const names=await this.readdir(value);return Promise.all(names.map(async name=>({name,...await this.lstat(path.posix.join(value,name))})));}
@@ -69,4 +71,11 @@ export class NativeGrantFs {
   async utimes(){throw failure('ENOTSUP');}
   async link(){throw failure('ENOTSUP');}
   async symlink(){throw failure('ENOTSUP');}
+}
+
+// One opaque metadata domain for read observations and the private edit scope.
+export function grantFileObservation(info,grant){
+  if(info.schemaVersion!==1)throw failure('ERR_WORKSPACE_HOST_ABI');
+  return {type:info.type===1?'file':info.type===2?'directory':info.type===3?'symlink':'other',size:Number(info.size),
+    version:`ohos-grant:${grant.id}:${grant.generation}:${info.dev}:${info.ino}:${info.size}:${info.mtimeSec}:${info.mtimeNsec}:${info.ctimeSec}:${info.ctimeNsec}`};
 }

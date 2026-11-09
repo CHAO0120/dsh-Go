@@ -1,7 +1,7 @@
 import { isMainThread } from 'node:worker_threads';
 import { posix } from 'node:path';
 import { loadGrantBinding } from './authority.mjs';
-import { NativeGrantFs } from './grant-fs.mjs';
+import { NativeGrantFs, grantFileObservation as entryObservation } from './grant-fs.mjs';
 import { borrowProcessGrantAuthority, processWorkspaceGrant, isLogicalWorkspacePath,
   quarantineProcessGrantRetirement } from './process-authority.mjs';
 
@@ -15,7 +15,7 @@ if (isMainThread && process.platform === 'openharmony') {
   try {
     borrowProcessGrantAuthority();
     const loaded = loadGrantBinding();
-    binding = Object.freeze(Object.fromEntries(['consume', 'stat', 'read', 'readdir', 'close'].map(name => {
+    binding = Object.freeze(Object.fromEntries(['consume', 'stat', 'statExact', 'read', 'readdir', 'close'].map(name => {
       if (typeof loaded[name] !== 'function') throw fail('ERR_WORKSPACE_HOST_ABI');
       return [name, loaded[name].bind(loaded)];
     })));
@@ -126,18 +126,11 @@ if (isMainThread && process.platform === 'openharmony') {
     } finally { closeFileLease(fs, scope.lease); }
   }
 
-  // Entry metadata/listing use the same private read-only lease. Native stat
-  // supplies only an opaque read observation, not a content or atomicity guard.
-  function entryObservation(info, grant) {
-    return { type: info.isFile ? 'file' : info.isDirectory ? 'directory' : info.isSymbolicLink ? 'symlink' : 'other',
-      size: info.size,
-      version: `ohos-grant:${grant.id}:${grant.generation}:${info.dev}:${info.ino}:${info.size}:${info.mtime.getTime()}` };
-  }
-
+  // Exact metadata is an opaque observation, not a content hash or a lock.
   async function lstatFile(value, signal) {
     return withFileLease(value, signal, async (fs, { relative, grant }) => {
       let info;
-      try { info = await fs.lstat(relative); }
+      try { info = await fs.lstatExact(relative); }
       catch (error) {
         if (error.code === 'ENOENT' || error.code === 'ENOTDIR') return undefined;
         throw error;
@@ -157,7 +150,7 @@ if (isMainThread && process.platform === 'openharmony') {
         signal?.throwIfAborted();
         const logicalPath = posix.join(canonical, name);
         let info;
-        try { info = await fs.stat(posix.join(relative, name)); }
+        try { info = await fs.statExact(posix.join(relative, name)); }
         catch (error) {
           if (error.code !== 'ENOENT' && error.code !== 'ENOTDIR') throw error;
         }
@@ -165,7 +158,7 @@ if (isMainThread && process.platform === 'openharmony') {
         const observed = info ? entryObservation(info, grant) : undefined;
         entries.push({ name, logicalPath, type: observed?.type ?? 'other',
           ...observed ? { version: observed.version } : {},
-          ...info?.isFile ? { size: info.size } : {} });
+          ...info?.isFile ? { size: Number(info.size) } : {} });
       }
       return entries;
     });
@@ -174,14 +167,12 @@ if (isMainThread && process.platform === 'openharmony') {
   async function statFile(value, signal) {
     return withFileLease(value, signal, async (fs, { relative, grant }) => {
       let info;
-      try { info = await fs.stat(relative); }
+      try { info = await fs.statExact(relative); }
       catch (error) {
         if (error.code === 'ENOENT' || error.code === 'ENOTDIR') return undefined;
         throw error;
       }
-      // Opaque read observation, not a content hash or a nanosecond write guard.
-      return { type: info.isFile ? 'file' : info.isDirectory ? 'directory' : 'other', size: info.size,
-        version: `ohos-grant:${grant.id}:${grant.generation}:${info.dev}:${info.ino}:${info.size}:${info.mtime.getTime()}` };
+      return entryObservation(info, grant);
     });
   }
 
