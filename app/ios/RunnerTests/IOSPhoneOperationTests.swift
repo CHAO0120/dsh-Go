@@ -50,7 +50,7 @@ final class IOSPhoneOperationTests: XCTestCase {
     for kind in ["runner_call", "screen", "intent", ""] {
       XCTAssertThrowsError(try IOSPhoneOperation(request(kind: kind)))
     }
-    for method in ["Screen", "screen ", "native", "prepareInput", "paste", "ascii", "handoff", ""] {
+    for method in ["Screen", "screen ", "native", "activate", "validate", "prepareInput", "paste", "ascii", "handoff", ""] {
       XCTAssertThrowsError(try IOSPhoneOperation(request(method: method)))
     }
     XCTAssertThrowsError(try IOSPhoneOperation(request(method: nil)))

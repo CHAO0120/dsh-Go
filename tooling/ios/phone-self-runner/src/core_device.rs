@@ -154,7 +154,22 @@ impl Drop for Input {
 }
 fn bundle_id(value: &str) -> bool {
     !value.is_empty() && value.len() <= 255 && value.contains('.')
+        && value.split('.').all(|part| !part.is_empty())
         && value.bytes().all(|c| c.is_ascii_alphanumeric() || c == b'.' || c == b'-')
+}
+fn application_catalog(apps: impl IntoIterator<Item = (String, String)>) -> Result<Vec<u8>, Failure> {
+    let mut output = Vec::new();
+    for (index, (name, id)) in apps.into_iter().enumerate() {
+        if index >= 4096 { return Err(LIMIT); }
+        // Device inventories can contain non-launchable entries. One invalid
+        // identifier must not hide every valid app, and must not be offered as
+        // a launch target. Retain Swift's independent per-entry validation.
+        if !bundle_id(&id) || name.is_empty() || name.len() > 512 || name.chars().any(char::is_control) { continue; }
+        output.push(json!({"name": name, "id": id}));
+    }
+    let bytes = serde_json::to_vec(&json!({"apps": output})).map_err(|_| INTERNAL_FAILURE)?;
+    if bytes.len() > MAX_APPS { return Err(LIMIT); }
+    Ok(bytes)
 }
 fn coordinate(value: f64) -> bool { value.is_finite() && (0.0..=1.0).contains(&value) }
 impl Input {
@@ -864,15 +879,7 @@ impl Session {
     async fn apps(&mut self) -> Result<Payload, Failure> {
         let mut client = AppServiceClient::connect_rsd(&mut self.tunnel.adapter, &mut self.tunnel.handshake).await.map_err(|_| SERVICE)?;
         let apps = client.list_apps(false, true, false, false, true).await.map_err(|_| SERVICE)?;
-        if apps.len() > 4096 { return Err(LIMIT); }
-        let mut output = Vec::with_capacity(apps.len());
-        for app in apps {
-            if !bundle_id(&app.bundle_identifier) || app.name.len() > 1024
-                || app.name.chars().any(char::is_control) { return Err(PROTOCOL); }
-            output.push(json!({"name":app.name,"id":app.bundle_identifier}));
-        }
-        let bytes = serde_json::to_vec(&json!({"apps":output})).map_err(|_| INTERNAL_FAILURE)?;
-        if bytes.len() > MAX_APPS { return Err(LIMIT); }
+        let bytes = application_catalog(apps.into_iter().map(|app| (app.name, app.bundle_identifier)))?;
         Ok(Payload::read("apps", "application/json", bytes))
     }
     async fn create_keyboard(&mut self, acted: &AtomicBool, frame: &Frame, id: &str) -> Result<(), Failure> {
@@ -986,6 +993,27 @@ fn png_crc32(bytes: &[u8]) -> u32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn app_catalog_keeps_valid_entries_when_inventory_contains_non_targets() {
+        let bytes = application_catalog(vec![
+            ("Settings".into(), "com.apple.Preferences".into()),
+            ("non-target".into(), "invalid_identifier".into()),
+            ("".into(), "com.example.hidden".into()),
+            ("control\nname".into(), "com.example.control".into()),
+            ("Shopping".into(), "com.example.shop".into()),
+        ]).unwrap();
+        let value: Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(value["apps"], json!([
+            {"name":"Settings","id":"com.apple.Preferences"},
+            {"name":"Shopping","id":"com.example.shop"},
+        ]));
+        for invalid in [".com.example", "com..example", "com.example."] { assert!(!bundle_id(invalid)); }
+    }
+    #[test]
+    fn app_catalog_does_not_truncate_count_or_output_limits() {
+        assert!(application_catalog((0..4097).map(|_| ("ignored".into(), "invalid_id".into()))).is_err());
+        assert!(application_catalog((0..4096).map(|_| ("N".repeat(512), format!("{}.app", "a".repeat(240))))).is_err());
+    }
     use std::ffi::CStr;
     use std::sync::{Condvar, Mutex};
     use crate::TEST_LOCK;

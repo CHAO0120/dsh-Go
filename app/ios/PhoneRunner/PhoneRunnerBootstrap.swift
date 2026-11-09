@@ -7,7 +7,7 @@ enum PhoneRunnerAppCatalog {
     if wanted.range(of: #"^[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+$"#, options: .regularExpression) != nil {
       return wanted
     }
-    if ["设置", "settings"].contains(wanted.lowercased()) { return "com.apple.Preferences" }
+    if ["设置", "系统设置", "settings", "system settings"].contains(wanted.lowercased()) { return "com.apple.Preferences" }
     return apps.first { $0["name"]?.caseInsensitiveCompare(wanted) == .orderedSame }?["id"]
   }
 }

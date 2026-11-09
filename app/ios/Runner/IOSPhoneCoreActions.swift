@@ -25,12 +25,13 @@ final class IOSPhoneCoreActions {
   private var epoch: UInt64 = 0
   private var latestToken: String?
   private var busy = false
+  private(set) var lastOpenedApplication: String?
 
   init(core: IOSPhoneCoreDevice? = nil, screen: IOSPhoneScreen? = nil) {
     self.core = core ?? .shared; self.screen = screen ?? IOSPhoneScreen()
   }
 
-  func invalidate() { epoch &+= 1; binding = nil; latestToken = nil; screen.invalidate() }
+  func invalidate() { epoch &+= 1; binding = nil; latestToken = nil; lastOpenedApplication = nil; screen.invalidate() }
 
   func targetLabel(_ plan: IOSPhoneOperation, ownerID: String, sessionID: String) -> String? {
     guard let binding, binding.sessionID == sessionID,
@@ -123,15 +124,16 @@ final class IOSPhoneCoreActions {
       if plan.method == .open, let application {
         let opened = try await send(["op": "launch", "bundleId": application], execution, current: live)
         guard await consent.waitForTarget(request, current: live) else {
-          throw IOSPhoneOperationError(message: "系统已接受应用启动请求，但目标前台未核实；没有继续读取或触摸。")
+          throw IOSPhoneOperationError(message: "系统已接受应用启动请求；" + consent.targetWaitFailureMessage)
         }
         let reply = try await capture(execution, current: live)
         let output = try await observe(reply, execution, image: false, detail: false, current: live)
+        lastOpenedApplication = application
         return IOSPhoneOutcome(text: "启动请求已派发（pid=\(opened.metadata.pid ?? 0)，前台 App 未核实）。\n" + output.text,
           isError: false, image: nil)
       }
       guard await consent.waitForTarget(request, current: live) else {
-        throw IOSPhoneOperationError(message: "用户未切回目标界面，或宠物画中画没有保持活动。")
+        throw IOSPhoneOperationError(message: consent.targetWaitFailureMessage)
       }
       try requireBackground(live)
       let fresh = try await capture(execution, current: live)

@@ -165,6 +165,21 @@ class PhoneNoticeEmbedding(unittest.TestCase):
 
 @unittest.skipUnless(sys.platform == 'darwin' and shutil.which('xcrun'), 'Requires Apple Security and Swift; not tested on Linux')
 class PhoneAppleHandshake(unittest.TestCase):
+    def test_model_plan_cannot_invoke_private_activation_or_choose_return_target(self):
+        with tempfile.TemporaryDirectory(prefix='phone-operation-') as temporary:
+            temporary = Path(temporary)
+            # The actual Foundation-only request envelope, without UIKit views.
+            source = (ROOT / 'app/ios/Runner/IOSPhoneActions.swift').read_text()
+            request = source[source.index('struct IOSPhoneRequest:'):source.index('struct IOSPhoneOutcome')]
+            request_file = temporary / 'request.swift'
+            request_file.write_text('import Foundation\n' + request)
+            executable = temporary / 'check'
+            subprocess.run(['xcrun', 'swiftc', '-swift-version', '5', '-parse-as-library',
+                            str(request_file), str(ROOT / 'app/ios/PhoneRunner/PhoneRunnerBootstrap.swift'),
+                            str(ROOT / 'app/ios/Runner/IOSPhoneOperation.swift'),
+                            str(ROOT / 'tooling/ios/tests/phone-operation.swift'), '-o', str(executable)], check=True)
+            subprocess.run([str(executable)], check=True)
+
     def test_real_ephemeral_rsa_readiness_protocol(self):
         with tempfile.TemporaryDirectory(prefix='phone-handshake-') as temporary:
             executable = Path(temporary) / 'check'

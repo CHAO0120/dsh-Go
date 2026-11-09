@@ -64,6 +64,7 @@ final class IOSPhoneTaskConsent {
   /// confirmation snapshots it before awaiting UI; a later invocation cannot
   /// donate its cleanup hook to an older answer. This never revokes a grant.
   var onClipboardRefusal: (() -> Void)?
+  private(set) var targetWaitFailureMessage = "等待目标界面超时，没有派发动作。"
 
   init(actions: IOSPhoneActions, now: @escaping () -> TimeInterval? = IOSPhoneContinuousTime.now) {
     self.actions = actions; self.now = now
@@ -178,17 +179,34 @@ final class IOSPhoneTaskConsent {
   /// A protected-data lock or an actual loss of PiP stops admission immediately.
   func waitForTarget(_ request: IOSPhoneRequest, current: () -> Bool) async -> Bool {
     let operation = generation
+    targetWaitFailureMessage = "等待目标界面超时，没有派发动作。"
     guard var wait = IOSPhoneTargetWait(start: now(),
       requestRemaining: request.expiresAt / 1000 - Date().timeIntervalSince1970) else { return false }
+    #if DSH_PHONE_SELF_RUNNER_DIAGNOSTICS
+    var previousGate = ""
+    #endif
     while true {
       let background = UIApplication.shared.applicationState == .background
+      let unlocked = UIApplication.shared.isProtectedDataAvailable
       let eligible = !Task.isCancelled && current() && generation == operation && isGranted
         && request.expiresAt > Date().timeIntervalSince1970 * 1000
+      let keepingAlive = background && IOSPetOverlay.shared.isKeepingAlive
+      #if DSH_PHONE_SELF_RUNNER_DIAGNOSTICS
+      let gate = "target wait bg=\(background) unlocked=\(unlocked) eligible=\(eligible) pip=\(keepingAlive) usable=\(IOSPetOverlay.shared.isUsable)"
+      if gate != previousGate { previousGate = gate; IOSPhoneSelfRunner.diagnostic(gate) }
+      #endif
       let decision = wait.sample(now: now(), background: background,
-        protectedDataAvailable: UIApplication.shared.isProtectedDataAvailable,
-        eligible: eligible, keepingAlive: background && IOSPetOverlay.shared.isKeepingAlive)
+        protectedDataAvailable: unlocked, eligible: eligible, keepingAlive: keepingAlive)
       switch decision {
-      case .refused: return false
+      case .refused:
+        if !unlocked { targetWaitFailureMessage = "手机已锁定，没有派发动作；请解锁后重新发起。" }
+        else if !eligible { targetWaitFailureMessage = "本次请求已取消、过期或暂停，没有派发动作；这不表示增强开关关闭。" }
+        else if !background { targetWaitFailureMessage = "DSH Go 仍在前台，未取得目标画面，没有派发动作。" }
+        else if !keepingAlive { targetWaitFailureMessage = "宠物画中画未保持播放，未派发动作；请恢复画中画后重新发起。" }
+        #if DSH_PHONE_SELF_RUNNER_DIAGNOSTICS
+        IOSPhoneSelfRunner.diagnostic("target wait refused bg=\(background) eligible=\(eligible) pip=\(keepingAlive)")
+        #endif
+        return false
       case .ready:
         // Core/XCTest must still capture and validate a fresh frame after this
         // delay. Do not consume or replace the approved observation here.

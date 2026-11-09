@@ -32,6 +32,7 @@ final class IOSPhoneRunner {
   private var selfOwnerID = UUID().uuidString
   private var invocationID = UUID()
   private var lastEndpoint: Endpoint?
+  private var targetApplication: String?
 
   init(actions: IOSPhoneActions, selfRunner: IOSPhoneSelfRunner? = nil) {
     self.actions = actions
@@ -67,6 +68,7 @@ final class IOSPhoneRunner {
     selfOwnerID = UUID().uuidString; self.invocationID = UUID()
     coreActions.invalidate(); lastRoute = nil; lastXCTestScreen = nil
     lastEndpoint = nil
+    targetApplication = nil
     consent.onClipboardRefusal = nil
     // Rotate local identities before either backend's synchronous status
     // callback can reenter. Never use an unowned stop for settings preflight.
@@ -150,6 +152,7 @@ final class IOSPhoneRunner {
     let plan: IOSPhoneOperation
     do { plan = try IOSPhoneOperation(request) }
     catch { return .failure((error as? IOSPhoneOperationError)?.message ?? "手机动作参数无效。") }
+    if plan.method == .open { targetApplication = nil }
     if plan.requiresObservation, lastRoute == nil {
       return .failure("没有本次任务的有效屏幕观察。先用 screen，不要猜编号或重放旧动作。")
     }
@@ -160,16 +163,22 @@ final class IOSPhoneRunner {
     let chooseXCTest = mustXCTest || ((plan.requiresObservation || plan.method == .screen) && lastRoute == .xctest)
     guard !chooseXCTest || link.xctestEnabled else { return .failure("XCTest 增强已关闭，没有启动或调用运行器。") }
     guard !mustCore || link.enabled else { return .failure("这个应用固定使用 CoreDevice，但本机连接已关闭。") }
+    let returnTarget = plan.needsTarget && link.xctestEnabled ? targetApplication : nil
+    let returnDescription = returnTarget.map {
+      "\n\n若本次使用 XCTest，允许后会先返回本次任务已打开或观察的应用：\($0)，再重新核对屏幕。若保持 CoreDevice 路线，请自行切回目标界面。不会重复原来的点按或输入。"
+    } ?? ""
     let description = plan.consentDescription(targetLabel: coreActions.targetLabel(plan, ownerID: ownerID,
       sessionID: request.owner.sessionId))
       + "\n\n路线由你的设置和可用性决定；XCTest 只在已启用时使用。已经派发或结果不明时不切换重试。"
+      + returnDescription
     guard await consent.prepareForeground(request, current: live), live(),
       await IOSPhoneClipboard.shared.resolvePending(request, actions: actions, current: live), live() else {
       retireConnection(ownerID: ownerID, invocationID: invocationID)
       return .failure("请先回到 DSH Go 处理上次剪贴板恢复；没有执行新动作。")
     }
     let preview = coreActions.approvalPreview(plan, ownerID: ownerID, sessionID: request.owner.sessionId)
-    guard await consent.approve(request, detail: description, needsTarget: plan.needsTarget || plan.method == .open, preview: preview, current: live),
+    guard await consent.approve(request, detail: description,
+      needsTarget: returnTarget == nil && (plan.needsTarget || plan.method == .open), preview: preview, current: live),
       live(), await authorize(), live(), consent.isGranted else {
       retireConnection(ownerID: ownerID, invocationID: invocationID)
       return .failure("本次调用没有取得仍有效的逐次批准，没有派发手机动作。不要自动重试。")
@@ -202,7 +211,9 @@ final class IOSPhoneRunner {
         if lastRoute != .coredevice { coreActions.invalidate(); lastXCTestScreen = nil }
         lastRoute = .coredevice; lastEndpoint = nil
         progress(.executing)
-        return await coreActions.run(plan, request: request, ownerID: ownerID, consent: consent, current: live)
+        let outcome = await coreActions.run(plan, request: request, ownerID: ownerID, consent: consent, current: live)
+        if !outcome.isError, plan.method == .open { targetApplication = coreActions.lastOpenedApplication }
+        return outcome
       case .failure(let failure):
         if failure.code == "ERR_PHONE_STOP_UNCONFIRMED" || core.isFaulted {
           return .failure(Self.coreStopUnconfirmed)
@@ -250,9 +261,22 @@ final class IOSPhoneRunner {
     if lastRoute != .xctest { coreActions.invalidate(); lastXCTestScreen = nil }
     lastRoute = .xctest; lastEndpoint = endpoint
     progress(.executing)
+    if let returnTarget {
+      #if DSH_PHONE_SELF_RUNNER_DIAGNOSTICS
+      IOSPhoneSelfRunner.diagnostic("target return begin")
+      #endif
+      let returned = await call(endpoint, request: request, current: live,
+        method: "activate", parameters: ["app": returnTarget])
+      guard !returned.isError, live(), consent.isGranted else {
+        return .failure("返回已批准目标的结果未确认，未继续派发读屏或输入。\n" + returned.text)
+      }
+      #if DSH_PHONE_SELF_RUNNER_DIAGNOSTICS
+      IOSPhoneSelfRunner.diagnostic("target return confirmed")
+      #endif
+    }
     if plan.needsTarget || plan.method == .open {
       guard await consent.waitForTarget(request, current: live), live(), consent.isGranted else {
-        return .failure("用户未返回目标界面，或画中画已停止；没有派发这个动作。")
+        return .failure(consent.targetWaitFailureMessage)
       }
     }
     var arguments = plan.parameters
@@ -308,7 +332,10 @@ final class IOSPhoneRunner {
     // The existing XCTest open implementation also reads the opened screen.
     // Admit it only after actual PiP is active, without changing that method or
     // the separate, protected automatic returnToApp implementation.
-    let needsTarget = operation != "apps"
+    // Internal activation is explicitly disclosed by this call's native sheet;
+    // it is how the already approved target becomes foreground before PiP and
+    // fresh-screen admission. It is absent from the model tool catalog.
+    let needsTarget = operation != "apps" && operation != "activate"
     let permitted = { !Task.isCancelled && current() && self.consent.isGranted
       && IOSPhoneLink.shared.xctestEnabled && UIApplication.shared.isProtectedDataAvailable
       && request.expiresAt > Date().timeIntervalSince1970 * 1000
@@ -356,8 +383,15 @@ final class IOSPhoneRunner {
         let message = result["error"] as? String ?? "手机操控没有完成这一步。"
         return .failure(message + "\n这一步不会自动重试。")
       }
+      if let app = result["appBundleID"] as? String, app != Bundle.main.bundleIdentifier,
+        PhoneRunnerAppCatalog.bundleID(for: app) == app {
+        targetApplication = app
+      }
       var text = result["text"] as? String ?? ""
-      if method != "validate", let screen = result["screen"] as? String { lastXCTestScreen = screen }
+      if method != "validate", let screen = result["screen"] as? String {
+        lastXCTestScreen = screen
+        text = "XCTest 增强观察（编号仅属于本后端）：\n" + text
+      }
       if let warning = result["warning"] as? String { text += "\n（注意：\(warning)）" }
       guard text.utf8.count <= IOSPhoneResultEnvelope.textBytes else {
         lastXCTestScreen = nil
