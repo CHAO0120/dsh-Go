@@ -7,6 +7,7 @@ import { pathToFileURL } from 'node:url';
 import { createServer } from 'node:http';
 import { once } from 'node:events';
 import { calls } from './linux-http-fixture.mjs';
+import { LinuxControl as NodeLinuxControl } from '../../../runtime/ohos/linux/control.mjs';
 
 const source = new URL('../../../app/ohos/entry/src/main/ets/runtime/', import.meta.url);
 const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'dsh-linux-control-'));
@@ -109,6 +110,69 @@ test('shutdown waits for the actual retirement observation after 202', async () 
     release.resolve(); await waiting; assert.equal(done, true);
     assert.equal(fixture.observed.filter(row => row.body?.action === 'shutdown').length, 1);
   } finally { release.resolve(); await fixture.close(); }
+});
+
+test('installation cleanup does not replace final shutdown completion over HTTP', async t => {
+  // The controller and ETS client are production code. Installation/Native and
+  // SDK HTTP/authentication are explicit fixtures; no guest or Native is loaded.
+  const disposed = deferred(), trace = [], wire = [];
+  let cleanup;
+  const owner = {
+    state: 'created', nativeOwnerCreated: false,
+    async install() {
+      trace.push('install'); this.state = 'failed';
+      throw Object.assign(new Error('fixture installation unavailable'), { code: 'ERR_OHOS_LINUX_DOWNLOAD' });
+    },
+    dispose() {
+      trace.push('dispose');
+      return cleanup ??= Promise.resolve().then(() => {
+        trace.push('cleanup'); this.state = 'disposed'; disposed.resolve();
+        return { resourcesRetired: true, filesRemoved: true, dataRetained: false,
+          ownerQuarantined: false, native: null, releaseError: null };
+      });
+    },
+  };
+  const control = new NodeLinuxControl({ hostPaths: { filesDir: directory, cacheDir: directory } }, {
+    async loadModule() { return {
+      async loadLinuxInstallationManifest() { return {}; },
+      createLinuxInstallationOwner() { return owner; },
+    }; },
+  });
+  const fixture = await serverFor((request, response) => {
+    // Preserve the production command -> synchronous JSON response order.
+    const value = request.method === 'POST' ? control.command(request.body) : control.status();
+    wire.push({ method: request.method, action: request.body?.action ?? null,
+      value: JSON.parse(JSON.stringify(value)) });
+    reply(response, request.method === 'POST' ? 202 : 200, value);
+  });
+  try {
+    const client = new LinuxControl();
+    const accepted = JSON.parse(await client.setEnabled(fixture.url, 'test-only-token', true));
+    assert.equal(accepted.state, 'installing');
+    await disposed.promise;
+    const failed = JSON.parse(await client.getStatus(fixture.url, 'test-only-token'));
+    assert.equal(failed.state, 'failed'); assert.equal(failed.ownerRetained, true);
+    assert.equal(failed.shutdownComplete, false); assert.equal(failed.retirement.resourcesRetired, true);
+    assert.equal(failed.retirement.native, null); assert.equal(failed.nativeMemoryRelease, null);
+    let shutdownError;
+    try { await client.shutdown(fixture.url, 'test-only-token'); }
+    catch (error) { shutdownError = error; }
+    const posts = wire.filter(row => row.action === 'shutdown');
+    assert.equal(posts.length, 1);
+    assert.equal(posts[0].value.instanceId, failed.instanceId);
+    assert.equal(posts[0].value.shutdownComplete, false);
+    assert.deepEqual(posts[0].value.retirement, failed.retirement);
+    assert.equal(shutdownError, undefined, 'historical confirmed cleanup must not reject final shutdown');
+    const last = wire.at(-1);
+    assert.equal(last.method, 'GET'); assert.equal(last.value.instanceId, failed.instanceId);
+    assert.equal(last.value.shutdownComplete, true);
+    assert.equal(last.value.retirement.resourcesRetired, true);
+    assert.deepEqual(trace, ['install', 'dispose', 'cleanup', 'dispose']);
+  } finally {
+    await control.shutdown();
+    await fixture.close();
+    t.diagnostic(JSON.stringify({ trace, wire }));
+  }
 });
 
 test('missing join, retirement errors and changed instance never confirm shutdown', async () => {
