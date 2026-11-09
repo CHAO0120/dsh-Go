@@ -114,7 +114,9 @@ void main() {
         if (closed != true) fail('Resource cleanup failed; see the original runAsync exception');
       }
     }();
-    addTearDown(close);
+    if (clock == null) {
+      addTearDown(close);
+    }
     try {
       container.listen(phoneTurnEndProvider, (_, _) {});
       container.listen(chatAlertsProvider, (_, _) {});
