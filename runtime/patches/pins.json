@@ -1773,6 +1773,10 @@
         "node_modules/@deepseek-ai/dsh-working-directory/lib/index.js": {
           "before": "ee0876bbfa11c8d52dcdb663810d6a042c65274f1088bca3f6dd7b8446ed8e09",
           "after": "167c67034bde5de5862e99ddd27a42d6d690fc42d2cc8748ed58cedf06c01b50"
+        },
+        "node_modules/@deepseek-ai/dsh-fs-local/lib/index.js": {
+          "before": "abb3a2fbb7beb840504a28c011bf00652fe048638ea547a47468106052c37b7a",
+          "after": "6a071078387ad540c6fc9727500f73941404be5cfd77c8711a49719693255e7e"
         }
       }
     }

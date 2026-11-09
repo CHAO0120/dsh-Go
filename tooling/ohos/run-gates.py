@@ -781,6 +781,44 @@ def main():
                   'workspace-frontend-entry.py', 'workspace-frontend-entry.mjs',
                   'workspace-frontend-instrumentation.mjs')],
               scope='Actual DSH bin/sole preload/WorkspaceRegistry/WorkingDirectory/public shell after real ETS FD publication; explicit SDK/storage/session-projection seams; no full chat, SDK, device, Linux guest or durable-storage claim')
+    # Reuse the five existing authority-entry native outputs; these two groups
+    # neither build native code nor prepare/copy a payload.
+    for workspace_read_mode in ('plain', 'jitless'):
+        g.run('workspace-read-' + workspace_read_mode,
+              lambda m=workspace_read_mode: g.py(
+                  rt + 'workspace-read-entry.py',
+                  '--source', s, '--payload', payload(), '--node', node(),
+                  '--manifest', o / 'composed/manifest.json',
+                  '--typescript-prefix', p('typescript_prefix'),
+                  '--native-directory', o / 'workspace-authority-entry/native',
+                  '--publication-fixture', native() / 'libpublication-test-linked.so',
+                  '--out', o / ('workspace-read-' + m),
+                  *(['--jitless'] if m == 'jitless' else [])),
+              needs=('compose', 'workspace-authority-entry', 'native-publication-build'),
+              timeout=120,
+              tests=[rt + name for name in (
+                  'workspace-read-entry.py', 'workspace-read-entry.mjs',
+                  'workspace-read-instrumentation.mjs')],
+              scope='Three ordinary default read calls: physical whole, selected logical whole, same small logical file streamed; actual services/tool pipeline and ETS FD publication with explicit SDK/in-memory Agent fixtures; no full chat, SDK/device, Linux guest or persistent-session claim')
+    # Reuse the five existing authority-entry native outputs; these two groups
+    # neither build native code nor prepare/copy a payload.
+    for workspace_directory_mode in ('plain', 'jitless'):
+        g.run('workspace-directory-' + workspace_directory_mode,
+              lambda m=workspace_directory_mode: g.py(
+                  rt + 'workspace-directory-entry.py',
+                  '--source', s, '--payload', payload(), '--node', node(),
+                  '--manifest', o / 'composed/manifest.json',
+                  '--typescript-prefix', p('typescript_prefix'),
+                  '--native-directory', o / 'workspace-authority-entry/native',
+                  '--publication-fixture', native() / 'libpublication-test-linked.so',
+                  '--out', o / ('workspace-directory-' + m),
+                  *(['--jitless'] if m == 'jitless' else [])),
+              needs=('compose', 'workspace-authority-entry', 'native-publication-build'),
+              timeout=120,
+              tests=[rt + name for name in (
+                  'workspace-directory-entry.py', 'workspace-directory-entry.mjs',
+                  'workspace-directory-instrumentation.mjs')],
+              scope='Two ordinary directory API-service calls: physical root positive control and selected logical root; actual SessionStore/registered lookup/WorkspaceFiles and ETS FD publication with explicit SDK doubles; no full RPC/UI/watch, SDK/device or persistent-session claim')
     g.run('host-layout', lambda: g.py(rt + 'host-layout.py', '--node', node(), '--native-library-dir', o / 'round-native', '--publication-fixture', native() / 'libpublication-test-linked.so', '--assembled-payload', payload(), '--out', o / 'host-layout'), needs=('compose', 'native-publication-build', 'native-static-resources', 'round-native-libraries'), timeout=240)
     g.run('host-safe-profile', lambda: g.py(rt + 'host-safe-profile.py', '--node', node(), '--native-library-dir', o / 'round-native', '--publication-fixture', native() / 'libpublication-test-linked.so', '--assembled-payload', payload(), '--out', o / 'host-safe-profile'), needs=('compose', 'native-publication-build', 'round-native-libraries'), timeout=600, tests=[rt + 'host-safe-profile.py'], scope='Actual Host safe argv and original public round; not OH device restart')
     for label, host in [('loopback', '127.0.0.1'), ('owned-http', g.config.get('ownedHttpHost', ''))]:
