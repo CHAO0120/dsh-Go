@@ -121,7 +121,7 @@ class PhoneAppRulesPage extends ConsumerWidget {
       final confirmed = await confirmLoosening(context, label: policies.labelFor(added.$1), from: current);
       if (!confirmed || !context.mounted) return;
     }
-    final ok = await ref.read(phoneProvider.notifier).setRule(added.$1, added.$2);
+    final ok = await ref.read(phoneProvider.notifier).setRule(added.$1, added.$2, expectedFrom: current);
     if (!ok && context.mounted) {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(context.l10n.phoneAppRulesSaveFailed)));
     }
@@ -187,7 +187,7 @@ class _AppRow extends ConsumerWidget {
       final ok = await confirmLoosening(context, label: label, from: current);
       if (!ok || !context.mounted) return;
     }
-    final saved = await ref.read(phoneProvider.notifier).setRule(package, next);
+    final saved = await ref.read(phoneProvider.notifier).setRule(package, next, expectedFrom: current);
     if (!saved && context.mounted) {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(context.l10n.phoneAppRulesSaveFailed)));
     }

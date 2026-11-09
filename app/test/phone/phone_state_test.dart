@@ -159,14 +159,14 @@ void main() {
         return true;
       };
       final first = ruleFirst
-          ? controller.setRule(package, AppRule.deny)
+          ? controller.setRule(package, AppRule.deny, expectedFrom: AppRule.normal)
           : controller.setConfirmMode(PhoneConfirmMode.task);
       Future<bool>? second;
       try {
         await entered.future;
         second = ruleFirst
             ? controller.setConfirmMode(PhoneConfirmMode.task)
-            : controller.setRule(package, AppRule.deny);
+            : controller.setRule(package, AppRule.deny, expectedFrom: AppRule.normal);
         release.complete();
         expect(await first, isTrue);
         expect(await second, isTrue);
@@ -209,11 +209,11 @@ void main() {
       }
       return true;
     };
-    final first = controller.setRule(firstPackage, AppRule.deny);
+    final first = controller.setRule(firstPackage, AppRule.deny, expectedFrom: AppRule.normal);
     Future<bool>? second;
     try {
       await entered.future;
-      second = controller.setRule(secondPackage, AppRule.confirmEachStep);
+      second = controller.setRule(secondPackage, AppRule.confirmEachStep, expectedFrom: AppRule.normal);
       release.complete();
       expect(await first, isFalse);
       expect(await second, isTrue);
@@ -261,9 +261,9 @@ void main() {
         }
         return true;
       };
-      first = controller.setRule('org.example.started', AppRule.deny);
+      first = controller.setRule('org.example.started', AppRule.deny, expectedFrom: AppRule.normal);
       await entered.future;
-      second = controller.setRule('org.example.queued', AppRule.deny);
+      second = controller.setRule('org.example.queued', AppRule.deny, expectedFrom: AppRule.normal);
       c.dispose();
       disposed = true;
       release.complete();
@@ -286,6 +286,65 @@ void main() {
       }
     }
   });
+
+  for (final (expected, actual, target, accepted) in [
+    (AppRule.confirmEachStep, AppRule.deny, AppRule.confirmEachStep, false),
+    (AppRule.normal, AppRule.confirmEachStep, AppRule.normal, false),
+    (AppRule.deny, AppRule.confirmEachStep, AppRule.normal, false),
+    (AppRule.normal, AppRule.confirmEachStep, AppRule.deny, true),
+    (AppRule.deny, AppRule.normal, AppRule.confirmEachStep, true),
+    (AppRule.confirmEachStep, AppRule.deny, AppRule.deny, true),
+    (AppRule.deny, AppRule.deny, AppRule.confirmEachStep, true),
+    (AppRule.confirmEachStep, AppRule.confirmEachStep, AppRule.normal, true),
+  ]) {
+    test('queued rule checks its original basis: $expected / $actual / $target', () async {
+      const package = 'org.example.basis';
+      final native = FakePhoneNative(policies: {
+        'denyPackages': [if (expected == AppRule.deny) package],
+        'confirmEveryWritePackages': [if (expected == AppRule.confirmEachStep) package],
+      })..install();
+      final c = make();
+      final controller = c.read(phoneProvider.notifier);
+      await controller.refreshPolicies();
+      final entered = Completer<void>();
+      final release = Completer<void>();
+      final writes = <Map<String, Object?>>[];
+      native.onSetPolicies = (args) async {
+        writes.add(args);
+        if (writes.length == 1) {
+          entered.complete();
+          await release.future;
+        }
+        return true;
+      };
+      final first = controller.setRule(package, actual, expectedFrom: expected);
+      Future<bool>? second;
+      try {
+        await entered.future;
+        second = controller.setRule(package, target, expectedFrom: expected);
+        release.complete();
+        expect(await first, isTrue);
+        expect(await second, accepted);
+        expect(writes, hasLength(accepted ? 2 : 1));
+        expect(c.read(phoneProvider).policies!.ruleFor(package), accepted ? target : actual);
+        // A local refusal must release the same tail for the next legal intent.
+        expect(
+          await controller.setRule(package, AppRule.deny, expectedFrom: accepted ? target : actual),
+          isTrue,
+        );
+        expect(writes, hasLength(accepted ? 3 : 2));
+        expect(writes.last['denyPackages'], contains(package));
+      } finally {
+        if (!release.isCompleted) {
+          release.complete();
+        }
+        await first;
+        if (second != null) {
+          await second;
+        }
+      }
+    });
+  }
 
   test('different app rule writes preserve both native lists while the first reply is pending', () async {
     const firstPackage = 'org.example.first';
@@ -314,11 +373,11 @@ void main() {
       }
       return true;
     };
-    final first = controller.setRule(firstPackage, AppRule.deny);
+    final first = controller.setRule(firstPackage, AppRule.deny, expectedFrom: AppRule.normal);
     Future<bool>? second;
     try {
       await entered.future;
-      second = controller.setRule(secondPackage, AppRule.confirmEachStep);
+      second = controller.setRule(secondPackage, AppRule.confirmEachStep, expectedFrom: AppRule.normal);
       release.complete();
       expect(await first, isTrue);
       expect(await second, isTrue);
@@ -542,7 +601,7 @@ void main() {
     final c = make();
     c.read(phoneProvider);
     await settle();
-    final ok = await c.read(phoneProvider.notifier).setRule('com.tencent.mm', AppRule.normal);
+    final ok = await c.read(phoneProvider.notifier).setRule('com.tencent.mm', AppRule.normal, expectedFrom: AppRule.confirmEachStep);
     expect(ok, isTrue);
     expect(native.callsOf('setPolicies').single.arguments, {
       'denyPackages': ['com.eg.android.AlipayGphone', 'com.unionpay', 'cmb.pb', 'com.icbc'],
@@ -554,7 +613,7 @@ void main() {
     expect(s.retained, ['com.tencent.mm']);
 
     native.accept = false;
-    final refused = await c.read(phoneProvider.notifier).setRule('cmb.pb', AppRule.normal);
+    final refused = await c.read(phoneProvider.notifier).setRule('cmb.pb', AppRule.normal, expectedFrom: AppRule.deny);
     expect(refused, isFalse);
     expect(c.read(phoneProvider).policies!.ruleFor('cmb.pb'), AppRule.deny);
   });

@@ -315,10 +315,14 @@ class PhoneController extends Notifier<PhoneState> {
 
   Future<PhoneResult> adbConnect({int? port}) => _thenRefresh(_channel.adbConnect(port: port));
 
-  /// Changes one app's rule; false when the native side refused (nothing changes).
-  Future<bool> setRule(String package, AppRule rule) => _serializePolicyWrite(() async {
+  /// Changes one app's rule. Refuses a newly looser change if its UI basis changed,
+  /// or when the native side refuses; neither case updates the local policy.
+  Future<bool> setRule(String package, AppRule rule, {required AppRule expectedFrom}) => _serializePolicyWrite(() async {
     final current = state.policies;
     if (current == null) return false;
+    final actual = current.ruleFor(package);
+    // AppRule is ordered deny, confirmEachStep, normal (least to most permissive).
+    if (actual != expectedFrom && rule.index > actual.index) return false;
     final next = current.withRule(package, rule);
     final ok = await _channel.setPolicies(next);
     if (!ok || !ref.mounted) return false;

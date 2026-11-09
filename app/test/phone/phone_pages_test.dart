@@ -2,6 +2,8 @@
 // set-ups; the channel picker itself is dnd_channels_test.dart), 应用名单 with
 // its risk notes.
 
+import 'dart:async';
+
 import 'package:dsh_app/state/phone_state.dart';
 import 'package:dsh_app/ui/common/app_sheet.dart';
 import 'package:dsh_app/ui/common/ask_ai.dart';
@@ -403,6 +405,87 @@ void main() {
       final args = native.callsOf('setPolicies').single.arguments as Map;
       expect(args['confirmEveryWritePackages'], contains(package));
       expect(phoneOf(tester).policies!.ruleFor(package), AppRule.confirmEachStep);
+    });
+
+    testWidgets('a queued add cannot loosen an intervening deny without confirmation', (tester) async {
+      const package = 'org.example.queuedrule';
+      final native = FakePhoneNative(policies: {
+        'denyPackages': <String>[],
+        'confirmEveryWritePackages': [package],
+      });
+      await pumpPhone(tester, const PhoneAppRulesPage(), native: native);
+      final entered = Completer<void>();
+      final release = Completer<void>();
+      final writes = <Map<String, Object?>>[];
+      var acceptedDeny = false;
+      final subscription = containerOf(tester).listen(phoneProvider, (previous, next) {
+        if (next.policies?.ruleFor(package) == AppRule.deny) {
+          acceptedDeny = true;
+        }
+      });
+      native.onSetPolicies = (args) async {
+        writes.add(args);
+        if (writes.length == 1) {
+          entered.complete();
+          await release.future;
+        }
+        return true;
+      };
+      Future<void> addRule({required bool confirm}) async {
+        await tester.tap(find.text('添加 App'));
+        await tester.pumpAndSettle();
+        await tester.enterText(find.byType(TextField), package);
+        if (confirm) {
+          await tester.tap(find.descendant(of: find.byType(AlertDialog), matching: find.text('每一步都确认')));
+        }
+        await tester.pump();
+        await tester.tap(find.descendant(of: find.byType(AlertDialog), matching: find.text('添加')));
+        await tester.pumpAndSettle();
+      }
+
+      try {
+        expect(phoneOf(tester).policies!.ruleFor(package), AppRule.confirmEachStep);
+        await addRule(confirm: false);
+        await entered.future;
+        expect(writes.single['denyPackages'], contains(package));
+        expect(find.byType(AlertDialog), findsNothing);
+        expect(find.byType(RiskNoticeSheet), findsNothing);
+        expect(phoneOf(tester).policies!.ruleFor(package), AppRule.confirmEachStep);
+
+        // Both invocations use the still-mounted page, not an AppRow that moved.
+        await addRule(confirm: true);
+        expect(find.byType(AlertDialog), findsNothing);
+        expect(find.byType(RiskNoticeSheet), findsNothing);
+        expect(phoneOf(tester).policies!.ruleFor(package), AppRule.confirmEachStep);
+        release.complete();
+        await tester.pumpAndSettle();
+        expect(acceptedDeny, isTrue);
+        // No risk acceptance has occurred. A second native write is premature.
+        expect(writes, hasLength(1));
+        expect(phoneOf(tester).policies!.ruleFor(package), AppRule.deny);
+        expect(find.text('没有保存成功，稍后再试'), findsOneWidget);
+        await addRule(confirm: true);
+        expect(find.byType(RiskNoticeSheet), findsOneWidget);
+        expect(writes, hasLength(1));
+        await tester.tap(find.descendant(of: find.byType(SheetHeader), matching: find.byType(SheetIconButton)));
+        await tester.pumpAndSettle();
+        expect(writes, hasLength(1));
+        await addRule(confirm: true);
+        await tester.tap(find.text('我知道风险，仍然修改'));
+        await tester.pumpAndSettle();
+        expect(writes, hasLength(2));
+        expect(writes.last['confirmEveryWritePackages'], contains(package));
+        expect(phoneOf(tester).policies!.ruleFor(package), AppRule.confirmEachStep);
+      } finally {
+        if (!release.isCompleted) {
+          release.complete();
+        }
+        try {
+          await tester.pumpAndSettle();
+        } finally {
+          subscription.close();
+        }
+      }
     });
 
     testWidgets('unreadable list says so', (tester) async {
