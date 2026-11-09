@@ -467,8 +467,11 @@ internal class ControlOverlay(private val service: AccessibilityService) : UserG
                     placeCapsule(p)
                     ball?.let { b -> if (ballShown) b.move(b.dockPos()) }
                 }
-                confirmCard?.let { place(it.root, it.params, top = false) }
                 handoffCard?.let { place(it.root, it.params, top = true) }
+            }
+            confirmCard?.let {
+                place(it.root, it.params,
+                    top = (it.params.gravity and Gravity.VERTICAL_GRAVITY_MASK) == Gravity.TOP)
             }
         }
     }
@@ -811,10 +814,17 @@ internal class ControlOverlay(private val service: AccessibilityService) : UserG
         if (Looper.myLooper() != Looper.getMainLooper() || !p.live || confirmCard != null || handoffCard != null) return null
         val root = FrameLayout(service).apply {
             setPadding(dp(6), dp(6), dp(6), dp(6))
-            addView(PhonePromptUi.card(service, p), FrameLayout.LayoutParams(
-                FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT))
         }
         val layout = params(top = false, keepScreenOn = true)
+        val moveHandoff: () -> Unit = {
+            if (p.live && sharedPrompt === p && confirmCard?.root === root) {
+                val top = (layout.gravity and Gravity.VERTICAL_GRAVITY_MASK) != Gravity.TOP
+                layout.gravity = (if (top) Gravity.TOP else Gravity.BOTTOM) or Gravity.CENTER_HORIZONTAL
+                place(root, layout, top)
+            }
+        }
+        root.addView(PhonePromptUi.card(service, p, moveHandoff), FrameLayout.LayoutParams(
+            FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT))
         place(root, layout, top = false)
         if (!p.live || !add(root, layout)) return null
         if (!p.markShown()) { remove(root); return null }

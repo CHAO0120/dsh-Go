@@ -58,7 +58,7 @@ internal object PhonePromptUi {
         PromptChoice.CONTINUE -> R.string.phone_prompt_continue
     })
 
-    fun card(ctx: Context, p: PromptPresentation): View {
+    fun card(ctx: Context, p: PromptPresentation, moveHandoff: (() -> Unit)? = null): View {
         val dark = ctx.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK == Configuration.UI_MODE_NIGHT_YES
         val bg = if (dark) 0xFF232730.toInt() else 0xFFFBFCFF.toInt()
         val ink = if (dark) 0xFFE6E9F0.toInt() else 0xFF1E232E.toInt()
@@ -95,6 +95,31 @@ internal object PhonePromptUi {
         tick.run()
         p.ticket.onFinished { main.removeCallbacks(tick) }
         val armedAt = SystemClock.elapsedRealtime() + 600
+        if (p.ticket.content.kind == PromptKind.HANDOFF && moveHandoff != null) {
+            val moveButton = PromptButton(ctx, armedAt) { p.live }.apply {
+                text = AppStrings.get(ctx, R.string.phone_prompt_move_edge)
+                textSize = 15f
+                typeface = Typeface.DEFAULT_BOLD
+                setTextColor(ink)
+                minimumHeight = dp(ctx, 48)
+                minimumWidth = dp(ctx, 48)
+                setPadding(dp(ctx, 16), dp(ctx, 10), dp(ctx, 16), dp(ctx, 10))
+                background = RippleDrawable(
+                    ColorStateList.valueOf(if (dark) 0x2297B1F0 else 0x224B67B4),
+                    GradientDrawable().apply {
+                        cornerRadius = dp(ctx, 14).toFloat()
+                        setColor(bg)
+                        setStroke(dp(ctx, 1), ink)
+                    },
+                    null,
+                )
+                setOnClickListener { moveHandoff() }
+            }
+            content.addView(moveButton, 0, LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+            ))
+        }
         for (choice in p.ticket.content.choices) {
             val primary = choice in setOf(PromptChoice.ALLOW_ONCE, PromptChoice.ALLOW_APP, PromptChoice.ALLOW_TASK, PromptChoice.ALLOW_VISUAL,
                 PromptChoice.OPEN, PromptChoice.CONTINUE)

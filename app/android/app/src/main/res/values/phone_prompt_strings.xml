@@ -12,6 +12,7 @@
     <string name="phone_prompt_later">Later</string>
     <string name="phone_prompt_stop">Stop task</string>
     <string name="phone_prompt_continue">Continue</string>
+    <string name="phone_prompt_move_edge">Move to other edge</string>
     <string name="phone_prompt_remaining">%1$d s remaining · no response will not allow an action</string>
     <string name="phone_prompt_result_channel">Phone control results</string>
     <string name="phone_prompt_result_title">DSH Go · Task complete</string>

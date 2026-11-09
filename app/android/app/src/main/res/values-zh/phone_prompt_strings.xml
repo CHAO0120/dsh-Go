@@ -12,6 +12,7 @@
     <string name="phone_prompt_later">稍后</string>
     <string name="phone_prompt_stop">停止任务</string>
     <string name="phone_prompt_continue">继续</string>
+    <string name="phone_prompt_move_edge">移到另一侧</string>
     <string name="phone_prompt_remaining">剩余 %1$d 秒 · 未回应不会授权</string>
     <string name="phone_prompt_result_channel">手机操控结果</string>
     <string name="phone_prompt_result_title">DSH Go · 任务完成</string>
