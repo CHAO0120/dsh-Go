@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Private Linux guest command transport. The host owns workspace/mount leases."""
+"""Private Linux guest command transport. The host decides which App directories a job sees."""
 import argparse
 import base64
 import ctypes
@@ -20,6 +20,12 @@ MAX_LINE = 131072
 WINDOW = 65536
 CHUNK = 4096
 UID = GID = 60081
+# App directories exported over virtio-9p, one tag each, mounted once per boot
+# in a root-only directory. Jobs see them only through their own bind mounts.
+EXPORTS = '/run/dsh-9p'
+EXPORT_OPTIONS = 'trans=virtio,version=9p2000.L,cache=none,access=any'
+MS_RDONLY, MS_NOSUID, MS_NODEV, MS_REMOUNT, MS_BIND, MS_REC, MS_PRIVATE = 1, 2, 4, 32, 4096, 16384, 1 << 18
+MNT_DETACH = 2
 
 
 def write_all(fd, data):
@@ -82,6 +88,40 @@ def drop_privileges():
     os.setresuid(UID, UID, UID)
 
 
+def mount(source, target, fstype, flags, data=None):
+    libc = ctypes.CDLL(None, use_errno=True)
+    libc.mount.argtypes = [ctypes.c_char_p, ctypes.c_char_p, ctypes.c_char_p, ctypes.c_ulong, ctypes.c_char_p]
+    encode = lambda value: None if value is None else value.encode()
+    if libc.mount(encode(source), target.encode(), encode(fstype), flags, encode(data)) != 0:
+        # Not an OSError: a missing path here is no missing command (exit 126).
+        raise RuntimeError(f'mount {target}: {os.strerror(ctypes.get_errno())}')
+
+
+def mount_workspaces(mounts):
+    """Give this job a private mount namespace holding only its App directories,
+    at their host paths. Read-only views are enforced by the guest kernel."""
+    if not mounts:
+        return
+    tags = sorted({item['tag'] for item in mounts})
+    for tag in tags:
+        base = os.path.join(EXPORTS, tag)
+        if not os.path.ismount(base):
+            os.makedirs(base, exist_ok=True)
+            os.chmod(EXPORTS, 0o700)
+            mount(tag, base, '9p', MS_NOSUID | MS_NODEV, EXPORT_OPTIONS)
+    os.unshare(os.CLONE_NEWNS)
+    mount(None, '/', None, MS_REC | MS_PRIVATE)
+    for item in mounts:
+        os.makedirs(item['target'], exist_ok=True)
+        mount(os.path.join(EXPORTS, item['tag'], item['source']), item['target'], None, MS_BIND)
+        if item['readOnly']:
+            mount(None, item['target'], None, MS_REMOUNT | MS_BIND | MS_RDONLY | MS_NOSUID | MS_NODEV)
+    libc = ctypes.CDLL(None, use_errno=True)
+    for tag in tags:
+        if libc.umount2(os.path.join(EXPORTS, tag).encode(), MNT_DETACH) != 0:
+            raise RuntimeError(f'umount {tag}: {os.strerror(ctypes.get_errno())}')
+
+
 def namespace_init(spec, info, stdin, stdout, stderr):
     if os.getpid() != 1:
         raise RuntimeError('job init did not enter its own PID namespace')
@@ -92,6 +132,7 @@ def namespace_init(spec, info, stdin, stdout, stderr):
         os.dup2(stderr, 2)
         close_fds({0, 1, 2, info})
         try:
+            mount_workspaces(spec['mounts'])
             os.chdir(spec['cwd'])
             drop_privileges()
             private_frame(info, 'admitted')
@@ -164,7 +205,22 @@ def validate_start(command):
     if not isinstance(env, dict) or any(not isinstance(k, str) or not k or '=' in k or '\0' in k
                                        or not isinstance(v, str) or '\0' in v for k, v in env.items()):
         raise ValueError('env must contain NUL-free string entries')
-    return {'argv': argv, 'cwd': cwd, 'env': env}
+    mounts = command.get('mounts', [])
+    if not isinstance(mounts, list) or len(mounts) > 4 or not all(valid_mount(item) for item in mounts):
+        raise ValueError('mounts must name App exports and absolute guest paths')
+    return {'argv': argv, 'cwd': cwd, 'env': env, 'mounts': mounts}
+
+
+def valid_mount(item):
+    if not isinstance(item, dict) or set(item) != {'tag', 'source', 'target', 'readOnly'}:
+        return False
+    source, target = item['source'], item['target']
+    return (isinstance(item['tag'], str) and re.fullmatch('dsh[0-3]', item['tag']) is not None
+            and isinstance(source, str) and '\0' not in source
+            and (source == '' or all(part not in ('', '.', '..') for part in source.split('/')))
+            and isinstance(target, str) and '\0' not in target and target != '/'
+            and target.startswith('/') and os.path.normpath(target) == target
+            and type(item['readOnly']) is bool)
 
 
 class Agent:
@@ -376,7 +432,8 @@ class Agent:
             self.active = None
 
     def run(self):
-        self.frame('opened', capabilities={'streamingStdin': True, 'pidNamespace': True, 'workspaceLease': False})
+        self.frame('opened', capabilities={'streamingStdin': True, 'pidNamespace': True, 'workspaceLease': False,
+                                           'mounts': True})
         try:
             while not self.closed:
                 reads = [0, self.wake_r]

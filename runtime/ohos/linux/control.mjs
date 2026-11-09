@@ -1,10 +1,11 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { STATUS_CODES } from 'node:http';
 import { fileURLToPath } from 'node:url';
+import { setTimeout as delay } from 'node:timers/promises';
 import { isMainThread } from 'node:worker_threads';
 import { linuxHostPaths } from './host-paths.mjs';
 import { deriveLinuxJobDiagnostic } from './job-diagnostics.mjs';
-import { LinuxProxyPolicy } from './proxy.mjs';
+import { LinuxProxyPolicy, withoutInheritedProxy } from './proxy.mjs';
 
 const route = '/dsh-go/v1/linux';
 const fail = (code, message, status = 409) => Object.assign(new Error(message), { code, status });
@@ -12,6 +13,9 @@ const requestError = message => fail('ERR_OHOS_LINUX_REQUEST', message, 400);
 const codeOf = cause => /^[A-Z][A-Z0-9_]{0,127}$/.test(cause?.code ?? '') ? cause.code : 'ERR_OHOS_LINUX_CONTROL';
 const plain = value => value && typeof value === 'object' && !Array.isArray(value);
 const bounded = (value, limit, nul = false) => typeof value === 'string' && Buffer.byteLength(value) <= limit && (nul || !value.includes('\0'));
+// A routed command that cannot run ends with this shell status and message.
+const routed = (exitCode, code, message) => Object.assign(new Error(message), { code, exitCode });
+const settings = '设置 · 能力 · Linux 环境';
 const emptyOutput = () => ({ encoding: 'base64', data: '', totalBytes: 0, retainedBytes: 0, truncated: false });
 const output = collector => {
   if (!collector) return emptyOutput();
@@ -47,13 +51,13 @@ function runRequest(body) {
   return { argv: [...body.argv], cwd: body.cwd, env: Object.fromEntries(Object.entries(env).sort(([a], [b]) => a.localeCompare(b))), stdin };
 }
 
-/** One explicit App entry; it does not add Linux to plugin command routing. */
+/** One explicit App entry, and the owner of agent/plugin commands routed into the guest. */
 export class LinuxControl {
   #instanceId = randomUUID(); #attemptId = null; #phase = 'disabled'; #enabled = false;
   #paths; #assets; #loadModule; #owner; #backend; #installAbort; #installPromise;
   #disablePromise; #shutdownPromise; #closing = false; #shutdownComplete = false;
   #failed = false; #unknown = false; #lastError = null; #progress = null; #retirement = null;
-  #job; #nextRequestId = 1; #lastRequestDigest;
+  #job; #nextRequestId = 1; #lastRequestDigest; #routed = null; #exports = Object.freeze([]);
   #proxy = new LinuxProxyPolicy();
 
   constructor({ hostPaths, assetsDirectory } = {}, internals = {}) {
@@ -61,6 +65,16 @@ export class LinuxControl {
     // Test-only constructor seam. The production factory below exposes no
     // caller-selected manifest, directory, module, environment or native path.
     this.#loadModule = internals.loadModule ?? (() => import('./owner.mjs'));
+  }
+  /** App directories every VM of this attempt exports over virtio-9p. */
+  get exports() { return this.#exports; }
+  exportWorkspaces(roots) {
+    if (!Array.isArray(roots) || roots.length > 4 || !roots.every(root => typeof root === 'string' && root.startsWith('/') && !root.includes('\0'))) {
+      throw new TypeError('At most four absolute App directories can be exported');
+    }
+    // The VM learns its exports at boot; a later owner cannot change a started attempt,
+    // and its commands outside those directories are refused as not exported.
+    if (this.#attemptId === null) this.#exports = Object.freeze(roots.map((path, index) => Object.freeze({ tag: 'dsh' + index, path })));
   }
   status() {
     const backendState = this.#backend?.state ?? null;
@@ -144,7 +158,7 @@ export class LinuxControl {
       try { manifest = await module.loadLinuxInstallationManifest({ assetsDirectory: this.#assets }); }
       catch (cause) { throw Object.assign(fail('ERR_OHOS_LINUX_ASSETS_UNAVAILABLE', 'Signed Linux assets are unavailable'), { cause }); }
       signal.throwIfAborted();
-      this.#owner = module.createLinuxInstallationOwner({ ...this.#paths, manifest,
+      this.#owner = module.createLinuxInstallationOwner({ ...this.#paths, manifest, exports: this.#exports,
         onProgress: event => this.#progressEvent(event) });
       const result = await this.#owner.install({ signal });
       this.#backend = result.backend; signal.throwIfAborted();
@@ -163,7 +177,7 @@ export class LinuxControl {
     if (this.#job?.id === body.requestId && digest === this.#lastRequestDigest) return;
     if (body.requestId !== this.#nextRequestId) throw fail('ERR_OHOS_LINUX_REQUEST_REUSED', 'Request identity is old, reused or out of order');
     if (!this.status().admission) throw fail('ERR_OHOS_LINUX_DISABLED', 'Private guest admission is closed');
-    if (this.#job && this.#job.state !== 'settled') throw fail('ERR_OHOS_LINUX_BUSY', 'One private guest job is still live or unknown');
+    if ((this.#job && this.#job.state !== 'settled') || this.#routed) throw fail('ERR_OHOS_LINUX_BUSY', 'One private guest job is still live or unknown');
     if (this.#nextRequestId >= Number.MAX_SAFE_INTEGER) throw fail('ERR_OHOS_LINUX_REQUEST_REUSED', 'Request identity space exhausted');
     const proxy = this.#proxy.forRequest(request.env);
     const handle = this.#backend.spawn({ argv: request.argv, cwd: request.cwd, env: proxy.environment, graceMs: 10000,
@@ -178,8 +192,46 @@ export class LinuxControl {
       job.state = 'unknown'; job.errorCode = codeOf(cause); this.#recordUnknown(cause);
     });
   }
+  /**
+   * Run an agent or plugin command. It waits for a resuming VM, never installs
+   * one. The guest runs one job at a time, shared with runPrivateGuest: a
+   * command waits up to waitMs for that lane and then fails as busy, so a
+   * long-lived server holding it cannot queue every later command forever.
+   */
+  async spawnRouted(spec, { signal, label, waitMs = 10000, resumeMs = 120000 } = {}) {
+    const resumeBy = Date.now() + resumeMs, busyBy = Date.now() + waitMs;
+    for (;;) {
+      signal?.throwIfAborted();
+      const status = this.status(), busy = (this.#job && this.#job.state !== 'settled') || this.#routed;
+      if (status.admission && !busy) break;
+      if (!status.enabled && !this.#closing) throw routed(127, 'ERR_OHOS_LINUX_DISABLED', `Linux 环境未开启：请在 ${settings} 中打开后重试。`);
+      if (!status.admission) {
+        if (status.state === 'installing' && this.#owner?.bootMode === 'install') {
+          throw routed(127, 'ERR_OHOS_LINUX_INSTALLING', `Linux 环境正在首次安装，完成后重试；进度见 ${settings}。`);
+        }
+        if (status.state !== 'installing' || Date.now() >= resumeBy) {
+          throw routed(127, 'ERR_OHOS_LINUX_UNAVAILABLE', `Linux 环境当前不可用（${status.state}${status.lastErrorCode ? '，' + status.lastErrorCode : ''}）：请在 ${settings} 查看，必要时重启 App。`);
+        }
+      } else if (Date.now() >= busyBy) {
+        throw routed(126, 'ERR_OHOS_LINUX_BUSY', `Linux 环境同一时间只运行一个命令，现在被 ${this.#routed?.label ?? '另一个命令'} 占用；请等它结束后重试。`);
+      }
+      await delay(100, undefined, { signal });
+    }
+    let env;
+    try { env = this.#proxy.forRequest(withoutInheritedProxy(spec.env)).environment; }
+    catch (cause) { throw routed(126, codeOf(cause), `命令自带的代理变量与 ${settings} 的代理设置冲突；去掉它们，或把代理改回“继承”。`); }
+    const handle = this.#backend.spawn({ ...spec, env });
+    const job = this.#routed = { handle, label };
+    handle.done.catch(() => {}).finally(() => { if (this.#routed === job) this.#routed = null; });
+    return handle;
+  }
   #recordUnknown(cause) { this.#unknown = true; this.#lastError = codeOf(cause); }
   async #drainJob() {
+    const routedJob = this.#routed?.handle;
+    if (routedJob) {
+      routedJob.terminate('SIGTERM');
+      if (await routedJob.waitForExit() !== true) throw fail('ERR_OHOS_LINUX_UNKNOWN', 'Routed job release was not confirmed');
+    }
     const job = this.#job;
     if (!job || job.state === 'settled') return;
     if (!job.cancelRequested) { job.cancelRequested = true; job.handle.terminate('SIGTERM'); }
