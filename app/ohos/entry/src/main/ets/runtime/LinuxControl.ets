@@ -205,7 +205,9 @@ export class LinuxControl {
     // This is a bounded observation window, never a synthetic completion ACK.
     const deadline = Date.now() + 180000;
     while (!current.shutdownComplete) {
-      if (current.instanceId !== instance || current.retirement !== null || Date.now() >= deadline) {
+      // Earlier installation cleanup is not the final shutdown acknowledgement.
+      if (current.instanceId !== instance ||
+          (current.retirement !== null && !current.retirement.resourcesRetired) || Date.now() >= deadline) {
         throw failure('ohos_linux_shutdown_unconfirmed');
       }
       await new Promise<void>((resolve): void => { setTimeout(resolve, 250); });

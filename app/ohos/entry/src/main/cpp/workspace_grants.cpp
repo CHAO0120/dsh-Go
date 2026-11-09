@@ -32,6 +32,44 @@ int dsh_workspace_stat(void* lease,const char* path,DshWorkspaceStat* out){retur
  const auto st=Lease(lease).Stat(Path(path));
  *out={static_cast<uint64_t>(st.st_size),static_cast<uint64_t>(st.st_ino),static_cast<uint64_t>(st.st_dev),static_cast<uint32_t>(st.st_mode),
   S_ISREG(st.st_mode)?1u:S_ISDIR(st.st_mode)?2u:S_ISLNK(st.st_mode)?3u:4u,st.st_mtim.tv_sec*1000.0+st.st_mtim.tv_nsec/1000000.0};return 0;});}
+namespace {
+template<class Integer> int64_t StatSeconds(Integer value){
+ static_assert(std::numeric_limits<Integer>::is_integer&&std::numeric_limits<Integer>::digits<=64,"seconds exceed exact stat ABI");
+ if constexpr(!std::numeric_limits<Integer>::is_signed){
+  if(value>static_cast<uint64_t>(INT64_MAX))throw dsh::GrantError("ERR_WORKSPACE_LIMIT");
+ }else{static_assert(std::numeric_limits<Integer>::digits<=63,"signed seconds exceed exact stat ABI");}
+ return static_cast<int64_t>(value);
+}
+DshWorkspaceStatExactV1 ExactStat(const struct stat& st){
+ const auto mn=dsh::grant_detail::StatUnsigned(st.st_mtim.tv_nsec),cn=dsh::grant_detail::StatUnsigned(st.st_ctim.tv_nsec);
+ if(mn>999999999||cn>999999999)throw dsh::GrantError("ERR_WORKSPACE_LIMIT");
+ const auto mode=dsh::grant_detail::StatUnsigned(st.st_mode);
+ if(mode>UINT32_MAX)throw dsh::GrantError("ERR_WORKSPACE_LIMIT");
+ return {1,0,dsh::grant_detail::StatUnsigned(st.st_dev),dsh::grant_detail::StatUnsigned(st.st_ino),dsh::grant_detail::StatUnsigned(st.st_size),
+  StatSeconds(st.st_mtim.tv_sec),StatSeconds(st.st_ctim.tv_sec),static_cast<uint32_t>(mn),static_cast<uint32_t>(cn),static_cast<uint32_t>(mode),
+  S_ISREG(st.st_mode)?1u:S_ISDIR(st.st_mode)?2u:S_ISLNK(st.st_mode)?3u:4u};
+}
+}
+int dsh_workspace_stat_exact_v1(void* lease,const char* path,DshWorkspaceStatExactV1* out,size_t out_size){return Call([&]()->int64_t{
+ if(!out||out_size!=sizeof(*out))throw dsh::GrantError("ERR_WORKSPACE_BUFFER");
+ *out=ExactStat(Lease(lease).StatExact(Path(path)));return 0;});}
+int dsh_workspace_edit_input_open_v1(void* lease,const char* path,uint64_t* size){return Call([&]()->int64_t{
+ if(!size)throw dsh::GrantError("ERR_WORKSPACE_BUFFER");
+ *size=Lease(lease).OpenEditInput(Path(path));return 0;});}
+int64_t dsh_workspace_edit_input_read_v1(void* lease,void* data,size_t count){return Call([&]()->int64_t{
+ return Lease(lease).ReadEditInput(data,count);});}
+int dsh_workspace_edit_input_close_v1(void* lease){return Call([&]()->int64_t{Lease(lease).CloseEditInput();return 0;});}
+int dsh_workspace_edit_begin_v1(void* lease,const char* path,uint32_t prior_mode){return Call([&]()->int64_t{Lease(lease).BeginEdit(Path(path),prior_mode);return 0;});}
+int64_t dsh_workspace_edit_write_v1(void* lease,const void* data,size_t count){return Call([&]()->int64_t{return Lease(lease).WriteEdit(data,count);});}
+int dsh_workspace_edit_close_v1(void* lease){return Call([&]()->int64_t{Lease(lease).CloseEdit();return 0;});}
+int dsh_workspace_edit_publish_v1(void* lease){return Call([&]()->int64_t{return Lease(lease).PublishEdit()?1:0;});}
+int dsh_workspace_edit_abort_v1(void* lease){return Call([&]()->int64_t{Lease(lease).AbortEdit();return 0;});}
+int dsh_workspace_move_output_begin_v1(void* lease,const char* path,uint32_t mode,int create_if_absent){return Call([&]()->int64_t{
+ if(create_if_absent!=0&&create_if_absent!=1)throw dsh::GrantError("ERR_WORKSPACE_MODE");
+ Lease(lease).BeginMoveOutput(Path(path),mode,create_if_absent!=0);return 0;});}
+int dsh_workspace_move_output_publish_v1(void* lease,DshWorkspaceMovePublishV1* out,size_t out_size){return Call([&]()->int64_t{
+ if(!out||out_size!=sizeof(*out))throw dsh::GrantError("ERR_WORKSPACE_BUFFER");
+ *out={1,0,0,0};out->staging_removed=Lease(lease).PublishMoveOutput(out->effect)?1:0;return 0;});}
 int dsh_workspace_readdir(void* lease,const char* path,DshWorkspaceEntry callback,void* data){return Call([&]()->int64_t{
  if(!callback)throw dsh::GrantError("ERR_WORKSPACE_BUFFER");
  Lease(lease).Readdir(Path(path),[&](const std::string& name){if(callback(name.data(),name.size(),data)!=0)throw dsh::GrantError("ERR_WORKSPACE_LIST_LIMIT");});return 0;});}

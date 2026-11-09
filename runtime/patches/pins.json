@@ -1763,6 +1763,34 @@
           "before": "828b8e84e5f922d3b3d137ada0be4df3187bc5c82bb51ec3fa3384ca3efbf60b"
         }
       }
+    },
+    "ohos-workspace-grant-paths.diff": {
+      "0.2.2-rc.1": {
+        "node_modules/@deepseek-ai/dsh-workspace/lib/index.js": {
+          "before": "97d891ee0bc2ee8a1867a3c2420cf3ea8787b8000293771244f923de3b362658",
+          "after": "6413e6c3a6d14a5518e3121ab936b599a2a46f40ab603eab39fd383c4067b72a"
+        },
+        "node_modules/@deepseek-ai/dsh-working-directory/lib/index.js": {
+          "before": "ee0876bbfa11c8d52dcdb663810d6a042c65274f1088bca3f6dd7b8446ed8e09",
+          "after": "167c67034bde5de5862e99ddd27a42d6d690fc42d2cc8748ed58cedf06c01b50"
+        },
+        "node_modules/@deepseek-ai/dsh-fs-local/lib/index.js": {
+          "before": "abb3a2fbb7beb840504a28c011bf00652fe048638ea547a47468106052c37b7a",
+          "after": "509e5a9fab8b33473ce7193443321b04244fd8f9e6250549d12fd336ce448bb0"
+        }
+      }
+    },
+    "ohos-workspace-edit.diff": {
+      "0.2.2-rc.1": {
+        "node_modules/@deepseek-ai/dsh-fs-local/lib/index.js": {
+          "before": "509e5a9fab8b33473ce7193443321b04244fd8f9e6250549d12fd336ce448bb0",
+          "after": "c9a0e9fd114af53f4cdef087dc9365193a88623a68fa39cb4c854d18f50a9f67"
+        },
+        "node_modules/@deepseek-ai/dsh-fs-sandbox/lib/index.js": {
+          "before": "f4edd14bf48f8d5bfdea10a61c6651ccde99f2d08a79855746ad2a8d89c6fb73",
+          "after": "08cca0535fa5368693e0f5141d92d0704c823dd1f331ddd9299e376ab49f2ac0"
+        }
+      }
     }
   },
   "schema": 2,
@@ -2004,7 +2032,9 @@
       "ohos-plugin-locale-bom.diff",
       "ohos-effect-dispose-completion.diff",
       "ohos-plugin-linkless.diff",
-      "ohos-mcp-command-router.diff"
+      "ohos-mcp-command-router.diff",
+      "ohos-workspace-grant-paths.diff",
+      "ohos-workspace-edit.diff"
     ]
   }
 }
