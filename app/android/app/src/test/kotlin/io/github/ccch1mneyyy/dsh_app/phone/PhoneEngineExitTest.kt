@@ -19,6 +19,8 @@ class PhoneEngineExitTest {
     private val notifications = AtomicInteger()
     private val workerThreads = mutableListOf<String>()
     private val scrolling = CountDownLatch(1)
+    private val settleRelease = CountDownLatch(1)
+    private val callers = mutableListOf<Thread>()
     private val core = PhoneCore(object : PhoneEnv {
         override fun enabled() = true
         override fun policies() = PhonePolicies()
@@ -64,7 +66,9 @@ class PhoneEngineExitTest {
                 if (Thread.currentThread().isInterrupted) return CollectResult(emptyList(), page - 1, "已停止", null)
                 scrolls.incrementAndGet()
                 scrolling.countDown()
-                CountDownLatch(1).await(700, TimeUnit.MILLISECONDS) // settle
+                // Remain on the first page until retirement interrupts this real worker.
+                // The cleanup release is only for a failed test, never its success path.
+                settleRelease.await()
             }
             return CollectResult(listOf("item"), maxPages, "达到页数上限", null)
         }
@@ -78,7 +82,7 @@ class PhoneEngineExitTest {
 
     private fun call(name: String, block: () -> ToolOutput): Pair<Thread, AtomicReference<ToolOutput>> {
         val out = AtomicReference<ToolOutput>()
-        return thread(name) { out.set(block()) } to out
+        return thread(name) { out.set(block()) }.also { callers += it } to out
     }
 
     private fun thread(name: String, block: () -> Unit) = Thread(block, name).apply { isDaemon = true; start() }
@@ -99,7 +103,14 @@ class PhoneEngineExitTest {
         }
     }
 
-    @After fun close() = core.worker.shutdown()
+    @After fun close() {
+        // JUnit runs this even if an admission/result assertion failed.
+        settleRelease.countDown()
+        core.worker.shutdown()
+        callers.forEach { it.interrupt() }
+        callers.forEach { it.join(5_000) }
+        assertTrue("test callers did not stop", callers.none { it.isAlive })
+    }
 
     @Test fun engineExitStopsARunningCollectAndAQueuedOldCall() {
         val (collector, collected) = call("collect", ::collect)
@@ -110,6 +121,8 @@ class PhoneEngineExitTest {
         engineStopped()
         collector.join(5_000)
         notifier.join(5_000)
+        assertFalse("collect caller did not stop", collector.isAlive)
+        assertFalse("queued caller did not stop", notifier.isAlive)
 
         assertEquals("no page after the engine stopped", 1, scrolls.get())
         assertTrue(collected.get().isError)
@@ -124,6 +137,7 @@ class PhoneEngineExitTest {
         assertTrue(scrolling.await(5, TimeUnit.SECONDS))
         engineStopped()
         collector.join(5_000)
+        assertFalse("collect caller did not stop", collector.isAlive)
 
         val fresh = notifyCall()
         assertFalse(fresh.text, fresh.isError)
