@@ -45,3 +45,63 @@ DSH_WORKSPACE_API int dsh_workspace_ticket_retire(const char* token);
 }
 #endif
 #endif
+
+#ifndef DSH_WORKSPACE_GRANTS_EDIT_ABI_V1
+#define DSH_WORKSPACE_GRANTS_EDIT_ABI_V1
+#ifdef __cplusplus
+extern "C" {
+#endif
+// Additive ABI. DshWorkspaceStat and all legacy symbols above are unchanged.
+// Integral fields are from one stat; consumers must not round through double.
+struct DshWorkspaceStatExactV1 {
+ uint32_t version;uint32_t reserved;
+ uint64_t dev;uint64_t ino;uint64_t size;
+ int64_t mtime_sec;int64_t ctime_sec;
+ uint32_t mtime_nsec;uint32_t ctime_nsec;uint32_t mode;uint32_t type;
+};
+DSH_WORKSPACE_API int dsh_workspace_stat_exact_v1(void* lease,const char* relative,struct DshWorkspaceStatExactV1* out,size_t out_size);
+// One private read-only input slot per lease. Open returns the fstat size of
+// that same descriptor. Read advances by its actual result, at most 1 MiB per
+// call; there is no total cap or imposed EOF/initial-size stopping policy.
+DSH_WORKSPACE_API int dsh_workspace_edit_input_open_v1(void* lease,const char* relative,uint64_t* size);
+DSH_WORKSPACE_API int64_t dsh_workspace_edit_input_read_v1(void* lease,void* buffer,size_t length);
+DSH_WORKSPACE_API int dsh_workspace_edit_input_close_v1(void* lease);
+// Existing-file edit only. prior_mode is the trusted provider's FIRST probe
+// mode & 0777. The caller retains its original guard/read/edit ordering.
+DSH_WORKSPACE_API int dsh_workspace_edit_begin_v1(void* lease,const char* relative,uint32_t prior_mode);
+DSH_WORKSPACE_API int64_t dsh_workspace_edit_write_v1(void* lease,const void* buffer,size_t length);
+// fsync -> prior mode -> checked file close. Does not publish.
+DSH_WORKSPACE_API int dsh_workspace_edit_close_v1(void* lease);
+// A nonnegative result ALWAYS confirms rename committed: 1 means our staging
+// directory was removed, 0 means only its best-effort removal failed. This call
+// never closes auxiliary descriptors after commit. The caller must record the
+// committed fact before subsequent resource cleanup and lease retirement.
+DSH_WORKSPACE_API int dsh_workspace_edit_publish_v1(void* lease);
+// Explicit output cleanup. After publish it closes only auxiliary descriptors;
+// it never removes the target and does not turn a directory-removal diagnostic
+// into an error. Descriptor close failure is an error and makes existing retire
+// remain unconfirmed. No output slot is an idempotent success. Input is separate.
+DSH_WORKSPACE_API int dsh_workspace_edit_abort_v1(void* lease);
+#ifdef __cplusplus
+}
+#endif
+#endif
+
+#ifndef DSH_WORKSPACE_GRANTS_MOVE_ABI_V1
+#define DSH_WORKSPACE_GRANTS_MOVE_ABI_V1
+#ifdef __cplusplus
+extern "C" {
+#endif
+// Additive Move output only; legacy stat/edit layouts and symbols unchanged.
+// Reuses edit write/close/abort on the same lease-owned output slot.
+DSH_WORKSPACE_API int dsh_workspace_move_output_begin_v1(void*,const char*,uint32_t source_mode,int create_if_absent);
+struct DshWorkspaceMovePublishV1 {uint32_t version;uint32_t reserved;uint32_t effect;uint32_t staging_removed;};
+// out remains meaningful on -1: effect0=no final created by this call,
+// effect1=wx final created but possibly incomplete, effect2=complete publication.
+// Complete output does NOT imply descriptor closure or lease retirement.
+// staging_removed concerns only best-effort removal of owned staging entries.
+DSH_WORKSPACE_API int dsh_workspace_move_output_publish_v1(void*,struct DshWorkspaceMovePublishV1*,size_t);
+#ifdef __cplusplus
+}
+#endif
+#endif
