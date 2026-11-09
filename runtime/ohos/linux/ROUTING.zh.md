@@ -17,7 +17,9 @@ bash -c '<脚本>'（虚拟 shell Worker）
 
 `bash`、`sh`、`rg`、`git`、`node` 仍在虚拟运行时。转发命令按 just-bash 语句缓冲：命令结束后一次交回 stdout/stderr（合计上限 64 MiB，超出即取消并报 `ERR_OHOS_LINUX_OUTPUT_LIMIT`），退出码原样，被信号结束时按 shell 惯例为 128+N。stdin 为该语句的批量输入。`ctx.signal`（外层取消、`timeout`）→ 客体取消，客体用 PID namespace SIGKILL 回收整棵树。`linux <命令> [参数…]` 运行客体里任意程序，例如 `linux sh -c '…'`。
 
-`pip`/`pip3` 与 `python3 -m pip` 换成 `python3 -c <引导>`：Alpine 的 pip 只以 ensurepip 自带 wheel 的形式存在，引导在没装 pip 时从该 wheel 运行。作业环境默认 `PIP_BREAK_SYSTEM_PACKAGES=1`，安装落在客体私有 HOME（`/workspace/.local`），系统 site-packages 归 root、作业改不了。
+`pip`/`pip3` 与 `python3 -m pip` 换成 `python3 -c <引导>`：Alpine 的 pip 只以 ensurepip 自带 wheel 的形式存在，引导在没装 pip 时从该 wheel 运行。作业环境默认 `PIP_BREAK_SYSTEM_PACKAGES=1`，安装落在客体私有 HOME（`/workspace/.local`），系统 site-packages 归 root、作业改不了。（`python3 -m ensurepip` 会清掉所有 `PIP_*` 变量，过不了 PEP 668，不能用。）
+
+**pip 慢**：从 zip 里的 wheel 运行，每次都要重新编译 pip 的源码，宿主上 `pip --version` 约 29 秒。用户执行一次 `pip install --user --no-index /usr/lib/python3.14/ensurepip/_bundled/pip-*.whl`（约 87 秒）后约 12 秒。更好的做法是把 py3-pip 及其 pyc 放进工具镜像，属于后续镜像变更；本期不自动装，避免第一次 pip 就要跑一分半。
 
 ## 工作区：virtio-9p 导出与每个作业的挂载
 
@@ -45,3 +47,5 @@ agent 变了（mounts、opened 里 `mounts:true`），六件资产必须重建�
 - `tooling/ohos/tests/guest-mounts.test.py`（linux-guest-mounts）：真实 agent 的 mounts 校验与挂载序列，在宿主内核的非特权 user+mount 命名空间里执行；9P 由 tmpfs 代替。
 - `tooling/ohos/tests/linux-fs-export.test.py`（linux-fs-export）：生产 fs_export.c 面对 `..`、客体符号链接、被换成链接的父目录下的旧 fid、FIFO。
 - `tooling/ohos/research/linux-routing/run.py`（linux-command-routing-guest）：agent 式 `bash -c` 经生产链路进入真实 TinyEMU 客体。
+
+真实客体一次运行（Linux 宿主、host-test 原生库、本分支六件资产，13 项全过）：首次安装并打开 32.8 秒；`gh --version` 1.3 秒，`python3 -c 'print(1)'` 0.6 秒，`pip --version` 29 秒；客体经 9P 读宿主写的文件、写回后宿主与虚拟 `cat` 都看到，0.6 秒；作业为 uid 60081、cwd 即宿主路径、`/run/dsh-9p` 不可见、本命名空间只有两个 9p 挂载；read-only 会话读得到、写入报 `Read-only file system`；取消后作业树被杀、通道立即可用；最终停止 native join 与 clean checkpoint 成立。原有 linux-control、linux-owner、linux-resume、linux-proxy、linux-backend 与 tinyemu-native/block-io/poweroff 研究组用同一份新资产和原生库仍通过。这些都不是 HAP 或手机上的结果。
