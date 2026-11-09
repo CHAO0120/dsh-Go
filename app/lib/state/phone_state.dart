@@ -332,14 +332,16 @@ class PhoneController extends Notifier<PhoneState> {
   /// 每次都询问 / 本任务免确认 / 始终免确认; false when the native side refused
   /// (nothing changes). Written, it also settles a first-run choice still
   /// pending: the latest word wins.
-  Future<bool> setConfirmMode(PhoneConfirmMode mode) => _serializePolicyWrite(() async {
+  Future<bool> setConfirmMode(PhoneConfirmMode mode) => _setConfirmMode(mode);
+
+  Future<bool> _setConfirmMode(PhoneConfirmMode mode, {bool pendingOnly = false}) => _serializePolicyWrite(() async {
     final current = state.policies;
     if (current == null) return false;
     final next = current.withConfirmMode(mode);
     final ok = await _channel.setPolicies(next);
     if (!ok || !ref.mounted) return false;
     state = state.copyWith(policies: _acceptedPolicyWrite(next));
-    await _clearPendingConfirmMode();
+    await _clearPendingConfirmMode(expected: pendingOnly ? mode : null);
     return true;
   });
 
@@ -425,7 +427,7 @@ class PhoneController extends Notifier<PhoneState> {
       if (!ref.mounted || policies == null) return false;
       state = state.copyWith(policies: policies);
     }
-    return setConfirmMode(mode);
+    return _setConfirmMode(mode, pendingOnly: true);
   }
 
   Future<PhoneConfirmMode?> _pendingConfirmMode() async {
@@ -437,9 +439,12 @@ class PhoneController extends Notifier<PhoneState> {
     }
   }
 
-  Future<void> _clearPendingConfirmMode() async {
+  Future<void> _clearPendingConfirmMode({PhoneConfirmMode? expected}) async {
     try {
       final prefs = await SharedPreferences.getInstance();
+      // Automatic replay consumes only its own value. Direct settings supersede any pending choice.
+      // No await between this cache comparison and remove's synchronous cache mutation.
+      if (expected != null && prefs.getString(confirmPendingKey) != expected.name) return;
       if (prefs.containsKey(confirmPendingKey)) await prefs.remove(confirmPendingKey);
     } catch (_) {}
   }

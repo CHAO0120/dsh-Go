@@ -342,6 +342,69 @@ void main() {
     }
   });
 
+  for (final scenario in ['different', 'same', 'refused']) {
+    test('automatic pending consumption preserves a later choice: $scenario', () async {
+      final native = FakePhoneNative()..install();
+      final c = make();
+      final controller = c.read(phoneProvider.notifier);
+      await controller.refresh();
+      final prefs = await SharedPreferences.getInstance();
+      const firstMode = PhoneConfirmMode.task;
+      final laterMode = scenario == 'same' ? firstMode : PhoneConfirmMode.ask;
+      await prefs.setString(PhoneController.confirmPendingKey, firstMode.name);
+      final entered = Completer<void>();
+      final release = Completer<void>();
+      final writes = <Map<String, Object?>>[];
+      native.onSetPolicies = (args) async {
+        writes.add(args);
+        if (writes.length == 1) {
+          entered.complete();
+          await release.future;
+          if (scenario == 'refused') return false;
+        }
+        native.policies = {...native.policies, ...args};
+        return true;
+      };
+      // Exercise automatic replay, not two arbitrary public setter calls.
+      final automatic = controller.applyPendingConfirmMode();
+      Future<bool>? later;
+      try {
+        await entered.future;
+        expect(writes.single['confirmMode'], firstMode.name);
+        later = controller.chooseConfirmMode(laterMode);
+        // Both calls await the existing singleton; choose's earlier continuation
+        // updates its cache before yielding for the platform setString result.
+        final stored = await SharedPreferences.getInstance();
+        expect(stored.getString(PhoneController.confirmPendingKey), laterMode.name);
+        release.complete();
+        expect(await automatic, scenario != 'refused');
+        expect(await later, isTrue);
+        expect(writes.map((write) => write['confirmMode']).toList(),
+            scenario == 'same' ? [firstMode.name] : [firstMode.name, laterMode.name]);
+        expect(native.policies['confirmMode'], laterMode.name);
+        expect(prefs.containsKey(PhoneController.confirmPendingKey), isFalse);
+        await controller.refreshPolicies();
+        expect(c.read(phoneProvider).policies!.confirmMode, laterMode);
+      } finally {
+        if (!release.isCompleted) release.complete();
+        await automatic;
+        if (later != null) await later;
+      }
+    });
+  }
+
+  test('direct confirm mode setting still supersedes a different pending choice', () async {
+    final native = FakePhoneNative()..install();
+    final c = make();
+    final controller = c.read(phoneProvider.notifier);
+    await controller.refresh();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(PhoneController.confirmPendingKey, PhoneConfirmMode.always.name);
+    expect(await controller.setConfirmMode(PhoneConfirmMode.ask), isTrue);
+    expect(native.policies['confirmMode'], PhoneConfirmMode.ask.name);
+    expect(prefs.containsKey(PhoneController.confirmPendingKey), isFalse);
+  });
+
   test('loads status, policies and the log; then follows events', () async {
     final native = FakePhoneNative()..install();
     final c = make();
