@@ -22,7 +22,7 @@ enum IOSPhoneSelfRunnerError: Error {
     case .cancelled:
       return "这个手机操控调用已经结束，没有执行动作。"
     case .timedOut:
-      return "端上 XCTest 启动超时，没有执行动作。请检查配对文件、LocalDevVPN、开发者模式、已签名的 PhoneRunner 和开发者镜像。"
+      return "端上 XCTest 启动超时，没有执行动作。请保持 iPhone 解锁；如手机显示 Enable UI Automation，请直接在手机输入锁屏密码确认，然后重试。若仍失败，请检查配对文件、LocalDevVPN、开发者模式、已签名的 PhoneRunner 和开发者镜像。"
     case .stopping:
       return "上一份端上 XCTest 会话还在停止，没有启动新的运行器。请等待停止完成，不要自动重复这一步。"
     case .faulted:
@@ -32,7 +32,7 @@ enum IOSPhoneSelfRunnerError: Error {
     case .setup:
       return "端上 XCTest 尚未就绪：配置不完整，或配对记录无法读取／校验。记录存在不代表可以使用；请解锁设备后检查配对记录、运行器包名和本机开发者服务端口。"
     case .failed:
-      return "端上 XCTest 没有连接成功，没有执行动作。请检查配对、LocalDevVPN、开发者模式、匹配的开发者镜像和已签名安装的 PhoneRunner。"
+      return "端上 XCTest 没有连接成功，没有执行动作。请保持 iPhone 解锁；如手机显示 Enable UI Automation，请直接在手机输入锁屏密码确认，然后重试。若仍失败，请检查配对、LocalDevVPN、开发者模式、匹配的开发者镜像和已签名安装的 PhoneRunner。"
     case .invalidHandshake:
       return "端上 XCTest 返回的就绪握手无效，没有执行动作。请重新启动运行器。"
     }

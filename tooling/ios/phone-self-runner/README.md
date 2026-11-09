@@ -88,6 +88,12 @@ portable compatibility tests. Self-owned base64/decoded buffers and the typed
 validation copy are zeroized when released. This does not claim that every
 allocation inside serde or the upstream library is zeroized.
 
+For the optional XCTest route, if iOS asks to **Enable UI Automation**, confirm
+on the iPhone by entering its lock-screen passcode there. This system
+confirmation can block readiness even after PhoneRunner launches. If startup
+times out, complete the confirmation before retrying; never send the passcode
+to the app, agent or logs.
+
 Only loopback IPs or the established self route `10.7.0.1` are accepted, with a
 nonzero port. Startup verifies existing pairing; it never begins PIN pairing,
 silently repairs the record, or persists credentials. The fixed upstream CLI's
