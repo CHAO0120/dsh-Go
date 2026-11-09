@@ -692,6 +692,7 @@ export class RuntimeController {
       `- 你运行在鸿蒙 App 的进程内 Node 中，默认工作区是 \`${workspace}\`。\n` +
       `- 要交给用户的文件放在 \`${this.paths.outputs}\`；App 的产出列表只显示这个目录中的文件。\n` +
       '- bash、rg 和 git 等能力以引擎当前能力清单为准；没有 Android 的 Ubuntu、PRoot、apt 或 /sdcard 挂载。\n' +
+      '- bash 里的 gh、python3、python、pip、pip3 交给 App 内 Linux 环境运行，看得到当前工作区；其他 Linux 程序用 `linux <命令>`。需要用户先在 设置 · 能力 · Linux 环境 打开；这些命令结束后一次性返回输出，同一时间只运行一个。\n' +
       '- 对不支持的命令说明限制，可请用户交给已连接的电脑执行；不能声称命令已经成功。\n' +
       '- 手机文件通过 App 的系统选择器导入或导出；不能遍历其他应用的数据。\n' +
       '- App 使用 Flutter 原生界面；不要把修改 Harness 网页当作修改 App 界面。\n';

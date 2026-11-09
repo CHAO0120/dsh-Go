@@ -21,7 +21,7 @@ CommandRouter 的第二个构造参数仅供可信应用 owner 安装 linux/nati
 
 Python provider 提供 live、started 与 dispose：started 来自实际 owner Worker 的作业准入；dispose 同步封闭准入，协作取消并等待作业双流生产完成、collector 封口，再等待真实 Worker exit。共享临时根在该屏障之后才可删除。失败时保留资源错误。关闭不调用 Worker.terminate 或 Py_Finalize，主解释器仍隔离保留，不能在同一 App 内重新初始化；这也不表示消费者已读完 Readable 的全部缓冲。
 
-本补丁尚不自动装入 905 Python、912 Linux、913 授权目录；那些后端仍需要统一生产装配和各自生命周期。新 Worker 也不因此获得嵌套 child_process 或任意原生库权限。Linux/Python/9P、安装下载和 HAP 真机验收不在本子项的已验证范围内。
+940 起 OHOS 运行时把 App 内 Linux 装进 linux 槽（工厂形式，拿到本 router 自己的根），虚拟 shell 里的 gh/python3/python/pip/pip3/`linux` 按语句缓冲转发为客体作业，见 `runtime/ohos/linux/ROUTING.zh.md`。本补丁仍不自动装入 905 Python、913 授权目录；那些后端仍需要统一生产装配和各自生命周期。新 Worker 也不因此获得嵌套 child_process 或任意原生库权限。Linux/Python/9P、安装下载和 HAP 真机验收不在本子项的已验证范围内。
 
 ## 固定依赖与构建
 
