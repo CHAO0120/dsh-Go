@@ -839,6 +839,24 @@ def main():
                   'workspace-bytes-entry.py', 'workspace-bytes-entry.mjs',
                   'workspace-bytes-instrumentation.mjs')],
               scope='Two ordinary 11-byte file windows through actual SessionStore/registered lookup/WorkspaceFiles and readByteRange: physical and selected logical; complete return-object oracle and target-await resource sample; no full readBytes, multi-window/Dart/RPC/UI, SDK/device or persistent-session claim')
+    # Reuse the actual Session scope and native publication outputs for full bytes.
+    for workspace_whole_bytes_mode in ('plain', 'jitless'):
+        g.run('workspace-whole-bytes-' + workspace_whole_bytes_mode,
+              lambda m=workspace_whole_bytes_mode: g.py(
+                  rt + 'workspace-whole-bytes-entry.py',
+                  '--source', s, '--payload', payload(), '--node', node(),
+                  '--manifest', o / 'composed/manifest.json',
+                  '--typescript-prefix', p('typescript_prefix'),
+                  '--native-directory', o / 'workspace-authority-entry/native',
+                  '--publication-fixture', native() / 'libpublication-test-linked.so',
+                  '--out', o / ('workspace-whole-bytes-' + m),
+                  *(['--jitless'] if m == 'jitless' else [])),
+              needs=('compose', 'workspace-authority-entry', 'native-publication-build'),
+              timeout=120,
+              tests=[rt + name for name in (
+                  'workspace-whole-bytes-entry.py', 'workspace-whole-bytes-entry.mjs',
+                  'workspace-whole-bytes-instrumentation.mjs')],
+              scope='Four ordinary no-range whole-byte contracts: physical and normally selected logical 11-byte files at cap11 and cap10; actual SessionStore/registered scope/WorkspaceFiles/Sandbox, independent exact versions and target-await/dispose samples; no range, codec, HTTP/RPC/UI, SDK/device or new Native claim')
     # Reuse the composed payload and the same authority-entry native registry.
     # Only two normal own-file read/edit cases; no new native build in this runner.
     for workspace_edit_mode in ('plain', 'jitless'):
