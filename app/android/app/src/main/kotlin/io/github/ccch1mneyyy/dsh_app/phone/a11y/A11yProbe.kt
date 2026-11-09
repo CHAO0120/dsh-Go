@@ -27,6 +27,7 @@ import java.util.concurrent.Executors
  * bridge. The broadcast must come from a holder of android.permission.DUMP (adb shell);
  * apps, including code in DSH's own Linux environment, can't send it. Results go to
  * `files/a11y-probe/last.txt` (+ `last.jpg`), read with `run-as`.
+ * Screen and action-result snapshots omit their mixed tree/OCR body; metadata remains.
  *
  *   am broadcast -a io.github.ccch1mneyyy.dsh_app.A11Y_PROBE --es cmd screen [--ez image true] [--ez detail true] --ei seq 1
  *   cmd: screen | target sid id | tap sid id [long] | type sid id text [submit] | scroll sid [id] dir |
@@ -102,7 +103,7 @@ internal class A11yProbe(private val service: PhoneA11yService, private val driv
             when (cmd) {
                 "screen" -> driver.observe(a.b("detail"), a.b("image")).let { s ->
                     image = s.image
-                    "id=${s.id} pkg=${s.packageName} secure=${s.secure} poor=${s.poorTree} image=${s.image?.size ?: 0}B ${s.imageMime ?: ""}\n${s.text}"
+                    screenMetadata(s)
                 }
                 "target" -> driver.target(a.s("sid")!!, a.i("id")!!).toString()
                 "tap" -> result(driver.perform(PhoneAction.Tap(a.s("sid")!!, a.i("id")!!, a.b("long"))))
@@ -183,7 +184,10 @@ internal class A11yProbe(private val service: PhoneA11yService, private val driv
     }
 
     private fun result(r: io.github.ccch1mneyyy.dsh_app.phone.ActionResult) =
-        "ok=${r.ok} msg=${r.message}\n----\n${r.screen?.let { "id=${it.id}\n${it.text}" }}"
+        "ok=${r.ok} msg=${r.message}\n----\n${r.screen?.let { screenMetadata(it) }}"
+
+    private fun screenMetadata(s: io.github.ccch1mneyyy.dsh_app.phone.ScreenSnapshot) =
+        "id=${s.id} pkg=${s.packageName} secure=${s.secure} poor=${s.poorTree} image=${s.image?.size ?: 0}B ${s.imageMime ?: ""}\nbody=omitted"
 
     /**
      * Shows a confirm card, then injects a tap on 允许一次 through this service's own
