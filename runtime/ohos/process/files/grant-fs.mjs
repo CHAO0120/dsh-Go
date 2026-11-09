@@ -13,6 +13,22 @@ export class NativeGrantFs {
     while(true){const bytes=this.#call('read',relative,size,Math.min(chunk,limit-size+1));if(bytes.length===0)break;
       size+=bytes.length;if(size>limit)throw failure('ERR_WORKSPACE_LIMIT');parts.push(bytes);}
     return Buffer.concat(parts,size);}
+  // Same 64 MiB resource ceiling as whole reads; never report a truncated file
+  // as EOF. The caller owns this handle until iteration closes.
+  async *readFileChunks(value,signal){const relative=this.#path(value);let size=0;
+    while(true){signal?.throwIfAborted();
+      const bytes=this.#call('read',relative,size,Math.min(chunk,limit-size+1));
+      signal?.throwIfAborted();if(bytes.length===0)return;
+      size+=bytes.length;if(size>limit)throw failure('ERR_WORKSPACE_LIMIT');yield bytes;}}
+  // Raw bytes from the requested offset; no whole-file read or text conversion.
+  async readFileWindow(value,{offset,length},signal){const relative=this.#path(value);
+    if(!Number.isSafeInteger(offset)||offset<0||!Number.isSafeInteger(length)||length<0||!Number.isSafeInteger(offset+length))throw failure('EINVAL');
+    const parts=[];let size=0;
+    while(size<length){signal?.throwIfAborted();
+      const bytes=this.#call('read',relative,offset+size,Math.min(chunk,length-size));
+      signal?.throwIfAborted();if(bytes.length===0)break;
+      size+=bytes.length;parts.push(bytes);}
+    return Buffer.concat(parts,size);}
   async readFile(value,options){return (await this.readFileBuffer(value)).toString(encoding(options));}
   async readFileBytes(value){return (await this.readFileBuffer(value)).toString('latin1');}
   async #write(value,content,options,append){const relative=this.#path(value);if(!relative)throw failure('EISDIR');
