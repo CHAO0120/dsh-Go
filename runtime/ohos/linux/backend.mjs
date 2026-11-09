@@ -8,7 +8,6 @@ import { loadLinuxNative } from './native-session.mjs';
 // this optional provider. Use that fixed package context and its public export.
 const requireProcess = createRequire(new URL('../process/runtime.mjs',import.meta.url));
 const { OutputCollector } = requireProcess('@deepseek-ai/dsh-subprocess-local/output');
-const { scrubbedParentEnv } = requireProcess('@deepseek-ai/dsh-subprocess');
 const deferred=()=>{const value=Promise.withResolvers();value.promise.catch(()=>{});return value;};
 const argvValid=argv=>Array.isArray(argv)&&argv.length>0&&argv[0]&&argv.every(x=>typeof x==='string'&&!x.includes('\0'));
 const checkedMode=mode=>mode==='pipe'||mode==='ignore'||mode==='inherit'||(mode&&typeof mode==='object'&&Number.isSafeInteger(mode.maxBytes)&&mode.maxBytes>=0&&(!mode.spill||(Number.isSafeInteger(mode.spill.maxBytes)&&mode.spill.maxBytes>0)));
@@ -46,7 +45,7 @@ export class LinuxRuntimeBackend {
     if(!Number.isFinite(spec.graceMs)||spec.graceMs<=0||spec.graceMs>2147483647)throw new TypeError('Invalid subprocess graceMs');
     spec.signal?.throwIfAborted();
     const io=spec.stdio;if(!io||io.control!==undefined||!checkedMode(io.stdout)||!checkedMode(io.stderr)||!(io.stdin==='pipe'||io.stdin==='ignore'||(io.stdin&&typeof io.stdin.data==='string')))throw failure('ERR_OHOS_LINUX_STDIO','Unsupported Linux stdio disposition');
-    const env={...scrubbedParentEnv(),PATH:'/usr/bin:/bin',HOME:'/workspace',TMPDIR:'/tmp',LANG:'C.UTF-8',...spec.env};
+    const env={PATH:'/usr/bin:/bin',HOME:'/workspace',TMPDIR:'/tmp',LANG:'C.UTF-8',...spec.env};
     for(const key of Object.keys(env)){if(env[key]===undefined){delete env[key];continue;}if(!key||key.includes('=')||key.includes('\0')||typeof env[key]!=='string'||env[key].includes('\0'))throw new TypeError('Invalid guest environment');}
     const command={argv:[...spec.argv],cwd:spec.cwd,env};
     if(Buffer.byteLength(JSON.stringify(command))>60000)throw failure('ERR_OHOS_LINUX_ARGUMENTS','Guest start frame exceeds bound');

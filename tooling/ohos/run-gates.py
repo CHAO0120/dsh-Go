@@ -874,6 +874,8 @@ def main():
     for mode in ['plain', 'strict']:
         g.node_tests('linux-proxy-policy-' + mode, [rt + 'linux-proxy-policy.test.mjs'],
                      mode=mode, needs=('prepared-inputs',))
+        g.node_tests('linux-guest-environment-' + mode, [rt + 'linux-guest-environment.test.mjs'],
+                     mode=mode, needs=('prepared-inputs',))
         g.node_tests('linux-app-control-' + mode,
                      [rt + 'linux-control-entry.test.mjs', rt + 'linux-owner-control.test.mjs', rt + 'linux-control.test.mjs', rt + 'linux-control-persistence.test.mjs', rt + 'linux-instance.test.mjs', rt + 'linux-proxy-control.test.mjs'],
                      mode=mode, needs=('prepared-inputs', 'android-targets', 'native-publication-build'),
@@ -1051,7 +1053,7 @@ def main():
     g.internal('embedding-package', embedding_package, needs=('tools',))
     g.node_tests('launch-clip', [rt + 'launch-clip.test.mjs'], needs=('embedding-package',), extra=lambda: {'OHOS_FLUTTER_EMBEDDING': str(o / 'embedding-package/package')})
     tooling = ['managed-skill', 'native-host-lazy', 'runtime-archive', 'runtime-channel', 'linux-control', 'lifecycle-host', 'web-files', 'transient-task', 'runtime-recovery', 'recovery-storage', 'native-recovery-gate', 'last-known-good']
-    g.node_tests('ets-runtime-tooling', [tools + n + '.test.mjs' for n in tooling], needs=('native-zlib-build',), extra=lambda: {'OHOS_TEST_ZLIB_ADDON': str(o / 'zlib.node'), 'OHOS_INSTALL_RECORD_WIRE': str(o / 'install-record-wire.json')}, timeout=240)
+    g.node_tests('ets-runtime-tooling', [tools + n + '.test.mjs' for n in tooling], needs=('native-zlib-build', 'prepared-inputs'), extra=lambda: {'OHOS_TEST_ZLIB_ADDON': str(o / 'zlib.node'), 'OHOS_INSTALL_RECORD_WIRE': str(o / 'install-record-wire.json')}, timeout=240)
     g.internal('install-record-wire', lambda _: verify_install_record_wire(o / 'install-record-wire.json'), needs=('ets-runtime-tooling',))
     for mode in ['plain', 'jitless']:
         g.node_tests('secrets-picker-' + mode, [rt + 'secrets.test.mjs', tools + 'attachment-files-channel.test.mjs'], mode=mode, needs=('tools',))
