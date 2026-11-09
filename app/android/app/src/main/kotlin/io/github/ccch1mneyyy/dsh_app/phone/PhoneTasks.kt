@@ -32,9 +32,10 @@ class PhoneTasks(
         val waived: Boolean = false,
         /** Native-only lifetime; never inferred from a session id or a Flutter page. */
         internal val lifecycle: Long = 0,
+        val handoffWaiting: Boolean = false,
     ) {
         fun toMap(): Map<String, Any?> =
-            linkedMapOf("id" to id, "active" to active, "app" to app, "paused" to paused, "stopped" to stopped, "waived" to waived)
+            linkedMapOf("id" to id, "active" to active, "app" to app, "paused" to paused, "stopped" to stopped, "waived" to waived, "handoffWaiting" to handoffWaiting)
     }
 
     sealed interface Begin {
@@ -47,6 +48,8 @@ class PhoneTasks(
     private val lock = Object()
     private var nextId = 1L
     private var taskId = 0L
+    private var handoffOwner: Owner? = null
+    private var handoffTicket: PromptTicket? = null
     private var lifecycle = 0L
     private var admissionEpoch = 0L
     private var active = false
@@ -299,13 +302,13 @@ class PhoneTasks(
 
     /** Engine/plugin shutdown also invalidates a prompt that predates any native task. */
     fun invalidateOwners() {
-        synchronized(lock) { lifecycle++; admissionEpoch++ }
+        synchronized(lock) { handoffOwner = null; handoffTicket = null; lifecycle++; admissionEpoch++ }
         fire()
     }
 
     /** Exact host run end wakes queued work without treating it as a new user stop/resume. */
     fun cancelPending() {
-        synchronized(lock) { lifecycle++; admissionEpoch++; paused = false; lock.notifyAll() }
+        synchronized(lock) { handoffOwner = null; handoffTicket = null; lifecycle++; admissionEpoch++; paused = false; lock.notifyAll() }
         fire()
     }
 
@@ -496,17 +499,38 @@ class PhoneTasks(
         out
     }
 
+    /** Stores identity only. Never enter PromptTicket/arbiter while holding Tasks.lock. */
+    internal fun beginHandoffWait(owner: Owner, ticket: PromptTicket): Boolean {
+        synchronized(lock) {
+            if (!owner.active || !currentLocked(owner)) return false
+            handoffOwner = owner
+            handoffTicket = ticket
+        }
+        fire()
+        return true
+    }
+
+    internal fun endHandoffWait(owner: Owner, ticket: PromptTicket) {
+        val cleared = synchronized(lock) {
+            if (handoffOwner !== owner || handoffTicket !== ticket) false
+            else { handoffOwner = null; handoffTicket = null; true }
+        }
+        if (cleared) fire()
+    }
+
     fun snapshot(): Snapshot = synchronized(lock) {
         val now = clock()
         val idle = idleLocked(now)
         Snapshot(taskId, active && !idle, if (active && !idle) app else null, paused, now < stoppedUntil, stopReason,
-            active && !idle && waived, lifecycle)
+            active && !idle && waived, lifecycle,
+            handoffTicket != null && handoffOwner?.let { it.active && currentLocked(it) } == true)
     }
 
     /** Idle: no call running, not paused, and nothing for [idleMs]. */
     private fun idleLocked(now: Long): Boolean = active && !paused && inFlight == 0 && now - lastCallAt > idleMs
 
     private fun endLocked() {
+        handoffOwner = null; handoffTicket = null
         lifecycle++
         active = false
         approved.clear()

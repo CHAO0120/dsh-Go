@@ -102,11 +102,24 @@ class PhonePrompts(
         if (!task.isCurrent(taskOwner)) return HandoffResult.STOP
         val ticket = arbiter.begin(null, task, PromptContent(PromptKind.HANDOFF, (if (sessionId == null) reason else "[$sessionId]\n$reason").take(4096), cause = cause, sessionId = sessionId),
             timeoutMs.coerceIn(1, 600_000), { enabled() && !locked() && task.isCurrent(taskOwner) }) ?: return HandoffResult.STOP
-        schedule(ticket)
-        return when (ticket.await().outcome) {
-            PromptOutcome.CONTINUE -> HandoffResult.CONTINUE
-            PromptOutcome.TIMEOUT -> HandoffResult.TIMEOUT
-            else -> HandoffResult.STOP
+        try {
+            if (!task.beginHandoffWait(taskOwner, ticket)) {
+                ticket.stop()
+                return HandoffResult.STOP
+            }
+            // Registration may immediately run if completion preceded installation/registration.
+            ticket.onFinished { task.endHandoffWait(taskOwner, ticket) }
+            schedule(ticket)
+            return when (ticket.await().outcome) {
+                PromptOutcome.CONTINUE -> HandoffResult.CONTINUE
+                PromptOutcome.TIMEOUT -> HandoffResult.TIMEOUT
+                else -> HandoffResult.STOP
+            }
+        } catch (e: Throwable) {
+            ticket.stop()
+            throw e
+        } finally {
+            task.endHandoffWait(taskOwner, ticket)
         }
     }
 

@@ -689,7 +689,7 @@ class PhoneTaskSessions(
             "finishing" to (task.closing || task.cleanupFailed || task.retired != null || task.endRequested && !task.endSettled), "draining" to (task.running && task.pending == 0),
             "stopped" to (task.retired != null || task.stopped || state.stopped || task.sessionId in stoppedSessions), "generation" to state.lifecycle,
             "completion" to task.completion, "endedRunId" to task.finished?.let { task.runId }, "endedGeneration" to task.finished?.lifecycle) }
-        state.toMap() + extra + if (task.retired != null) mapOf("active" to false) else emptyMap()
+        state.toMap() + extra + if (task.retired != null) mapOf("active" to false, "handoffWaiting" to false) else emptyMap()
     }
 
     /** Short registry -> Tasks commit; callbacks cannot cancel a successor in this record. */

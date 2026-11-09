@@ -255,4 +255,83 @@ class PhonePromptTest {
         assertEquals(engine.choices, engine.notificationChoices)
     }
 
+    @Test fun handoffCompletedBeforeRegistrationClearsInstalledWaitSynchronously() {
+        val tasks = PhoneTasks(clock = { now }).apply { begin() }
+        val owner = tasks.activeOwner()!!
+        val ticket = arbiter.begin(null, tasks, content(PromptKind.HANDOFF), 30_000) { tasks.isCurrent(owner) }!!
+        assertTrue(shown(ticket).choose(PromptChoice.CONTINUE))
+        assertTrue(tasks.beginHandoffWait(owner, ticket))
+        assertTrue(tasks.snapshot().handoffWaiting)
+        ticket.onFinished { tasks.endHandoffWait(owner, ticket) }
+        assertEquals(false, tasks.snapshot().toMap()["handoffWaiting"])
+        assertEquals(PromptOutcome.CONTINUE, ticket.await().outcome)
+    }
+
+    @Test fun handoffCompletionClearsWaitBeforeAnyLaterRead() {
+        val tasks = PhoneTasks(clock = { now }).apply { begin() }
+        val owner = tasks.activeOwner()!!
+        val ticket = arbiter.begin(null, tasks, content(PromptKind.HANDOFF), 30_000) { tasks.isCurrent(owner) }!!
+        assertTrue(tasks.beginHandoffWait(owner, ticket))
+        ticket.onFinished { tasks.endHandoffWait(owner, ticket) }
+        assertNull(arbiter.begin(null, tasks, content(PromptKind.HANDOFF), 30_000) { true })
+        assertTrue(shown(ticket).choose(PromptChoice.CONTINUE))
+        assertFalse(tasks.snapshot().handoffWaiting)
+        assertTrue(tasks.isCurrent(owner))
+        tasks.endHandoffWait(owner, ticket)
+        assertFalse(tasks.snapshot().handoffWaiting)
+    }
+
+    @Test fun oldHandoffFinallyCannotClearAnotherTicketOrOwner() {
+        val tasks = PhoneTasks(clock = { now }).apply { begin() }
+        val owner = tasks.activeOwner()!!
+        val a = arbiter.begin(null, tasks, content(PromptKind.HANDOFF), 30_000) { tasks.isCurrent(owner) }!!
+        assertTrue(tasks.beginHandoffWait(owner, a)); a.stop()
+        val b = arbiter.begin(null, tasks, content(PromptKind.HANDOFF), 30_000) { tasks.isCurrent(owner) }!!
+        assertTrue(tasks.beginHandoffWait(owner, b))
+        tasks.endHandoffWait(owner, a)
+        assertTrue(tasks.snapshot().handoffWaiting)
+        tasks.endTask(); tasks.begin()
+        val next = tasks.activeOwner()!!
+        b.stop()
+        val c = arbiter.begin(null, tasks, content(PromptKind.HANDOFF), 30_000) { tasks.isCurrent(next) }!!
+        assertTrue(tasks.beginHandoffWait(next, c))
+        tasks.endHandoffWait(owner, b)
+        assertTrue(tasks.snapshot().handoffWaiting)
+        tasks.endHandoffWait(next, c); c.stop()
+        assertFalse(tasks.snapshot().handoffWaiting)
+    }
+
+    @Test fun handoffTimeoutUnavailableAndInterruptClearRealTicketWaits() {
+        for (ending in 0..2) {
+            val tasks = PhoneTasks(clock = { now }).apply { begin() }
+            val owner = tasks.activeOwner()!!
+            val ticket = arbiter.begin(null, tasks, content(PromptKind.HANDOFF), 30_000) { tasks.isCurrent(owner) }!!
+            assertTrue(tasks.beginHandoffWait(owner, ticket))
+            ticket.onFinished { tasks.endHandoffWait(owner, ticket) }
+            when (ending) {
+                0 -> { now += 30_001; ticket.check(); assertEquals(PromptOutcome.TIMEOUT, ticket.await().outcome) }
+                1 -> { ticket.unavailable(); assertEquals(PromptOutcome.UNAVAILABLE, ticket.await().outcome) }
+                else -> {
+                    Thread.currentThread().interrupt()
+                    try { assertEquals(PromptOutcome.STOPPED, ticket.await().outcome) }
+                    finally { Thread.interrupted() }
+                }
+            }
+            assertFalse(tasks.snapshot().handoffWaiting)
+        }
+    }
+
+    @Test fun taskLifecycleInvalidationNeverProjectsAnOldHandoffWait() {
+        for (ending in 0..3) {
+            val tasks = PhoneTasks(clock = { now }).apply { begin() }
+            val owner = tasks.activeOwner()!!
+            val ticket = arbiter.begin(null, tasks, content(PromptKind.HANDOFF), 30_000) { tasks.isCurrent(owner) }!!
+            assertTrue(tasks.beginHandoffWait(owner, ticket))
+            when (ending) { 0 -> tasks.stop("user"); 1 -> tasks.endTask(); 2 -> tasks.invalidateOwners(); else -> tasks.cancelPending() }
+            assertFalse(tasks.snapshot().handoffWaiting)
+            assertFalse(tasks.beginHandoffWait(owner, ticket))
+            ticket.stop()
+        }
+    }
+
 }

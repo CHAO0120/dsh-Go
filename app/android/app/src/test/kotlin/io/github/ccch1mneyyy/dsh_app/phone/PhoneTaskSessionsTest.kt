@@ -1784,4 +1784,30 @@ class PhoneTaskSessionsTest {
         end("A")
     }
 
+    @Test fun retiredTaskProjectionCannotKeepItsCachedHandoffWaitingTrue() {
+        assertFalse(invoke("A").isError)
+        val original = task("A")
+        val owner = original.tasks.activeOwner()!!
+        val arbiter = PromptArbiter(time::get)
+        val ticket = arbiter.begin(null, original.tasks, PromptContent(PromptKind.HANDOFF, "public"), 30_000) {
+            original.tasks.isCurrent(owner)
+        }!!
+        assertTrue(original.tasks.beginHandoffWait(owner, ticket))
+        assertEquals(true, sessions.snapshot().single { it["sessionId"] == "A" }["handoffWaiting"])
+        val cleanupCalls = mutableListOf<() -> Unit>()
+        cleanupDispatch = { cleanupCalls += it }
+        try {
+            sessions.retire()
+            assertTrue(checkNotNull(original.retired).handoffWaiting)
+            assertFalse(original.tasks.snapshot().handoffWaiting)
+            val row = sessions.snapshot().single { it["sessionId"] == "A" }
+            assertEquals(true, row["retiring"])
+            assertEquals(false, row["handoffWaiting"])
+        } finally {
+            ticket.stop()
+            cleanupDispatch = { it() }
+            cleanupCalls.toList().forEach { it() }
+        }
+    }
+
 }
