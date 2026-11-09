@@ -1044,6 +1044,7 @@ def main():
             return values
         g.run('lifecycle-' + label, lifecycle_command, needs=('prepared-inputs', 'native-publication-build', 'build-bash', 'build-regex') + (('proc-mapping-tools',) if label == 'freeze' else ()), env=g.common, timeout=360, tests=[rt + 'lifecycle-' + label + '-controller.py'])
     g.node_tests('lifecycle-platform', [rt + 'lifecycle-platform.test.mjs'], needs=('prepared-inputs',), extra=lambda: {'DSH_LIFECYCLE_BASE_PIPELINE': str(p('android_pristine') / 'node_modules/@deepseek-ai/dsh-tools/lib/pipeline.js')})
+    # Includes steady-heartbeat history isolation and control-completion ACK cases.
     g.node_tests('lifecycle-host-http', [rt + 'lifecycle-host-http.test.mjs'], needs=('prepared-inputs', 'native-publication-build'), extra=lambda: {**linked_env(), 'DSH_LIFECYCLE_BEFORE_ROUTE': str(p('lifecycle_before_route'))})
     g.node_tests('publication-platform', [rt + 'publication-platform.test.mjs', rt + 'fs-exclusive.test.mjs'], needs=('android-targets',), extra=lambda: {'DSH_TEST_PREFIX': str(o / 'targets/ohos-prefix')})
     g.node_tests('publication-capabilities-route', [rt + 'publication-capabilities-route.test.mjs'], needs=('prepared-inputs',), extra=lambda: {'M6_TEST_PREFIX': str(prefix()), 'M6_TEST_CAPABILITIES_MODULE': str(s / 'runtime/ohos/capabilities/index.mjs')})
@@ -1136,6 +1137,7 @@ def main():
     flutter_tests = ['test/secrets', 'test/ohos/attachment_files_test.dart', 'test/runtime/phone_callback_bridge_test.dart', 'test/runtime/runtime_recovery_test.dart', 'test/runtime/ohos_install_record_test.dart', 'test/usage/ohos_device_contract_test.dart',
                      'test/safe_mode/safe_mode_logic_test.dart', 'test/state/engine_control_test.dart', 'test/runtime/runtime_controller_test.dart',
                      'test/plugins/ohos_replace_cancel_test.dart',
+                     'test/chat/artifact_ohos_workspace_materialize_test.dart',
                      'test/chat/attachment_file_budget_test.dart', 'test/remote/private_key_file_budget_test.dart',
                      'test/chat/attachment_owner_test.dart', 'test/remote/ssh_key_callback_lifetime_test.dart', 'test/share_hosted', 'test/share/share_panel_test.dart']
     g.run('flutter-consumers', lambda: g.flutter('test', '--no-pub', '--reporter', 'json', '--concurrency=1', *flutter_tests), cwd=g.flutter_source / 'app', env=g.flutter_env, needs=('flutter-input-identity',), timeout=300, tests=['app/' + x for x in flutter_tests], scope='Actual Linux Flutter engine and Dart consumers; not OHOS AOT/device')
