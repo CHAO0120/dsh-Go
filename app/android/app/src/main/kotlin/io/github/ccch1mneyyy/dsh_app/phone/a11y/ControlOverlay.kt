@@ -1384,6 +1384,7 @@ internal class ControlOverlay(private val service: AccessibilityService) : UserG
     }
 
     private fun add(view: View, params: WindowManager.LayoutParams): Boolean = try {
+        if (captureHidden) view.visibility = View.INVISIBLE
         wm.addView(view, params); true
     } catch (e: Exception) { Log.w(TAG, "overlay addView failed", e); false }
 
