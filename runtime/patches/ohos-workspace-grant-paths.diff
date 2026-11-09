@@ -239,7 +239,17 @@
  		return Promise.resolve(streamWholeText({
  			displayPath: target.displayPath,
  			targetKey: target.targetKey
-@@ -932,6 +1029,17 @@
+@@ -926,12 +1023,27 @@
+ 		}, signal, maxBytes, this.internals);
+ 	}
+ 	async readByteRange(target, range, signal) {
++		if (ohosWorkspacePaths?.handles(String(target.targetKey))) {
++			try { return await ohosWorkspacePaths.readWindow(String(target.targetKey), range, signal); }
++			catch (error) { throw ohosFileError(error, "read", target.displayPath, signal); }
++		}
+ 		return readByteWindow({
+ 			displayPath: target.displayPath,
+ 			targetKey: target.targetKey
  		}, range, signal);
  	}
  	async listDir(target, signal) {

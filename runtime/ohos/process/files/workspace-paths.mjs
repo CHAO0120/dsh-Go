@@ -196,6 +196,13 @@ if (isMainThread && process.platform === 'openharmony') {
     });
   }
 
+  async function readWindow(value, range, signal) {
+    return withFileLease(value, signal, async (fs, { relative }) => {
+      await requireRegularFile(fs, relative);
+      return fs.readFileWindow(relative, range, signal);
+    });
+  }
+
   // The generator acquires nothing until first next(). EOF, an error and
   // iterator return all run the same real close/retire barrier.
   async function* readChunks(value, signal) {
@@ -210,6 +217,6 @@ if (isMainThread && process.platform === 'openharmony') {
 
   Object.defineProperty(globalThis, Symbol.for('dsh.go.ohos.workspace-paths'), {
     value: Object.freeze({ handles: isLogicalWorkspacePath, isRoot: value => rootPattern.test(value),
-      stat, realpath, directory, resolveFile, statFile, readBuffer, readChunks, lstatFile, listDirectory }), writable: false, configurable: false,
+      stat, realpath, directory, resolveFile, statFile, readBuffer, readWindow, readChunks, lstatFile, listDirectory }), writable: false, configurable: false,
   });
 }
