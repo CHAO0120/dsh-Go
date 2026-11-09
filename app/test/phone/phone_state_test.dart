@@ -136,6 +136,212 @@ void main() {
     expect(c.read(phoneProvider).status.task.id, 73);
   });
 
+  for (final ruleFirst in [true, false]) {
+    test('full policy writes preserve rule and mode with ruleFirst=$ruleFirst', () async {
+      const package = 'org.example.serial';
+      final native = FakePhoneNative(policies: {
+        'denyPackages': <String>[],
+        'confirmEveryWritePackages': <String>[],
+        'confirmMode': 'ask',
+      })..install();
+      final c = make();
+      final controller = c.read(phoneProvider.notifier);
+      await controller.refreshPolicies();
+      final entered = Completer<void>();
+      final release = Completer<void>();
+      final writes = <Map<String, Object?>>[];
+      native.onSetPolicies = (args) async {
+        writes.add(args);
+        if (writes.length == 1) {
+          entered.complete();
+          await release.future;
+        }
+        return true;
+      };
+      final first = ruleFirst
+          ? controller.setRule(package, AppRule.deny)
+          : controller.setConfirmMode(PhoneConfirmMode.task);
+      Future<bool>? second;
+      try {
+        await entered.future;
+        second = ruleFirst
+            ? controller.setConfirmMode(PhoneConfirmMode.task)
+            : controller.setRule(package, AppRule.deny);
+        release.complete();
+        expect(await first, isTrue);
+        expect(await second, isTrue);
+        expect(writes, hasLength(2));
+        expect(writes.last['denyPackages'], contains(package));
+        expect(writes.last['confirmMode'], 'task');
+        expect(c.read(phoneProvider).policies!.ruleFor(package), AppRule.deny);
+        expect(c.read(phoneProvider).policies!.confirmMode, PhoneConfirmMode.task);
+      } finally {
+        if (!release.isCompleted) {
+          release.complete();
+        }
+        await first;
+        if (second != null) {
+          await second;
+        }
+      }
+    });
+  }
+
+  test('refused policy write releases the next intent without accepting its fields', () async {
+    const firstPackage = 'org.example.refused';
+    const secondPackage = 'org.example.accepted';
+    final native = FakePhoneNative(policies: {
+      'denyPackages': <String>[],
+      'confirmEveryWritePackages': <String>[],
+    })..install();
+    final c = make();
+    final controller = c.read(phoneProvider.notifier);
+    await controller.refreshPolicies();
+    final entered = Completer<void>();
+    final release = Completer<void>();
+    final writes = <Map<String, Object?>>[];
+    native.onSetPolicies = (args) async {
+      writes.add(args);
+      if (writes.length == 1) {
+        entered.complete();
+        await release.future;
+        return false;
+      }
+      return true;
+    };
+    final first = controller.setRule(firstPackage, AppRule.deny);
+    Future<bool>? second;
+    try {
+      await entered.future;
+      second = controller.setRule(secondPackage, AppRule.confirmEachStep);
+      release.complete();
+      expect(await first, isFalse);
+      expect(await second, isTrue);
+      expect(writes, hasLength(2));
+      expect(writes.last['denyPackages'], isNot(contains(firstPackage)));
+      expect(writes.last['confirmEveryWritePackages'], contains(secondPackage));
+      expect(c.read(phoneProvider).policies!.ruleFor(firstPackage), AppRule.normal);
+      expect(c.read(phoneProvider).policies!.ruleFor(secondPackage), AppRule.confirmEachStep);
+    } finally {
+      if (!release.isCompleted) {
+        release.complete();
+      }
+      await first;
+      if (second != null) {
+        await second;
+      }
+    }
+  });
+
+  test('disposing the controller prevents a queued policy intent from reaching native', () async {
+    final native = FakePhoneNative(policies: {
+      'denyPackages': <String>[],
+      'confirmEveryWritePackages': <String>[],
+    })..install();
+    final c = ProviderContainer(overrides: [
+      localRuntimeProvider.overrideWith(
+        () => PhoneTestRuntime(LocalRuntimeState(loaded: true, status: runningRuntime)),
+      ),
+      activeHostProvider.overrideWith(() => FixedActiveHost(HostRef.local)),
+    ]);
+    var disposed = false;
+    final entered = Completer<void>();
+    final release = Completer<void>();
+    final writes = <Map<String, Object?>>[];
+    Future<bool>? first;
+    Future<bool>? second;
+    try {
+      final controller = c.read(phoneProvider.notifier);
+      await controller.refreshPolicies();
+      native.onSetPolicies = (args) async {
+        writes.add(args);
+        if (writes.length == 1) {
+          entered.complete();
+          await release.future;
+        }
+        return true;
+      };
+      first = controller.setRule('org.example.started', AppRule.deny);
+      await entered.future;
+      second = controller.setRule('org.example.queued', AppRule.deny);
+      c.dispose();
+      disposed = true;
+      release.complete();
+      expect(await first, isFalse);
+      expect(await second, isFalse);
+      expect(writes, hasLength(1));
+      expect(writes.single['denyPackages'], contains('org.example.started'));
+    } finally {
+      if (!release.isCompleted) {
+        release.complete();
+      }
+      if (first != null) {
+        await first;
+      }
+      if (second != null) {
+        await second;
+      }
+      if (!disposed) {
+        c.dispose();
+      }
+    }
+  });
+
+  test('different app rule writes preserve both native lists while the first reply is pending', () async {
+    const firstPackage = 'org.example.first';
+    const secondPackage = 'org.example.second';
+    final native = FakePhoneNative(policies: {
+      'denyPackages': <String>[], 'confirmEveryWritePackages': <String>[],
+    })..install();
+    final c = make();
+    final controller = c.read(phoneProvider.notifier);
+    await controller.refreshPolicies();
+    final entered = Completer<void>();
+    final release = Completer<void>();
+    final firstPersisted = Completer<void>();
+    final writes = <Map<String, Object?>>[];
+    native.onSetPolicies = (args) async {
+      writes.add(args);
+      if (writes.length == 1) {
+        entered.complete();
+        await release.future;
+        native.policies = {...native.policies, ...args};
+        firstPersisted.complete();
+      } else {
+        // The production plugin also executes policy writes serially.
+        await firstPersisted.future;
+        native.policies = {...native.policies, ...args};
+      }
+      return true;
+    };
+    final first = controller.setRule(firstPackage, AppRule.deny);
+    Future<bool>? second;
+    try {
+      await entered.future;
+      second = controller.setRule(secondPackage, AppRule.confirmEachStep);
+      release.complete();
+      expect(await first, isTrue);
+      expect(await second, isTrue);
+      expect(writes, hasLength(2));
+      expect(writes.first['denyPackages'], contains(firstPackage));
+      // The second actual wire map must preserve the first accepted change.
+      expect(writes.last['denyPackages'], contains(firstPackage));
+      expect(native.policies['denyPackages'], contains(firstPackage));
+      expect(native.policies['confirmEveryWritePackages'], contains(secondPackage));
+      await controller.refreshPolicies();
+      expect(c.read(phoneProvider).policies!.ruleFor(firstPackage), AppRule.deny);
+      expect(c.read(phoneProvider).policies!.ruleFor(secondPackage), AppRule.confirmEachStep);
+    } finally {
+      if (!release.isCompleted) {
+        release.complete();
+      }
+      await first;
+      if (second != null) {
+        await second;
+      }
+    }
+  });
+
   test('loads status, policies and the log; then follows events', () async {
     final native = FakePhoneNative()..install();
     final c = make();

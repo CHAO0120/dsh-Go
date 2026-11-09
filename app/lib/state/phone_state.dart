@@ -85,6 +85,7 @@ class PhoneController extends Notifier<PhoneState> {
 
   StreamSubscription<PhoneStatus>? _sub;
   Future<bool>? _applying;
+  Future<void> _policyWriteTail = Future<void>.value();
   int? _statusRevision;
 
   PhoneChannel get _channel => ref.read(phoneChannelProvider);
@@ -315,7 +316,7 @@ class PhoneController extends Notifier<PhoneState> {
   Future<PhoneResult> adbConnect({int? port}) => _thenRefresh(_channel.adbConnect(port: port));
 
   /// Changes one app's rule; false when the native side refused (nothing changes).
-  Future<bool> setRule(String package, AppRule rule) async {
+  Future<bool> setRule(String package, AppRule rule) => _serializePolicyWrite(() async {
     final current = state.policies;
     if (current == null) return false;
     final next = current.withRule(package, rule);
@@ -326,12 +327,12 @@ class PhoneController extends Notifier<PhoneState> {
       retained: state.retained.contains(package) ? state.retained : [...state.retained, package],
     );
     return true;
-  }
+  });
 
   /// 每次都询问 / 本任务免确认 / 始终免确认; false when the native side refused
   /// (nothing changes). Written, it also settles a first-run choice still
   /// pending: the latest word wins.
-  Future<bool> setConfirmMode(PhoneConfirmMode mode) async {
+  Future<bool> setConfirmMode(PhoneConfirmMode mode) => _serializePolicyWrite(() async {
     final current = state.policies;
     if (current == null) return false;
     final next = current.withConfirmMode(mode);
@@ -340,6 +341,21 @@ class PhoneController extends Notifier<PhoneState> {
     state = state.copyWith(policies: _acceptedPolicyWrite(next));
     await _clearPendingConfirmMode();
     return true;
+  });
+
+  // These two setters replace the same three policy fields. Build their wire
+  // values only after the previous write has published its accepted state.
+  Future<bool> _serializePolicyWrite(Future<bool> Function() write) async {
+    final previous = _policyWriteTail;
+    final done = Completer<void>();
+    _policyWriteTail = done.future;
+    try {
+      await previous;
+      if (!ref.mounted) return false;
+      return await write();
+    } finally {
+      done.complete();
+    }
   }
 
   // The old setter writes these three fields. Preserve newer read-only settings,
