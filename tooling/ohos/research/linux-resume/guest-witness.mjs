@@ -1,9 +1,9 @@
 import { createHash } from 'node:crypto';
 import { isUtf8 } from 'node:buffer';
 
-// These identities are the agent/init inputs of the existing 931 six assets.
+// These identities are the agent/init inputs of the six assets (agent from 940).
 // A driver must also bind its actual asset manifest, native library and source.
-const AGENT_SHA256 = 'd313f9080f7e3e450458dd00f1d9ad45ccdc95c40ded1c1bbb9fc1c2ef5bb74b';
+const AGENT_SHA256 = 'e8069c237ef2960c2b5558d610210355375109a7f3bc866c1303d3bf1cffb9a0';
 const INIT_SHA256 = '2debca599bdab558987fc6e65a284cbba0b7dc4c654cb47e99f45d2ac9d3e95f';
 const DATA_BYTES = 1024 * 1024;
 const digest = bytes => createHash('sha256').update(bytes).digest('hex');
@@ -18,7 +18,7 @@ const COMMON = Object.freeze({
   uid: 60081, gid: 60081,
   data: Object.freeze({ path: '/workspace/931-persistence.bin', bytes: DATA_BYTES, sha256: DATA_SHA256, mode: '0o600' }),
   config: Object.freeze({ path: '/workspace/.config/dsh931/settings.json', bytes: Buffer.byteLength(CONFIG_TEXT), sha256: digest(CONFIG_TEXT), mode: '0o600' }),
-  agent: Object.freeze({ path: '/usr/local/lib/dsh/guest-agent.py', bytes: 18509, sha256: AGENT_SHA256, mode: '0o644' }),
+  agent: Object.freeze({ path: '/usr/local/lib/dsh/guest-agent.py', bytes: 21575, sha256: AGENT_SHA256, mode: '0o644' }),
   init: Object.freeze({ path: '/sbin/dsh-init', bytes: 687, sha256: INIT_SHA256, mode: '0o755' }),
 });
 
