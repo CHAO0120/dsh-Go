@@ -73,6 +73,18 @@ internal class A11yProbe(private val service: PhoneA11yService, private val driv
     }
 
     private fun run(seq: Int, cmd: String, a: Args) {
+        if (cmd == "navigation-witness") {
+            try {
+                PhoneControl.get(service).collectNavigationWitness(driver, seq,
+                    a.intent.hasExtra("taskId"), a.intent.extras?.get("taskId"),
+                    a.intent.hasExtra("generation"), a.intent.extras?.get("generation")) { bytes ->
+                    val tmp = File(dir, "last.tmp")
+                    tmp.writeBytes(bytes)
+                    check(tmp.renameTo(File(dir, "last.txt")))
+                }
+            } catch (_: Exception) { /* Never export exception text or a raw trace. */ }
+            return
+        }
         if (cmd == "navigation-material") {
             // Never enter the generic body/Throwable logging or image output path below.
             try {

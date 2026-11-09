@@ -704,6 +704,23 @@ class PhoneControl private constructor(private val app: Context) : PhoneEnv, Con
     fun appDetailsIntent(): Intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${app.packageName}"))
         .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
 
+    /** Historical public facts only; never claims a UI return or settles a save. */
+    internal fun collectNavigationWitness(driver: io.github.ccch1mneyyy.dsh_app.phone.a11y.MainScreenDriver,
+                                         seq: Int, hasTask: Boolean, task: Any?, hasGeneration: Boolean,
+                                         generation: Any?, publish: (ByteArray) -> Unit) {
+        fun allowed(): Boolean = app.applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE != 0 &&
+            PhoneRegistry.mainDriver === driver && enabled() && !isLocked() &&
+            core.safety.checkReadSources(policies(), listOf(io.github.ccch1mneyyy.dsh_app.phone.a11y.MarkorNavigation.PACKAGE)) == null
+        val projection = io.github.ccch1mneyyy.dsh_app.phone.skills.PhoneNavigationWitnessExport
+        val bytes = try {
+            if (!allowed()) projection.unavailable(seq, "unavailable") else {
+                val result = projection.read(seq, hasTask, task, hasGeneration, generation, skillDrafts, skillTrace)
+                if (allowed()) result else projection.unavailable(seq, "unavailable")
+            }
+        } catch (_: Exception) { projection.unavailable(seq, "unavailable") }
+        publish(bytes)
+    }
+
     /** Debug probe only. The worker builds values; only the successful caller may persist them. */
     internal fun collectNavigationMaterial(driver: io.github.ccch1mneyyy.dsh_app.phone.a11y.MainScreenDriver,
                                           seq: Int, publish: (ByteArray) -> Unit) {
