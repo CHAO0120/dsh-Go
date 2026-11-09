@@ -340,7 +340,8 @@ static int set_attributes(int parent, const char *leaf, uint32_t mask, uint32_t 
     if (mask & P9_SETATTR_MODE) {
         if (S_ISLNK(st.st_mode))
             return -EOPNOTSUPP;
-        if (fchmodat(parent, leaf, mode, 0))
+        /* Checked and changed on one object: never follows a link swapped in meanwhile. */
+        if (fchmodat(parent, leaf, mode, AT_SYMLINK_NOFOLLOW))
             return host_error();
     }
     if (mask & P9_SETATTR_SIZE) {

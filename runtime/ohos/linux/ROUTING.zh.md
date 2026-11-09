@@ -24,10 +24,10 @@ bash -c '<脚本>'（虚拟 shell Worker）
 ## 工作区：virtio-9p 导出与每个作业的挂载
 
 - 导出：OHOS 运行时把 router 自己的根（App 工作区 `filesDir/workspace` 与本次运行的私有临时根）在第一次启用前交给 LinuxControl，owner 在安装与恢复的 TinyEMU 配置里写成 `fs0..fs3`（tag `dsh0..dsh3`，TinyEMU 上限四个）。一次 attempt 启动后导出不再变；之后不在导出内的目录按“未导出”拒绝。
-- 宿主侧：嵌入构建的 9P 后端是 `native/fs_export.c`，不再是上游 fs_disk。每个操作从导出根逐级 `openat(O_NOFOLLOW)` 重新解析，拒绝 `.`、`..` 与含 `/` 的名字，客体造的符号链接只在客体内核里解析；所有对象报告为客体作业身份 60081（于是宿主权限位按“属主”生效），chown 到 60081 视为无操作、到别的身份为 EPERM；错误码按 Linux errno 原样回传；打开带 O_NONBLOCK，FIFO 不会卡住 VM 线程。
+- 宿主侧：嵌入构建的 9P 后端是 `native/fs_export.c`，不再是上游 fs_disk。每个按名字的操作（walk、open、create、mkdir、setattr、link、symlink、mknod、readlink、rename、unlink）都从导出根逐级 `openat(O_NOFOLLOW)` 重新解析，拒绝 `.`、`..` 与含 `/` 的名字，客体造的符号链接只在客体内核里解析；改权限用 `fchmodat(AT_SYMLINK_NOFOLLOW)`，检查与修改落在同一对象上，遇链接拒绝。正文读写不重新解析：它们作用于 open/create 时已持有的描述符，所以文件在打开后被改名、移走，已打开的读写仍指向原对象，已交付的字节不会因后来的路径变化而撤回。mknod 的类型交给宿主，宿主进程无权建设备节点，FIFO 与 socket 可以建在导出内；打开得到的对象不限于普通文件。所有对象报告为客体作业身份 60081（于是宿主权限位按“属主”生效），chown 到 60081 视为无操作、到别的身份为 EPERM；错误码按 Linux errno 原样回传；打开带 O_NONBLOCK，FIFO 不会卡住 VM 线程。
 - 客体侧：agent 的 start 帧可带 `mounts:[{tag, source, target, readOnly}]`。作业 leader 仍是 root 时：首次用到某个 tag 就在根命名空间把它挂到只有 root 能进的 `/run/dsh-9p/<tag>`（`cache=none,access=any`），然后 `unshare(CLONE_NEWNS)`、整棵设为 private、把导出内的子目录 bind 到与宿主相同的绝对路径，只读的再 `remount,bind,ro`，最后在本作业命名空间里卸掉 `/run/dsh-9p/*`，再 chdir、丢权限、exec。作业因此只看得到自己的两个目录。挂载失败按 exec 失败处理：stderr 说明、退出码 126。
-- 换算（`process/linux-backend.mjs`）：有会话 policy 时挂 `policy.workspaceRoot` 与临时根，mode 为 read-only 时两者都只读（与虚拟运行时 read-only 拒绝一切写入一致）；没有 policy 的插件进程挂它的 cwd 与临时根。cwd 必须落在其中，否则 126。`TMPDIR` 是宿主临时根（与虚拟 shell 共用），`HOME=/workspace` 是客体私有目录，`PATH` 先找 `/workspace/.local/bin`。
-- capabilities：`LinuxCommandBackend.capabilities.confinement` 为 `['read-only','workspace-write']`。只读与目录范围由客体内核（私有挂载命名空间、ro bind、作业无任何 capability 且 no_new_privs）保证；客体内核若被攻破，这层不再成立，但宿主侧的 fs_export 仍把访问限制在导出根内。`LinuxRuntimeBackend` 自身仍是 `confinement: []`，只接受 owner 换算好的 mounts。
+- 换算（`process/linux-backend.mjs`）：有会话 policy 时挂 `policy.workspaceRoot` 与临时根，mode 为 read-only 时两者都只读（只覆盖宿主共享的这两个目录；客体自己的 `/tmp` 与私有 `/workspace`（HOME）仍可写，所以这不等于虚拟运行时 read-only 的“拒绝一切写入”）；没有 policy 的插件进程挂它的 cwd 与临时根。cwd 必须落在其中，否则 126。`TMPDIR` 是宿主临时根（与虚拟 shell 共用），`HOME=/workspace` 是客体私有目录，`PATH` 先找 `/workspace/.local/bin`。
+- capabilities：`LinuxCommandBackend.capabilities.confinement` 为 `['read-only','workspace-write']`。宿主共享目录的只读与可见范围由客体内核（私有挂载命名空间、ro bind、作业无任何 capability 且 no_new_privs）保证，mount 的源与目标仍由客体内核按路径解析，前提是这些路径在受信资产里只归 root 所有；客体内核若被攻破，这层不再成立，但宿主侧的 fs_export 仍把访问限制在导出根内。`LinuxRuntimeBackend` 自身仍是 `confinement: []`，只接受 owner 换算好的 mounts。
 
 ## 开关、恢复、忙
 

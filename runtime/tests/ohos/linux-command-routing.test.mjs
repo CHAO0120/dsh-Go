@@ -177,3 +177,35 @@ test('the App proxy applies to routed jobs; switching Linux off cancels a runnin
   assert.equal((await running).exitCode, 137);
   await until(() => f.control.status().state === 'disabled');
 });
+
+test('an unconfirmed guest exit is never reported as exited, and its output errors are handled', async t => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), 'linux-unconfirmed-')));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const unhandled = [];
+  const onUnhandled = reason => unhandled.push(reason);
+  process.on('unhandledRejection', onUnhandled);
+  t.after(() => process.off('unhandledRejection', onUnhandled));
+  const quarantine = Object.assign(new Error('guest exit not confirmed'), { code: 'ERR_OHOS_LINUX_QUARANTINED' });
+  const { PassThrough } = await import('node:stream');
+  const control = {
+    exports: [{ tag: 'fs0', path: root }],
+    exportWorkspaces() {},
+    status: () => ({ enabled: true }),
+    async spawnRouted() {
+      const job = { stdin: new PassThrough(), stdout: new PassThrough(), stderr: new PassThrough(),
+        started: Promise.resolve(), done: Promise.reject(quarantine), terminate() {} };
+      job.done.catch(() => {});
+      // Quarantine destroys both outputs with the same error.
+      setImmediate(() => { job.stdout.destroy(quarantine); job.stderr.destroy(quarantine); });
+      return job;
+    },
+  };
+  const backend = new LinuxCommandBackend({ control, workspaceRoots: [root], temporaryRoot: root });
+  const job = backend.spawn({ argv: ['gh', '--version'], cwd: root, env: {}, graceMs: 1000,
+    stdio: { stdin: 'ignore', stdout: { maxBytes: 4096 }, stderr: { maxBytes: 4096 } } });
+  await assert.rejects(job.done, { code: 'ERR_OHOS_LINUX_QUARANTINED' });
+  await assert.rejects(job.waitForExit(), { code: 'ERR_OHOS_LINUX_QUARANTINED' });
+  await assert.rejects(backend.dispose(), { code: 'ERR_OHOS_LINUX_QUARANTINED' });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(unhandled, []);
+});

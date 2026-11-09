@@ -23,7 +23,7 @@
     "temu_embed.h": "e6b6da718dd459cee79733c854c3b2a1d55fae2956c9030c7806a7d2dc733485",
     "patches/0014-grant-fid-decoder.patch": "c356a51798380a59267621884e096e0e7de36b727b3915eb282ff2b868906d27",
     "patches/0015-block-write-errors.patch": "e6644b787e29c98caeab49b0911a88f88ab120c290dcaf07383c7e228f83d66d",
-    "fs_export.c": "8949582d58872a3918f7b40da85c301a991fbb7b13c1fb92b791f18f28927174",
+    "fs_export.c": "4ebc81e80db33f47daa7677ab84ae50bcff90411f490842602a4bdde9804f6f9",
     "fs_export.h": "978fea6b3a36b9c49751b1f8c306c0fad9414c114a95d9067a64fd67161c9200",
     "patches/0016-app-workspace-export.patch": "d229bd61ea52c9f9743813565cbbf3f21a34a711512fdcf86747233a56f36696"
   }

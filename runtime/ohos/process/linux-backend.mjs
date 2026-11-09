@@ -46,6 +46,8 @@ export class LinuxCommandBackend {
   #control;
   #waitMs;
   #disposal;
+  // Jobs whose guest exit was never confirmed; dispose reports them.
+  #failures = new Set();
 
   constructor({ control, workspaceRoots, temporaryRoot, onSpillFailure = () => {} }, { waitMs } = {}) {
     this.#control = control;
@@ -96,7 +98,7 @@ export class LinuxCommandBackend {
     if (!spec.argv?.length || spec.argv.some(value => typeof value !== 'string' || value.includes('\0'))) throw new TypeError('argv 必须是无 NUL 的字符串数组，且命令名非空');
     if (spec.stdio.control === 'pipe') throw fail('ERR_OHOS_STREAM_UNAVAILABLE', 'Linux 命令没有控制通道');
     spec.signal?.throwIfAborted();
-    const admission = new AbortController(), started = deferred(), done = deferred(), gone = deferred();
+    const admission = new AbortController(), started = deferred(), done = deferred();
     const input = spec.stdio.stdin === 'pipe' ? new PassThrough() : undefined;
     const output = {}, collected = {};
     for (const label of ['stdout', 'stderr']) {
@@ -115,8 +117,7 @@ export class LinuxCommandBackend {
       for (const stream of Object.values(output)) stream.end();
       started.reject(Object.assign(new Error('任务在启动前已结束'), { code: 'ERR_OHOS_NOT_STARTED' }));
       this.live.delete(handle);
-      gone.resolve(true);
-      if (error) done.reject(error); else done.resolve(outcome);
+      if (error) { this.#failures.add(error); done.reject(error); } else done.resolve(outcome);
     };
     const handle = {
       stdin: input, stdout: output.stdout, stderr: output.stderr, control: undefined, collected,
@@ -126,12 +127,15 @@ export class LinuxCommandBackend {
         stopSignal = signal === 'SIGKILL' ? 'SIGKILL' : 'SIGTERM';
         if (job) job.terminate(stopSignal); else admission.abort();
       },
+      // An unconfirmed guest exit rejects here; it is never reported as exited.
       waitForExit: async signal => {
-        if (settled) return true;
+        if (settled) { await done.promise; return true; }
         if (signal?.aborted) return false;
         const interrupted = Promise.withResolvers(), abort = () => interrupted.resolve(false);
+        const exited = done.promise.then(() => true);
+        exited.catch(() => {});
         signal?.addEventListener('abort', abort, { once: true });
-        try { return await Promise.race([gone.promise, interrupted.promise]); }
+        try { return await Promise.race([exited, interrupted.promise]); }
         finally { signal?.removeEventListener('abort', abort); }
       },
     };
@@ -161,7 +165,9 @@ export class LinuxCommandBackend {
       const drained = ['stdout', 'stderr'].map(label => {
         if (collected[label]) job[label].on('data', bytes => collected[label].push(bytes));
         else job[label].pipe(output[label] ?? process[label], { end: false });
-        return finished(job[label]);
+        const drain = finished(job[label]);
+        drain.catch(() => {});
+        return drain;
       });
       try {
         const outcome = await job.done;
@@ -203,7 +209,11 @@ export class LinuxCommandBackend {
     this.closed = true;
     const jobs = [...this.live];
     for (const job of jobs) job.terminate();
-    return this.#disposal = Promise.allSettled(jobs.map(job => job.done)).then(() => {});
+    return this.#disposal = Promise.allSettled(jobs.map(job => job.done)).then(() => {
+      const errors = [...this.#failures];
+      if (errors.length === 1) throw errors[0];
+      if (errors.length) throw new AggregateError(errors, 'Linux 命令资源未全部确认退出');
+    });
   }
 }
 
