@@ -250,7 +250,9 @@ class PhonePlugin : FlutterPlugin, ActivityAware, MethodChannel.MethodCallHandle
                     controlIo.execute { control.background.saveKeep(cleared) }
                     control.background.cancelRootSelection()
                 }
-                async(result) {
+                // Serialize both switch directions away from slow transport work; a queued
+                // enable must not run after a newer disable on another executor.
+                async(result, shortControl = true) {
                     val ok = (!enabled || control.background.preparePhoneEnable()) && control.setEnabled(enabled)
                     if (ok && !enabled) control.background.setBackgroundMode("off")["ok"] == true else ok
                 }
