@@ -5,6 +5,7 @@ import android.os.Process as AndroidProcess
 import android.system.Os
 import java.io.File
 import java.nio.file.Files
+import java.util.Collections
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
@@ -25,6 +26,7 @@ fun main(args: Array<String>) {
     val children = mutableListOf<Process>()
     val attempts = mutableListOf<DshProcess>()
     val methods = mutableListOf<Boolean>()
+    val startupFailures = Collections.synchronizedList(mutableListOf<DshProcess>())
     fun child(): Process = ProcessBuilder("/bin/sleep", "45").directory(root).apply {
         environment()["DSH_GO_RUNTIME_ROOT"] = root.canonicalPath
     }.start().also {
@@ -39,6 +41,7 @@ fun main(args: Array<String>) {
         override fun onLog(line: String, stream: String, storageLine: String) { println("[$case] $line") }
         override fun onReady(source: DshProcess, baseUrl: String, token: String) {}
         override fun onExit(source: DshProcess, code: Int, expected: Boolean) {}
+        override fun onStartupFailure(source: DshProcess) { startupFailures += source }
     }).also(attempts::add)
     val guestRecord = DshProcess::class.java.getDeclaredMethod("guestRecord").apply { isAccessible = true }
     fun capture(owner: DshProcess) { guestRecord.invoke(owner) }
@@ -50,6 +53,7 @@ fun main(args: Array<String>) {
         }
         next.failStart(failure.message!!)
         next.awaitExit()
+        check(startupFailures == listOf(next)) { "Expected one startup-failure callback from the rejected launcher" }
         check(methods.isEmpty() && !marker.exists() && Os.sentSignals == 0)
     }
     var lockObserved = false

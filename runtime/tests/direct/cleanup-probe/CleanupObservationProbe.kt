@@ -14,6 +14,7 @@ fun main(args: Array<String>) {
         val root = Files.createTempDirectory(output.toPath(), "cleanup-").toFile()
         val childRoot = if (scenario == "other-root") Files.createTempDirectory(output.toPath(), "other-").toFile() else root
         val logs = mutableListOf<String>()
+        val startupFailures = mutableListOf<DshProcess>()
         val child = ProcessBuilder("/bin/sleep", "30").directory(childRoot).apply {
             environment()["DSH_GO_RUNTIME_ROOT"] = childRoot.canonicalPath
         }.start()
@@ -33,6 +34,7 @@ fun main(args: Array<String>) {
                 override fun onLog(line: String, stream: String, storageLine: String) { logs += line }
                 override fun onReady(source: DshProcess, baseUrl: String, token: String) {}
                 override fun onExit(source: DshProcess, code: Int, expected: Boolean) {}
+                override fun onStartupFailure(source: DshProcess) { startupFailures += source }
             })
             val clean = runtime.killStrays()
             if (clean && scenario !in setOf("other-root", "other-uid")) child.waitFor(1, TimeUnit.SECONDS)
@@ -54,6 +56,7 @@ fun main(args: Array<String>) {
                 check(recovered && !child.isAlive) { "captured cleanup did not recover when observation returned" }
             }
             check(Os.signalledPids.all { it == pid })
+            check(startupFailures.isEmpty()) { "Cleanup-only probe received a startup failure" }
             println("""{"case":"$scenario","reportedClean":$clean,"childAliveAfterFirst":$alive,"deniedReads":$denied,"signalsBeforeRecovery":$signals,"recovered":$recovered,"diagnosticCount":${logs.size},"pass":true}""")
         } finally {
             Os.denyStatPids -= pid; Os.denyOnce -= pid; Os.denyAfterSignal -= pid; Os.ignoreSignals -= pid; Os.foreignUid -= pid
