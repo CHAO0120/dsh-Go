@@ -1,0 +1,252 @@
+# TEMPORARY verification workflow for reverse request 004. Never merge.
+# Builds the layered arm64 runtime twice for real (no runtime/out cache) and a
+# debug-signed release APK, printing the results with an `R004:` prefix.
+name: reverse-004
+
+on:
+  push:
+    branches: [reverse/refactor1-004]
+
+permissions:
+  contents: read
+
+env:
+  FLUTTER_VERSION: 3.47.7
+  NODE_VERSION: 24.22.1
+  GRADLE_VERSION: 9.3.1
+  TZ: Asia/Shanghai
+  CA_DEB: runtime/.cache/ubuntu/debs/ca-certificates_20260816ubuntu0.24.04.1_all.deb
+  EXPECTED_BASE_ID: 4e5b05dadfef6bb2a6dbd00872ec8309320b1fc9c12b922d7a50157d6737fc38
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  verify:
+    name: reverse-004 verification
+    runs-on: ubuntu-24.04
+    timeout-minutes: 150
+    env:
+      DSH_MAVEN_MIRRORS: 0
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+      - uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
+        with:
+          gradle-version: ${{ env.GRADLE_VERSION }}
+
+      - name: R004 environment and helper
+        run: |
+          echo "R004: ENV head=$(git rev-parse HEAD) runner=$(. /etc/os-release && echo "$PRETTY_NAME") arch=$(uname -m) python=$(python3 --version 2>&1)"
+          git ls-files -s runtime/build-runtime.sh tooling/build-apk.sh | sed 's/^/R004: ENV mode /'
+          mkdir -p "$RUNNER_TEMP/r004"
+          : > "$RUNNER_TEMP/r004/codes"
+          cat > "$RUNNER_TEMP/r004/summary.py" <<'PY'
+          import glob, hashlib, json, os, sys
+          label, out_path = sys.argv[1], sys.argv[2]
+          def say(msg):
+              print('R004: %s %s' % (label, msg), flush=True)
+          def sha(path):
+              h = hashlib.sha256()
+              with open(path, 'rb') as f:
+                  for chunk in iter(lambda: f.read(1 << 20), b''):
+                      h.update(chunk)
+              return h.hexdigest()
+          result = {}
+          try:
+              report = json.load(open('runtime/out/arm64-v8a/build-report.json'))
+              result['baseCache'] = report.get('baseCache')
+              say('baseCache=' + json.dumps(report.get('baseCache'), sort_keys=True))
+          except Exception as e:
+              say('build-report unreadable: %r' % (e,))
+          manifests = sorted(glob.glob('runtime/out/**/manifest*.json', recursive=True))
+          say('manifests=' + json.dumps(manifests))
+          arm = [m for m in manifests if 'arm64-v8a' in m]
+          if arm:
+              try:
+                  m = json.load(open(arm[0]))
+                  result['manifest'] = arm[0]
+                  result['schema'] = m.get('schema')
+                  result['runtimeVersion'] = m.get('runtimeVersion')
+                  result['baseId'] = (m.get('upgrade') or {}).get('baseId')
+                  result['layers'] = m.get('layers')
+                  say('manifest=%s schema=%s runtimeVersion=%s' % (arm[0], m.get('schema'), m.get('runtimeVersion')))
+                  say('upgrade=' + json.dumps(m.get('upgrade'), sort_keys=True))
+                  say('baseId=%s' % result['baseId'])
+                  say('layers=' + json.dumps(m.get('layers'), sort_keys=True))
+                  say('baseCompatibility=' + json.dumps(m.get('baseCompatibility'), sort_keys=True))
+              except Exception as e:
+                  say('manifest unreadable: %r' % (e,))
+          for kind in ('base', 'engine'):
+              files = sorted(glob.glob('runtime/out/arm64-v8a/**/%s-arm64-v8a.tar.*' % kind, recursive=True))
+              for f in files:
+                  s, n = sha(f), os.path.getsize(f)
+                  result[kind + 'Sha256'], result[kind + 'Bytes'], result[kind + 'Path'] = s, n, f
+                  say('archive %s path=%s sha256=%s bytes=%d' % (kind, f, s, n))
+              if not files:
+                  say('archive %s missing' % kind)
+          json.dump(result, open(out_path, 'w'), indent=1, sort_keys=True)
+          PY
+
+      # The runtime/out restore/save of android-release is deliberately absent:
+      # this run must build for real and must not populate the default cache key.
+      - name: Force the ca-certificates deb to be fetched again
+        run: |
+          if [ -f "$CA_DEB" ]; then mv "$CA_DEB" "$CA_DEB.bak"; echo "R004: PREP renamed cached ca deb to .bak"; else echo "R004: PREP no cached ca deb (fresh runner)"; fi
+
+      - name: A - runtime unit tests
+        run: |
+          set +e
+          python3 -I -m unittest discover -s runtime/tests -p test_runtime_fetch.py -v > a1.log 2>&1; a1=$?
+          python3 -I runtime/tests/test_runtime_layers.py -v > a2.log 2>&1; a2=$?
+          python3 -I runtime/tests/test_runtime_upgrade.py -v > a3.log 2>&1; a3=$?
+          for i in 1 2 3; do
+            echo "::group::a$i.log"; cat "a$i.log"; echo "::endgroup::"
+            grep -E '^(Ran [0-9]+ tests?|OK|FAILED)' "a$i.log" | sed "s/^/R004: A$i /"
+            grep -E '\.\.\. (FAIL|ERROR)$|^(FAIL|ERROR):' "a$i.log" | sed "s/^/R004: A$i bad /"
+          done
+          echo "R004: A exit fetch=$a1 layers=$a2 upgrade=$a3"
+          a=$(( a1 | a2 | a3 ))
+          echo "A=$a" >> "$RUNNER_TEMP/r004/codes"
+
+      - name: B - first real layered build
+        run: |
+          set +e
+          echo "R004: B locks-diff-before=[$(git diff --stat -- runtime/locks | tr '\n' ' ')]"
+          start=$(date +%s); echo "R004: B start=$(date -u +%FT%TZ)"
+          RUNTIME_LAYERS=1 bash runtime/build-runtime.sh arm64-v8a 2>&1 | tee build1.log
+          b=${PIPESTATUS[0]}
+          echo "R004: B exit=$b seconds=$(( $(date +%s) - start ))"
+          grep -n 'ca-certificates' build1.log | sed 's/^/R004: B ca-log /'
+          if [ -f "$CA_DEB" ]; then
+            echo "R004: B ca-deb sha256=$(sha256sum "$CA_DEB" | cut -d' ' -f1) bytes=$(stat -c %s "$CA_DEB")"
+          else
+            echo "R004: B ca-deb missing"
+          fi
+          ls -la runtime/.cache/ubuntu/debs/ 2>/dev/null | grep ca-cert | sed 's/^/R004: B ca-ls /'
+          echo "R004: B locks-diff-after=[$(git diff --stat -- runtime/locks | tr '\n' ' ')]"
+          python3 -I "$RUNNER_TEMP/r004/summary.py" B /tmp/r004-build1.json
+          python3 -I - <<'PY'
+          import json, os
+          d = json.load(open('/tmp/r004-build1.json'))
+          print('R004: B baseId-matches-expected=%s' % (d.get('baseId') == os.environ['EXPECTED_BASE_ID']))
+          PY
+          [ "$b" = 0 ] || tail -n 60 build1.log | sed 's/^/R004: B tail /'
+          echo "B=$b" >> "$RUNNER_TEMP/r004/codes"
+
+      - name: C - release APK
+        run: |
+          set +e
+          start=$(date +%s); c=0
+          (
+            set -e
+            cd app
+            flutter pub get --enforce-lockfile
+            printf 'sdk.dir=%s\nflutter.sdk=%s\n' "$ANDROID_HOME" "$FLUTTER_ROOT" > android/local.properties
+            cd android
+            gradle wrapper --gradle-version "$GRADLE_VERSION" --distribution-type bin
+          ) > c-prep.log 2>&1 || { c=1; echo "R004: C prepare failed"; tail -n 60 c-prep.log | sed 's/^/R004: C tail /'; }
+          if [ "$c" = 0 ]; then
+            bash tooling/build-apk.sh -f arm64 --release > c-build.log 2>&1; c=$?
+            echo "R004: C build-apk exit=$c"
+            [ "$c" = 0 ] || tail -n 60 c-build.log | sed 's/^/R004: C tail /'
+          fi
+          if [ "$c" = 0 ]; then
+            # Verbatim script of android-release's "Check packaged runtime and shrinker output".
+            (
+              set -e
+              test -s app/build/app/outputs/flutter-apk/app-arm64-release.apk
+              test -s app/build/app/outputs/mapping/arm64Release/mapping.txt
+              python3 - <<'PY'
+          import hashlib, json, zipfile
+          from pathlib import Path
+          runtime = Path('runtime/out/arm64-v8a/assets/runtime')
+          manifest = (runtime / 'manifest.json').read_bytes()
+          with zipfile.ZipFile('app/build/app/outputs/flutter-apk/app-arm64-release.apk') as apk:
+              assert apk.read('assets/runtime/manifest.json') == manifest
+              data = json.loads(manifest)
+              if data['schema'] == 1:
+                  archives = [{'asset': data['rootfs'], 'sha256': data['rootfsSha256']}]
+              elif data['schema'] == 2:
+                  archives = [data['layers'][name] for name in ('base', 'engine')]
+              else:
+                  raise AssertionError('unsupported runtime manifest schema')
+              for layer in archives:
+                  with apk.open('assets/runtime/' + layer['asset']) as archive:
+                      assert hashlib.file_digest(archive, 'sha256').hexdigest() == layer['sha256']
+              print('Verified %d runtime archive(s), schema %s' % (len(archives), data['schema']))
+          PY
+            ) > c-check.log 2>&1; c=$?
+            cat c-check.log
+            sed 's/^/R004: C check /' c-check.log
+            echo "R004: C check exit=$c"
+          fi
+          for f in app/build/app/outputs/flutter-apk/app-arm64-release.apk app/build/app/outputs/mapping/arm64Release/mapping.txt; do
+            if [ -f "$f" ]; then echo "R004: C file $f bytes=$(stat -c %s "$f")"; else echo "R004: C file $f missing"; fi
+          done
+          echo "::group::c-build.log tail"; tail -n 200 c-build.log 2>/dev/null; echo "::endgroup::"
+          echo "R004: C exit=$c seconds=$(( $(date +%s) - start ))"
+          echo "C=$c" >> "$RUNNER_TEMP/r004/codes"
+
+      - name: D - second build after an engine-only change
+        run: |
+          set +e
+          printf '\n// reverse-004 cache probe\n' >> runtime/bridge/dsh-go-bridge/lib/index.js
+          start=$(date +%s); echo "R004: D start=$(date -u +%FT%TZ)"
+          RUNTIME_LAYERS=1 bash runtime/build-runtime.sh arm64-v8a 2>&1 | tee build2.log
+          d=${PIPESTATUS[0]}
+          echo "R004: D exit=$d seconds=$(( $(date +%s) - start ))"
+          echo "R004: D locks-diff-after=[$(git diff --stat -- runtime/locks | tr '\n' ' ')]"
+          python3 -I "$RUNNER_TEMP/r004/summary.py" D /tmp/r004-build2.json
+          [ "$d" = 0 ] || tail -n 60 build2.log | sed 's/^/R004: D tail /'
+          python3 -I - <<'PY'
+          import json
+          a = json.load(open('/tmp/r004-build1.json'))
+          b = json.load(open('/tmp/r004-build2.json'))
+          ka, kb = (a.get('baseCache') or {}), (b.get('baseCache') or {})
+          checks = [
+              ('baseCache.key same', ka.get('key') is not None and ka.get('key') == kb.get('key')),
+              ('build2 baseCache.status reused', kb.get('status') == 'reused'),
+              ('baseId same', a.get('baseId') is not None and a.get('baseId') == b.get('baseId')),
+              ('base sha256 same', a.get('baseSha256') is not None and a.get('baseSha256') == b.get('baseSha256')),
+              ('base bytes same', a.get('baseBytes') is not None and a.get('baseBytes') == b.get('baseBytes')),
+              ('engine sha256 differs', None not in (a.get('engineSha256'), b.get('engineSha256')) and a.get('engineSha256') != b.get('engineSha256')),
+              ('runtimeVersion differs', None not in (a.get('runtimeVersion'), b.get('runtimeVersion')) and a.get('runtimeVersion') != b.get('runtimeVersion')),
+          ]
+          print('R004: D status build1=%s build2=%s' % (ka.get('status'), kb.get('status')))
+          for name, ok in checks:
+              print('R004: D compare %s: %s' % (name, 'YES' if ok else 'NO'))
+          print('R004: D compare all=%s' % ('PASS' if all(ok for _, ok in checks) else 'FAIL'))
+          raise SystemExit(0 if all(ok for _, ok in checks) else 3)
+          PY
+          cmp=$?
+          [ "$d" = 0 ] && d=$cmp
+          echo "R004: D final=$d"
+          echo "D=$d" >> "$RUNNER_TEMP/r004/codes"
+
+      - name: Summary
+        if: always()
+        run: |
+          cat "$RUNNER_TEMP/r004/codes" | sed 's/^/R004: SUMMARY /'
+          fail=0
+          for k in A B C D; do
+            v=$(grep "^$k=" "$RUNNER_TEMP/r004/codes" | tail -n1 | cut -d= -f2)
+            [ -n "$v" ] || { echo "R004: SUMMARY $k did not record a result"; fail=1; continue; }
+            [ "$v" = 0 ] || fail=1
+          done
+          echo "R004: SUMMARY overall=$([ $fail = 0 ] && echo PASS || echo FAIL)"
+          exit $fail
