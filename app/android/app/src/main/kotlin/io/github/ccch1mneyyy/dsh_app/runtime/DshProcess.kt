@@ -335,10 +335,11 @@ class DshProcess(
     }
 
     private fun pump(reader: java.io.BufferedReader, stream: String) = thread(name = "dsh-$stream", isDaemon = true) {
+        val redactor = LogRedactor()
         try {
             reader.useLines { lines ->
                 lines.forEach { line ->
-                    listener.onLog(line, stream)
+                    listener.onLog(redactor.line(line), stream)
                     if (!readyReported) detectToken(line)
                 }
             }

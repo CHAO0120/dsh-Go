@@ -110,7 +110,6 @@ object CrashClassifier {
     private val DIAGNOSTICS = Regex("^Full diagnostics: (\\S+)")
     private val REQUIRED_ROW = Regex("^\\s{2}(\\S+) \\(required\\)")
     private val PACKAGE = Regex("^\\s+Package: (\\S+)")
-    private val TOKEN = Regex("token=[A-Za-z0-9._~%-]+")
     private const val WEB_MODULES = "/profiles/web/node_modules/"
     private const val SHIPPED_SCOPE = "@deepseek-ai/"
     private const val SUMMARY_MAX = 240
@@ -123,7 +122,7 @@ object CrashClassifier {
 
     fun isFatal(line: String): Boolean = FATAL.any { it.containsMatchIn(line) }
 
-    fun redact(line: String): String = TOKEN.replace(line, "token=•••")
+    fun redact(line: String): String = LogRedactor.redact(line)
 
     /**
      * [readyAt] and [now] share one monotonic clock (elapsedRealtime); [readyAt] is null when

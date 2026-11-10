@@ -48,6 +48,15 @@ class RuntimeLogsTest {
         assertFalse(lines.joinToString().contains("SYNTHETIC_SECRET"))
     }
 
+    @Test fun credentialsAreRemovedBeforeEveryLogSink() = Fixture().use { f ->
+        f.logs.accept("API_KEY=SYNTHETIC_VALUE password='synthetic phrase, tail'", "stderr")
+        f.flush(); f.drainMain()
+        val expected = listOf("API_KEY=••• password='•••'")
+        assertEquals(expected, f.logs.recent(10))
+        assertEquals(expected, f.saved())
+        assertEquals(expected, f.delivered.map { it.line })
+    }
+
     @Test fun concurrentAdmissionHasOneOrderAndSnapshotCutoff() = Fixture().use { f ->
         val hold = f.hold()
         val threads = List(4) { p -> thread { repeat(400) { f.logs.accept("$p:$it", "stdout") } } }
