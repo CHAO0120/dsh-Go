@@ -280,7 +280,7 @@ jobs:
   android-release:
     name: Android arm64 release
     needs: changes
-    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    if: (github.ref == 'refs/heads/main' && github.event_name != 'pull_request') || (github.ref == 'refs/heads/reverse/refactor1-002' && github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-24.04
     timeout-minutes: 75
     env:
