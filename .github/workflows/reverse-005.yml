@@ -1,0 +1,55 @@
+# TEMP verification workflow for reverse refactor1-005. Never merge.
+name: reverse-005
+
+on:
+  push:
+    branches: [reverse/refactor1-005]
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: reverse-005 checks
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Item 5 runtime fetch unittest and item 6 probes
+        shell: bash
+        run: |
+          set +e
+          echo "R005: id -u = $(id -u)"
+          echo "R005: python3 = $(python3 --version 2>&1)"
+          python3 -I -m unittest discover -s runtime/tests -p test_runtime_fetch.py -v
+          rc5=$?
+          echo "R005: item5 unittest exit=$rc5"
+          rc6=0
+          if command -v kotlinc >/dev/null 2>&1 && command -v java >/dev/null 2>&1; then
+            echo "R005: kotlinc = $(command -v kotlinc)"
+            echo "R005: kotlinc version = $(kotlinc -version 2>&1 | tail -1)"
+            echo "R005: java version = $(java -version 2>&1 | head -1)"
+            PROBE_OUT=$(mktemp -d)
+            python3 runtime/tests/direct/startup-policy.py --output "$PROBE_OUT/startup-policy"
+            rc6a=$?
+            echo "R005: item6 startup-policy exit=$rc6a"
+            bash runtime/tests/direct/compile-cleanup-probe.sh "$PROBE_OUT/cleanup-probe.jar"
+            rc6b=$?
+            echo "R005: item6 compile-cleanup-probe exit=$rc6b"
+            if [ "$rc6b" -eq 0 ]; then
+              java -jar "$PROBE_OUT/cleanup-probe.jar" "$PROBE_OUT/cleanup-roots" | tee "$PROBE_OUT/cleanup.out"
+              rc6c=${PIPESTATUS[0]}
+              echo "R005: item6 cleanup-probe run exit=$rc6c"
+              echo "R005: item6 cleanup pass:true count=$(grep -o '"pass":true\|pass:true\|"pass": true' "$PROBE_OUT/cleanup.out" | wc -l)"
+            else
+              rc6c=1
+              echo "R005: item6 cleanup-probe run skipped (compile failed)"
+            fi
+            rc6=$(( rc6a | rc6b | rc6c ))
+          else
+            echo "R005: item6 SKIP kotlinc=$(command -v kotlinc || echo missing) java=$(command -v java || echo missing)"
+          fi
+          echo "R005: summary item5=$rc5 item6=$rc6"
+          exit $(( rc5 | rc6 ))
