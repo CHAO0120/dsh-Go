@@ -1,0 +1,364 @@
+# TEMPORARY verification workflow for reverse request 006. Never merge.
+# Recovers the official PRoot debs, builds the layered arm64 runtime twice for
+# real (no runtime/out cache), a debug-signed release APK, and runs the 5047
+# probe comparison, printing the results with an `R006:` prefix.
+name: reverse-006
+
+on:
+  push:
+    branches: [reverse/refactor1-006]
+
+permissions:
+  contents: read
+  actions: read
+
+env:
+  FLUTTER_VERSION: 3.47.7
+  NODE_VERSION: 24.22.1
+  GRADLE_VERSION: 9.3.1
+  TZ: Asia/Shanghai
+  CA_DEB: runtime/.cache/ubuntu/debs/ca-certificates_20260816ubuntu0.24.04.1_all.deb
+  EXPECTED_BASE_ID: 4e5b05dadfef6bb2a6dbd00872ec8309320b1fc9c12b922d7a50157d6737fc38
+  BASELINE_COMMIT: 1c5b220093295f8d069f6bfb06d8b4fc97b9e9c2
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  verify:
+    name: reverse-006 verification
+    runs-on: ubuntu-24.04
+    timeout-minutes: 150
+    env:
+      DSH_MAVEN_MIRRORS: 0
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+      - uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
+        with:
+          gradle-version: ${{ env.GRADLE_VERSION }}
+
+      - name: R006 environment and helper
+        run: |
+          echo "R006: ENV head=$(git rev-parse HEAD) runner=$(. /etc/os-release && echo "$PRETTY_NAME") arch=$(uname -m) uid=$(id -u) python=$(python3 --version 2>&1)"
+          git ls-files -s runtime/build-runtime.sh tooling/build-apk.sh | sed 's/^/R006: ENV mode /'
+          mkdir -p "$RUNNER_TEMP/r006"
+          : > "$RUNNER_TEMP/r006/codes"
+          cat > "$RUNNER_TEMP/r006/summary.py" <<'PY'
+          import glob, hashlib, json, os, sys
+          label, out_path = sys.argv[1], sys.argv[2]
+          root = 'runtime/out/arm64-v8a'
+          def say(msg):
+              print('R006: %s %s' % (label, msg), flush=True)
+          def sha(path):
+              h = hashlib.sha256()
+              with open(path, 'rb') as f:
+                  for chunk in iter(lambda: f.read(1 << 20), b''):
+                      h.update(chunk)
+              return h.hexdigest()
+          result = {}
+          try:
+              report = json.load(open(root + '/build-report.json'))
+              result['baseCache'] = report.get('baseCache')
+              say('baseCache=' + json.dumps(report.get('baseCache'), sort_keys=True))
+          except Exception as e:
+              say('build-report unreadable: %r' % (e,))
+          manifest_path = root + '/assets/runtime/manifest.json'
+          manifests = sorted(glob.glob('runtime/out/**/manifest*.json', recursive=True))
+          say('manifests=' + json.dumps(manifests))
+          if not os.path.isfile(manifest_path):
+              arm = [m for m in manifests if 'arm64-v8a' in m]
+              manifest_path = arm[0] if arm else None
+          layers = {}
+          if manifest_path:
+              try:
+                  m = json.load(open(manifest_path))
+                  result['manifest'] = manifest_path
+                  result['schema'] = m.get('schema')
+                  result['runtimeVersion'] = m.get('runtimeVersion')
+                  result['baseId'] = (m.get('upgrade') or {}).get('baseId')
+                  layers = m.get('layers') or {}
+                  result['layers'] = layers
+                  say('manifest=%s schema=%s runtimeVersion=%s' % (manifest_path, m.get('schema'), m.get('runtimeVersion')))
+                  say('upgrade=' + json.dumps(m.get('upgrade'), sort_keys=True))
+                  say('baseId=%s' % result['baseId'])
+                  for kind in ('base', 'engine'):
+                      l = layers.get(kind) or {}
+                      say('layer %s asset=%s sha256=%s bytes=%s tarSha256=%s tarBytes=%s' % (
+                          kind, l.get('asset'), l.get('sha256'), l.get('bytes'), l.get('tarSha256'), l.get('tarBytes')))
+                  say('baseCompatibility=' + json.dumps(m.get('baseCompatibility'), sort_keys=True))
+              except Exception as e:
+                  say('manifest unreadable: %r' % (e,))
+          for kind in ('base', 'engine'):
+              asset = (layers.get(kind) or {}).get('asset')
+              files = [os.path.join(os.path.dirname(manifest_path), asset)] if (asset and manifest_path) else []
+              files = [f for f in files if os.path.isfile(f)] or sorted(glob.glob(root + '/**/%s-arm64-v8a.tar.*' % kind, recursive=True))
+              for f in files[:1]:
+                  s, n = sha(f), os.path.getsize(f)
+                  result[kind + 'Sha256'], result[kind + 'Bytes'], result[kind + 'Path'] = s, n, f
+                  say('archive %s path=%s actual-sha256=%s actual-bytes=%d manifest-match=%s' % (
+                      kind, f, s, n, (layers.get(kind) or {}).get('sha256') == s and (layers.get(kind) or {}).get('bytes') == n))
+              if not files:
+                  say('archive %s missing' % kind)
+          json.dump(result, open(out_path, 'w'), indent=1, sort_keys=True)
+          PY
+
+      # The runtime/out restore/save of android-release is deliberately absent:
+      # this run must build for real and must not populate the default cache key.
+      - name: Force the ca-certificates deb to be fetched again
+        run: |
+          if [ -f "$CA_DEB" ]; then mv "$CA_DEB" "$CA_DEB.bak"; echo "R006: PREP renamed cached ca deb to .bak"; else echo "R006: PREP no cached ca deb (fresh runner)"; fi
+
+      - name: P - recover the official PRoot debs
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set +e
+          bash .reverse/006/006-official-proot-cache.sh "$PWD" > p.log 2>&1; p=$?
+          sed 's/^/R006: P out /' p.log
+          echo "R006: P exit=$p"
+          for f in runtime/.cache/termux/proot_5.1.107.98_aarch64.deb runtime/.cache/termux/proot_5.1.107.98_x86_64.deb; do
+            if [ -f "$f" ]; then echo "R006: P file $f sha256=$(sha256sum "$f" | cut -d' ' -f1) bytes=$(stat -c %s "$f")"; else echo "R006: P file $f missing"; fi
+          done
+          echo "P=$p" >> "$RUNNER_TEMP/r006/codes"
+
+      - name: B - first real layered build
+        if: always()
+        run: |
+          set +e
+          echo "R006: B locks-diff-before=[$(git diff --stat -- runtime/locks | tr '\n' ' ')]"
+          start=$(date +%s); echo "R006: B start=$(date -u +%FT%TZ)"
+          RUNTIME_LAYERS=1 bash runtime/build-runtime.sh arm64-v8a 2>&1 | tee build1.log
+          b=${PIPESTATUS[0]}
+          echo "R006: B exit=$b seconds=$(( $(date +%s) - start ))"
+          grep -n 'ca-certificates' build1.log | sed 's/^/R006: B ca-log /'
+          grep -n -i 'proot' build1.log | head -n 20 | sed 's/^/R006: B proot-log /'
+          if [ -f "$CA_DEB" ]; then
+            echo "R006: B ca-deb sha256=$(sha256sum "$CA_DEB" | cut -d' ' -f1) bytes=$(stat -c %s "$CA_DEB")"
+          else
+            echo "R006: B ca-deb missing"
+          fi
+          ls -la runtime/.cache/ubuntu/debs/ 2>/dev/null | grep ca-cert | sed 's/^/R006: B ca-ls /'
+          echo "R006: B locks-diff-after=[$(git diff --stat -- runtime/locks | tr '\n' ' ')]"
+          python3 -I "$RUNNER_TEMP/r006/summary.py" B "$RUNNER_TEMP/r006/build1.json"
+          python3 -I - "$RUNNER_TEMP/r006/build1.json" <<'PY'
+          import json, os, sys
+          d = json.load(open(sys.argv[1]))
+          print('R006: B baseId-matches-expected=%s' % (d.get('baseId') == os.environ['EXPECTED_BASE_ID']))
+          PY
+          if [ "$b" = 0 ]; then
+            mkdir -p "$RUNNER_TEMP/r006-b1"
+            cp runtime/out/arm64-v8a/build-report.json runtime/out/arm64-v8a/assets/runtime/manifest.json "$RUNNER_TEMP/r006-b1/"
+            cp runtime/out/arm64-v8a/assets/runtime/base-arm64-v8a.tar.* "$RUNNER_TEMP/r006-b1/"
+            ls -la "$RUNNER_TEMP/r006-b1" | sed 's/^/R006: B saved /'
+          else
+            tail -n 60 build1.log | sed 's/^/R006: B tail /'
+          fi
+          echo "B=$b" >> "$RUNNER_TEMP/r006/codes"
+
+      - name: C - release APK
+        if: always()
+        continue-on-error: true
+        run: |
+          set +e
+          start=$(date +%s); c=0
+          (
+            set -e
+            cd app
+            flutter pub get --enforce-lockfile
+            printf 'sdk.dir=%s\nflutter.sdk=%s\n' "$ANDROID_HOME" "$FLUTTER_ROOT" > android/local.properties
+            cd android
+            gradle wrapper --gradle-version "$GRADLE_VERSION" --distribution-type bin
+          ) > c-prep.log 2>&1 || { c=1; echo "R006: C prepare failed"; tail -n 60 c-prep.log | sed 's/^/R006: C tail /'; }
+          if [ "$c" = 0 ]; then
+            bstart=$(date +%s)
+            bash tooling/build-apk.sh -f arm64 --release > c-build.log 2>&1; c=$?
+            echo "R006: C build-apk exit=$c seconds=$(( $(date +%s) - bstart ))"
+            [ "$c" = 0 ] || tail -n 60 c-build.log | sed 's/^/R006: C tail /'
+          fi
+          if [ "$c" = 0 ]; then
+            # Verbatim script of android-release's "Check packaged runtime and shrinker output".
+            (
+              set -e
+              test -s app/build/app/outputs/flutter-apk/app-arm64-release.apk
+              test -s app/build/app/outputs/mapping/arm64Release/mapping.txt
+              python3 - <<'PY'
+          import hashlib, json, zipfile
+          from pathlib import Path
+          runtime = Path('runtime/out/arm64-v8a/assets/runtime')
+          manifest = (runtime / 'manifest.json').read_bytes()
+          with zipfile.ZipFile('app/build/app/outputs/flutter-apk/app-arm64-release.apk') as apk:
+              assert apk.read('assets/runtime/manifest.json') == manifest
+              data = json.loads(manifest)
+              if data['schema'] == 1:
+                  archives = [{'asset': data['rootfs'], 'sha256': data['rootfsSha256']}]
+              elif data['schema'] == 2:
+                  archives = [data['layers'][name] for name in ('base', 'engine')]
+              else:
+                  raise AssertionError('unsupported runtime manifest schema')
+              for layer in archives:
+                  with apk.open('assets/runtime/' + layer['asset']) as archive:
+                      assert hashlib.file_digest(archive, 'sha256').hexdigest() == layer['sha256']
+              print('Verified %d runtime archive(s), schema %s' % (len(archives), data['schema']))
+          PY
+            ) > c-check.log 2>&1; c=$?
+            cat c-check.log
+            sed 's/^/R006: C check /' c-check.log
+            echo "R006: C check exit=$c"
+          fi
+          for f in app/build/app/outputs/flutter-apk/app-arm64-release.apk app/build/app/outputs/mapping/arm64Release/mapping.txt; do
+            if [ -f "$f" ]; then echo "R006: C file $f bytes=$(stat -c %s "$f")"; else echo "R006: C file $f missing"; fi
+          done
+          echo "::group::c-build.log tail"; tail -n 200 c-build.log 2>/dev/null; echo "::endgroup::"
+          echo "R006: C exit=$c seconds=$(( $(date +%s) - start ))"
+          echo "C=$c" >> "$RUNNER_TEMP/r006/codes"
+
+      - name: D - second build after an engine-only change
+        if: always()
+        run: |
+          set +e
+          b=$(grep '^B=' "$RUNNER_TEMP/r006/codes" | tail -n1 | cut -d= -f2)
+          if [ "$b" != 0 ]; then
+            echo "R006: D 未运行 (B exit=${b:-none})"
+            echo "D=skipped" >> "$RUNNER_TEMP/r006/codes"
+            exit 0
+          fi
+          printf '\n// reverse-006 cache probe\n' >> runtime/bridge/dsh-go-bridge/lib/index.js
+          start=$(date +%s); echo "R006: D start=$(date -u +%FT%TZ)"
+          RUNTIME_LAYERS=1 bash runtime/build-runtime.sh arm64-v8a 2>&1 | tee build2.log
+          d=${PIPESTATUS[0]}
+          echo "R006: D exit=$d seconds=$(( $(date +%s) - start ))"
+          echo "R006: D locks-diff-after=[$(git diff --stat -- runtime/locks | tr '\n' ' ')]"
+          python3 -I "$RUNNER_TEMP/r006/summary.py" D "$RUNNER_TEMP/r006/build2.json"
+          [ "$d" = 0 ] || tail -n 60 build2.log | sed 's/^/R006: D tail /'
+          saved=$(ls "$RUNNER_TEMP"/r006-b1/base-arm64-v8a.tar.* 2>/dev/null | head -n1)
+          now=$(ls runtime/out/arm64-v8a/assets/runtime/base-arm64-v8a.tar.* 2>/dev/null | head -n1)
+          if [ -n "$saved" ] && [ -n "$now" ] && cmp "$saved" "$now"; then cmpres=SAME; else cmpres=DIFF; fi
+          echo "R006: D cmp base saved=$saved now=$now result=$cmpres"
+          [ -n "$saved" ] && echo "R006: D cmp saved sha256=$(sha256sum "$saved" | cut -d' ' -f1) bytes=$(stat -c %s "$saved")"
+          [ -n "$now" ] && echo "R006: D cmp now   sha256=$(sha256sum "$now" | cut -d' ' -f1) bytes=$(stat -c %s "$now")"
+          CMPRES=$cmpres python3 -I - "$RUNNER_TEMP/r006/build1.json" "$RUNNER_TEMP/r006/build2.json" <<'PY'
+          import json, os, sys
+          a = json.load(open(sys.argv[1]))
+          b = json.load(open(sys.argv[2]))
+          ka, kb = (a.get('baseCache') or {}), (b.get('baseCache') or {})
+          checks = [
+              ('baseCache.key same', ka.get('key') is not None and ka.get('key') == kb.get('key')),
+              ('build2 baseCache.status reused', kb.get('status') == 'reused'),
+              ('baseId same', a.get('baseId') is not None and a.get('baseId') == b.get('baseId')),
+              ('base archive cmp byte-identical', os.environ.get('CMPRES') == 'SAME'),
+              ('base sha256 same', a.get('baseSha256') is not None and a.get('baseSha256') == b.get('baseSha256')),
+              ('base bytes same', a.get('baseBytes') is not None and a.get('baseBytes') == b.get('baseBytes')),
+              ('engine sha256 differs', None not in (a.get('engineSha256'), b.get('engineSha256')) and a.get('engineSha256') != b.get('engineSha256')),
+              ('runtimeVersion differs', None not in (a.get('runtimeVersion'), b.get('runtimeVersion')) and a.get('runtimeVersion') != b.get('runtimeVersion')),
+          ]
+          print('R006: D keys build1=%s build2=%s' % (ka.get('key'), kb.get('key')))
+          print('R006: D status build1=%s build2=%s' % (ka.get('status'), kb.get('status')))
+          print('R006: D baseId build1=%s build2=%s' % (a.get('baseId'), b.get('baseId')))
+          print('R006: D engine build1=%s/%s build2=%s/%s' % (a.get('engineSha256'), a.get('engineBytes'), b.get('engineSha256'), b.get('engineBytes')))
+          print('R006: D runtimeVersion build1=%s build2=%s' % (a.get('runtimeVersion'), b.get('runtimeVersion')))
+          for name, ok in checks:
+              print('R006: D compare %s: %s' % (name, 'YES' if ok else 'NO'))
+          print('R006: D compare all=%s' % ('PASS' if all(ok for _, ok in checks) else 'FAIL'))
+          raise SystemExit(0 if all(ok for _, ok in checks) else 3)
+          PY
+          cmp=$?
+          [ "$d" = 0 ] && d=$cmp
+          echo "R006: D final=$d"
+          echo "D=$d" >> "$RUNNER_TEMP/r006/codes"
+
+      - name: E - 5039 probe comparison
+        if: always()
+        run: |
+          set +e
+          git checkout -- runtime/bridge/dsh-go-bridge/lib/index.js
+          echo "R006: E candidate-status=[$(git status --porcelain --untracked-files=no | tr '\n' ' ')]"
+          if ! command -v kotlinc >/dev/null || ! command -v java >/dev/null; then
+            echo "R006: E SKIP kotlinc=$(command -v kotlinc || echo missing) java=$(command -v java || echo missing)"
+            echo "E=skip" >> "$RUNNER_TEMP/r006/codes"
+            exit 0
+          fi
+          echo "R006: E kotlinc=$(command -v kotlinc) java=$(command -v java)"
+          kotlinc -version 2>&1 | head -n 2 | sed 's/^/R006: E kotlinc-version /'
+          git cat-file -e "$BASELINE_COMMIT^{commit}" 2>/dev/null || git fetch --no-tags origin "$BASELINE_COMMIT"
+          git worktree add --detach "$RUNNER_TEMP/r006-baseline" "$BASELINE_COMMIT" > e-wt.log 2>&1; w=$?
+          sed 's/^/R006: E worktree /' e-wt.log
+          if [ "$w" != 0 ]; then echo "E=$w" >> "$RUNNER_TEMP/r006/codes"; exit 0; fi
+          PROBE_COMPARE_OUT="$RUNNER_TEMP/r006-probe"
+          start=$(date +%s)
+          python3 -I .reverse/006/5047-probe-compare.py --baseline "$RUNNER_TEMP/r006-baseline" --candidate "$PWD" --output "$PROBE_COMPARE_OUT" > e.out 2> e.err; e=$?
+          echo "R006: E exit=$e seconds=$(( $(date +%s) - start ))"
+          head -c 4000 e.err | sed 's/^/R006: E stderr /'
+          echo "R006: E stdout-lines=$(wc -l < e.out)"
+          find "$PROBE_COMPARE_OUT" -maxdepth 3 -type f 2>/dev/null | head -80 | sed 's/^/R006: E file /'
+          for f in summary.json restoration.json; do
+            [ -f "$PROBE_COMPARE_OUT/$f" ] && sed "s/^/R006: E $f /" "$PROBE_COMPARE_OUT/$f"
+          done
+          python3 -I - "$PROBE_COMPARE_OUT" <<'PY'
+          import json, sys
+          from pathlib import Path
+          out = Path(sys.argv[1])
+          def say(m): print('R006: E ' + m, flush=True)
+          for arm in ('baseline', 'candidate'):
+              p = out / arm / 'result.json'
+              if not p.is_file():
+                  say('%s result.json missing' % arm); continue
+              r = json.loads(p.read_text())
+              s = r.get('startupSummary') or {}
+              say('%s passed=%s startupExit=%s startup passed=%s failed=%s recorded=%s' % (
+                  arm, r.get('passed'), r.get('startupExit'), s.get('passed'), s.get('failed'), r.get('startupCasesRecorded')))
+              for f in r.get('startupFailures') or []:
+                  j = f.get('json') or {}
+                  say('%s fail case=%s errors=%s' % (arm, f.get('case'), json.dumps(j.get('errors'), ensure_ascii=False)[:1500]))
+                  say('%s fail case=%s stderrHead=%s' % (arm, f.get('case'), json.dumps((f.get('stderrHead') or {}).get('text'), ensure_ascii=False)[:800]))
+              say('%s cleanupCompileExit=%s cleanupExit=%s cleanupPassCount=%s' % (
+                  arm, r.get('cleanupCompileExit'), r.get('cleanupExit'), r.get('cleanupPassCount')))
+              for k in ('startupStderrHead', 'cleanupCompileStderrHead', 'cleanupStderrHead'):
+                  t = (r.get(k) or {}).get('text') if r.get(k) else None
+                  if t:
+                      say('%s %s=%s' % (arm, k, json.dumps(t, ensure_ascii=False)[:1500]))
+              for k in ('procBefore', 'procAfter'):
+                  o = r.get(k) or {}
+                  fe = o.get('fieldErrors') or []
+                  kinds = {}
+                  for e in fe:
+                      key = '%s:%s' % (e.get('field'), e.get('errno'))
+                      kinds[key] = kinds.get(key, 0) + 1
+                  say('%s %s sameUidCount=%s uidErrors=%d fieldErrors=%d byFieldErrno=%s enumerationError=%s' % (
+                      arm, k, o.get('sameUidCount'), len(o.get('uidErrors') or []), len(fe), json.dumps(kinds, sort_keys=True), o.get('enumerationError')))
+          PY
+          for arm in baseline candidate; do
+            f="$PROBE_COMPARE_OUT/$arm/result.json"
+            [ -f "$f" ] || continue
+            echo "::group::$arm result.json (first 200 lines)"; head -n 200 "$f"; echo "::endgroup::"
+          done
+          echo "E=$e" >> "$RUNNER_TEMP/r006/codes"
+
+      - name: Summary
+        if: always()
+        run: |
+          sed 's/^/R006: SUMMARY /' "$RUNNER_TEMP/r006/codes"
+          fail=0
+          for k in P B C D E; do
+            v=$(grep "^$k=" "$RUNNER_TEMP/r006/codes" | tail -n1 | cut -d= -f2)
+            [ -n "$v" ] || { echo "R006: SUMMARY $k did not record a result"; fail=1; continue; }
+            [ "$v" = 0 ] || fail=1
+          done
+          echo "R006: SUMMARY overall=$([ $fail = 0 ] && echo PASS || echo FAIL)"
+          exit $fail
