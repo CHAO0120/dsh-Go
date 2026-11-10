@@ -27,9 +27,7 @@ data class AdbStatus(
         mapOf("wirelessDebugging" to wirelessDebugging, "paired" to paired, "connected" to connected)
 }
 
-class AdbStarter(private val context: Context, private val onChanged: () -> Unit) {
-
-    private val keys = AdbKeyStore(context)
+class AdbStarter(private val context: Context, private val keys: AdbKeyStore, private val onChanged: () -> Unit) {
     private val pairedFlag = File(File(context.filesDir, "phone-adb"), "paired").apply { parentFile?.mkdirs() }
 
     private val manager = object : AbsAdbConnectionManager() {

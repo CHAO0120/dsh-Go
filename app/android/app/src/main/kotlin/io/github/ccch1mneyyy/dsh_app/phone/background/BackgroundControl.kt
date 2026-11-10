@@ -133,7 +133,8 @@ class BackgroundControl private constructor(context: Context) {
     private val shizuku = ShizukuStarter(app, {
         synchronized(keepGuard) { if (mode == "shizuku" || mode == "sui") gate.reset() }
     }) { transportChanged("sharedApi") }
-    private val adb = AdbStarter(app) { transportChanged("adb") }
+    internal val adbKeys = AdbKeyStore(app)
+    private val adb = AdbStarter(app, adbKeys) { transportChanged("adb") }
     private val root = RootStarter(app) { transportChanged("root") }
 
     private val mode: String get() = keep.mode

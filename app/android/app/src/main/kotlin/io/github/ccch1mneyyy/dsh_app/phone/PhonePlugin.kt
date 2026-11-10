@@ -288,6 +288,7 @@ class PhonePlugin : FlutterPlugin, ActivityAware, MethodChannel.MethodCallHandle
                 control.background.cancelUnwantedPending()
                 async(result) { if (live()) control.background.prepareRoot(live) else cancelledSelection() }
             }
+            "getAdbKeyProtection", "setAdbKeyProtection" -> adbKeyProtection(call, result)
             "adbStartPairing" -> async(result) { control.background.adbStartPairing() }
             "adbPair" -> async(result) {
                 val code = call.argument<String>("code")?.trim().orEmpty()
@@ -327,6 +328,24 @@ class PhonePlugin : FlutterPlugin, ActivityAware, MethodChannel.MethodCallHandle
         }
         if (call.method == "setBackgroundMode" || call.method == "adbConnect" || call.method == "requestShizukuPermission") {
             control.emitStatus()
+        }
+    }
+
+    private fun adbKeyProtection(call: MethodCall, result: MethodChannel.Result) {
+        val enabled = (call.arguments as? Map<*, *>)?.get("enabled") as? Boolean
+        if (call.method == "setAdbKeyProtection" && enabled == null) {
+            result.error("invalid_argument", "enabled must be a boolean", null)
+            return
+        }
+        async(result) {
+            try {
+                val keys = control.background.adbKeys
+                val enabledNow = if (call.method == "setAdbKeyProtection") keys.setProtection(enabled!!)
+                    else keys.protectionEnabled()
+                mapOf("enabled" to enabledNow)
+            } catch (_: Exception) {
+                throw IllegalStateException("ADB key protection is unavailable; the identity was not reset")
+            }
         }
     }
 
