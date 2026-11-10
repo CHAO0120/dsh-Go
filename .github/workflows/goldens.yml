@@ -1,6 +1,8 @@
 name: Render updated goldens
 
 on:
+  push:
+    branches: ['reverse/refactor1-002-goldens']
   workflow_dispatch:
     inputs:
       paths:
@@ -76,7 +78,7 @@ jobs:
       - name: Run Flutter tests and render new goldens
         id: render
         env:
-          GOLDEN_PATHS: ${{ inputs.paths }}
+          GOLDEN_PATHS: ${{ inputs.paths || 'test/shell/common_golden_test.dart' }}
         run: |
           python3 - <<'PY'
           import os, shlex, subprocess, sys
