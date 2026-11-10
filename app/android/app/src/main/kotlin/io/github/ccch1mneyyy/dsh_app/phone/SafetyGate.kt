@@ -10,12 +10,15 @@ data class PhonePolicies(
     val confirmEveryWritePackages: List<String> = SafetyRules.DEFAULT_CONFIRM_EVERY_WRITE,
     val confirmMode: ConfirmMode = ConfirmMode.ASK,
     val unlocks: PhoneUnlocks = PhoneUnlocks(),
+    /** Opt-in: stop reading/acting when the observed app cannot be checked against the lists. */
+    val denyUnknownPackages: Boolean = false,
 ) {
     fun toMap(): Map<String, Any?> = linkedMapOf(
         "denyPackages" to denyPackages,
         "confirmEveryWritePackages" to confirmEveryWritePackages,
         "confirmMode" to confirmMode.wire,
         "unlocks" to unlocks.toMap(),
+        "denyUnknownPackages" to denyUnknownPackages,
     )
 
     companion object {
@@ -30,6 +33,7 @@ data class PhonePolicies(
                 list("confirmEveryWritePackages", base.confirmEveryWritePackages),
                 ConfirmMode.fromWire(map?.get("confirmMode") as? String) ?: base.confirmMode,
                 PhoneUnlocks.fromMap(map?.get("unlocks") as? Map<*, *>, base.unlocks),
+                map?.get("denyUnknownPackages") as? Boolean ?: base.denyUnknownPackages,
             )
         }
 
@@ -211,6 +215,7 @@ class SafetyGate(
         packages.firstNotNullOfOrNull { checkRead(p, it, null) }
 
     private fun checkRead(p: PhonePolicies, pkg: String?, appLabel: String?): Verdict.Refuse? {
+        if (p.denyUnknownPackages && pkg.isNullOrBlank()) return Verdict.Refuse(UNKNOWN_PACKAGE, "unknown-package")
         if (pkg == ownPackage && !p.unlocks.ownApp) return Verdict.Refuse(OWN_APP, "own-app")
         if (pkg != null && pkg in p.denyPackages) return Verdict.Refuse(denied(labelOf(pkg, appLabel)), "deny-list")
         return null
@@ -244,6 +249,7 @@ class SafetyGate(
         val app = labelOf(pkg, appLabel)
         if (kind == WriteKind.KEY) return Verdict.Allow // back / home / recents / shade: always a way out
         val p = policies()
+        if (p.denyUnknownPackages && pkg.isNullOrBlank()) return Verdict.Refuse(UNKNOWN_PACKAGE, "unknown-package")
         val lifted = p.unlocks
         if (pkg == ownPackage && !lifted.ownApp) return Verdict.Refuse(OWN_APP, "own-app")
         if (pkg != null && pkg in p.denyPackages) return Verdict.Refuse(denied(app), "deny-list")
@@ -388,10 +394,10 @@ class SafetyGate(
     fun filterScreen(s: ScreenSnapshot): ScreenSnapshot = filterScreen(s, policies())
 
     internal fun filterScreen(s: ScreenSnapshot, p: PhonePolicies): ScreenSnapshot {
+        val readRefusal = checkRead(p, s.packageName, s.appLabel)
         val sourceRefusal = s.readPackages.firstNotNullOfOrNull { checkRead(p, it, null) }
         val refusal = when {
-            s.packageName == ownPackage && !p.unlocks.ownApp -> OWN_APP
-            s.packageName != null && s.packageName in p.denyPackages -> denied(labelOf(s.packageName, s.appLabel))
+            readRefusal != null -> readRefusal.message
             sourceRefusal != null -> sourceRefusal.message
             // l10n:keep agent safety result
             s.secure -> "安全窗口（禁止截屏 / 读取）。要操作请 handoff。"
@@ -426,6 +432,8 @@ class SafetyGate(
     }
 
     companion object {
+        // l10n:keep agent safety result
+        const val UNKNOWN_PACKAGE = "当前应用包名未知，无法核对应用名单。已按设置停止读取或操作，请重新观察，或 handoff 交给用户。"
         // l10n:keep agent safety result
         const val OWN_APP = "这是 DSH 自己的界面，不读取也不操作。"
         fun denied(app: String) =
