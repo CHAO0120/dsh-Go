@@ -60,6 +60,10 @@
 | 404，无码；协商端点也无路由 | 返回 null，保持旧桥降级，含义仍是未协商 |
 | 协商中 401/403/5xx、其他结构化404、网络异常、未知主版本 | 实际错误向上传播 |
 
+`ClientInventoryApi.readBridgeInventory()` 对 404 使用同样的顺序，检查的能力名为 `inventory`：先读嵌套错误，再兼容平铺错误；资源码抛为 `client-inventory/<code>`，保留消息、path 和 status；`route-not-found` 直接返回 null；只有无码404才调用上述协商入口。协商明确有 inventory 时抛 `client-inventory/http-404`，无此能力或旧桥未协商时才返回 null。协商自身的错误保持 `dsh-go/...` 或协议/传输异常，不改写成 inventory 不支持。
+
+inventory 成功仍只发一个请求，成功模型保持原有读取方式；其非404 HTTP错误仍是 `client-inventory/http-<status>`。`readClientInventory()` 是原有的尽力聚合接口，boot 与 bridge 这两个可选部分失败时仍降低 tier；它没有把失败保存成“桥不支持”。需要区分资源错误的调用方使用 `readBridgeInventory()`。
+
 每次需要探测时重新读取，没有进程级缓存或第二套连接状态机。`timeout` 沿用每个 HTTP 请求的超时；无码404时最多再做一次能力请求。显式 `route-not-found` 是当前请求的直接路由缺失证据，当前 API 不接收调用方缓存的协商对象。持有其他代次声明的调用方不应据旧声明覆盖当前结果。
 
 ## 新旧双向兼容
@@ -69,14 +73,14 @@
 | 基底 App + 新桥 | 原成功体/路由不变；基底 plugin-config 解析器已同时支持嵌套和平铺；新增端点不影响旧调用 |
 | 新 App + 基底桥 | contributions 的 v1 成功照常；协商端点旧404返回 null；旧平铺错误仍可读取 |
 | 新 App + 新桥 | v决定可解析性，列表决定实现是否宣告；资源404不再泛化成旧桥 |
-| 新 App + 无桥 Host | 两条端点均旧式404时仍可降级；认证/服务器错误不会误报无桥 |
+| 新 App + 无桥 Host | 业务端点与协商端点均旧式404时仍可降级；认证/服务器错误不会误报无桥 |
 | 新 App + 未支持的主版本 | 抛 `dsh-go/unsupported-version`，不套用v1默认值 |
-| 非 HTTP carrier | 沿用 `dsh-go/unsupported`，不创建旁路连接 |
+| 非 HTTP carrier | 原生 API 沿用 `dsh-go/unsupported`，inventory 沿用 `client-inventory/unsupported`；不创建旁路连接 |
 
-兼容结论来自本仓库基底解析器；不等于验证了每个历史 APK。`DshGoContributions.fromJson` 仍是供本地数据使用的宽松模型读取器；HTTP 入口负责必需的主版本校验。
+基底解析器已在本次源码中核对。owner 在 2026-11-10 的 ADDENDUM-03 确认，plugin-config 从 1.0.0 首个源码提交 `a5fa6738`（2026-10-29）起就先读嵌套 error，再读平铺，因此不增加平铺别名；这段历史证据来自 owner，不表示本次运行过历史 APK。`DshGoContributions.fromJson` 仍是供本地数据使用的宽松模型读取器；HTTP 入口负责必需的主版本校验。
 
 ## 范围与验证
 
-`client_inventory_api.dart` 在另一条本机工作线：其无条件404降级应按上述规则接入 `readDshGoBridgeCapabilities` 并检查 `inventory`。本补丁只改授权的 `dsh_go_api.dart` 与相关测试，不改本机状态/UI。将来若要缓存，须用现有 Host/mux generation 管理失效；不得永久缓存null。
+ADDENDUM-03 已授权 `client_inventory_api.dart` 及测试，404 判定按上述规则接入。按连接缓存协商对象仍由本机工作线负责，这一波没有缓存；将来缓存须用现有 Host/mux generation 管理失效，不得永久缓存 null。
 
 轻量 `bridge-http-errors.test.mjs` 使用真实 loopback HTTP 与模拟 Cordis/Connection，核对能力列表、已有权限接口仍独立以及401/403/503入口。`route-guard.mjs`、`native-bridge.mjs` 把新路由纳入实际 Host 契约。Dart fake Host 覆盖新旧桥、无能力/未知能力、资源404、协商失败、v检查和不增加成功往返次数。完整 Host 与 Dart 测试结果由实际执行记录确定；单测夹具不替代完整环境。
