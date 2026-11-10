@@ -2,6 +2,12 @@ name: Render updated goldens
 
 on:
   workflow_dispatch:
+    inputs:
+      paths:
+        description: 'Test files or directories (space-separated; quote paths containing spaces)'
+        type: string
+        required: false
+        default: test
 
 permissions:
   contents: read
@@ -67,48 +73,51 @@ jobs:
           sudo install -Dm644 -t "$DSH_TEST_FONT_DIR" ~/test-fonts/NotoSansCJK-*.ttc
           sudo install -Dm644 ~/test-fonts/NotoColorEmoji.ttf /usr/share/fonts/noto/NotoColorEmoji.ttf
       - run: flutter pub get --enforce-lockfile
-      - name: Record existing golden timestamps
-        run: |
-          python3 - <<'PY'
-          import json, os
-          from pathlib import Path
-          before = {p.as_posix(): p.stat().st_mtime_ns for p in Path('test').rglob('*.png') if 'goldens' in p.parts}
-          (Path(os.environ['RUNNER_TEMP']) / 'golden-before.json').write_text(json.dumps(before))
-          PY
       - name: Run Flutter tests and render new goldens
         id: render
-        run: flutter test --no-pub --update-goldens --concurrency=4 --reporter github
-      - name: Collect only newly rendered goldens
+        env:
+          GOLDEN_PATHS: ${{ inputs.paths }}
+        run: |
+          python3 - <<'PY'
+          import os, shlex, subprocess, sys
+          paths = shlex.split(os.environ['GOLDEN_PATHS']) or ['test']
+          sys.exit(subprocess.call(['flutter', 'test', '--no-pub', '--update-goldens',
+                                   '--concurrency=4', '--reporter', 'github', *paths]))
+          PY
+      - name: Collect changed golden images
         if: always() && steps.render.outcome != 'skipped'
         env:
           GOLDEN_TEST_RESULT: ${{ steps.render.outcome }}
         run: |
           python3 - <<'PY'
-          import json, os, shutil
+          import os, shutil, subprocess
           from pathlib import Path
-          temp = Path(os.environ['RUNNER_TEMP'])
-          before = json.loads((temp / 'golden-before.json').read_text())
-          out = temp / 'golden-updates'
+          repo = Path(subprocess.check_output(['git', 'rev-parse', '--show-toplevel'], text=True).strip())
+          changes = subprocess.check_output(['git', 'status', '--porcelain=v1', '-z',
+                                             '--untracked-files=all', '--no-renames', '--', 'test'])
+          out = Path(os.environ['RUNNER_TEMP']) / 'golden-updates'
           out.mkdir()
           rendered = []
-          for image in sorted(Path('test').rglob('*.png')):
-              if 'goldens' not in image.parts or before.get(image.as_posix()) == image.stat().st_mtime_ns:
+          for record in sorted(changes.split(b'\0')):
+              if not record:
                   continue
-              target = out / 'app' / image
+              relative = Path(os.fsdecode(record[3:]))
+              image = repo / relative
+              if relative.parts[:2] != ('app', 'test') or 'goldens' not in relative.parts or image.suffix != '.png' or not image.is_file():
+                  continue
+              target = out / relative
               target.parent.mkdir(parents=True, exist_ok=True)
               shutil.copyfile(image, target)
-              rendered.append(('app' / image).as_posix())
-          (out / 'rendered-files.txt').write_text('\n'.join(rendered) + '\n')
+              rendered.append(relative.as_posix())
+          (out / 'changed-files.txt').write_text('\n'.join(rendered) + '\n')
           (out / 'STATUS.txt').write_text(
               'commit: ' + os.environ['GITHUB_SHA'] + '\n'
               'flutter-test: ' + os.environ['GOLDEN_TEST_RESULT'] + '\n'
-              'new-goldens: ' + str(len(rendered)) + '\n'
-              'Update mode renders candidates; review them before replacing baselines.\n')
-          if not rendered:
-              raise SystemExit('No new golden renders were produced')
-          print(f'Collected {len(rendered)} new renders; test result: {os.environ["GOLDEN_TEST_RESULT"]}')
+              'changed-goldens: ' + str(len(rendered)) + '\n'
+              'Only changed or new golden images are included; review before replacing baselines.\n')
+          print(f'Collected {len(rendered)} changed goldens; test result: {os.environ["GOLDEN_TEST_RESULT"]}')
           PY
-      - name: Upload new golden renders
+      - name: Upload changed golden images
         if: always() && steps.render.outcome != 'skipped'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
