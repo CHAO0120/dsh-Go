@@ -333,8 +333,16 @@ jobs:
           with zipfile.ZipFile('app/build/app/outputs/flutter-apk/app-arm64-release.apk') as apk:
               assert apk.read('assets/runtime/manifest.json') == manifest
               data = json.loads(manifest)
-              with apk.open('assets/runtime/' + data['rootfs']) as archive:
-                  assert hashlib.file_digest(archive, 'sha256').hexdigest() == data['rootfsSha256']
+              if data['schema'] == 1:
+                  archives = [{'asset': data['rootfs'], 'sha256': data['rootfsSha256']}]
+              elif data['schema'] == 2:
+                  archives = [data['layers'][name] for name in ('base', 'engine')]
+              else:
+                  raise AssertionError('unsupported runtime manifest schema')
+              for layer in archives:
+                  with apk.open('assets/runtime/' + layer['asset']) as archive:
+                      assert hashlib.file_digest(archive, 'sha256').hexdigest() == layer['sha256']
+              print('Verified %d runtime archive(s), schema %s' % (len(archives), data['schema']))
           PY
       - name: Keep R8 reports
         if: always()
