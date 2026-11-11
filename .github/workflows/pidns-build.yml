@@ -54,10 +54,13 @@ jobs:
         working-directory: app/android
         run: gradle --stacktrace :app:assembleArm64Debug
 
+      - name: Locate APKs
+        run: find app/android/app/build -name '*.apk' -print
+
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: dsh-go-pidns-fix-arm64-debug
-          path: app/android/app/build/outputs/apk/**/debug/*.apk
+          path: app/android/app/build/outputs/apk/**/*.apk
           if-no-files-found: error
           retention-days: 14
