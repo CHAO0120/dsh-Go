@@ -36,6 +36,8 @@ jobs:
           gradle-version: ${{ env.GRADLE_VERSION }}
 
       - name: Build the bundled runtime (arm64)
+        env:
+          UPDATE_DEB_LOCK: 1 # noble lock pins ca-certificates *.1, the mirrors only carry *.2 now
         run: runtime/build-runtime.sh arm64-v8a
 
       - name: Flutter plugins and local.properties
