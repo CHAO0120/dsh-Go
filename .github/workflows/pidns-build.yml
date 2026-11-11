@@ -61,6 +61,6 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: dsh-go-pidns-fix-arm64-debug
-          path: app/build/outputs/apk/**/*.apk
+          path: app/build/app/outputs/apk/**/*.apk
           if-no-files-found: error
           retention-days: 14
