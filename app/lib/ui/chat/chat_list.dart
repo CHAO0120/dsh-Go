@@ -557,11 +557,12 @@ class _ChatListState extends ConsumerState<ChatList> with SingleTickerProviderSt
       _splitKey = null;
     } else if (!_splitChosen) {
       _splitChosen = true;
-      _splitKey = _lastStableKey();
+      _splitKey = _lastStableKey(beforeSeq: s.runningTurn?.startSeq);
+      _snapNext = true;
     } else if (_splitKey != null && !_index.containsKey(_splitKey)) {
       // 锚点行被替换(重新同步后结构变了):重新分界,贴底时跟上。
       final folded = _rows.whereType<TurnProcessRow>().where((row) => row.rows.any((child) => child.key == _splitKey));
-      _splitKey = folded.isEmpty ? _lastStableKey() : folded.first.key;
+      _splitKey = folded.isEmpty ? _lastStableKey(beforeSeq: s.runningTurn?.startSeq) : folded.first.key;
     }
 
     if (uiTraceEnabled) {
@@ -625,9 +626,26 @@ class _ChatListState extends ConsumerState<ChatList> with SingleTickerProviderSt
     });
   }
 
-  String? _lastStableKey() {
+  String? _lastStableKey({int? beforeSeq}) {
     for (var i = _rows.length - 1; i >= 0; i--) {
-      if (_rows[i].stable) return _rows[i].key;
+      final row = _rows[i];
+      if (!row.stable) continue;
+      // A durable message in the running turn can still be folded away.
+      // Keep the whole turn after the center, including steering pieces,
+      // so its completion cannot move the history the person is reading.
+      if (beforeSeq != null) {
+        final seq = switch (row) {
+          UserRow(:final item) => item.seq,
+          AssistantRow(:final item) => item.seq,
+          NoticeRowData(:final item) => item.seq,
+          TurnProcessRow(:final trace) => trace.endSeq,
+          TurnFootnoteRow(:final trace) => trace.endSeq,
+          CommandNoticeRow(:final notice) => notice.seq,
+          _ => null,
+        };
+        if (seq == null || seq >= beforeSeq) continue;
+      }
+      return row.key;
     }
     return null;
   }
@@ -671,12 +689,20 @@ class _ChatListState extends ConsumerState<ChatList> with SingleTickerProviderSt
           if (_lastViewport != null && _lastViewport != viewport && _pinned) {
             _follow();
           }
-          _lastViewport = viewport;
           // The chat page's pet stands over the composer: the last line
           // stops clear of it (0 without a pet).
           final bottomPad = widget.bottomInset + AppSpace.sm + headroom;
           final anchor = viewport <= 0 ? 1.0 : ((viewport - bottomPad) / viewport).clamp(0.0, 1.0);
-          _anchorPixels = viewport * anchor;
+          final anchorPixels = viewport * anchor;
+          if (_lastViewport != null && !_pinned && _scroll.hasClients) {
+            // The composer can shrink when a turn ends. Preserve the same
+            // visible history as its bottom-anchored viewport grows, without
+            // ending a drag or fling with jumpTo.
+            final shift = anchorPixels - _anchorPixels;
+            if (shift != 0) _scroll.position.correctBy(shift);
+          }
+          _lastViewport = viewport;
+          _anchorPixels = anchorPixels;
 
           return Stack(
             children: [
@@ -1410,7 +1436,9 @@ class _TopBoundedScrollPosition extends ScrollPositionWithSingleContext {
     // RangeMaintainingScrollPhysics otherwise retains an out-of-range offset
     // at nonzero velocity and springs a now-short chat back over later frames.
     if (!hasContentDimensions || minScrollExtent == maxScrollExtent) {
-      final initial = pixels.clamp(minScrollExtent, maxScrollExtent);
+      // The initial running turn can fill the forward segment: land at its
+      // end in this layout, without painting the center for one frame first.
+      final initial = hasContentDimensions ? pixels.clamp(minScrollExtent, maxScrollExtent) : maxScrollExtent;
       if (initial != pixels) {
         correctPixels(initial);
         return false;
