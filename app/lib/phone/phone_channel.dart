@@ -384,7 +384,11 @@ class PhoneBackgroundStatus {
         PhoneBackgroundMode.adb => PhonePrivilegedMode.adb,
       };
 
-  bool get effectiveReady => privileged?.ready ?? ready;
+  // A connected transport can still explicitly refuse background capability.
+  // Keep unknown/legacy capacity and temporary busy states on their existing contract.
+  bool get effectiveReady =>
+      (privileged?.ready ?? ready) &&
+      !(parallelism?.effectiveLimit == 0 && parallelism?.reason == 'peerUnsupported');
   String? get effectiveReason => privileged == null ? reason : privileged!.reason;
 
   PhonePrivilegedKeepStatus get keep => privileged?.keep ?? const PhonePrivilegedKeepStatus();
